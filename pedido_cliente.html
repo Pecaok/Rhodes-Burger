@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ver mi pedido - Rhodes Burguers</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: url('background.jpg') center/cover no-repeat fixed;
+      color: #111;
+      margin: 0;
+      padding-top: 70px;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: -1;
+    }
+    header {
+      background: #333;
+      color: white;
+      padding: 15px 30px;
+      position: fixed;
+      width: 100%;
+      top: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+    header h1 {
+      margin: 0;
+    }
+    header a {
+      color: white;
+      text-decoration: none;
+      background: #28a745;
+      padding: 8px 16px;
+      border-radius: 6px;
+    }
+    main {
+      background: rgba(255, 255, 255, 0.95);
+      max-width: 700px;
+      margin: 20px auto;
+      padding: 30px;
+      border-radius: 12px;
+      border: 2px solid #000;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+    h2 {
+      text-align: center;
+    }
+    .pedido-item {
+      border-bottom: 1px dashed #ccc;
+      padding: 10px 0;
+    }
+    .total {
+      font-weight: bold;
+      margin-top: 20px;
+      text-align: right;
+    }
+    label {
+      display: block;
+      margin-top: 15px;
+    }
+    input, select, textarea {
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      margin-top: 5px;
+    }
+    button {
+      margin-top: 20px;
+      padding: 12px;
+      width: 100%;
+      border: none;
+      background: #28a745;
+      color: white;
+      font-size: 16px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rhodes Burguers</h1>
+    <a href="index.html">Menú</a>
+  </header>
+  <main>
+    <h2>Tu pedido</h2>
+    <div id="pedido"></div>
+    <div class="total" id="total"></div>
+
+    <label>Nombre y Apellido
+      <input type="text" id="nombre" required />
+    </label>
+    <label>Método de Pago
+      <select id="metodo">
+        <option value="Efectivo">Efectivo</option>
+        <option value="Débito">Débito</option>
+        <option value="MercadoPago">MercadoPago</option>
+      </select>
+    </label>
+    <label>Tipo de pedido
+      <select id="tipo">
+        <option value="Take Away">Take Away</option>
+      </select>
+    </label>
+    <label>Comentarios (opcional)
+      <textarea id="comentarios" rows="3"></textarea>
+    </label>
+
+    <button onclick="enviarPedido()">Confirmar pedido</button>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.appspot.com",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
+      measurementId: "G-LQVYTJWHSM"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const pedidoContainer = document.getElementById("pedido");
+    const totalContainer = document.getElementById("total");
+    const carrito = JSON.parse(localStorage.getItem("order") || "[]");
+
+    let total = 0;
+    carrito.forEach(p => {
+      const div = document.createElement("div");
+      div.className = "pedido-item";
+      div.innerHTML = `${p.quantity} x ${p.item} - $${p.price * p.quantity}`;
+      pedidoContainer.appendChild(div);
+      total += p.price * p.quantity;
+    });
+    totalContainer.textContent = `Total: $${total}`;
+
+    window.enviarPedido = async function () {
+      const nombre = document.getElementById("nombre").value.trim();
+      const metodo = document.getElementById("metodo").value;
+      const tipo = document.getElementById("tipo").value;
+      const comentarios = document.getElementById("comentarios").value;
+
+      if (!nombre) return alert("Por favor completá tu nombre");
+      if (!carrito.length) return alert("Tu pedido está vacío");
+
+      try {
+        await addDoc(collection(db, "pedidos"), {
+          nombre,
+          metodo,
+          tipo,
+          comentarios,
+          pedido: carrito,
+          total,
+          timestamp: serverTimestamp()
+        });
+        alert("¡Pedido enviado con éxito!");
+        localStorage.removeItem("order");
+        location.href = "index.html";
+      } catch (e) {
+        alert("Error al enviar pedido");
+        console.error(e);
+      }
+    }
+  </script>
+</body>
+</html>
