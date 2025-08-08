@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pedidos Local - Rhodes Burguers</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-image: url('background.jpg');
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
+      color: #333;
+    }
+    header {
+      background-color: #000000cc;
+      color: white;
+      padding: 15px 30px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+    .toast {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background-color: #28a745;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 6px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+      z-index: 999;
+      animation: fadein 0.5s, fadeout 0.5s 3.5s;
+    }
+    @keyframes fadein {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeout {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
+    .container {
+      max-width: 800px;
+      margin: 30px auto;
+      background-color: #ffffffcc;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    .pedido {
+      border: 2px solid #000;
+      border-radius: 10px;
+      padding: 15px;
+      margin-bottom: 20px;
+      background: white;
+    }
+    .pedido h3 {
+      margin: 0 0 10px 0;
+    }
+    .pedido p {
+      margin: 4px 0;
+    }
+    .total-dia {
+      text-align: right;
+      font-weight: bold;
+      font-size: 18px;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Pedidos del día - Rhodes Burguers</h1>
+  </header>
+
+  <div class="container" id="pedidos"></div>
+  <div class="container total-dia" id="total-dia"></div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.appspot.com",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
+      measurementId: "G-LQVYTJWHSM"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const pedidosRef = collection(db, "pedidos");
+    const pedidosOrdenados = query(pedidosRef, orderBy("timestamp", "asc"));
+
+    let totalDelDia = 0;
+    let primerosCargados = false;
+
+    onSnapshot(pedidosOrdenados, (snapshot) => {
+      const container = document.getElementById("pedidos");
+      container.innerHTML = "";
+      totalDelDia = 0;
+
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "added" && primerosCargados) {
+          mostrarToast("Nuevo pedido recibido");
+        }
+      });
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const div = document.createElement("div");
+        div.className = "pedido";
+
+        const hora = data.timestamp?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || "-";
+        const totalPedido = data.pedido?.reduce((acc, item) => acc + (item.price * item.quantity), 0) || 0;
+        totalDelDia += totalPedido;
+
+        div.innerHTML = `
+          <h3>${data.cliente || "Cliente desconocido"}</h3>
+          <p><strong>Hora:</strong> ${hora}</p>
+          <p><strong>Método de pago:</strong> ${data.metodoPago || "-"}</p>
+          <p><strong>Tipo de entrega:</strong> ${data.tipoPedido || "-"}</p>
+          <p><strong>Comentarios:</strong> ${data.comentarios || "Sin comentarios"}</p>
+          <ul>
+            ${data.pedido?.map(item => `<li>${item.quantity} x ${item.item} - $${item.price * item.quantity}</li>`).join("")}
+          </ul>
+          <p><strong>Total del pedido:</strong> $${totalPedido}</p>
+        `;
+        container.appendChild(div);
+      });
+
+      document.getElementById("total-dia").textContent = `Total acumulado: $${totalDelDia}`;
+      primerosCargados = true;
+    });
+
+    function mostrarToast(mensaje) {
+      const toast = document.createElement("div");
+      toast.className = "toast";
+      toast.textContent = mensaje;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 4000);
+    }
+  </script>
+</body>
+</html>
