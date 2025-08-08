@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pedidos del Local</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-image: url('background.jpg');
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
+      margin: 0;
+      padding-top: 70px;
+    }
+    header {
+      background-color: #333;
+      color: white;
+      position: fixed;
+      width: 100%;
+      top: 0;
+      padding: 15px 30px;
+      text-align: center;
+      z-index: 10;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+    .alert {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: red;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 5px;
+      display: none;
+      z-index: 100;
+    }
+    .container {
+      max-width: 900px;
+      margin: 100px auto 40px;
+      background-color: rgba(255,255,255,0.9);
+      padding: 30px;
+      border-radius: 10px;
+    }
+    .pedido {
+      border: 2px solid #000;
+      padding: 15px;
+      margin-bottom: 20px;
+      background-color: #fff;
+      border-radius: 8px;
+    }
+    .pedido h3 {
+      margin-top: 0;
+    }
+    .total-mes {
+      text-align: center;
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 30px;
+      background-color: white;
+      padding: 15px;
+      border-radius: 8px;
+      border: 2px solid #000;
+    }
+  </style>
+</head>
+<body>
+  <div class="alert" id="alertaNuevo">¡Nuevo pedido recibido!</div>
+  <header>
+    <h1>Pedidos del Local</h1>
+  </header>
+  <div class="container">
+    <div class="total-mes" id="totalMes">Total acumulado del mes: $0</div>
+    <div id="listaPedidos"></div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-app.js";
+    import { getFirestore, collection, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.appspot.com",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
+      measurementId: "G-LQVYTJWHSM"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const listaPedidos = document.getElementById("listaPedidos");
+    const totalMes = document.getElementById("totalMes");
+    const alerta = document.getElementById("alertaNuevo");
+
+    let totalAcumulado = 0;
+    let pedidosCargados = new Set();
+
+    function mostrarAlerta() {
+      alerta.style.display = "block";
+      setTimeout(() => { alerta.style.display = "none"; }, 4000);
+    }
+
+    const pedidosRef = collection(db, "pedidos");
+    const q = query(pedidosRef, orderBy("timestamp", "desc"));
+
+    onSnapshot(q, (snapshot) => {
+      listaPedidos.innerHTML = "";
+      totalAcumulado = 0;
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (!pedidosCargados.has(doc.id)) {
+          mostrarAlerta();
+          pedidosCargados.add(doc.id);
+        }
+
+        const pedidoDiv = document.createElement("div");
+        pedidoDiv.className = "pedido";
+        let totalPedido = 0;
+        const productosHTML = data.pedido.map(p => {
+          totalPedido += p.quantity * p.price;
+          return `<li>${p.quantity} x ${p.item} - $${p.quantity * p.price}</li>`;
+        }).join("");
+        totalAcumulado += totalPedido;
+
+        const fecha = data.timestamp?.toDate?.().toLocaleString() || "";
+
+        pedidoDiv.innerHTML = `
+          <h3>Cliente: ${data.cliente || "Sin nombre"}</h3>
+          <p><strong>Hora del pedido:</strong> ${fecha}</p>
+          <p><strong>Método de pago:</strong> ${data.metodoPago || "No especificado"}</p>
+          <p><strong>Tipo de entrega:</strong> ${data.tipoEntrega || "No especificado"}</p>
+          ${data.comentarios ? `<p><strong>Comentarios:</strong> ${data.comentarios}</p>` : ""}
+          <ul>${productosHTML}</ul>
+          <p><strong>Total del pedido:</strong> $${totalPedido}</p>
+        `;
+
+        listaPedidos.appendChild(pedidoDiv);
+      });
+
+      totalMes.textContent = `Total acumulado del mes: $${totalAcumulado}`;
+    });
+  </script>
+</body>
+</html>
