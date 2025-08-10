@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirmar Pedido - Rhodes Burguers</title>
+  <style>
+    body{
+      font-family: Arial, sans-serif; margin:0; padding-top:80px;
+      background-image:url('background.jpg'); background-size: contain;
+      background-repeat:no-repeat; background-position:center; background-attachment:fixed; background-color:#f0f0f0;
+    }
+    header{
+      background:white; position:fixed; top:0; width:100%; padding:10px 24px;
+      display:flex; justify-content:space-between; align-items:center; z-index:10;
+      box-shadow:0 2px 5px rgba(0,0,0,.1);
+    }
+    header img{ height:50px; }
+    .header-right { display:flex; align-items:center; gap:12px; transform: translateX(-80px); }
+    .btn{ background:#28a745; color:#fff; text-decoration:none; padding:8px 16px; border-radius:6px; font-weight:bold; }
+
+    .container{
+      max-width:760px; margin:20px auto; background:#fff; border-radius:12px; padding:18px;
+      box-shadow:0 10px 26px rgba(0,0,0,.15); border:2px solid #000;
+    }
+    h2{ margin-top:0; }
+    .items{ list-style:none; padding:0; margin:0 0 10px 0; }
+    .item{
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      padding:10px; border:1px solid #ddd; border-radius:10px; margin-bottom:8px;
+      background:#fafafa;
+    }
+    .item-left{ display:flex; flex-direction:column; gap:4px; }
+    .item-title{ font-weight:700; }
+    .item-extras em{ font-style:normal; font-weight:700; color:#0b3e20; background:#eafff2; padding:2px 6px; border-radius:6px; }
+    .item-sub{ font-weight:700; min-width:110px; text-align:right; }
+    .btn-remove{
+      background:#c92a2a; color:#fff; border:none; padding:6px 10px; border-radius:6px; cursor:pointer;
+    }
+
+    .total{ font-weight:bold; margin-top:10px; font-size:1.1rem; }
+    label{ display:block; margin:10px 0 4px; font-weight:bold; }
+    input, select, textarea{
+      width:100%; padding:10px; border:1px solid #222; border-radius:8px; background:#fff;
+    }
+    button.confirm{
+      width:100%; margin-top:12px; background:#333; color:#fff; border:none; padding:12px 14px; border-radius:8px; cursor:pointer; font-weight:700;
+    }
+
+    /* Estilo .menu-item por si luego reutilizás tarjetas aquí */
+    .menu-item{ display:grid; grid-template-columns: 140px 1fr auto auto auto; grid-template-areas:"img info price actions customize"; gap:14px; background:#fff; border:2px solid #000; border-radius:10px; padding:12px; margin-bottom:12px; }
+    .item-img{ grid-area:img; width:140px; height:100px; object-fit:cover; border-radius:8px; border:1px solid #222; }
+    .item-details{ grid-area:info; }
+    .item-price{ grid-area:price; text-align:right; font-weight:700; }
+    .item-actions{ grid-area:actions; display:flex; gap:8px; }
+    button.customize{ grid-area:customize; background:#0f7a33; color:#fff; border:none; padding:8px 12px; border-radius:6px; }
+
+    /* Tablet */
+    @media (max-width: 900px) {
+      .menu-item{
+        grid-template-columns: 140px 1fr 180px;
+        grid-template-areas:
+          "img info price"
+          "img info actions"
+          "img info customize";
+        align-items: start; gap: 12px 14px;
+      }
+      .item-img{ width:140px; height:100px; }
+      .item-price{ justify-self:end; align-self:start; font-size:1.05rem; }
+      .item-actions, button.customize{ justify-self:end; }
+    }
+    /* Móvil */
+    @media (max-width: 720px) {
+      .menu-item{
+        grid-template-columns:110px 1fr;
+        grid-template-areas:"img info" "img price" "img actions" "img customize";
+        align-items:start; gap:10px 12px;
+      }
+      .item-img{ width:110px; height:90px; }
+      .item-price{ justify-self:start; font-size:1rem; }
+      .item-actions, button.customize{ justify-self:start; }
+    }
+  </style>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.appspot.com",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+    };
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    let pedido = [];
+
+    const lista = document.getElementById('lista');
+    const totalEl = document.getElementById('total');
+    const form = document.getElementById('form');
+
+    function cargarPedido() { pedido = JSON.parse(localStorage.getItem('order') || '[]'); }
+    function guardarPedido() { localStorage.setItem('order', JSON.stringify(pedido)); }
+
+    function formatearExtras(itemText) {
+      const idx = itemText.indexOf('Extras:');
+      if (idx === -1) return { base: itemText, extrasHtml: '' };
+      const base = itemText.slice(0, idx).trim().replace(/[-–—]\s*$/, '').trim();
+      const extras = itemText.slice(idx);
+      return { base, extrasHtml: `<span class="item-extras"><em>${extras}</em></span>` };
+    }
+
+    function render() {
+      lista.innerHTML = '';
+      if (!pedido.length) {
+        lista.innerHTML = `<li class="empty">(No hay productos en el pedido)</li>`;
+        totalEl.textContent = 'Total: $0';
+        return;
+      }
+      let total = 0;
+      pedido.forEach((p, i) => {
+        const sub = p.price * p.quantity;
+        total += sub;
+        const { base, extrasHtml } = formatearExtras(p.item);
+        const li = document.createElement('li');
+        li.className = 'item';
+        li.innerHTML = `
+          <div class="item-left">
+            <div class="item-title">${base}</div>
+            ${extrasHtml || ''}
+            <div class="item-qty">Cantidad: ${p.quantity}</div>
+          </div>
+          <div class="item-sub">$${sub}</div>
+          <button class="btn-remove">Quitar</button>
+        `;
+        li.querySelector('.btn-remove').addEventListener('click', () => { pedido.splice(i,1); guardarPedido(); render(); });
+        lista.appendChild(li);
+      });
+      totalEl.textContent = `Total: $${total}`;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      cargarPedido();
+      render();
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!pedido.length) { alert('Tu carrito está vacío.'); return; }
+
+        const nombre = document.getElementById('nombre').value.trim();
+        const metodo = document.getElementById('metodo').value;
+        const entrega = document.getElementById('entrega').value;
+        const comentarios = document.getElementById('comentarios').value.trim();
+        if (!nombre) { alert('Ingresá tu nombre y apellido.'); return; }
+
+        const data = { nombre, metodo, entrega, comentarios, pedido, timestamp: serverTimestamp() };
+        try {
+          await addDoc(collection(db, 'pedidos'), data);
+          localStorage.removeItem('order');
+          alert('¡Pedido enviado con éxito!');
+          window.location.href = 'index.html';
+        } catch (err) {
+          console.error(err);
+          alert('Ocurrió un error al enviar el pedido.');
+        }
+      });
+    });
+  </script>
+</head>
+<body>
+  <header>
+    <img src="logo.jpg" alt="Rhodes Burguers">
+    <div class="header-right">
+      <a class="btn" href="index.html">Menú</a>
+    </div>
+  </header>
+
+  <div class="container">
+    <h2>Confirmá tu pedido</h2>
+    <ul id="lista" class="items"></ul>
+    <p class="total" id="total">Total: $0</p>
+
+    <form id="form">
+      <label for="nombre">Nombre y Apellido</label>
+      <input id="nombre" type="text" required>
+
+      <label for="metodo">Método de pago</label>
+      <select id="metodo" required>
+        <option value="efectivo">Efectivo</option>
+        <option value="débito">Débito</option>
+        <option value="mercado pago">Mercado Pago</option>
+      </select>
+
+      <label for="entrega">Tipo de pedido</label>
+      <select id="entrega" required>
+        <option value="take away">Take Away</option>
+      </select>
+
+      <label for="comentarios">Comentarios (opcional)</label>
+      <textarea id="comentarios" rows="3"></textarea>
+
+      <button class="confirm" type="submit">Confirmar pedido</button>
+    </form>
+  </div>
+</body>
+</html>
