@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pedidos - Rhodes Burgers</title>
+  <style>
+    :root{
+      --green:#28a745;
+      --border:1px solid rgba(0,0,0,.1);
+      --shadow:0 4px 12px rgba(0,0,0,.12);
+      --muted:#555;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    body{
+      background:#f5f5f5;
+      min-height:100dvh;
+      padding-top:78px;
+    }
+    /* Fondo con logo entero, sin zoom */
+    body::before{
+      content:"";
+      position:fixed; inset:0; z-index:-1;
+      background:url('images/logo.jpg') center/contain no-repeat fixed;
+      opacity:.14;
+    }
+
+    /* Header blanco unificado */
+    header{
+      position:fixed; inset:0 0 auto 0; height:78px; z-index:10;
+      background:#fff; border-bottom:var(--border);
+      display:flex; align-items:center; gap:12px; padding:12px 16px;
+    }
+    .brand{width:42px; height:42px; border-radius:10px; overflow:hidden; flex:0 0 auto; border:var(--border)}
+    .brand img{width:100%; height:100%; object-fit:cover}
+    .spacer{flex:1}
+    .btn{
+      display:inline-flex; align-items:center; gap:10px; text-decoration:none; cursor:pointer;
+      border-radius:10px; padding:10px 16px; font-weight:700; border:2px solid var(--green);
+      background:#fff; color:#111;
+    }
+
+    main{max-width:1040px; margin:18px auto; padding:0 16px}
+
+    /* Panel mensual */
+    .panel{
+      background:#fff; border-radius:14px; border:var(--border); box-shadow:var(--shadow);
+      padding:14px; margin:6px 0 16px;
+      display:grid; gap:12px; grid-template-columns:1fr 1fr 1fr;
+      align-items:end;
+    }
+    @media (max-width:760px){ .panel{grid-template-columns:1fr; } }
+    .panel .field{display:flex; flex-direction:column; gap:6px}
+    .panel label{font-weight:700}
+    .panel select{
+      padding:10px 12px; border-radius:10px; border:var(--border);
+      background:#fff;
+    }
+    .panel .total-mes{
+      grid-column:1 / -1;
+      text-align:center; font-size:22px; font-weight:800;
+      background:#fff; border-radius:10px; border:var(--border); padding:10px;
+    }
+
+    /* Tarjetas de pedido */
+    .pedido{
+      background:#fff; border-radius:14px; border:var(--border); box-shadow:var(--shadow);
+      padding:14px; margin:12px 0;
+    }
+    .pedido h3{margin:0 0 8px; font-size:18px}
+    .meta{display:flex; flex-wrap:wrap; gap:10px; color:#333; margin-bottom:8px}
+    .meta span{background:#f5f5f5; padding:6px 10px; border-radius:999px; border:var(--border); font-size:13px}
+    .lineas{margin:8px 0 0; padding-left:18px}
+    .tot{margin-top:10px; font-weight:800; text-align:right}
+    .empty{padding:20px; text-align:center; color:#666}
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="index.html" aria-label="Menú">
+      <img src="images/logo.jpg" alt="Rhodes Burgers">
+    </a>
+    <div class="spacer"></div>
+    <a class="btn" href="index.html">Menú</a>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="field">
+        <label for="anio">Año</label>
+        <select id="anio"></select>
+      </div>
+      <div class="field">
+        <label for="mes">Mes</label>
+        <select id="mes"></select>
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <div class="total-mes" id="totalMes">$0</div>
+      </div>
+    </section>
+
+    <section id="listaPedidos">
+      <div class="empty">Cargando pedidos...</div>
+    </section>
+  </main>
+
+  <!-- Firebase + lógica -->
+  <script type="module">
+    // ---------- Firebase ----------
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getFirestore, collection, query, where, orderBy, onSnapshot, Timestamp
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    // Usa tu config (la que ya venías usando)
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.appspot.com",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getFirestore(app);
+
+    // ---------- UI Mes/Año ----------
+    const $ = (s)=>document.querySelector(s);
+    const $anio = $('#anio');
+    const $mes  = $('#mes');
+    const $lista = $('#listaPedidos');
+    const $totalMes = $('#totalMes');
+
+    // Poblamos selects (últimos 24 meses por defecto)
+    function poblarSelects(){
+      const ahora = new Date();
+      const yearNow = ahora.getFullYear();
+      // años: actual y anterior (podés ampliar)
+      const years = [yearNow-1, yearNow, yearNow+1]; // +1 por si ya están cargando próximo año
+      $anio.innerHTML = years.map(y=>`<option value="${y}" ${y===yearNow?'selected':''}>${y}</option>`).join('');
+
+      const meses = [
+        "01 - Enero","02 - Febrero","03 - Marzo","04 - Abril","05 - Mayo","06 - Junio",
+        "07 - Julio","08 - Agosto","09 - Septiembre","10 - Octubre","11 - Noviembre","12 - Diciembre"
+      ];
+      const mesActual = ahora.getMonth(); // 0-11
+      $mes.innerHTML = meses.map((m,idx)=>`<option value="${idx}">${m}</option>`).join('');
+      $mes.value = String(mesActual);
+    }
+
+    function rangoMes(y, m /*0-11*/){
+      const start = new Date(y, m, 1, 0,0,0,0);
+      const end   = new Date(y, m+1, 1, 0,0,0,0);
+      return { start, end };
+    }
+
+    let unsubscribe = null;
+
+    function escucharMes(y, m){
+      // Desenganchar oyente anterior si existe
+      if (typeof unsubscribe === 'function') { try{ unsubscribe(); }catch{} }
+
+      const { start, end } = rangoMes(y, m);
+      const pedidosRef = collection(db, "pedidos");
+      const q = query(
+        pedidosRef,
+        where("timestamp", ">=", Timestamp.fromDate(start)),
+        where("timestamp", "<",  Timestamp.fromDate(end)),
+        orderBy("timestamp", "asc")
+      );
+
+      unsubscribe = onSnapshot(q, (snap)=>{
+        renderPedidos(snap.docs.map(d=>({ id:d.id, ...d.data() })));
+      }, (err)=>{
+        console.error("Error escuchando pedidos:", err);
+        $lista.innerHTML = `<div class="empty">No se pudieron cargar los pedidos.</div>`;
+        $totalMes.textContent = '$0';
+      });
+    }
+
+    function money(n){ return '$'+(Number(n||0)).toLocaleString('es-AR'); }
+    function fechaLocal(ts){
+      if (!ts) return '-';
+      try {
+        if (ts.seconds) return new Date(ts.seconds * 1000).toLocaleString();
+        if (typeof ts === 'number') return new Date(ts).toLocaleString();
+      } catch {}
+      return '-';
+    }
+
+    function totalPedido(pedidoArr){
+      return (pedidoArr||[]).reduce((acc, it)=>acc + Number(it.price||0) * Number(it.quantity||0), 0);
+    }
+
+    function renderPedidos(pedidos){
+      if (!pedidos || pedidos.length === 0) {
+        $lista.innerHTML = `<div class="empty">Sin pedidos en el período elegido.</div>`;
+        $totalMes.textContent = '$0';
+        return;
+      }
+
+      let accMes = 0;
+      const html = pedidos.map(p => {
+        const tot = totalPedido(p.pedido);
+        accMes += tot;
+
+        const lineas = (p.pedido||[])
+          .map(it => `<li>${it.quantity} × ${it.item} — ${money(Number(it.price||0) * Number(it.quantity||0))}</li>`)
+          .join('');
+
+        return `
+          <article class="pedido">
+            <h3>Pedido #${p.id}</h3>
+            <div class="meta">
+              <span><b>Cliente:</b> ${p.nombre || '-'}</span>
+              <span><b>Fecha:</b> ${fechaLocal(p.timestamp)}</span>
+              <span><b>Pago:</b> ${p.metodo || '-'}</span>
+              <span><b>Entrega:</b> ${p.entrega || '-'}</span>
+              ${p.comentarios ? `<span><b>Notas:</b> ${p.comentarios}</span>` : ''}
+            </div>
+            <ul class="lineas">${lineas}</ul>
+            <div class="tot">Total del pedido: ${money(tot)}</div>
+          </article>
+        `;
+      }).join('');
+
+      $lista.innerHTML = html;
+      $totalMes.textContent = `Total del mes: ${money(accMes)}`;
+    }
+
+    // Eventos selects
+    $anio.addEventListener('change', ()=> escucharMes(Number($anio.value), Number($mes.value)));
+    $mes.addEventListener('change',  ()=> escucharMes(Number($anio.value), Number($mes.value)));
+
+    // Init
+    poblarSelects();
+    escucharMes(Number($anio.value), Number($mes.value));
+  </script>
+</body>
+</html>
