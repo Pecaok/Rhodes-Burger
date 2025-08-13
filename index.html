@@ -29,6 +29,11 @@
     .row{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:8px }
     .price{ font-weight:800 }
     .actions{ display:flex; gap:8px; flex-wrap:wrap }
+
+    /* NUEVO: estilos para selector de papas (igual al resto del sitio) */
+    .inline{ display:flex; gap:12px; flex-wrap:wrap; margin:8px 0 }
+    .pill{ display:inline-flex; align-items:center; gap:8px; border:1px solid #e7e7e7; border-radius:999px; padding:8px 12px }
+
     /* Drawer */
     .drawer{ position:fixed; top:0; right:-460px; width:460px; max-width:92vw; height:100vh; background:#fff; box-shadow:-8px 0 30px rgba(0,0,0,.18); transition:right .25s; z-index:30; display:flex; flex-direction:column }
     .drawer.open{ right:0 }
@@ -38,6 +43,7 @@
     .total{ display:flex; align-items:center; justify-content:space-between; font-weight:800; font-size:18px; margin-top:10px }
     .close{ position:absolute; top:10px; right:10px; width:38px; height:38px; border-radius:999px; border:1px solid #eee; background:#fff; font-weight:900; cursor:pointer }
     .muted{ color:var(--muted); font-size:14px }
+
     /* Modal */
     .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.25); display:none; align-items:center; justify-content:center; z-index:40 }
     .overlay.open{ display:flex }
@@ -65,6 +71,14 @@
 
       <h2>Hamburguesas</h2>
       <div id="burgersGrid" class="grid"></div>
+
+      <!-- NUEVO: PAPAS OBLIGATORIAS (debajo de hamburguesas) -->
+      <h2>Papas fritas (obligatorio)</h2>
+      <div class="inline" id="papas-opciones">
+        <label class="pill"><input type="radio" name="papas" value="con_sazon"> Con sazón</label>
+        <label class="pill"><input type="radio" name="papas" value="sin_sazon"> Sin sazonar</label>
+      </div>
+      <p class="muted">Debés elegir una opción de papas para continuar.</p>
 
       <h2>Bebidas</h2>
       <div id="drinksGrid" class="grid"></div>
@@ -186,6 +200,27 @@
       return t;
     }
 
+    // >>> NUEVO: manejo de PAPAS <<<
+    function validarPapas(){
+      if(!cart.fries){
+        alert("Por favor elegí papas: con sazón o sin sazonar.");
+        return false;
+      }
+      return true;
+    }
+    // Preseleccionar si ya había elección
+    if(cart.fries){
+      const r = document.querySelector(`input[name="papas"][value="${cart.fries}"]`);
+      if(r) r.checked = true;
+    }
+    // Guardar elección al cambiar
+    document.addEventListener("change", (e)=>{
+      if(e.target && e.target.name==="papas"){
+        cart.fries = e.target.value;
+        saveCart();
+      }
+    });
+
     /*************** RENDER MENÚ ***************/
     const gridBurgers = $("#burgersGrid"), gridDrinks = $("#drinksGrid");
     function renderCard(item,type){
@@ -201,7 +236,7 @@
             <div class="actions">
               ${type==="drink"
                 ? `<button class="btn" data-add>Agregar</button>`
-                : `<button class="btn" data-quick>Add</button>
+                : `<button class="btn" data-quick>Agregar</button>
                    <button class="btn" data-custom>Personalizar</button>`
               }
             </div>
@@ -223,12 +258,14 @@
 
     /*************** QUICK ADD ***************/
     function quickAddBurger(item){
+      if(!validarPapas()) return;
       const bucket = cart.burger || (cart.burger={});
       if(!bucket[item.id]) bucket[item.id] = { qty:0, item, extras:{patty:0, cheddar:0} };
       bucket[item.id].qty += 1;
       saveCart(); renderCart(); openDrawer();
     }
     function quickAddDrink(item){
+      if(!validarPapas()) return;
       const bucket = cart.drink || (cart.drink={});
       if(!bucket[item.id]) bucket[item.id] = { qty:0, item };
       bucket[item.id].qty += 1;
@@ -295,6 +332,7 @@
     let currentItem=null; // {id,name,price,kind}
 
     function openCustomize(item){
+      if(!validarPapas()) return; // <<< obligatorio antes de personalizar
       currentItem = item;
       modTitle.textContent = "Personalizar: " + item.name;
       qtyVal.textContent="1"; notes.value="";
@@ -357,7 +395,13 @@
     document.getElementById("btnCart").onclick = openDrawer;
     document.getElementById("closeDrawer").onclick = closeDrawer;
     document.getElementById("btnVaciar").onclick = ()=>{ cart={burger:{},drink:{},fries:null}; saveCart(); renderCart(); };
-    document.getElementById("btnIrPagar").onclick = ()=> window.location.href="pedido_cliente.html";
+
+    // Validación de papas antes de ir a pagar
+    document.getElementById("btnIrPagar").onclick = ()=>{
+      if(!validarPapas()) return;
+      window.location.href="pedido_cliente.html";
+    };
+
     document.getElementById("btnContacto").onclick = ()=> window.location.href="contacto.html";
 
     // Init
