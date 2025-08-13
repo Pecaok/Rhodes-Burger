@@ -1,6 +1,5 @@
 // netlify/functions/createPreference.js
-// Requiere: npm i mercadopago
-const mercadopago = require("mercadopago");
+// No requiere npm install. Usa fetch nativo de Node 18 en Netlify.
 
 exports.handler = async (event) => {
   // --- CORS preflight ---
@@ -21,14 +20,11 @@ exports.handler = async (event) => {
   }
 
   try {
-    // Access Token en Netlify (Site settings → Environment variables)
     const ACCESS_TOKEN = process.env.NETLIFY_MP_ACCESS_TOKEN;
     if (!ACCESS_TOKEN) {
       return json(500, { error: "Falta NETLIFY_MP_ACCESS_TOKEN en Netlify" });
     }
-    mercadopago.configure({ access_token: ACCESS_TOKEN });
 
-    // Body
     let body = {};
     try { body = JSON.parse(event.body || "{}"); } catch {}
     const orderId = String(body.orderId || "").trim();
@@ -38,7 +34,7 @@ exports.handler = async (event) => {
 
     if (!orderId) return json(400, { error: "Falta orderId" });
 
-    // Normalizo items (si vienen)
+    // Normalizo ítems
     items = items
       .map(it => ({
         title: String(it.title || it.name || "Item Rhodes Burgers"),
@@ -48,13 +44,12 @@ exports.handler = async (event) => {
       }))
       .filter(it => it.quantity > 0 && Number.isFinite(it.unit_price) && it.unit_price > 0);
 
-    // Si no hay items válidos, creo uno con el total
+    // Si no hay ítems válidos, uso 1 por el total
     if (items.length === 0) {
-      const amount = Number(total);
-      if (!Number.isFinite(amount) || amount <= 0) {
+      if (!Number.isFinite(total) || total <= 0) {
         return json(400, { error: 'items vacío y "total" inválido (> 0 requerido)' });
       }
-      items = [{ title: "Pedido Rhodes Burgers", quantity: 1, currency_id: "ARS", unit_price: amount }];
+      items = [{ title: "Pedido Rhodes Burgers", quantity: 1, currency_id: "ARS", unit_price: Number(total) }];
     }
 
     const preference = {
@@ -70,26 +65,11 @@ exports.handler = async (event) => {
       },
     };
 
-    const res = await mercadopago.preferences.create(preference);
-    const pref = res.body || {};
-    return json(200, {
-      id: pref.id,
-      init_point: pref.init_point,
-      sandbox_init_point: pref.sandbox_init_point,
-    });
-  } catch (e) {
-    console.error("createPreference error:", e);
-    return json(500, { error: e.message || "Error creando preferencia" });
-  }
-};
-
-function json(statusCode, obj) {
-  return {
-    statusCode,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    },
-    body: JSON.stringify(obj),
-  };
-}
+    // Llamada directa a la API de Mercado Pago
+    const resp = await fetch("https://api.mercadopago.com/checkout/preferences", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringif
