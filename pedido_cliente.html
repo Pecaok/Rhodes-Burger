@@ -15,6 +15,7 @@
     .brand img{ width:40px; height:40px; border-radius:10px; background:#fff; object-fit:contain }
     .spacer{ flex:1 }
     .btn{ display:inline-flex; align-items:center; gap:10px; border:2px solid var(--primary); padding:10px 16px; border-radius:999px; color:var(--primary); background:#fff; font-weight:700; text-decoration:none; cursor:pointer }
+    .btn[disabled]{ opacity:.6; cursor:not-allowed }
     .btn.primary{ background:var(--primary); color:#fff }
     .btn.ghost{ border-color:#e7e7e7; color:#333 }
     .container{ max-width:900px; margin:24px auto; padding:0 12px }
@@ -29,6 +30,7 @@
     .item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid #efefef }
     .muted{ color:var(--muted); font-size:14px }
     .total{ display:flex; align-items:center; justify-content:space-between; font-weight:800; font-size:18px; margin-top:10px }
+    .err{ color:#b00020 }
   </style>
 </head>
 <body>
@@ -81,6 +83,7 @@
             <button class="btn primary" id="btnConfirmar">Ir a pagar</button>
           </div>
           <p class="muted" id="status" style="margin-top:8px"></p>
+          <p class="muted err" id="errorMsg" style="margin-top:4px"></p>
         </div>
 
         <!-- Columna derecha: resumen -->
@@ -98,6 +101,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
+    /*************** FIREBASE ***************/
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -109,6 +113,7 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
+    /*************** HELPERS ***************/
     const $ = s => document.querySelector(s);
     const money = n => n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const CART_KEY = "rhodes_cart_v3";
@@ -116,22 +121,29 @@
     const itemsEl = $("#items");
     const totalEl = $("#total");
     const statusEl = $("#status");
+    const errorEl = $("#errorMsg");
     const dirWrap = $("#dirWrap"), inpDireccion=$("#inpDireccion");
     const inpNombre = $("#inpNombre");
+    const btnConfirmar = $("#btnConfirmar");
+
+    function setStatus(msg, isError=false){
+      statusEl.textContent = msg || "";
+      errorEl.textContent = isError ? msg : "";
+    }
 
     let cart = loadCart();
     function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{},fries:null}; }catch{ return {burger:{},drink:{},fries:null}; } }
     function clearCart(){ localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{},fries:null})); }
     function cartCount(){ let n=0; for(const b of Object.values(cart.burger)) n+=b.qty; for(const d of Object.values(cart.drink)) n+=d.qty; return n; }
-    function calcTotal(){ let t=0; for(const b of Object.values(cart.burger)) t+=(b.item?.price||0)*b.qty; for(const d of Object.values(cart.drink)) t+=(d.item?.price||0)*d.qty; return t; }
+    function calcTotal(){ let t=0; for(const b of Object.values(cart.burger)) t+=(Number(b.item?.price)||0)*b.qty; for(const d of Object.values(cart.drink)) t+=(Number(d.item?.price)||0)*d.qty; return Number(t)||0; }
 
     function renderResumen(){
       const rows=[];
       for(const obj of Object.values(cart.burger)){
-        rows.push(`<div class="item"><div><strong>${obj.item.name}</strong>${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}<div class="muted">${money(obj.item.price)} x ${obj.qty}</div></div><div>${money(obj.item.price*obj.qty)}</div></div>`);
+        rows.push(`<div class="item"><div><strong>${obj.item.name}</strong>${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}<div class="muted">${money(Number(obj.item.price)||0)} x ${obj.qty}</div></div><div>${money((Number(obj.item.price)||0)*obj.qty)}</div></div>`);
       }
       for(const obj of Object.values(cart.drink)){
-        rows.push(`<div class="item"><div><strong>${obj.item.name}</strong><div class="muted">${money(obj.item.price)} x ${obj.qty}</div></div><div>${money(obj.item.price*obj.qty)}</div></div>`);
+        rows.push(`<div class="item"><div><strong>${obj.item.name}</strong><div class="muted">${money(Number(obj.item.price)||0)} x ${obj.qty}</div></div><div>${money((Number(obj.item.price)||0)*obj.qty)}</div></div>`);
       }
       itemsEl.innerHTML = rows.join("") || `<p class="muted">No hay productos en el carrito.</p>`;
       totalEl.textContent = money(calcTotal());
@@ -142,13 +154,30 @@
       }
     }
 
+    // Toggle dirección por tipo de entrega
     document.querySelectorAll('input[name="entrega"]').forEach(r=>{
       r.addEventListener("change", ()=>{ dirWrap.classList.toggle("hid", r.value!=="delivery"); });
     });
 
     $("#btnCancelar").onclick = ()=> { window.location.href = "index.html"; };
 
+    /*************** HEALTHCHECK NETLIFY FUNCTION ***************/
+    (async function healthcheck(){
+      try{
+        const ping = await fetch("/.netlify/functions/createPreference", { method: "GET" });
+        // Debe responder 405 si existe. 404 => ruta mal.
+        console.log("Healthcheck createPreference:", ping.status);
+        if (ping.status === 404) {
+          setStatus("No encuentro la función /.netlify/functions/createPreference (404). Verificá la ruta o el deploy.", true);
+        }
+      }catch(e){
+        console.warn("Healthcheck error:", e);
+      }
+    })();
+
+    /*************** CONFIRMAR ***************/
     $("#btnConfirmar").onclick = async ()=>{
+      errorEl.textContent = "";
       if(cartCount()===0){ alert("Tu carrito está vacío."); return; }
       const nombre = inpNombre.value.trim();
       if(!nombre){ alert("Ingresá tu nombre y apellido."); return; }
@@ -163,62 +192,102 @@
       const direccion = entrega==="delivery" ? (inpDireccion.value.trim()) : "";
       if(entrega==="delivery" && !direccion){ alert("Ingresá la dirección para Delivery."); return; }
 
+      // Items básicos (si usás extras en index, se agregan igual; acá priorizamos funcionamiento de MP)
       const items=[];
-      for(const o of Object.values(cart.burger)) items.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:o.item.price, ...(o.notes?{notes:o.notes}:{})});
-      for(const o of Object.values(cart.drink))  items.push({type:"drink",  id:o.item.id, name:o.item.name, qty:o.qty, price:o.item.price});
+      for(const o of Object.values(cart.burger)) items.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0, ...(o.notes?{notes:o.notes}:{})});
+      for(const o of Object.values(cart.drink))  items.push({type:"drink",  id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0});
 
       const order = {
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         nombre,
-        pago: pagoEl.value,
+        pago: pagoEl.value,                // "mercado_pago" | "debito" | "efectivo"
         entrega,
         direccion,
         fries: papasEl.value,
         items,
-        total: calcTotal(),
+        total: Number(calcTotal()) || 0,   // asegurar número
         status: "pending"
       };
 
       try{
-        statusEl.textContent = "Guardando pedido...";
+        btnConfirmar.disabled = true;
+        setStatus("Guardando pedido...");
+
         const docRef = await db.collection("orders").add(order);
+        console.log("Order creado:", docRef.id, order);
 
         if (order.pago === "mercado_pago" || order.pago === "debito") {
-          const resp = await fetch("/.netlify/functions/createPreference", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              orderId: docRef.id,
-              total: order.total,
-              nombre: order.nombre
-            })
-          });
+          setStatus("Creando preferencia de pago...");
+          let resp;
+          try{
+            resp = await fetch("/.netlify/functions/createPreference", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                orderId: docRef.id,
+                total: Number(order.total)||0,
+                nombre: order.nombre
+              })
+            });
+          }catch(netErr){
+            console.error("Fetch error a Netlify Function:", netErr);
+            setStatus("No se pudo contactar la función de pago (revisá deploy/URL).", true);
+            btnConfirmar.disabled = false;
+            return;
+          }
 
+          // Si la función respondió con error, mostramos detalle
           if (!resp.ok) {
-            alert("No pudimos iniciar el pago con Mercado Pago. Probá de nuevo.");
+            const raw = await resp.text();
+            console.error("MP createPreference fallo:", resp.status, raw);
+            setStatus(`Error creando preferencia (HTTP ${resp.status}). Detalle en consola.`, true);
+            alert("No pudimos iniciar el pago con Mercado Pago. Revisá la consola del navegador para más detalles.");
+            btnConfirmar.disabled = false;
             return;
           }
-          const pref = await resp.json();
+
+          // Intentar parsear JSON de respuesta
+          let pref;
+          try{
+            pref = await resp.json();
+          }catch(jsonErr){
+            const raw = await resp.text().catch(()=>"(sin body)");
+            console.error("No se pudo parsear JSON de la función:", jsonErr, raw);
+            setStatus("Respuesta inválida de la función de pago. Mirá consola.", true);
+            btnConfirmar.disabled = false;
+            return;
+          }
+
           const url = pref.init_point || pref.sandbox_init_point;
+          console.log("Preferencia MP:", pref);
           if (!url) {
-            alert("Preferencia creada pero sin URL.");
+            setStatus("Preferencia creada pero sin URL (init_point). Verificá tu Access Token de MP y modo sandbox/producción.", true);
+            btnConfirmar.disabled = false;
             return;
           }
+
+          // OK → limpiar y redirigir
           clearCart();
+          setStatus("Redirigiendo a Mercado Pago…");
           window.location.href = url;
           return;
         }
 
+        // Efectivo u otros métodos locales
         clearCart();
         alert("¡Pedido enviado! ✅");
         window.location.href = "index.html";
       }catch(err){
         console.error(err);
-        statusEl.textContent = "Error guardando el pedido.";
-        alert("No pudimos guardar el pedido.");
+        setStatus("Error guardando el pedido en Firestore.", true);
+        alert("No pudimos guardar el pedido. Revisá Firestore y vuelve a intentar.");
+      }finally{
+        // si no redirigimos, reactivamos
+        btnConfirmar.disabled = false;
       }
     };
 
+    // Inicio
     (function init(){
       renderResumen();
     })();
