@@ -3,7 +3,7 @@
 const mercadopago = require("mercadopago");
 
 exports.handler = async (event) => {
-  // --- CORS ---
+  // --- CORS preflight ---
   if (event.httpMethod === "OPTIONS") {
     return {
       statusCode: 204,
@@ -17,83 +17,46 @@ exports.handler = async (event) => {
   }
 
   if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
-      body: JSON.stringify({ error: "Use POST" }),
-    };
+    return json(405, { error: "Use POST" });
   }
 
   try {
-    // --- Credencial de MP desde Netlify (Settings > Environment variables) ---
+    // Access Token en Netlify (Site settings → Environment variables)
     const ACCESS_TOKEN = process.env.NETLIFY_MP_ACCESS_TOKEN;
     if (!ACCESS_TOKEN) {
-      return {
-        statusCode: 500,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-        body: JSON.stringify({
-          error:
-            "Falta NETLIFY_MP_ACCESS_TOKEN en las variables de entorno de Netlify",
-        }),
-      };
+      return json(500, { error: "Falta NETLIFY_MP_ACCESS_TOKEN en Netlify" });
     }
     mercadopago.configure({ access_token: ACCESS_TOKEN });
 
-    // --- Parseo body ---
+    // Body
     let body = {};
-    try {
-      body = JSON.parse(event.body || "{}");
-    } catch (_) {}
-    const orderId = body.orderId || "";
-    const nombre = body.nombre || "";
-    const total = Number(body.total);
-    let items = Array.isArray(body.items) ? body.items : [];
+    try { body = JSON.parse(event.body || "{}"); } catch {}
+    const orderId = String(body.orderId || "").trim();
+    const nombre  = String(body.nombre || "").trim();
+    const total   = Number(body.total);
+    let items     = Array.isArray(body.items) ? body.items : [];
 
-    if (!orderId) {
-      return resp(400, { error: "Falta orderId" });
-    }
+    if (!orderId) return json(400, { error: "Falta orderId" });
 
-    // Si no hay items válidos, creo uno por el total
-    items = (items || [])
-      .map((it) => ({
+    // Normalizo items (si vienen)
+    items = items
+      .map(it => ({
         title: String(it.title || it.name || "Item Rhodes Burgers"),
-        quantity: Number(it.quantity || it.qty || 1),
+        quantity: Number(it.quantity ?? it.qty ?? 1),
         currency_id: String(it.currency_id || "ARS"),
         unit_price: Number(it.unit_price ?? it.price ?? 0),
       }))
-      .filter(
-        (it) =>
-          Number.isFinite(it.unit_price) &&
-          it.unit_price >= 0 &&
-          Number.isFinite(it.quantity) &&
-          it.quantity > 0
-      );
+      .filter(it => it.quantity > 0 && Number.isFinite(it.unit_price) && it.unit_price > 0);
 
+    // Si no hay items válidos, creo uno con el total
     if (items.length === 0) {
-      const amount = Number.isFinite(total) && total > 0 ? total : 0;
-      if (amount <= 0) {
-        return resp(400, {
-          error:
-            'items vacío y "total" inválido. Enviá items o un total > 0.',
-        });
+      const amount = Number(total);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return json(400, { error: 'items vacío y "total" inválido (> 0 requerido)' });
       }
-      items = [
-        {
-          title: "Pedido Rhodes Burgers",
-          quantity: 1,
-          currency_id: "ARS",
-          unit_price: amount,
-        },
-      ];
+      items = [{ title: "Pedido Rhodes Burgers", quantity: 1, currency_id: "ARS", unit_price: amount }];
     }
 
-    // --- Preferencia ---
     const preference = {
       items,
       payer: { name: nombre },
@@ -107,27 +70,26 @@ exports.handler = async (event) => {
       },
     };
 
-    const mpRes = await mercadopago.preferences.create(preference);
-    const pref = mpRes.body || {};
-    return resp(200, {
+    const res = await mercadopago.preferences.create(preference);
+    const pref = res.body || {};
+    return json(200, {
       id: pref.id,
       init_point: pref.init_point,
       sandbox_init_point: pref.sandbox_init_point,
     });
   } catch (e) {
-    console.error("MP createPreference error:", e);
-    return resp(500, { error: e.message || "Error creando preferencia" });
+    console.error("createPreference error:", e);
+    return json(500, { error: e.message || "Error creando preferencia" });
   }
 };
 
-// Helper de respuesta
-function resp(statusCode, bodyObj) {
+function json(statusCode, obj) {
   return {
     statusCode,
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
     },
-    body: JSON.stringify(bodyObj),
+    body: JSON.stringify(obj),
   };
 }
