@@ -17,7 +17,7 @@
     .btn.small{ padding:6px 10px; font-size:13px }
     .btn.primary{ background:var(--primary); color:#fff }
     .container{ max-width:1100px; margin:20px auto; padding:0 12px }
-    .controls{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px }
+    .controls{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; align-items:center }
     select, input[type="search"]{ padding:10px 12px; border:1px solid #e7e7e7; border-radius:12px }
     .grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:14px }
     .card{ background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px; display:flex; flex-direction:column; gap:8px }
@@ -39,7 +39,8 @@
       <a href="index.html" class="brand"><img src="images/logo.png" alt="Rhodes Burgers"></a>
       <h3 style="margin:0 8px;">Panel de pedidos</h3>
       <div class="spacer"></div>
-      <a class="btn" href="pedido_cliente.html">Ver pantalla cliente</a>
+      <button id="btnSound" class="btn">🔔 Activar sonido</button>
+      <a class="btn" href="pedido_cliente.html" target="_blank">Pantalla cliente</a>
     </div>
   </header>
 
@@ -48,11 +49,11 @@
       <label>Estado:
         <select id="filtroEstado">
           <option value="all">Todos</option>
-          <option value="pending" selected>Pendientes</option>
-          <option value="accepted">Aceptados</option>
+          <option value="accepted" selected>Aceptados</option>
           <option value="ready">Listos</option>
           <option value="delivered">Entregados</option>
           <option value="cancelled">Cancelados</option>
+          <option value="pending">Pendientes (heredados)</option>
         </select>
       </label>
       <input id="buscar" type="search" placeholder="Buscar por nombre o dirección">
@@ -61,11 +62,19 @@
     <p id="status" class="muted"></p>
   </main>
 
+  <!-- Sonido (poné tu propio mp3 en /sounds/new-order.mp3 si querés) -->
+  <audio id="newOrderAudio" preload="auto">
+    <source src="data:audio/mp3;base64,//uQZAAAAAAAAAAAAAAAAAAAAAA..." type="audio/mp3">
+    <!-- Si querés usar un archivo real, reemplazá la línea de arriba por:
+    <source src="sounds/new-order.mp3" type="audio/mpeg">
+    -->
+  </audio>
+
   <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script>
-    // MISMOS DATOS QUE EN pedido_cliente.html
+    // Mismos datos que en pedido_cliente.html
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -86,17 +95,50 @@
     const filtro = $("#filtroEstado");
     const buscar = $("#buscar");
 
+    let firstLoad = true;           // para no sonar por los pedidos históricos
+    let soundEnabled = false;
+
+    // Activación de sonido (necesaria por políticas del navegador)
+    const audio = document.getElementById("newOrderAudio");
+    document.getElementById("btnSound").addEventListener("click", async ()=>{
+      try{
+        await audio.play();     // un "ping" cortito embebido
+        audio.pause(); audio.currentTime = 0;
+        soundEnabled = true;
+        alert("Sonido activado ✅");
+      }catch(e){
+        alert("No se pudo habilitar el sonido. Probá nuevamente.");
+      }
+    });
+
+    // Suscripción
     let unsub = null;
     function listen() {
       if (unsub) unsub();
 
-      let q = db.collection("orders");
-      // Para que funcione bien el orden mientras createdAt llega como serverTimestamp(null)
-      q = q.orderBy("createdAt","desc");
+      // Ordenamos por createdAt desc (tolera null al inicio)
+      let q = db.collection("orders").orderBy("createdAt","desc");
 
-      unsub = q.onSnapshot(snap=>{
+      unsub = q.onSnapshot(async snap=>{
         const docs = [];
         snap.forEach(d=> docs.push({id:d.id, ...d.data()}));
+
+        // Auto-aceptar pedidos "pending" recién agregados
+        const changes = snap.docChanges();
+        for (const ch of changes) {
+          if (ch.type === "added") {
+            const d = ch.doc.data() || {};
+            if (d.status === "pending") {
+              try { await ch.doc.ref.update({ status: "accepted" }); } catch(_) {}
+            }
+            // Sonido solo para nuevos (no en primera carga)
+            if (!firstLoad && soundEnabled) {
+              try { audio.play().catch(()=>{}); } catch(_){}
+            }
+          }
+        }
+        firstLoad = false;
+
         render(docs);
       }, err=>{
         console.error(err);
@@ -128,8 +170,8 @@
           return `<li>${linea}${it.notes?` — <em>${it.notes}</em>`:""}</li>`;
         }).join("");
 
-        const sClass = `s-${o.status||"pending"}`;
-        const estado = o.status||"pending";
+        const estado = o.status||"accepted";
+        const sClass = `s-${estado}`;
 
         return `
         <div class="card" data-id="${o.id}">
@@ -168,20 +210,23 @@
       });
     }
 
+    // Flujo SIN aceptar: pending y accepted comparten acciones (Listo / Cancelar)
     function actionButtons(estado){
-      const flow = {
-        pending:   [{t:"Aceptar", to:"accepted"}, {t:"Cancelar", to:"cancelled"}],
+      const flowMap = {
+        pending:   [{t:"Listo", to:"ready"}, {t:"Cancelar", to:"cancelled"}],
         accepted:  [{t:"Listo", to:"ready"}, {t:"Cancelar", to:"cancelled"}],
         ready:     [{t:"Entregado", to:"delivered"}],
         delivered: [],
         cancelled: []
-      }[estado] || [];
+      };
+      const flow = flowMap[estado] || [];
       if(flow.length===0) return `<span class="muted">Sin acciones</span>`;
       return flow.map(b=>`<button class="btn small" data-action="${b.to}">${b.t}</button>`).join("");
     }
 
-    filtro.addEventListener("change", listen);
-    buscar.addEventListener("input", listen);
+    filtro.addEventListener("change", renderFromCache);
+    buscar.addEventListener("input", renderFromCache);
+    function renderFromCache(){ /* trigger nueva escucha para aplicar filtros en vivo */ listen(); }
 
     // Inicio
     listen();
