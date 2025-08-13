@@ -1,93 +1,90 @@
-// netlify/functions/create-preference.js
-
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
-const ok  = (body) => ({ statusCode: 200, headers: CORS, body: JSON.stringify(body) });
-const err = (code, body) => ({ statusCode: code, headers: CORS, body: JSON.stringify(body) });
+// netlify/functions/createPreference.js
+const mercadopago = require("mercadopago");
 
 exports.handler = async (event) => {
-  try {
-    if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
-    if (event.httpMethod !== 'POST') return err(405, { error: 'Use POST' });
-
-    const token = process.env.MP_ACCESS_TOKEN; // <<<<< configurá esta variable en Netlify
-    if (!token) return err(500, { error: 'Falta MP_ACCESS_TOKEN en Netlify' });
-
-    let payload = {};
-    try { payload = JSON.parse(event.body || '{}'); }
-    catch (e) { return err(400, { error: 'JSON inválido', details: String(e) }); }
-
-    const { items = [], orderId = '', cliente = '' } = payload;
-    if (!Array.isArray(items) || items.length === 0) {
-      return err(400, { error: 'items vacío' });
-    }
-
-    // Adaptar a formato MP
-    const mpItems = items.map(it => ({
-      title: it.item || it.title || 'Producto',
-      quantity: Number(it.quantity || 1),
-      currency_id: 'ARS',
-      unit_price: Number(it.price || it.unit_price || 0),
-    }));
-
-    // Sólo débito (excluye crédito, ticket y atm). Ajustá si querés permitir más.
-    const payment_methods = {
-      excluded_payment_types: [
-        { id: 'credit_card' },
-        { id: 'ticket' },
-        { id: 'atm' },
-      ],
-    };
-
-    const siteUrl = process.env.URL || 'https://rhodes-burgers.netlify.app';
-
-    const bodyPref = {
-      items: mpItems,
-      payer: { name: cliente || 'Cliente' },
-      external_reference: orderId || String(Date.now()),
-      back_urls: {
-        success: `${siteUrl}/success.html`,
-        failure: `${siteUrl}/failure.html`,
-        pending: `${siteUrl}/success.html`,
+  // CORS
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
       },
-      auto_return: 'approved',
-      payment_methods,
+      body: "",
+    };
+  }
+
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ error: "Método no permitido" }),
+    };
+  }
+
+  try {
+    const { NETLIFY_MP_ACCESS_TOKEN } = process.env;
+    if (!NETLIFY_MP_ACCESS_TOKEN) {
+      return {
+        statusCode: 500,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ error: "Falta NETLIFY_MP_ACCESS_TOKEN en Netlify" }),
+      };
+    }
+    mercadopago.configure({ access_token: NETLIFY_MP_ACCESS_TOKEN });
+
+    let body = {};
+    try { body = JSON.parse(event.body || "{}"); } catch (_) {}
+    const orderId = body.orderId;
+    const nombre = body.nombre || "";
+    const amount = Number(body.total);
+
+    if (!orderId) {
+      return {
+        statusCode: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ error: "Falta orderId" }),
+      };
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return {
+        statusCode: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ error: `total inválido: "${body.total}"` }),
+      };
+    }
+
+    const preference = {
+      items: [{ title: "Pedido Rhodes Burgers", quantity: 1, currency_id: "ARS", unit_price: amount }],
+      payer: { name: nombre },
+      back_urls: {
+        success: "https://rhodes-burgers.netlify.app/success.html",
+        failure: "https://rhodes-burgers.netlify.app/failure.html",
+        pending: "https://rhodes-burgers.netlify.app/pending.html",
+      },
+      auto_return: "approved",
+      statement_descriptor: "RHODES BURGERS",
+      metadata: { orderId }
     };
 
-    // Llamada al API de Mercado Pago
-    let r, txt, data;
-    try {
-      r = await fetch('https://api.mercadopago.com/checkout/preferences', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(bodyPref),
-      });
-      txt = await r.text();
-      try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
-    } catch (fetchErr) {
-      return err(500, { error: 'Fallo llamando a MP', details: String(fetchErr) });
-    }
-
-    if (!r.ok) {
-      return err(r.status, {
-        error: data?.message || 'MP rechazó la preferencia',
-        details: data,
-      });
-    }
-
-    return ok({
-      id: data.id,
-      init_point: data.init_point || data.sandbox_init_point,
-      sandbox_init_point: data.sandbox_init_point,
-    });
+    const resp = await mercadopago.preferences.create(preference);
+    const pref = resp.body || {};
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({
+        id: pref.id,
+        init_point: pref.init_point,
+        sandbox_init_point: pref.sandbox_init_point
+      }),
+    };
   } catch (e) {
-    return err(500, { error: 'Excepción en function', details: String(e) });
+    console.error("MP error:", e);
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ error: e.message || "Error creando preferencia" }),
+    };
   }
 };
