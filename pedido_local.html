@@ -73,11 +73,6 @@
   </aside>
 </main>
 
-<!-- Sonido (puedes reemplazar por un MP3 propio: sounds/new-order.mp3) -->
-<audio id="newOrderAudio" preload="auto">
-  <source src="data:audio/mp3;base64,//uQZAAAAAAAAAAAAAAAAAAAAAA..." type="audio/mp3">
-</audio>
-
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -104,11 +99,28 @@
   const selAnio = $("#selAnio");
   const busca = $("#busca");
 
-  const audio = $("#newOrderAudio");
-  let soundEnabled=false, firstLoad=true;
-  $("#btnSound").onclick = async ()=>{
-    try{ await audio.play(); audio.pause(); audio.currentTime=0; soundEnabled=true; alert("Sonido activado ✅"); }catch(e){ alert("No se pudo activar sonido. Tocá de nuevo."); }
+  // === SONIDO ===
+  // Asegurate de subir sounds/new-order.mp3 a tu sitio
+  const audio = new Audio("sounds/new-order.mp3");
+  let soundEnabled = false;
+  let firstLoad = true;
+
+  $("#btnSound").onclick = () => {
+    audio.play()
+      .then(() => {
+        soundEnabled = true;
+        alert("🔔 Sonido activado. Sonará cuando entre un pedido nuevo.");
+      })
+      .catch(err => {
+        console.error("No se pudo reproducir el sonido:", err);
+        alert("No se pudo activar el sonido. Verificá que el archivo exista y el navegador no esté en mute.");
+      });
   };
+
+  function playNewOrderSound(){
+    if(!soundEnabled) return;
+    try { audio.currentTime = 0; audio.play().catch(()=>{}); } catch(_){}
+  }
 
   // Meses UI
   const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -118,17 +130,13 @@
   const yearNow = hoy.getFullYear();
   for (let y=yearNow-3; y<=yearNow+1; y++) selAnio.innerHTML += `<option value="${y}" ${y===yearNow?"selected":""}>${y}</option>`;
 
-  let allOrders = []; // cache local de pedidos
+  let allOrders = []; // cache
   let unsub = null;
 
   function listen(){
     if (unsub) unsub();
-    // Traemos todo y filtramos por mes en cliente (simple)
     unsub = db.collection("orders").orderBy("createdAt","desc").onSnapshot(snap=>{
-      const addedNow=[];
-      snap.docChanges().forEach(ch=>{
-        if (ch.type==="added") addedNow.push(ch.doc.id);
-      });
+      const newAdded = snap.docChanges().filter(ch=>ch.type==="added").length;
 
       allOrders = [];
       snap.forEach(d=>{
@@ -136,10 +144,8 @@
         allOrders.push({ id:d.id, ...data });
       });
 
-      if (!firstLoad && addedNow.length && soundEnabled){
-        try{ audio.play().catch(()=>{}); }catch(_){}
-      }
-      firstLoad=false;
+      if (!firstLoad && newAdded>0) playNewOrderSound();
+      firstLoad = false;
 
       render();
       renderSummary();
@@ -151,7 +157,7 @@
 
   function inSelectedMonth(o){
     const ts = o.createdAt?.toDate ? o.createdAt.toDate() : null;
-    if (!ts) return false; // si aún no llegó el serverTimestamp lo omitimos
+    if (!ts) return false;
     return ts.getMonth() === Number(selMes.value) && ts.getFullYear() === Number(selAnio.value);
   }
 
@@ -159,7 +165,7 @@
     const term = busca.value.trim().toLowerCase();
     const filtered = allOrders
       .filter(o => inSelectedMonth(o))
-      .filter(o => (o.status!=="cancelled")) // excluir cancelados en la lista; quitalo si querés ver todos
+      .filter(o => (o.status!=="cancelled"))
       .filter(o => !term || (`${o.nombre||""} ${o.direccion||""}`).toLowerCase().includes(term));
 
     if (filtered.length===0){
@@ -190,17 +196,17 @@
   }
 
   function renderSummary(){
-    // Agrupar por mes/año, excluyendo cancelados
+    // Agrupa por mes/año, excluyendo cancelados
     const map = new Map();
     for (const o of allOrders){
-      if (o.status==="cancelled") continue; // no contar cancelados
+      if (o.status==="cancelled") continue;
       const dt = o.createdAt?.toDate ? o.createdAt.toDate() : null;
       if (!dt) continue;
-      const key = `${dt.getFullYear()}-${dt.getMonth()}`; // YYYY-M
+      const key = `${dt.getFullYear()}-${dt.getMonth()}`;
       if (!map.has(key)) map.set(key, { year: dt.getFullYear(), month: dt.getMonth(), ventas:0, ingresos:0 });
       const agg = map.get(key);
-      agg.ventas += 1;                 // cantidad de pedidos
-      agg.ingresos += Number(o.total)||0; // suma de total
+      agg.ventas += 1;
+      agg.ingresos += Number(o.total)||0;
     }
 
     const rows = Array.from(map.values()).sort((a,b)=> (b.year-a.year) || (b.month-a.month));
