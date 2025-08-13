@@ -153,6 +153,40 @@
 
     $("#btnCancelar").onclick = ()=> { window.location.href = "index.html"; };
 
+    /*************** Helper: llamar Netlify Function ***************/
+    async function createPreference(payload){
+      // intenta primero /createPreference y si da 404 prueba /create-preference
+      const endpoints = [
+        "/.netlify/functions/createPreference",
+        "/.netlify/functions/create-preference"
+      ];
+      let lastErr = null;
+
+      for (const url of endpoints) {
+        try {
+          const resp = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          const raw = await resp.text();
+          let data = {};
+          try { data = JSON.parse(raw); } catch { data = { raw }; }
+
+          if (!resp.ok) {
+            // Si me devuelve 404, pruebo el siguiente endpoint
+            if (resp.status === 404) { lastErr = {status:resp.status, data}; continue; }
+            // Si devuelve 405 "Use POST", hay algo interceptando (redirect); igualmente corto
+            throw new Error(`HTTP ${resp.status} ${data.error || data.raw || ""}`);
+          }
+          return data;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error("No se pudo contactar la función de pago");
+    }
+
     /*************** CONFIRMAR ***************/
     btnConfirmar.onclick = async ()=>{
       if(cartCount()===0){ alert("Tu carrito está vacío."); return; }
@@ -169,7 +203,7 @@
       const direccion = entrega==="delivery" ? (inpDireccion.value.trim()) : "";
       if(entrega==="delivery" && !direccion){ alert("Ingresá la dirección para Delivery."); return; }
 
-      // Items del pedido (para guardar y para MP)
+      // Items del pedido
       const items=[];
       for(const o of Object.values(cart.burger)) items.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0, ...(o.notes?{notes:o.notes}:{})});
       for(const o of Object.values(cart.drink))  items.push({type:"drink",  id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0});
@@ -193,8 +227,7 @@
 
         if (order.pago === "mercado_pago" || order.pago === "debito") {
           statusEl.textContent = "Creando preferencia de pago...";
-
-          // Construyo ítems para Mercado Pago
+          // Ítems para MP
           const mpItems = order.items.map(it => ({
             title: it.name,
             quantity: Number(it.qty) || 1,
@@ -202,41 +235,29 @@
             unit_price: Number(it.price) || 0
           })).filter(x => x.quantity > 0 && Number.isFinite(x.unit_price));
 
-          // Si por algún motivo quedó vacío, mando 1 ítem con el total
           if (mpItems.length === 0) {
-            mpItems.push({
-              title: "Pedido Rhodes Burgers",
-              quantity: 1,
-              currency_id: "ARS",
-              unit_price: Number(order.total) || 0
-            });
+            mpItems.push({ title: "Pedido Rhodes Burgers", quantity: 1, currency_id: "ARS", unit_price: Number(order.total)||0 });
           }
 
-          const resp = await fetch("/.netlify/functions/createPreference", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          // Llamo a la Netlify Function (POST SIEMPRE)
+          let pref;
+          try{
+            pref = await createPreference({
               orderId: docRef.id,
               total: Number(order.total),
               nombre: order.nombre,
-              items: mpItems          // 👈 ahora enviamos los items
-            })
-          });
-
-          const raw = await resp.text();
-          let data = {};
-          try { data = JSON.parse(raw); } catch { data = { raw }; }
-
-          if (!resp.ok) {
-            console.error("createPreference error:", resp.status, data);
-            alert(`Error MP (${resp.status}): ${data.error || data.raw || "sin detalle"}`);
+              items: mpItems
+            });
+          }catch(e){
+            console.error("Error contactando función MP:", e);
+            alert("No pudimos iniciar el pago. Verificá el nombre de la función en Netlify (createPreference o create-preference) y el Access Token.");
             btnConfirmar.disabled = false;
             return;
           }
 
-          const url = data.init_point || data.sandbox_init_point;
+          const url = pref.init_point || pref.sandbox_init_point;
           if (!url) {
-            alert("Preferencia sin URL. Revisá el Access Token / modo sandbox.");
+            alert("Preferencia sin URL. Revisá el Access Token (prod/sandbox) en Netlify.");
             btnConfirmar.disabled = false;
             return;
           }
