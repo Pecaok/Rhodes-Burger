@@ -3,33 +3,33 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Rhodes Burgers - Pedidos</title>
+  <title>Panel de pedidos - Rhodes Burgers</title>
   <link rel="icon" href="images/logo.png" />
   <style>
     :root{ --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff; --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.08) }
     *{ box-sizing:border-box }
     html,body{ margin:0; background:var(--bg); color:var(--text); font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif }
     header{ position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06) }
-    .topbar{ max-width:1000px; margin:0 auto; padding:10px 12px; display:flex; align-items:center; gap:12px }
+    .topbar{ max-width:1100px; margin:0 auto; padding:10px 12px; display:flex; align-items:center; gap:12px }
     .brand img{ width:40px; height:40px; border-radius:10px; background:#fff; object-fit:contain }
     .spacer{ flex:1 }
     .btn{ display:inline-flex; align-items:center; gap:10px; border:2px solid var(--primary); padding:10px 16px; border-radius:999px; color:var(--primary); background:#fff; font-weight:700; text-decoration:none; cursor:pointer }
     .btn.primary{ background:var(--primary); color:#fff }
     .btn.ghost{ border-color:#e7e7e7; color:#333 }
 
-    .container{ max-width:1000px; margin:24px auto; padding:0 12px }
-    h1{ font-size:28px; margin:0 0 14px }
-    .filters{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px }
-    select,input[type="text"]{ padding:10px 12px; border:1px solid #e7e7e7; border-radius:12px }
-    .list{ display:flex; flex-direction:column; gap:12px }
-    .card{ background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:12px 14px; display:grid; grid-template-columns:1fr auto; gap:8px; align-items:start }
+    .container{ max-width:1100px; margin:24px auto; padding:0 12px }
+    h1{ font-size:28px; margin:10px 4px 14px }
+    .controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+    .controls input, .controls select{ padding:10px 12px; border:1px solid #e7e7e7; border-radius:10px }
+    .cards{ display:grid; grid-template-columns:2fr 1fr; gap:16px; margin-top:12px }
+    .card{ background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px }
+    .order{ padding:12px 0; border-bottom:1px solid #efefef; display:flex; justify-content:space-between; gap:12px }
     .muted{ color:var(--muted) }
-    .items{ margin-top:6px; color:#333; }
-    .items li{ margin:2px 0 }
-    .total{ font-weight:800; font-size:16px; }
-    .chip{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #e7e7e7; }
-    .chip.efectivo{ background:#fff7e6; border-color:#ffd180 }
-    .chip.mercado{ background:#e6fff0; border-color:#b5f0cf }
+    .sumgrid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:12px }
+    .sum{ background:#fff; border-radius:16px; padding:12px; box-shadow:var(--shadow) }
+    table{ width:100%; border-collapse:collapse; margin-top:12px; background:#fff; border-radius:16px; overflow:hidden; box-shadow:var(--shadow) }
+    th,td{ padding:10px 12px; border-bottom:1px solid #f0f0f0; text-align:left }
+    th{ background:#fafafa; }
   </style>
 </head>
 <body>
@@ -38,140 +38,171 @@
       <a href="index.html" class="brand"><img src="images/logo.png" alt="Rhodes Burgers"></a>
       <strong>Panel de pedidos</strong>
       <div class="spacer"></div>
-      <button class="btn ghost" id="btnSound">🔔 Activar sonido</button>
+      <button class="btn" id="btnSound">🔔 Activar sonido</button>
+      <a class="btn ghost" href="index.html">Menú</a>
     </div>
   </header>
 
   <main>
     <div class="container">
-      <h1>Pedidos</h1>
-
-      <div class="filters">
+      <div class="controls">
         <label>Mes:
           <select id="selMes"></select>
         </label>
         <label>Año:
           <select id="selAnio"></select>
         </label>
-        <input id="inpSearch" type="text" placeholder="Buscar por nombre o notas" />
+        <input id="txtBuscar" placeholder="Buscar por nombre o texto" />
       </div>
 
-      <div class="list" id="ordersList"></div>
+      <div class="cards">
+        <div class="card">
+          <h1>Pedidos</h1>
+          <div id="list"></div>
+        </div>
+
+        <div class="card">
+          <h1>Totales del mes</h1>
+          <div class="sumgrid">
+            <div class="sum"><div class="muted">Cantidad</div><div id="tCant" style="font-weight:800;font-size:22px">0</div></div>
+            <div class="sum"><div class="muted">Ingresos</div><div id="tMonto" style="font-weight:800;font-size:22px">$0</div></div>
+          </div>
+
+          <h1 style="margin-top:18px">Totales por mes (año)</h1>
+          <table id="tablaMeses">
+            <thead><tr><th>Mes</th><th>Pedidos</th><th>Ingresos</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </main>
 
-  <audio id="sound" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto"></audio>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
-  <!-- Firebase v10 (modular) -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import { getFirestore, collection, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
+  <script>
+    /*************** FIREBASE (tus credenciales) ***************/
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
       projectId: "rhodes-burguers",
       storageBucket: "rhodes-burguers.firebasestorage.app",
       messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const $=s=>document.querySelector(s);
+    const money=n=>n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+
+    // Controles
+    const selMes=$("#selMes"), selAnio=$("#selAnio"), txtBuscar=$("#txtBuscar");
+    const list=$("#list"), tCant=$("#tCant"), tMonto=$("#tMonto");
+    const tablaMeses=$("#tablaMeses tbody");
+
+    // Poblar selects
+    const meses=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+    const now=new Date(); const curM=now.getMonth(); const curY=now.getFullYear();
+    selMes.innerHTML = meses.map((m,i)=>`<option value="${i}" ${i===curM?"selected":""}>${m}</option>`).join("");
+    let yOpts=""; for(let y=curY-2;y<=curY+1;y++) yOpts+=`<option ${y===curY?"selected":""}>${y}</option>`;
+    selAnio.innerHTML=yOpts;
+
+    let unsub=null;
+    let firstLoad=true;
+    let lastIds=new Set();
+    let soundEnabled=false;
+    let ding;
+
+    // Sonido
+    $("#btnSound").onclick=async ()=>{
+      try{
+        ding = ding || new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
+        await ding.play(); // prueba
+        ding.pause(); ding.currentTime=0;
+        soundEnabled = true;
+        $("#btnSound").textContent="🔔 Sonido activado";
+      }catch(e){ alert("Dale permiso al navegador para reproducir sonido."); }
     };
 
-    const app = initializeApp(firebaseConfig);
-    const db  = getFirestore(app);
+    function watch(){
+      if(unsub) unsub();
+      const y=+selAnio.value, m=+selMes.value;
+      const start=new Date(y,m,1); const end=new Date(y,m+1,1);
 
-    const $ = s => document.querySelector(s);
-    const listEl   = $("#ordersList");
-    const selMes   = $("#selMes");
-    const selAnio  = $("#selAnio");
-    const inpSearch= $("#inpSearch");
-    const sound    = $("#sound");
-    const btnSound = $("#btnSound");
+      unsub = db.collection("orders")
+        .where("createdAt",">=",start)
+        .where("createdAt","<",end)
+        .orderBy("createdAt","desc")
+        .onSnapshot(snap=>{
+          const orders=[];
+          let cant=0, monto=0;
 
-    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const friesLabel = v => v==="con_sazon" ? "Con sazón" : v==="sin_sazon" ? "Sin sazonar" : "—";
+          snap.docChanges().forEach(ch=>{
+            if(!firstLoad && ch.type==="added" && soundEnabled){
+              // Nuevo pedido real
+              (ding||new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg")).play().catch(()=>{});
+            }
+          });
 
-    // poblar combos
-    const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-    const now = new Date();
-    meses.forEach((m,i)=> selMes.innerHTML += `<option value="${i}">${m}</option>`);
-    selMes.value = now.getMonth();
-    for(let y=now.getFullYear()-1;y<=now.getFullYear()+1;y++) selAnio.innerHTML += `<option>${y}</option>`;
-    selAnio.value = now.getFullYear();
+          snap.forEach(doc=>{
+            const o=doc.data(); o.id=doc.id;
+            orders.push(o);
+            cant += 1;
+            monto += +o.total||0;
+          });
 
-    // estado
-    let docs = [];          // snapshot crudo
-    let knownIds = new Set; // para sonido
+          renderList(orders);
+          tCant.textContent = String(cant);
+          tMonto.textContent = money(monto);
 
-    function render(){
-      const m = Number(selMes.value), y = Number(selAnio.value);
-      const q = (inpSearch.value||"").trim().toLowerCase();
+          firstLoad=false;
+        });
 
-      const filtered = docs.filter(d=>{
-        const data = d.data;
-        const ts = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt? new Date(data.createdAt) : null);
-        if(!ts) return false;
-        if(ts.getMonth()!==m || ts.getFullYear()!==y) return false;
-
-        if(q){
-          const hay = (data.nombre||"").toLowerCase().includes(q)
-            || (data.direccion||"").toLowerCase().includes(q)
-            || (data.items||[]).some(it => (it.name||"").toLowerCase().includes(q))
-            || (data.notes||"").toLowerCase().includes(q);
-          if(!hay) return false;
-        }
-        return true;
-      });
-
-      listEl.innerHTML = filtered.map(d=>{
-        const o = d.data;
-        const ts = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt||Date.now());
-        const idShown = o.orderNumber ? `#${o.orderNumber}` : `#${d.id}`;
-        const chipClass = (o.metodoPago||o.pago)==="efectivo" ? "efectivo" : "mercado";
-        const chipText  = (o.metodoPago||o.pago)==="efectivo" ? "Efectivo" : "Mercado Pago";
-        const itemsHtml = (o.items||[]).map(it => `• ${it.qty}× ${it.name}`).join("<br>");
-
-        return `
-        <div class="card">
-          <div>
-            <div><strong>${idShown}</strong> — <strong>${o.nombre||"Cliente"}</strong> &nbsp; <span class="chip ${chipClass}">${chipText}</span></div>
-            <div class="muted">${ts.toLocaleDateString("es-AR")} ${ts.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</div>
-            <div>Entrega: <strong>take_away</strong></div>
-            <div>Papas: <strong>${friesLabel(o.fries)}</strong></div>
-            <div class="items">${itemsHtml}</div>
-          </div>
-          <div class="total">${money(o.total||0)}</div>
-        </div>`;
-      }).join("") || `<div class="muted">No hay pedidos para mostrar con los filtros seleccionados.</div>`;
+      // Totales por mes del año
+      buildYearTotals(+selAnio.value);
     }
 
-    selMes.onchange = render;
-    selAnio.onchange = render;
-    inpSearch.oninput = render;
-
-    btnSound.onclick = ()=> {
-      sound.play().then(()=> sound.pause()).catch(()=>{});
-      btnSound.textContent = "🔔 Sonido activado";
-    };
-
-    // Suscripción en tiempo real (colección correcta: 'pedidos')
-    const qRef = query(collection(db,"pedidos"), orderBy("createdAt","desc"));
-    onSnapshot(qRef, (snap)=>{
-      // detectar nuevos para sonido
-      let hasNew = false;
-      snap.docChanges().forEach(ch=>{
-        if(ch.type==="added" && !knownIds.has(ch.doc.id)){
-          hasNew = true;
-          knownIds.add(ch.doc.id);
-        }
-      });
-
-      docs = snap.docs.map(d=>({ id:d.id, data:d.data() }));
-      render();
-
-      if(hasNew){
-        sound.play().catch(()=>{}); // puede requerir un click previo (usa el botón Activar sonido)
+    function renderList(orders){
+      const q=txtBuscar.value.trim().toLowerCase();
+      const rows=[];
+      for(const o of orders){
+        const fecha=o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt);
+        const line = `
+          <div class="order">
+            <div>
+              <div><strong>${o.orderNumber || "(sin #)"}</strong> — ${o.nombre||""}</div>
+              <div class="muted">${fecha.toLocaleDateString()} ${fecha.toLocaleTimeString()}</div>
+              <div class="muted">Retiro: take_away • Papas: ${o.fries==="con_sazon"?"Con sazón":"Sin sazonar"}</div>
+              <div class="muted">${(o.items||[]).map(i=>`• ${i.qty}× ${i.name}`).join("<br>")}</div>
+            </div>
+            <div style="font-weight:800">${money(o.total||0)}</div>
+          </div>`;
+        if(!q || line.toLowerCase().includes(q)) rows.push(line);
       }
-    });
+      list.innerHTML = rows.join("") || `<p class="muted">No hay pedidos para mostrar.</p>`;
+    }
+
+    async function buildYearTotals(year){
+      const monthTotals = Array.from({length:12},()=>({c:0,m:0}));
+      const start=new Date(year,0,1); const end=new Date(year+1,0,1);
+      const snap = await db.collection("orders")
+        .where("createdAt",">=",start)
+        .where("createdAt","<",end)
+        .get();
+      snap.forEach(d=>{
+        const o=d.data(); const dt=o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt);
+        const mm=dt.getMonth();
+        monthTotals[mm].c += 1;
+        monthTotals[mm].m += +o.total||0;
+      });
+      tablaMeses.innerHTML = monthTotals.map((t,i)=>`<tr><td>${meses[i]}</td><td>${t.c}</td><td>${money(t.m)}</td></tr>`).join("");
+    }
+
+    selMes.onchange=watch; selAnio.onchange=watch; txtBuscar.oninput=()=>unsub && watch();
+    watch();
   </script>
 </body>
 </html>
