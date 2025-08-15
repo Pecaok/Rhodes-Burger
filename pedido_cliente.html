@@ -9,7 +9,6 @@
     :root{ --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff; --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.08) }
     *{ box-sizing:border-box }
     html,body{ margin:0; background:var(--bg); color:var(--text); font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif }
-    body::before{ content:""; position:fixed; inset:0; background:url("images/logo.png") center 120px/320px no-repeat; opacity:.06; pointer-events:none; z-index:0; filter:grayscale(100%) }
     header{ position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06) }
     .topbar{ max-width:900px; margin:0 auto; padding:10px 12px; display:flex; align-items:center; gap:12px }
     .brand img{ width:40px; height:40px; border-radius:10px; background:#fff; object-fit:contain }
@@ -17,6 +16,7 @@
     .btn{ display:inline-flex; align-items:center; gap:10px; border:2px solid var(--primary); padding:10px 16px; border-radius:999px; color:var(--primary); background:#fff; font-weight:700; text-decoration:none; cursor:pointer }
     .btn.primary{ background:var(--primary); color:#fff }
     .btn.ghost{ border-color:#e7e7e7; color:#333 }
+
     .container{ max-width:900px; margin:24px auto; padding:0 12px }
     h1{ font-size:34px; margin:14px 4px 18px }
     .grid{ display:grid; grid-template-columns:2fr 1fr; gap:16px }
@@ -25,9 +25,10 @@
     .field input{ padding:10px 12px; border:1px solid #e7e7e7; border-radius:12px }
     .inline{ display:flex; gap:12px; flex-wrap:wrap; margin:8px 0 }
     .pill{ display:inline-flex; align-items:center; gap:8px; border:1px solid #e7e7e7; border-radius:999px; padding:8px 12px }
-    .item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid #efefef }
     .muted{ color:var(--muted); font-size:14px }
+    .item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid #efefef }
     .total{ display:flex; align-items:center; justify-content:space-between; font-weight:800; font-size:18px; margin-top:10px }
+    .orderTag{ font-weight:800; font-size:18px; padding:8px 12px; border-radius:999px; border:1px solid #e7e7e7; display:inline-block }
   </style>
 </head>
 <body>
@@ -43,8 +44,13 @@
     <div class="container">
       <h1>Confirmar pedido</h1>
       <div class="grid">
-        <!-- Columna izquierda: datos -->
+        <!-- Datos -->
         <div class="card">
+          <div class="field">
+            <label>Número de pedido</label>
+            <div id="orderNumber" class="orderTag">#—</div>
+          </div>
+
           <div class="field">
             <label>Nombre y apellido</label>
             <input id="inpNombre" placeholder="Ej: Juan Pérez" autocomplete="name" />
@@ -55,18 +61,18 @@
             <label class="pill"><input type="radio" name="pago" value="efectivo"> Efectivo</label>
           </div>
 
-          <!-- Sin Delivery: solo Take Away -->
-          <div class="inline" style="margin-top:8px">
-            <label class="pill"><input type="radio" name="entrega" value="take_away" checked> Take Away</label>
+          <div class="field">
+            <label>Retiro</label>
+            <div class="muted">Modalidad: <strong>Take Away</strong> (retira en el local).</div>
           </div>
 
           <div class="field" style="margin-top:10px">
-            <label>Papas (obligatorio)</label>
+            <label>Papas fritas (obligatorio)</label>
             <div class="inline">
               <label class="pill"><input type="radio" name="papas" value="con_sazon"> Con sazón</label>
               <label class="pill"><input type="radio" name="papas" value="sin_sazon"> Sin sazonar</label>
             </div>
-            <div class="muted">Se toma lo que elegiste en el menú; si querés, podés cambiarlo acá.</div>
+            <div class="muted">Si ya elegiste en el menú, viene preseleccionado.</div>
           </div>
 
           <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
@@ -76,7 +82,7 @@
           <p class="muted" id="status" style="margin-top:8px"></p>
         </div>
 
-        <!-- Columna derecha: resumen -->
+        <!-- Resumen -->
         <div class="card">
           <h3>Resumen</h3>
           <div id="items"></div>
@@ -91,101 +97,67 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    // FIREBASE CONFIG
+    /*************** FIREBASE (tus credenciales) ***************/
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
       projectId: "rhodes-burguers",
       storageBucket: "rhodes-burguers.firebasestorage.app",
       messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
     };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
-  </script>
 
-  <script>
-    // ===== CARRITO / UI =====
+    /*************** UTIL ***************/
     const $ = s => document.querySelector(s);
-    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const money = n => n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const CART_KEY = "rhodes_cart_v3";
+    const WA_NUMBER = "541170596483"; // destino hamburguesería
 
+    function shortId(){
+      const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let out="#";
+      for(let i=0;i<6;i++) out+=chars[Math.floor(Math.random()*chars.length)];
+      return out;
+    }
+
+    /*************** ESTADO ***************/
+    let cart = loadCart(); // {burger:{},drink:{},fries}
     function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{},fries:null}; }catch{ return {burger:{},drink:{},fries:null}; } }
-    function saveCart(c){ localStorage.setItem(CART_KEY, JSON.stringify(c)); }
-    function clearCart(){ saveCart({burger:{},drink:{},fries:null}); }
-    function cartCount(c){ let n=0; for(const b of Object.values(c.burger)) n+=b.qty; for(const d of Object.values(c.drink)) n+=d.qty; return n; }
-    function calcTotal(c){ let t=0; for(const b of Object.values(c.burger)) t+=(Number(b.item?.price)||0)*b.qty; for(const d of Object.values(c.drink)) t+=(Number(d.item?.price)||0)*d.qty; return t; }
+    function clearCart(){ localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{},fries:null})); }
+    function cartCount(){ let n=0; for(const b of Object.values(cart.burger)) n+=b.qty; for(const d of Object.values(cart.drink)) n+=d.qty; return n; }
+    function calcTotal(){ let t=0; for(const b of Object.values(cart.burger)) t+=(b.item?.price||0)*b.qty; for(const d of Object.values(cart.drink)) t+=(d.item?.price||0)*d.qty; return t; }
 
-    let cart = loadCart();
-
-    const itemsEl = $("#items");
-    const totalEl = $("#total");
-    const statusEl = $("#status");
-    const inpNombre = $("#inpNombre");
-    const btnConfirmar = $("#btnConfirmar");
-
-    // Preseleccionar papas si venía de index
-    (function preselectFries(){
-      if(cart.fries){
-        const r = document.querySelector(`input[name="papas"][value="${cart.fries}"]`);
-        if(r) r.checked = true;
-      }
-    })();
+    const itemsEl=$("#items"), totalEl=$("#total"), statusEl=$("#status");
+    const inpNombre=$("#inpNombre");
+    const orderNumberTag=$("#orderNumber");
+    const orderNumber = shortId();
+    orderNumberTag.textContent = orderNumber;
 
     function renderResumen(){
       const rows=[];
       for(const obj of Object.values(cart.burger)){
-        rows.push(`<div class="item"><div><strong>${obj.item.name}</strong>${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}<div class="muted">${money(obj.item.price)} x ${obj.qty}</div></div><div>${money((Number(obj.item.price)||0)*obj.qty)}</div></div>`);
+        rows.push(`<div class="item"><div><strong>${obj.item.name}</strong>${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}<div class="muted">${money(obj.item.price)} x ${obj.qty}</div></div><div>${money(obj.item.price*obj.qty)}</div></div>`);
       }
       for(const obj of Object.values(cart.drink)){
-        rows.push(`<div class="item"><div><strong>${obj.item.name}</strong><div class="muted">${money(obj.item.price)} x ${obj.qty}</div></div><div>${money((Number(obj.item.price)||0)*obj.qty)}</div></div>`);
+        rows.push(`<div class="item"><div><strong>${obj.item.name}</strong><div class="muted">${money(obj.item.price)} x ${obj.qty}</div></div><div>${money(obj.item.price*obj.qty)}</div></div>`);
       }
       itemsEl.innerHTML = rows.join("") || `<p class="muted">No hay productos en el carrito.</p>`;
-      totalEl.textContent = money(calcTotal(cart));
-    }
+      totalEl.textContent = money(calcTotal());
 
-    // Etiquetas
-    const friesLabel = v => v==="con_sazon" ? "Con sazón" : v==="sin_sazon" ? "Sin sazonar" : "—";
-
-    // Mensaje WhatsApp
-    function buildWhatsappMessage(orderNumber, nombre, fries, items, total){
-      const lines = [];
-      lines.push(`*Rhodes Burgers*`);
-      lines.push(`*Pedido #${orderNumber}*`);
-      lines.push(`Nombre: ${nombre}`);
-      lines.push(`Retiro: Take Away`);
-      lines.push(`Papas: ${friesLabel(fries)}`);
-      lines.push(``);
-      lines.push(`*Items:*`);
-      for(const it of items){
-        const unit = Number(it.price)||0;
-        lines.push(`- ${it.qty}× ${it.name}${it.notes?` — ${it.notes}`:""} (${money(unit)})`);
+      // Preseleccionar papas si venía de index
+      if(cart.fries){
+        const r = document.querySelector(`input[name="papas"][value="${cart.fries}"]`);
+        if(r) r.checked = true;
       }
-      lines.push(``);
-      lines.push(`*Total:* ${money(total)}`);
-      lines.push(`*Pago:* Efectivo`);
-      lines.push(``);
-      lines.push(`¡Gracias!`);
-      return lines.join("\n");
     }
 
-    // Contador atómico para orderNumber
-    async function getNextOrderNumber(){
-      const ref = db.collection("meta").doc("order_counter");
-      const next = await db.runTransaction(async tx=>{
-        const snap = await tx.get(ref);
-        const cur = snap.exists ? (snap.data().value||0) : 0;
-        const n = cur + 1;
-        tx.set(ref, { value: n }, { merge: true });
-        return n;
-      });
-      return next;
-    }
+    // Botones
+    $("#btnCancelar").onclick = ()=> location.href="index.html";
 
-    $("#btnCancelar").onclick = ()=> { window.location.href = "index.html"; };
-
-    btnConfirmar.onclick = async ()=>{
-      if(cartCount(cart)===0){ alert("Tu carrito está vacío."); return; }
+    $("#btnConfirmar").onclick = async ()=>{
+      if(cartCount()===0){ alert("Tu carrito está vacío."); return; }
       const nombre = inpNombre.value.trim();
       if(!nombre){ alert("Ingresá tu nombre y apellido."); return; }
       const pagoEl = document.querySelector('input[name="pago"]:checked');
@@ -193,80 +165,67 @@
       const papasEl = document.querySelector('input[name="papas"]:checked');
       if(!papasEl){ alert("Elegí una opción de papas (obligatorio)."); return; }
 
-      // Guardamos papas si se cambió acá
-      cart.fries = papasEl.value;
-      saveCart(cart);
+      const items=[];
+      for(const o of Object.values(cart.burger)) items.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:o.item.price, ...(o.notes?{notes:o.notes}:{})});
+      for(const o of Object.values(cart.drink))  items.push({type:"drink",  id:o.item.id, name:o.item.name, qty:o.qty, price:o.item.price});
 
-      // Ítems para guardar / MP
-      const itemsFS=[], mpItems=[];
-      for(const o of Object.values(cart.burger)){
-        itemsFS.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0, ...(o.notes?{notes:o.notes}:{})});
-        mpItems.push({title:o.item.name, quantity:Number(o.qty)||1, currency_id:"ARS", unit_price:Number(o.item.price)||0});
-      }
-      for(const o of Object.values(cart.drink)){
-        itemsFS.push({type:"drink", id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0});
-        mpItems.push({title:o.item.name, quantity:Number(o.qty)||1, currency_id:"ARS", unit_price:Number(o.item.price)||0});
-      }
-
-      const total = calcTotal(cart);
+      const order = {
+        orderNumber,                   // ← número de pedido
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        nombre,
+        pago: pagoEl.value,
+        entrega: "take_away",
+        fries: papasEl.value,
+        items,
+        total: calcTotal(),
+        status: "pending"
+      };
 
       try{
-        btnConfirmar.disabled = true;
-        statusEl.textContent = "Generando número de pedido...";
-        const orderNumber = await getNextOrderNumber();
-
-        const order = {
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          orderNumber,          // Número de pedido
-          nombre,
-          pago: pagoEl.value,   // campo original
-          metodoPago: pagoEl.value, // alias para el panel
-          entrega: "take_away", // sin delivery
-          direccion: "",
-          fries: cart.fries,
-          items: itemsFS,
-          total,
-          status: "accepted"
-        };
-
         statusEl.textContent = "Guardando pedido...";
-        const docRef = await db.collection("pedidos").add(order); // <<< colección 'pedidos'
+        await db.collection("orders").add(order);
 
-        if (order.pago === "mercado_pago") {
-          // Mercado Pago (Netlify Function)
-          const valid = mpItems.filter(x => x.quantity>0 && Number.isFinite(x.unit_price) && x.unit_price>0);
-          const payloadItems = valid.length ? valid : [{ title:`Pedido #${orderNumber}`, quantity:1, currency_id:"ARS", unit_price:Number(order.total)||0 }];
-
-          const resp = await fetch("/.netlify/functions/createPreference", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ orderId: docRef.id, orderNumber, total: Number(order.total)||0, nombre: order.nombre, items: payloadItems })
-          });
-
-          const raw = await resp.text(); let data={}; try{ data=JSON.parse(raw) }catch{ data={raw} }
-          if(!resp.ok){ console.error("MP error", resp.status, data); alert(`Error MP ${resp.status}: ${data.error||data.raw||"sin detalle"}`); btnConfirmar.disabled=false; return; }
-
-          const url = data.init_point || data.sandbox_init_point;
-          if(!url){ alert("Preferencia MP creada sin URL. Revisá el Access Token en Netlify."); btnConfirmar.disabled=false; return; }
-
+        if(pagoEl.value==="efectivo"){
+          // Armar mensaje para WhatsApp
+          const lines = [
+            `*Pedido ${orderNumber}*`,
+            `Nombre: ${nombre}`,
+            `Retiro: Take Away`,
+            `Papas: ${order.fries==="con_sazon"?"Con sazón":"Sin sazonar"}`,
+            `—`,
+            ...items.map(i=>`• ${i.qty}× ${i.name}`),
+            `—`,
+            `Total: ${money(order.total)}`
+          ];
+          const text = encodeURIComponent(lines.join("\n"));
+          const wa = `https://wa.me/${WA_NUMBER}?text=${text}`;
           clearCart();
-          window.location.href = url;
+          window.location.href = wa;
           return;
         }
 
-        // EFECTIVO → WhatsApp
-        const phone = "541170596483"; // número de la hamburguesería
-        const msg = buildWhatsappMessage(orderNumber, nombre, cart.fries, itemsFS, total);
-        const wa = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+        // Mercado Pago
+        const mpItems = items.map(i=>({ title:i.name, quantity:i.qty, unit_price:i.price }));
+        // fallback por si el carrito no tiene items (no debería pasar)
+        if(mpItems.length===0){ alert("No hay items para pagar."); return; }
 
+        const res = await fetch("/.netlify/functions/createPreference",{
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ items: mpItems, orderNumber })
+        });
+        if(!res.ok){
+          console.error("MP createPreference:", await res.text());
+          alert("No pudimos iniciar Mercado Pago. Intentá de nuevo.");
+          return;
+        }
+        const data = await res.json();
         clearCart();
-        window.location.href = wa;
-
+        window.location.href = data.init_point || data.sandbox_init_point || data.url;
       }catch(err){
         console.error(err);
-        alert("No pudimos guardar el pedido. Revisá Firestore o la conexión.");
-      }finally{
-        btnConfirmar.disabled = false;
+        statusEl.textContent = "Error guardando el pedido. Revisá la conexión a Firestore.";
+        alert("No pudimos guardar el pedido. Revisá Firestore.");
       }
     };
 
