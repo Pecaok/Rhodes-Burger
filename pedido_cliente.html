@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Rhodes Burgers - Confirmar pedido</title>
   <link rel="icon" href="images/logo.png" />
+  <!-- Si ya tenés este CSS en tu proyecto, se usa tal cual -->
   <link rel="stylesheet" href="css/theme.css" />
 </head>
 <body>
   <header>
     <div class="topbar">
       <a href="index.html" class="brand">
-        <img src="images/logo.png" onerror="this.src='images/logo.jpg'" alt="Rhodes Burgers"><span>Rhodes Burgers</span>
+        <img src="images/logo.png" alt="Rhodes Burgers"><span>Rhodes Burgers</span>
       </a>
       <div class="spacer"></div>
       <a class="btn ghost" href="index.html">← Seguir comprando</a>
@@ -20,9 +21,8 @@
 
   <main class="container">
     <h1>Confirmar pedido</h1>
-    <div id="warn" class="warn" style="display:none"></div>
-
     <div class="grid-2">
+      <!-- Columna izquierda: datos -->
       <section class="card">
         <div class="field">
           <label>Nombre y apellido</label>
@@ -53,6 +53,11 @@
           <div class="muted">Se toma lo que elegiste en el menú; si querés, podés cambiarlo acá.</div>
         </div>
 
+        <div class="field" style="margin-top:10px">
+          <label>Comentarios</label>
+          <textarea id="inpComentarios" placeholder="Ej: Sin mayonesa, agregar servilletas" rows="3"></textarea>
+        </div>
+
         <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
           <button class="btn" id="btnCancelar">Cancelar</button>
           <button class="btn primary" id="btnConfirmar">Ir a pagar</button>
@@ -60,6 +65,7 @@
         <p class="muted" id="status" style="margin-top:8px"></p>
       </section>
 
+      <!-- Columna derecha: resumen -->
       <aside class="card">
         <h2>Resumen</h2>
         <div id="items"></div>
@@ -85,39 +91,53 @@
   </script>
 
   <script>
+    /*************** UTIL / CARRITO (SIN RegExp) ***************/
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const CART_KEY = "rhodes_cart_v3";
-    const warn = $("#warn");
 
-    // base64 utils
-    const dec = b64 => { try{ return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), c=>c.charCodeAt(0)))); }catch{ return null; } };
+    // Decodifica base64 (URL/cart/cookie) a objeto
+    const dec = (b64) => {
+      try {
+        const bin = atob(b64);
+        const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+        return JSON.parse(new TextDecoder().decode(bytes));
+      } catch { return null; }
+    };
+
+    // Lee cookie por nombre (sin regex)
     function getCookie(name){
-      const m=document.cookie.match(new RegExp("(?:^|; )"+name.replace(/([.$?*|{}()\\[\\]\\\\/+^])/g,"\\$1")+"=([^;]*)"));
-      return m?decodeURIComponent(m[1]):null;
+      const pairs = document.cookie ? document.cookie.split("; ") : [];
+      for (const p of pairs){
+        const idx = p.indexOf("=");
+        const key = idx > -1 ? p.slice(0, idx) : p;
+        if (key === name) return decodeURIComponent(idx > -1 ? p.slice(idx + 1) : "");
+      }
+      return null;
     }
 
-    function loadCart() {
-      // 1) URL
+    function loadCart(){
+      // 1) URL ?cart=... (cuando venís de index)
       const qs = new URLSearchParams(location.search);
       if (qs.has("cart")) {
         const c = dec(qs.get("cart"));
         if (c) return c;
       }
       // 2) sessionStorage
-      try { const v=sessionStorage.getItem(CART_KEY); if(v) return JSON.parse(v); } catch {}
+      try { const v = sessionStorage.getItem(CART_KEY); if (v) return JSON.parse(v); } catch {}
       // 3) localStorage
-      try { const v=localStorage.getItem(CART_KEY); if(v) return JSON.parse(v); } catch {}
-      // 4) cookie backup
+      try { const v = localStorage.getItem(CART_KEY); if (v) return JSON.parse(v); } catch {}
+      // 4) cookie
       const ck = getCookie("cart");
       if (ck) { const c = dec(ck); if (c) return c; }
-      return {burger:{},drink:{},fries:null};
+      return { burger:{}, drink:{}, fries:null };
     }
+
     function saveCart(c){
-      try{
+      try {
         localStorage.setItem(CART_KEY, JSON.stringify(c));
         sessionStorage.setItem(CART_KEY, JSON.stringify(c));
-      }catch{}
+      } catch {}
     }
     function clearCart(){ saveCart({burger:{},drink:{},fries:null}); }
     function cartCount(c){ let n=0; for(const b of Object.values(c.burger)) n+=b.qty; for(const d of Object.values(c.drink)) n+=d.qty; return n; }
@@ -125,23 +145,21 @@
 
     let cart = loadCart();
 
+    /*************** UI ***************/
     const itemsEl = $("#items");
     const totalEl = $("#total");
     const statusEl = $("#status");
     const dirWrap = $("#dirWrap"), inpDireccion=$("#inpDireccion");
     const inpNombre = $("#inpNombre");
+    const inpComentarios = $("#inpComentarios");
     const btnConfirmar = $("#btnConfirmar");
 
     function renderResumen(){
       const rows=[];
       for(const obj of Object.values(cart.burger)){
-        const ex=[];
-        if(obj.extras?.patty)  ex.push(`+${obj.extras.patty} medallón(es)`);
-        if(obj.extras?.cheddar)ex.push(`+${obj.extras.cheddar} cheddar`);
         rows.push(`<div class="item">
           <div>
             <strong>${obj.item.name}</strong>
-            ${ex.length?`<div class="muted">${ex.join(" · ")}</div>`:""}
             ${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}
             <div class="muted">${money(obj.item.price)} x ${obj.qty}</div>
           </div>
@@ -150,7 +168,8 @@
       }
       for(const obj of Object.values(cart.drink)){
         rows.push(`<div class="item">
-          <div><strong>${obj.item.name}</strong>
+          <div>
+            <strong>${obj.item.name}</strong>
             <div class="muted">${money(obj.item.price)} x ${obj.qty}</div>
           </div>
           <div>${money((Number(obj.item.price)||0)*obj.qty)}</div>
@@ -159,40 +178,42 @@
       itemsEl.innerHTML = rows.join("") || `<p class="muted">No hay productos en el carrito.</p>`;
       totalEl.textContent = money(calcTotal(cart));
 
+      // Preseleccionar papas si venía de index
       if(cart.fries){
         const r = document.querySelector(`input[name="papas"][value="${cart.fries}"]`);
         if(r) r.checked = true;
       }
-
-      if(cartCount(cart)===0){
-        warn.style.display="block";
-        warn.textContent="No recibí el carrito. Volvé al menú, agregá productos y tocá “Ir a pagar”.";
-      }else{
-        warn.style.display="none";
-      }
     }
 
-    // Mostrar/ocultar dirección
+    // Mostrar/ocultar dirección por tipo de entrega
     document.querySelectorAll('input[name="entrega"]').forEach(r=>{
       r.addEventListener("change", ()=>{ dirWrap.style.display = (r.value==="delivery") ? "block" : "none"; });
     });
 
     $("#btnCancelar").onclick = ()=> { window.location.href = "index.html"; };
 
-    // Confirmar → guarda en Firestore (orders) y gestiona MP/Efectivo
+    /*************** CONFIRMAR ***************/
     btnConfirmar.onclick = async ()=>{
       if(cartCount(cart)===0){ alert("Tu carrito está vacío."); return; }
-      const nombre = inpNombre.value.trim(); if(!nombre){ alert("Ingresá tu nombre y apellido."); return; }
-      const pagoEl = document.querySelector('input[name="pago"]:checked'); if(!pagoEl){ alert("Elegí un método de pago."); return; }
-      const entregaEl = document.querySelector('input[name="entrega"]:checked'); if(!entregaEl){ alert("Elegí si es Delivery o Take Away."); return; }
-      const papasEl = document.querySelector('input[name="papas"]:checked'); if(!papasEl){ alert("Elegí una opción de papas (obligatorio)."); return; }
+      const nombre = inpNombre.value.trim();
+      if(!nombre){ alert("Ingresá tu nombre y apellido."); return; }
+      const pagoEl = document.querySelector('input[name="pago"]:checked');
+      if(!pagoEl){ alert("Elegí un método de pago."); return; }
+      const entregaEl = document.querySelector('input[name="entrega"]:checked');
+      if(!entregaEl){ alert("Elegí si es Delivery o Take Away."); return; }
+      const papasEl = document.querySelector('input[name="papas"]:checked');
+      if(!papasEl){ alert("Elegí una opción de papas (obligatorio)."); return; }
 
-      cart.fries = papasEl.value; saveCart(cart);
+      cart.fries = papasEl.value; // lo que se vea acá manda
+      saveCart(cart);
 
       const entrega = entregaEl.value;
       const direccion = entrega==="delivery" ? (inpDireccion.value.trim()) : "";
       if(entrega==="delivery" && !direccion){ alert("Ingresá la dirección para Delivery."); return; }
 
+      const comentarios = inpComentarios.value.trim();
+
+      // Ítems para Firestore y MP
       const itemsFS=[], mpItems=[];
       for(const o of Object.values(cart.burger)){
         itemsFS.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0, ...(o.notes?{notes:o.notes}:{})});
@@ -210,17 +231,21 @@
         entrega,
         direccion,
         fries: cart.fries,
+        comments: comentarios || "",
         items: itemsFS,
         total: calcTotal(cart),
-        status: "accepted"
+        status: "accepted" // directo aceptado
       };
 
       try{
         btnConfirmar.disabled = true;
         statusEl.textContent = "Guardando pedido...";
+
+        // Guardar en Firestore
         const docRef = await db.collection("orders").add(order);
 
         if (order.pago === "mercado_pago") {
+          // Armar payload de MP (evita items $0)
           const valid = mpItems.filter(x => x.quantity>0 && Number.isFinite(x.unit_price) && x.unit_price>0);
           const payloadItems = valid.length ? valid : [{ title:"Pedido Rhodes Burgers", quantity:1, currency_id:"ARS", unit_price:Number(order.total)||0 }];
 
@@ -230,21 +255,33 @@
             body: JSON.stringify({ orderId: docRef.id, total: Number(order.total)||0, nombre: order.nombre, items: payloadItems })
           });
 
-          const raw = await resp.text(); let data={}; try{ data=JSON.parse(raw) }catch{ data={raw} }
-          if(!resp.ok){ console.error("MP error", resp.status, data); alert(`Error MP ${resp.status}: ${data.error||data.raw||"sin detalle"}`); btnConfirmar.disabled=false; return; }
+          const raw = await resp.text(); let data={};
+          try{ data=JSON.parse(raw) }catch{ data={raw} }
+
+          if(!resp.ok){
+            console.error("MP error", resp.status, data);
+            alert(`Error MP ${resp.status}: ${data.error||data.raw||"sin detalle"}`);
+            btnConfirmar.disabled=false;
+            return;
+          }
 
           const url = data.init_point || data.sandbox_init_point;
-          if(!url){ alert("Preferencia creada sin URL. Revisá el Access Token en Netlify."); btnConfirmar.disabled=false; return; }
+          if(!url){
+            alert("Preferencia creada sin URL. Revisá el Access Token en Netlify.");
+            btnConfirmar.disabled=false;
+            return;
+          }
 
           clearCart();
-          window.location.href = url;
+          window.location.href = url; // redirección a Mercado Pago
           return;
         }
 
-        // Efectivo
+        // EFECTIVO: solo guarda y vuelve al inicio
         clearCart();
         alert("¡Pedido enviado! ✅");
         window.location.href = "index.html";
+
       }catch(err){
         console.error(err);
         statusEl.textContent = "Error guardando el pedido.";
