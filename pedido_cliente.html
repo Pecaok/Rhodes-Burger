@@ -105,16 +105,6 @@
     </div>
   </main>
 
-  <!-- Form oculto para que Netlify detecte el schema en el deploy -->
-  <form name="pedido" method="POST" data-netlify="true" netlify-honeypot="bot-field" hidden>
-    <input type="hidden" name="form-name" value="pedido">
-    <input name="nombre" /><input name="apellido" /><input name="telefono" />
-    <input name="pago" /><input name="entrega" /><input name="direccion" />
-    <input name="notas" /><input name="fries" /><input name="total" />
-    <textarea name="items"></textarea>
-    <input name="bot-field" />
-  </form>
-
   <!-- Resolver logo (png/jpg) para header + fondo -->
   <script>
     (function(){
@@ -123,15 +113,33 @@
     })();
   </script>
 
-  <!-- Lógica del pedido + envío a Netlify Forms -->
-  <script>
+  <!-- Firebase (SOLO SDK) — Firestore LITE -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-lite.js";
+
+    // === TU CONFIG (del proyecto "rhodes-burgers") ===
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5Y0WDE0ouLn-Ib_iD1yUesok5SEh88",
+      authDomain: "rhodes-burgers.firebaseapp.com",
+      projectId: "rhodes-burgers",
+      storageBucket: "rhodes-burgers.firebasestorage.app",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
+      measurementId: "G-LQVYTJWHSM"
+    };
+
+    // Init Firebase + Firestore Lite (sin WebChannel)
+    const app = initializeApp(firebaseConfig);
+    const db  = getFirestore(app);
+
+    // -------- Carrito / UI --------
     const CART_KEY="rhodes_cart_v3";
     const $=s=>document.querySelector(s);
     const money=n=>n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const lista=$("#lista-pedido"), totalSpan=$("#total"), friesLine=$("#friesLine"), itemsCount=$("#itemsCount");
     const errMsg=$("#errMsg"), okMsg=$("#okMsg");
 
-    // helpers carrito
     const getCookie = name => (document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1] && decodeURIComponent((document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1]);
     const decodeCartBase64 = b64 => { try{ const bin=atob(b64); const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0)); return JSON.parse(new TextDecoder().decode(bytes)); }catch{ return null; } };
     function parseCart(){
@@ -177,7 +185,7 @@
     const showError = m => { errMsg.style.display="block"; errMsg.textContent=m; };
     const showOK    = m => { okMsg.style.display="block"; okMsg.textContent=m; };
 
-    // Enviar a Netlify Forms
+    // Guardar pedido en Firestore (colección "pedidos")
     form.addEventListener("submit", async (e)=>{
       e.preventDefault(); errMsg.style.display="none"; okMsg.style.display="none";
 
@@ -196,29 +204,26 @@
       const hasItems = (cart && (Object.keys(cart.burger||{}).length || Object.keys(cart.drink||{}).length));
       if(!hasItems) return showError("Tu pedido está vacío.");
 
-      const fields = {
-        "form-name":"pedido",
-        nombre, apellido, telefono, pago, entrega, direccion, notas,
-        fries: cart.fries || "",
+      const btn=$("#btnConfirmar"); btn.disabled=true; btn.textContent="Confirmando...";
+
+      const payload = {
+        cliente:{ nombre, apellido, telefono: telefono||null },
+        pago, entrega, direccion: entrega==="Delivery"?direccion:null,
+        notas: notas||null, fries: cart.fries||null,
+        items:{ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) },
         total: calcTotal(cart),
-        items: JSON.stringify({ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) }),
-        "bot-field":""
+        createdAt: new Date().toISOString(), // simple y suficiente
+        status:"pendiente"
       };
 
-      const btn=$("#btnConfirmar"); btn.disabled=true; btn.textContent="Confirmando...";
       try{
-        const res = await fetch("/", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams(fields).toString()
-        });
-        if(!res.ok) throw new Error(`Netlify Forms respondió ${res.status}`);
-        showOK("¡Listo! Tu pedido fue enviado. Lo ves en Netlify → Forms.");
+        const ref = await addDoc(collection(db,"pedidos"), payload);
+        showOK(`¡Listo! Pedido creado. Código: ${ref.id}`);
         try{ sessionStorage.removeItem(CART_KEY); }catch{}
         document.cookie="cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
       }catch(err){
         console.error(err);
-        showError("No se pudo enviar el pedido. " + (err.message||err));
+        showError(err?.code ? `${err.code}: ${err.message}` : String(err));
       }finally{
         btn.disabled=false; btn.textContent="Confirmar pedido";
       }
