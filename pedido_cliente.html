@@ -113,12 +113,12 @@
     })();
   </script>
 
-  <!-- Firebase + Firestore (SDK con long-polling + fallback REST automático) -->
+  <!-- Firebase (solo SDK) -->
   <script type="module">
     import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { initializeFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-    // Tu configuración
+    // Config de tu proyecto
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5Y0WDE0ouLn-Ib_iD1yUesok5SEh88",
       authDomain: "rhodes-burgers.firebaseapp.com",
@@ -129,16 +129,17 @@
       measurementId: "G-LQVYTJWHSM"
     };
 
+    // Init + long-polling (más estable en algunos hosts)
     const app = getApps()[0] || initializeApp(firebaseConfig);
-    // Evita bloqueos del transporte de Firestore
     const db = initializeFirestore(app, { experimentalForceLongPolling: true, useFetchStreams: false });
 
-    // ---------- helpers carrito/UI ----------
+    // ------- carrito / UI -------
     const CART_KEY="rhodes_cart_v3";
     const $=s=>document.querySelector(s);
     const money=n=>n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const lista=$("#lista-pedido"), totalSpan=$("#total"), friesLine=$("#friesLine"), itemsCount=$("#itemsCount");
-    const getCookie = name => (document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1] && decodeURIComponent((document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1]);
+
+    const getCookie = name => (document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g,"\\$1")+'=([^;]*)'))||[])[1] && decodeURIComponent((document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g,"\\$1")+'=([^;]*)'))||[])[1]);
     const decodeCartBase64 = b64 => { try{ const bin=atob(b64); const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0)); return JSON.parse(new TextDecoder().decode(bytes)); }catch{ return null; } };
     function parseCart(){
       const p=new URLSearchParams(location.search);
@@ -166,26 +167,6 @@
     const showError = m=>{ errMsg.style.display="block"; errMsg.textContent=m; };
     const showOK = m=>{ okMsg.style.display="block"; okMsg.textContent=m; };
 
-    // ---------- Fallback REST (por si el SDK se cuelga) ----------
-    async function restCreate(collectionName, obj){
-      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/${encodeURIComponent(collectionName)}?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
-      const body = {
-        fields: {
-          raw: { stringValue: JSON.stringify(obj) },
-          status: { stringValue: obj.status || "pendiente" },
-          ts:  { timestampValue: new Date().toISOString() }
-        }
-      };
-      const res = await fetch(url, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body) });
-      if(!res.ok){ const txt = await res.text().catch(()=>String(res.status)); throw new Error(`REST ${res.status}: ${txt}`); }
-      const data = await res.json();
-      return (data.name||"").split("/").pop() || "sin_id";
-    }
-
-    async function trySDK(payload){
-      return withTimeout(addDoc(collection(db,"pedidos"), payload), 15000);
-    }
-
     form.addEventListener("submit", async (e)=>{
       e.preventDefault(); errMsg.style.display="none"; okMsg.style.display="none";
 
@@ -206,7 +187,7 @@
 
       const btn=$("#btnConfirmar"); btn.disabled=true; btn.textContent="Confirmando...";
 
-      const payloadSDK = {
+      const payload = {
         cliente:{ nombre, apellido, telefono: telefono||null },
         pago, entrega, direccion: entrega==="Delivery"?direccion:null,
         notas: notas||null, fries: cart.fries||null,
@@ -216,28 +197,14 @@
         status:"pendiente"
       };
 
-      const payloadREST = {
-        ...payloadSDK,
-        createdAt: new Date().toISOString() // para REST guardo ISO
-      };
-
       try{
-        // 1) Intento con SDK
-        try{
-          const ref = await trySDK(payloadSDK);
-          showOK(`¡Listo! Pedido creado. Código: ${ref.id}`);
-        }catch(errSDK){
-          console.warn("[SDK] falló o tardó, uso REST:", errSDK);
-          const id = await restCreate("pedidos", payloadREST);
-          showOK(`¡Listo! Pedido creado. Código: ${id} (REST)`);
-        }
-
-        // limpiar carrito
+        const ref = await withTimeout(addDoc(collection(db,"pedidos"), payload), 15000);
+        showOK(`¡Listo! Pedido creado. Código: ${ref.id}`);
         try{ sessionStorage.removeItem(CART_KEY); }catch{}
         document.cookie = "cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
-      }catch(errAny){
-        console.error(errAny);
-        showError(errAny?.message || String(errAny));
+      }catch(err){
+        console.error(err);
+        showError(err?.code ? `${err.code}: ${err.message}` : String(err));
       }finally{
         btn.disabled=false; btn.textContent="Confirmar pedido";
       }
