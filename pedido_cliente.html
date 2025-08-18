@@ -28,7 +28,7 @@
     .total{ font-weight:800; font-size:18px; margin-top:10px }
     form .field{ margin:10px 0 }
     form label{ display:block; font-weight:700; margin-bottom:6px }
-    form input[type="text"], form input[type="tel"]{ width:100%; padding:10px; border:1px solid #e7e7e7; border-radius:12px; font-size:15px; background:#fff }
+    input[type="text"], input[type="tel"]{ width:100%; padding:10px; border:1px solid #e7e7e7; border-radius:12px; font-size:15px; background:#fff }
     .radio-row{ display:flex; gap:12px; flex-wrap:wrap }
     .radio-row label{ display:inline-flex; align-items:center; gap:8px; border:1px solid #e7e7e7; border-radius:999px; padding:8px 12px; cursor:pointer }
     .actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px }
@@ -113,35 +113,25 @@
     })();
   </script>
 
-  <!-- Firebase SDK (SOLO Firestore Lite) -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-lite.js";
-
-    // === CONFIG DE TU PROYECTO (la misma que mostraste) ===
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5Y0WDE0ouLn-Ib_iD1yUesok5SEh88",
-      authDomain: "rhodes-burgers.firebaseapp.com",
-      projectId: "rhodes-burgers",
-      storageBucket: "rhodes-burgers.firebasestorage.app",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
-      measurementId: "G-LQVYTJWHSM"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db  = getFirestore(app); // Lite = simple y directo
-
-    // ------- Carrito / UI -------
+  <!-- JS: resumen + envío a Netlify Function /api/pedido -->
+  <script>
     const CART_KEY="rhodes_cart_v3";
     const $=s=>document.querySelector(s);
     const money=n=>n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const lista=$("#lista-pedido"), totalSpan=$("#total"), friesLine=$("#friesLine"), itemsCount=$("#itemsCount");
     const errMsg=$("#errMsg"), okMsg=$("#okMsg");
 
-    // helpers carrito
-    const getCookie = name => (document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1] && decodeURIComponent((document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1]);
-    const decodeCartBase64 = b64 => { try{ const bin=atob(b64); const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0)); return JSON.parse(new TextDecoder().decode(bytes)); }catch{ return null; } };
+    const getCookie = n => {
+      const m = document.cookie.match(new RegExp('(?:^|; )'+n.replace(/([.*+?^${}()|[\]\\])/g,"\\$1")+'=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : "";
+    };
+    const decodeCartBase64 = b64 => {
+      try {
+        const bin = atob(b64);
+        const bytes = Uint8Array.from(bin, c=>c.charCodeAt(0));
+        return JSON.parse(new TextDecoder().decode(bytes));
+      } catch { return null; }
+    };
     function parseCart(){
       const p=new URLSearchParams(location.search);
       if(p.has("cart")){ const c=decodeCartBase64(p.get("cart")); if(c) return c; }
@@ -151,9 +141,25 @@
     }
     const cart=parseCart();
 
-    function calcTotal(c){ let t=0; if(c?.burger){ for(const o of Object.values(c.burger)){ t+=(o.item?.price||0)*(o.qty||0);} } if(c?.drink){ for(const o of Object.values(c.drink)){ t+=(o.item?.price||0)*(o.qty||0);} } return t; }
-    function mapBurgers(b){ if(!b) return []; return Object.values(b).map(o=>({ id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0, extras:o.extras||{}, notes:o.notes||null })); }
-    function mapDrinks(d){ if(!d) return []; return Object.values(d).map(o=>({ id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0 })); }
+    function calcTotal(c){
+      let t=0;
+      if(c?.burger) for(const o of Object.values(c.burger)) t+=(o.item?.price||0)*(o.qty||0);
+      if(c?.drink)  for(const o of Object.values(c.drink))  t+=(o.item?.price||0)*(o.qty||0);
+      return t;
+    }
+    function mapBurgers(b){
+      if(!b) return [];
+      return Object.values(b).map(o=>({
+        id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0,
+        extras:o.extras||{}, notes:o.notes||null
+      }));
+    }
+    function mapDrinks(d){
+      if(!d) return [];
+      return Object.values(d).map(o=>({
+        id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0
+      }));
+    }
 
     function renderResumen(){
       lista.innerHTML=""; let total=0; let count=0;
@@ -173,7 +179,7 @@
     }
     renderResumen();
 
-    // Mostrar/ocultar dirección
+    // Mostrar/ocultar dirección según entrega
     const form=$("#formPedido"), direccionField=$("#direccionField");
     $("#entregaRow").addEventListener("change", ()=>{
       const val=(new FormData(form).get("entrega"))||"";
@@ -185,7 +191,7 @@
     const showError = m => { errMsg.style.display="block"; errMsg.textContent=m; };
     const showOK    = m => { okMsg.style.display="block"; okMsg.textContent=m; };
 
-    // Guardar pedido en Firestore (colección "pedidos")
+    // Envío al backend (Netlify Function) que guarda en Firestore
     form.addEventListener("submit", async (e)=>{
       e.preventDefault(); errMsg.style.display="none"; okMsg.style.display="none";
 
@@ -205,26 +211,30 @@
       if(!hasItems) return showError("Tu pedido está vacío.");
 
       const btn=$("#btnConfirmar");
-      btn.disabled=true; btn.textContent="Confirmando...";
+      btn.disabled=true; btn.textContent="Confirmando…";
 
       const payload = {
         cliente:{ nombre, apellido, telefono: telefono||null },
         pago, entrega, direccion: entrega==="Delivery"?direccion:null,
         notas: notas||null, fries: cart.fries||null,
         items:{ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) },
-        total: calcTotal(cart),
-        createdAt: new Date().toISOString(), // simple y compatible con Lite
-        status:"pendiente"
+        total: calcTotal(cart)
       };
 
       try{
-        const ref = await addDoc(collection(db,"pedidos"), payload);
-        showOK(`¡Listo! Pedido creado. Código: ${ref.id}`);
+        const res = await fetch("/api/pedido", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify(payload)
+        });
+        const out = await res.json().catch(()=>({}));
+        if(!res.ok) throw new Error(out?.error || "No se pudo guardar");
+        showOK(`¡Listo! Pedido #${out.id}`);
         try{ sessionStorage.removeItem(CART_KEY); }catch{}
         document.cookie="cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
       }catch(err){
         console.error(err);
-        showError(err?.code ? `${err.code}: ${err.message}` : String(err));
+        showError("No se pudo guardar el pedido. " + (err.message || ""));
       }finally{
         btn.disabled=false; btn.textContent="Confirmar pedido";
       }
