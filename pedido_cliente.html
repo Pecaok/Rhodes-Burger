@@ -9,7 +9,7 @@
     :root{ --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff; --radius:18px; --shadow:0 4px 12px rgba(0,0,0,.08); --logo-url:url("images/logo.png"); }
     *{ box-sizing:border-box }
     html,body{ margin:0; font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif; color:var(--text); background:var(--bg) }
-    body::before{ content:""; position:fixed; inset:0; z-index:0; pointer-events:none; background-image:var(--logo-url); background-repeat:no-repeat; background-position:center 120px; background-size:clamp(260px,45vw,560px); opacity:.08; filter:grayscale(100%); }
+    body::before{ content:""; position:fixed; inset:0; z-index:0; pointer-events:none; background-image:var(--logo-url); background-repeat:no-repeat; background-position:center 120px; background-size:clamp(260px,45vw,560px); opacity:.08; filter:grayscale(100%) }
     header{ position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06) }
     .topbar{ max-width:1000px; margin:0 auto; padding:10px 12px; display:flex; align-items:center; gap:12px }
     .brand img{ height:48px; width:auto; object-fit:contain; display:block }
@@ -105,6 +105,21 @@
     </div>
   </main>
 
+  <!-- Form oculto para que Netlify detecte la estructura en build -->
+  <form name="pedido" data-netlify="true" netlify-honeypot="bot-field" hidden>
+    <input name="nombre" />
+    <input name="apellido" />
+    <input name="telefono" />
+    <input name="pago" />
+    <input name="entrega" />
+    <input name="direccion" />
+    <input name="notas" />
+    <input name="fries" />
+    <input name="total" />
+    <textarea name="items"></textarea>
+    <input name="bot-field" />
+  </form>
+
   <!-- Resolver logo para header y fondo -->
   <script>
     (function(){
@@ -113,32 +128,15 @@
     })();
   </script>
 
-  <!-- Firebase (SOLO SDK) — Firestore LITE -->
-  <script type="module">
-    import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-lite.js";
-
-    // Config (tu misma config)
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-      authDomain: "rhodes-burgers.firebaseapp.com",
-      projectId: "rhodes-burgers",
-      storageBucket: "rhodes-burgers.firebasestorage.app",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
-      measurementId: "G-LQVYTJWHSM"
-    };
-
-    const app = getApps()[0] || initializeApp(firebaseConfig);
-    // Firestore LITE (SDK oficial) — sin WebChannel
-    const db = getFirestore(app);
-
-    // ------- carrito / UI -------
+  <!-- JS: enviar a Netlify Forms (sin servicios externos) -->
+  <script>
     const CART_KEY="rhodes_cart_v3";
     const $=s=>document.querySelector(s);
     const money=n=>n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const lista=$("#lista-pedido"), totalSpan=$("#total"), friesLine=$("#friesLine"), itemsCount=$("#itemsCount");
+    const errMsg=$("#errMsg"), okMsg=$("#okMsg");
 
+    // helpers carrito
     const getCookie = name => (document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1] && decodeURIComponent((document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1]);
     const decodeCartBase64 = b64 => { try{ const bin=atob(b64); const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0)); return JSON.parse(new TextDecoder().decode(bytes)); }catch{ return null; } };
     function parseCart(){
@@ -150,6 +148,10 @@
     }
     const cart=parseCart();
 
+    function calcTotal(c){ let t=0; if(c?.burger){ for(const o of Object.values(c.burger)){ t+=(o.item?.price||0)*(o.qty||0);} } if(c?.drink){ for(const o of Object.values(c.drink)){ t+=(o.item?.price||0)*(o.qty||0);} } return t; }
+    function mapBurgers(b){ if(!b) return []; return Object.values(b).map(o=>({ id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0, extras:o.extras||{}, notes:o.notes||null })); }
+    function mapDrinks(d){ if(!d) return []; return Object.values(d).map(o=>({ id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0 })); }
+
     function renderResumen(){
       lista.innerHTML=""; let total=0; let count=0;
       if(cart.fries){ friesLine.style.display="block"; friesLine.textContent=`Papas: ${cart.fries==="con_sazon"?"Con sazón":"Sin sazonar"}`; }
@@ -159,24 +161,21 @@
     }
     renderResumen();
 
-    const form=$("#formPedido"), direccionField=$("#direccionField"), errMsg=$("#errMsg"), okMsg=$("#okMsg");
-    $("#entregaRow").addEventListener("change", ()=>{ const val=(new FormData(form).get("entrega"))||""; direccionField.style.display=(val==="Delivery")?"block":"none"; if(val!=="Delivery") $("#direccion").value=""; });
-    $("#btnVolver").addEventListener("click", ()=>location.href="index.html");
-
-    const withTimeout = (p,ms=15000)=>Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error("TIMEOUT: No se pudo contactar a Firestore")),ms))]);
-    const showError = m=>{ errMsg.style.display="block"; errMsg.textContent=m; };
-    const showOK = m=>{ okMsg.style.display="block"; okMsg.textContent=m; };
+    // ----- envío a Netlify Forms -----
+    const form = $("#formPedido");
+    const showError = m => { errMsg.style.display="block"; errMsg.textContent=m; };
+    const showOK    = m => { okMsg.style.display="block"; okMsg.textContent=m; };
 
     form.addEventListener("submit", async (e)=>{
       e.preventDefault(); errMsg.style.display="none"; okMsg.style.display="none";
 
-      const nombre=$("#nombre").value.trim();
-      const apellido=$("#apellido").value.trim();
-      const telefono=$("#telefono").value.trim();
-      const pago=form.querySelector('input[name="pago"]:checked')?.value||"";
-      const entrega=form.querySelector('input[name="entrega"]:checked')?.value||"";
-      const direccion=$("#direccion")?.value.trim()||"";
-      const notas=$("#notas")?.value.trim()||"";
+      const nombre   = document.getElementById("nombre").value.trim();
+      const apellido = document.getElementById("apellido").value.trim();
+      const telefono = document.getElementById("telefono").value.trim();
+      const pago     = form.querySelector('input[name="pago"]:checked')?.value || "";
+      const entrega  = form.querySelector('input[name="entrega"]:checked')?.value || "";
+      const direccion= document.getElementById("direccion")?.value.trim() || "";
+      const notas    = document.getElementById("notas")?.value.trim() || "";
 
       if(!nombre||!apellido) return showError("Completá nombre y apellido.");
       if(!pago) return showError("Elegí un método de pago.");
@@ -185,34 +184,44 @@
       const hasItems = (cart && (Object.keys(cart.burger||{}).length || Object.keys(cart.drink||{}).length));
       if(!hasItems) return showError("Tu pedido está vacío.");
 
-      const btn=$("#btnConfirmar"); btn.disabled=true; btn.textContent="Confirmando...";
-
       const payload = {
-        cliente:{ nombre, apellido, telefono: telefono||null },
-        pago, entrega, direccion: entrega==="Delivery"?direccion:null,
-        notas: notas||null, fries: cart.fries||null,
-        items:{ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) },
+        nombre, apellido, telefono, pago, entrega, direccion, notas,
+        fries: cart.fries || "",
         total: calcTotal(cart),
-        createdAt: new Date().toISOString(),  // usamos ISO en LITE
-        status:"pendiente"
+        items: JSON.stringify({ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) }),
+        // Campos obligatorios para Netlify Forms
+        "form-name": "pedido",
+        "bot-field": ""
       };
 
+      const body = new URLSearchParams(payload).toString();
+
+      const btn=$("#btnConfirmar"); btn.disabled=true; btn.textContent="Confirmando...";
       try{
-        const ref = await withTimeout(addDoc(collection(db,"pedidos"), payload), 15000);
-        showOK(`¡Listo! Pedido creado. Código: ${ref.id}`);
+        const res = await fetch("/", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body
+        });
+        if(!res.ok) throw new Error(`Netlify Forms respondió ${res.status}`);
+        showOK("¡Listo! Tu pedido fue enviado. Lo vas a ver en el panel de Netlify → Forms.");
         try{ sessionStorage.removeItem(CART_KEY); }catch{}
-        document.cookie = "cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
+        document.cookie="cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
       }catch(err){
         console.error(err);
-        showError(err?.code ? `${err.code}: ${err.message}` : String(err));
+        showError("No se pudo enviar el pedido. " + (err.message||err));
       }finally{
         btn.disabled=false; btn.textContent="Confirmar pedido";
       }
     });
 
-    function calcTotal(c){ let t=0; if(c?.burger){ for(const o of Object.values(c.burger)){ t+=(o.item?.price||0)*(o.qty||0);} } if(c?.drink){ for(const o of Object.values(c.drink)){ t+=(o.item?.price||0)*(o.qty||0);} } return t; }
-    function mapBurgers(b){ if(!b) return []; return Object.values(b).map(o=>({ id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0, extras:o.extras||{}, notes:o.notes||null })); }
-    function mapDrinks(d){ if(!d) return []; return Object.values(d).map(o=>({ id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0 })); }
+    // Mostrar/ocultar dirección según entrega
+    document.getElementById("entregaRow").addEventListener("change", ()=>{
+      const val=(new FormData(form).get("entrega"))||"";
+      const field=document.getElementById("direccionField");
+      field.style.display=(val==="Delivery")?"block":"none";
+      if(val!=="Delivery") document.getElementById("direccion").value="";
+    });
   </script>
 </body>
 </html>
