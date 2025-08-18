@@ -5,25 +5,23 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Rhodes Burgers - Menú</title>
 
-  <!-- Favicon por defecto; el JS lo reemplaza si encuentra otra ruta -->
+  <!-- Favicon por defecto; el resolver lo actualiza si corresponde -->
   <link rel="icon" href="images/logo.png" />
 
   <style>
     :root{
       --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
       --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.08);
-      /* ✅ URL del logo que el JS actualizará dinámicamente */
+      /* URL del logo que el JS actualizará dinámicamente */
       --logo-url:url("images/logo.png");
     }
     *{ box-sizing:border-box }
     html,body{ margin:0; background:var(--bg); color:var(--text); font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif }
 
-    /* ✅ Logo de fondo (marca de agua) usando la variable */
+    /* Logo de fondo (marca de agua) */
     body::before{
-      content:"";
-      position:fixed; inset:0;
-      background-image:var(--logo-url);
-      background-repeat:no-repeat;
+      content:""; position:fixed; inset:0;
+      background-image:var(--logo-url); background-repeat:no-repeat;
       background-position:center 120px;
       background-size:clamp(260px,45vw,560px);
       opacity:.08; pointer-events:none; z-index:0; filter:grayscale(100%);
@@ -31,13 +29,7 @@
 
     header{ position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06) }
     .topbar{ max-width:1000px; margin:0 auto; padding:10px 12px; display:flex; align-items:center; gap:12px }
-
-    /* ✅ Logo del header sin recortes */
-    .brand img{
-      height:48px; width:auto; display:block; object-fit:contain;
-      border-radius:0; background:transparent;
-    }
-
+    .brand img{ height:48px; width:auto; object-fit:contain; display:block; background:transparent; border-radius:0 }
     .spacer{ flex:1 }
     .btn{ display:inline-flex; align-items:center; gap:10px; border:2px solid var(--primary); padding:10px 16px; border-radius:999px; color:var(--primary); background:#fff; font-weight:700; text-decoration:none; cursor:pointer }
     .btn.primary{ background:var(--primary); color:#fff }
@@ -79,7 +71,6 @@
   <header>
     <div class="topbar">
       <a href="index.html" class="brand">
-        <!-- ✅ El src lo setea el “resolver” abajo -->
         <img id="logo" src="" alt="Rhodes Burgers">
       </a>
       <div class="spacer"></div>
@@ -150,15 +141,13 @@
     </div>
   </div>
 
+  <!-- Resolver de logo -->
   <script>
-    /* ================================
-       🔎 Resolver de LOGO robusto
-       ================================ */
     (function resolveLogo(){
       const candidates = [
         "images/logo.png","images/logo.jpg",
         "/images/logo.png","/images/logo.jpg",
-        "images/Logo.png","images/Logo.jpg" // por si hubo mayúsculas
+        "images/Logo.png","images/Logo.jpg"
       ];
       function findFirstExisting(list){
         return new Promise(resolve=>{
@@ -168,36 +157,44 @@
             const img=new Image();
             img.onload=()=>resolve(list[i]);
             img.onerror=()=>{ i++; next(); };
-            img.src=list[i]+"?v="+Date.now(); // bust cache
+            img.src=list[i]+"?v="+Date.now();
           };
           next();
         });
       }
       findFirstExisting(candidates).then(src=>{
-        const finalSrc = src || "images/logo.png"; // fallback
-        // Header <img>
+        const finalSrc = src || "images/logo.png";
+        console.log("[logo] candidato encontrado:", finalSrc);
         const logoEl = document.getElementById("logo");
         if(logoEl) logoEl.src = finalSrc;
-
-        // CSS variable para el fondo
         document.documentElement.style.setProperty("--logo-url", `url("${finalSrc}")`);
-
-        // Favicon
         let link = document.querySelector('link[rel="icon"]');
-        if(!link){
-          link = document.createElement("link");
-          link.rel = "icon";
-          document.head.appendChild(link);
-        }
+        if(!link){ link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
         link.href = finalSrc;
       });
     })();
   </script>
 
-  <script>
-    /* ================================
-       Tu JS existente (sin cambios)
-       ================================ */
+  <script type="module">
+    /* ===== Firebase ===== */
+    import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5Y0WDE0ouLn-Ib_iD1yUesok5SEh88",
+      authDomain: "rhodes-burgers.firebaseapp.com",
+      projectId: "rhodes-burgers",
+      storageBucket: "rhodes-burgers.appspot.com",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
+      measurementId: "G-LQVYTJWHSM"
+    };
+
+    const app = getApps()[0] || initializeApp(firebaseConfig);
+    console.log("[firebase] app options:", app.options);
+    const db = getFirestore(app);
+
+    /* ===== Tu lógica de menú (igual que antes) ===== */
     const EXTRA_PRICE_PATTY=0, EXTRA_PRICE_CHEDDAR=0;
     const CART_KEY="rhodes_cart_v3";
     const $=s=>document.querySelector(s);
@@ -230,12 +227,9 @@
       const d=new Date(Date.now()+secs*1000).toUTCString();
       document.cookie=`${name}=${encodeURIComponent(val)}; Expires=${d}; Path=/; SameSite=Lax`;
     }
-
     const enc = obj => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(obj))));
-    const moneyFmt = n => n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
     let cart = ( () => { try{ return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{},fries:null}; }catch{ return {burger:{},drink:{},fries:null}; } } )();
-
     function saveCart(){ try{ localStorage.setItem(CART_KEY,JSON.stringify(cart)); }catch{} }
     function cartCount(){ let n=0; for(const b of Object.values(cart.burger)) n+=b.qty; for(const d of Object.values(cart.drink)) n+=d.qty; return n; }
     function calcTotal(){ let t=0; for(const b of Object.values(cart.burger)) t+=(b.item?.price||0)*b.qty; for(const d of Object.values(cart.drink)) t+=(d.item?.price||0)*d.qty; return t; }
