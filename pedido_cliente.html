@@ -30,6 +30,7 @@
     .total{ display:flex; align-items:center; justify-content:space-between; font-weight:800; font-size:18px; margin-top:10px }
     .row-actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px }
     .numPedido{ font-weight:700; letter-spacing:.5px }
+    .banner{ background:#fff7d6; border:1px solid #ffe08a; color:#7a5b00; padding:10px 12px; border-radius:12px; margin-bottom:12px }
   </style>
 </head>
 <body>
@@ -47,6 +48,7 @@
   <main>
     <div class="container">
       <h1>Confirmar pedido</h1>
+      <div id="warn" class="banner" style="display:none"></div>
       <div class="grid">
         <!-- Columna izquierda -->
         <div class="card">
@@ -64,7 +66,7 @@
             <label>Método de pago</label>
             <div class="inline">
               <label class="pill"><input type="radio" name="pago" value="mercado_pago"> Mercado Pago</label>
-              <label class="pill"><input type="radio" name="pago" value="efectivo"> Efectivo</label>
+              <label class="pill"><input type="radio" name="pago" value="efectivo" checked> Efectivo</label>
             </div>
           </div>
 
@@ -124,20 +126,20 @@
     /*************** UTIL ***************/
     const $ = s => document.querySelector(s);
     const money = n => n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const CART_KEYS = ["rhodes_cart_v3","rhodes_cart_v2","rhodes_cart","cart"];
 
-    // Normaliza cualquier formato de carrito a {burger:{}, drink:{}, fries:null}
+    const CART_KEYS = ["rhodes_cart_v3","rhodes_cart_v2","rhodes_cart","cart","pending_cart","backup_cart"];
+
     function normalizeCart(raw){
       const blank = { burger:{}, drink:{}, fries:null };
       if(!raw) return blank;
 
-      // Si venía como array: [{type:'burger'|'drink', item|id,name,price, qty, ...}, ...]
-      if(Array.isArray(raw)) {
+      // array -> normaliza
+      if(Array.isArray(raw)){
         const out = { ...blank };
         for(const it of raw){
           const type = it.type === "drink" ? "drink" : "burger";
           const item = it.item ? it.item : { id: it.id, name: it.name, price: it.price };
-          if(!item || !item.id) continue;
+          if(!item?.id) continue;
           const bucket = out[type];
           bucket[item.id] = {
             qty: it.qty || 1,
@@ -149,16 +151,15 @@
         return out;
       }
 
-      // Si venía como objeto
+      // objeto esperado
       const burger = {};
       const drink  = {};
       const fries  = raw.fries ?? null;
 
-      // v3 esperada
       if(raw.burger || raw.drink){
         for(const [id,obj] of Object.entries(raw.burger || {})){
           const itm = obj.item ? obj.item : { id, name: obj.name, price: obj.price };
-          if(!itm || !itm.id) continue;
+          if(!itm?.id) continue;
           burger[itm.id] = {
             qty: obj.qty || 1,
             item: itm,
@@ -168,7 +169,7 @@
         }
         for(const [id,obj] of Object.entries(raw.drink || {})){
           const itm = obj.item ? obj.item : { id, name: obj.name, price: obj.price };
-          if(!itm || !itm.id) continue;
+          if(!itm?.id) continue;
           drink[itm.id] = {
             qty: obj.qty || 1,
             item: itm
@@ -177,29 +178,37 @@
         return { burger, drink, fries };
       }
 
-      // fallback ultra-tolerante
-      for(const maybe of ["items","products","lista"]){
-        if(Array.isArray(raw[maybe])){
-          return normalizeCart(raw[maybe]);
-        }
+      // otras formas conocidas
+      for(const k of ["items","products","lista"]){
+        if(Array.isArray(raw[k])) return normalizeCart(raw[k]);
       }
       return blank;
     }
 
+    // Lee de localStorage y sessionStorage y mergea
     function loadCart(){
-      for(const key of CART_KEYS){
-        try{
-          const val = localStorage.getItem(key);
-          if(!val) continue;
-          const parsed = JSON.parse(val);
-          const norm = normalizeCart(parsed);
-          // si hay algo, retornamos
-          if(Object.keys(norm.burger).length || Object.keys(norm.drink).length || norm.fries){
-            return norm;
-          }
-        }catch(e){}
+      const storages = [localStorage, sessionStorage];
+      let result = { burger:{}, drink:{}, fries:null };
+      for(const store of storages){
+        for(const key of CART_KEYS){
+          try{
+            const val = store.getItem(key);
+            if(!val) continue;
+            const parsed = JSON.parse(val);
+            const norm = normalizeCart(parsed);
+
+            // mergea
+            for(const [id,obj] of Object.entries(norm.burger)){
+              result.burger[id] = result.burger[id] || obj;
+            }
+            for(const [id,obj] of Object.entries(norm.drink)){
+              result.drink[id] = result.drink[id] || obj;
+            }
+            if(norm.fries && !result.fries) result.fries = norm.fries;
+          }catch(e){}
+        }
       }
-      return { burger:{}, drink:{}, fries:null };
+      return result;
     }
 
     function clearCart(){
@@ -211,8 +220,7 @@
     function calcTotal(){
       let t=0;
       for(const b of Object.values(cart.burger)){
-        const base=b.item?.price||0;
-        t += base * (b.qty||1);
+        t += (b.item?.price||0) * (b.qty||1);
       }
       for(const d of Object.values(cart.drink)){
         t += (d.item?.price||0) * (d.qty||1);
@@ -225,6 +233,11 @@
     const statusEl = $("#status");
     const inpNombre = $("#inpNombre");
     const inpNro = $("#inpNro");
+    const warnEl = $("#warn");
+
+    function emptyCart(c){
+      return Object.keys(c.burger||{}).length===0 && Object.keys(c.drink||{}).length===0;
+    }
 
     function renderResumen(){
       const rows=[];
@@ -257,6 +270,14 @@
         const r = document.querySelector(\`input[name="papas"][value="\${cart.fries}"]\`);
         if(r) r.checked = true;
       }
+
+      // Aviso si no se encontró nada
+      if(emptyCart(cart)){
+        warnEl.style.display = "block";
+        warnEl.textContent = "No encontramos productos en el carrito. Volvé al menú, agregá tus productos y luego tocá “Ver pedido”.";
+      } else {
+        warnEl.style.display = "none";
+      }
     }
 
     /*************** NÚMERO DE PEDIDO SECUENCIAL ***************/
@@ -273,9 +294,8 @@
     $("#btnCancelar").onclick = ()=> { window.location.href = "index.html"; };
 
     $("#btnConfirmar").onclick = async ()=>{
-      if(Object.keys(cart.burger).length===0 && Object.keys(cart.drink).length===0){
-        alert("Tu carrito está vacío."); return;
-      }
+      if(emptyCart(cart)){ alert("Tu carrito está vacío."); return; }
+
       const nombre = inpNombre.value.trim();
       if(!nombre){ alert("Ingresá tu nombre y apellido."); return; }
       const pagoEl = document.querySelector('input[name="pago"]:checked');
@@ -328,7 +348,7 @@
           const data = await resp.json();
           if(data && data.init_point){
             clearCart();
-            window.location.href = data.init_point;
+            window.location.href = data.init_point; // redirección a MP
             return;
           }else{
             alert("No recibimos el link de pago (init_point). Revisá la función serverless.");
@@ -341,14 +361,14 @@
         }
       }else{
         clearCart();
-        // podés cambiar a WhatsApp si ya lo tenías configurado:
-        // window.location.href = "https://wa.me/54...?...";
         window.location.href = "gracias.html";
       }
     };
 
     // Inicio
-    renderResumen();
+    (function init(){
+      renderResumen();
+    })();
   </script>
 </body>
 </html>
