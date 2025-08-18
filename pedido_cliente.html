@@ -6,19 +6,10 @@
   <title>Mi Pedido - Rhodes Burgers</title>
   <link rel="icon" href="images/logo.png" />
   <style>
-    :root{
-      --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
-      --radius:18px; --shadow:0 4px 12px rgba(0,0,0,.08);
-      --logo-url:url("images/logo.png");
-    }
+    :root{ --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff; --radius:18px; --shadow:0 4px 12px rgba(0,0,0,.08); --logo-url:url("images/logo.png"); }
     *{ box-sizing:border-box }
     html,body{ margin:0; font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif; color:var(--text); background:var(--bg) }
-    body::before{
-      content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
-      background-image:var(--logo-url); background-repeat:no-repeat;
-      background-position:center 120px; background-size:clamp(260px,45vw,560px);
-      opacity:.08; filter:grayscale(100%);
-    }
+    body::before{ content:""; position:fixed; inset:0; z-index:0; pointer-events:none; background-image:var(--logo-url); background-repeat:no-repeat; background-position:center 120px; background-size:clamp(260px,45vw,560px); opacity:.08; filter:grayscale(100%); }
     header{ position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06) }
     .topbar{ max-width:1000px; margin:0 auto; padding:10px 12px; display:flex; align-items:center; gap:12px }
     .brand img{ height:48px; width:auto; object-fit:contain; display:block }
@@ -114,46 +105,19 @@
     </div>
   </main>
 
-  <!-- Resolver de logo -->
+  <!-- Resolver de logo para header y fondo -->
   <script>
-    (function resolveLogo(){
-      const candidates = [
-        "images/logo.png","images/logo.jpg",
-        "/images/logo.png","/images/logo.jpg",
-        "images/Logo.png","images/Logo.jpg"
-      ];
-      function findFirstExisting(list){
-        return new Promise(resolve=>{
-          let i=0;
-          const next=()=>{
-            if(i>=list.length) return resolve(null);
-            const img=new Image();
-            img.onload=()=>resolve(list[i]);
-            img.onerror=()=>{ i++; next(); };
-            img.src=list[i]+"?v="+Date.now();
-          };
-          next();
-        });
-      }
-      findFirstExisting(candidates).then(src=>{
-        const finalSrc = src || "images/logo.png";
-        console.log("[logo] candidato encontrado:", finalSrc);
-        const logoEl = document.getElementById("logo");
-        if(logoEl) logoEl.src = finalSrc;
-        document.documentElement.style.setProperty("--logo-url", `url("${finalSrc}")`);
-        let link = document.querySelector('link[rel="icon"]');
-        if(!link){ link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
-        link.href = finalSrc;
-      });
+    (function(){
+      const opts=["images/logo.png","images/logo.jpg","/images/logo.png","/images/logo.jpg","images/Logo.png","images/Logo.jpg"];
+      (async()=>{for(const s of opts){const i=new Image();i.src=s+"?v="+Date.now();try{await i.decode();document.getElementById("logo").src=s;document.documentElement.style.setProperty("--logo-url",`url("${s}")`);let l=document.querySelector('link[rel="icon"]');if(!l){l=document.createElement("link");l.rel="icon";document.head.appendChild(l);}l.href=s;return;}catch(e){}}})();
     })();
   </script>
 
-  <!-- Firebase + Pedido (long-polling + fallback REST) -->
+  <!-- Firebase + Firestore (SDK only, long-polling) -->
   <script type="module">
     import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { initializeFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-    /* TU CONFIG */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5Y0WDE0ouLn-Ib_iD1yUesok5SEh88",
       authDomain: "rhodes-burgers.firebaseapp.com",
@@ -165,160 +129,64 @@
     };
 
     const app = getApps()[0] || initializeApp(firebaseConfig);
-    console.log("[firebase] app options:", app.options);
+    // Evita el transporte WebChannel que a veces se bloquea
+    const db = initializeFirestore(app, { experimentalForceLongPolling: true, useFetchStreams: false });
 
-    /* Forzar long-polling para evitar bloqueos de transporte */
-    const db = initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-      useFetchStreams: false
-    });
+    // ------- carrito / UI -------
+    const CART_KEY="rhodes_cart_v3";
+    const $=s=>document.querySelector(s);
+    const money=n=>n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const lista=$("#lista-pedido"), totalSpan=$("#total"), friesLine=$("#friesLine"), itemsCount=$("#itemsCount");
 
-    /* ===== Carrito / UI ===== */
-    const CART_KEY = "rhodes_cart_v3";
-    const $ = s=>document.querySelector(s);
-    const money = n=>n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const lista = $("#lista-pedido"), totalSpan = $("#total"), friesLine = $("#friesLine"), itemsCount=$("#itemsCount");
-
-    function getCookie(name){
-      const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([$?*|{}\(\)\[\]\\\/\+^])/g,'\\$1') + '=([^;]*)'));
-      return m ? decodeURIComponent(m[1]) : null;
+    const getCookie = name => (document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'))||[])[1] && decodeURIComponent((document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'))||[])[1]);
+    const decodeCartBase64 = b64 => { try{ const bin=atob(b64); const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0)); return JSON.parse(new TextDecoder().decode(bytes)); }catch{ return null; } };
+    function parseCart(){
+      const p=new URLSearchParams(location.search);
+      if(p.has("cart")){ const c=decodeCartBase64(p.get("cart")); if(c) return c; }
+      try{ const raw=sessionStorage.getItem(CART_KEY); if(raw){ return JSON.parse(raw); } }catch{}
+      const ck=getCookie("cart"); if(ck){ const c=decodeCartBase64(ck); if(c) return c; }
+      return {burger:{},drink:{},fries:null};
     }
-    function decodeCartBase64(b64){
-      try{ const bin = atob(b64); const bytes = Uint8Array.from(bin, c => c.charCodeAt(0)); const json = new TextDecoder().decode(bytes); return JSON.parse(json); }
-      catch(e){ return null; }
-    }
-    function parseCartFromAnywhere(){
-      const p = new URLSearchParams(location.search);
-      if(p.has("cart")){ const c = decodeCartBase64(p.get("cart")); if(c) return c; }
-      try{ const raw = sessionStorage.getItem(CART_KEY); if(raw){ const c = JSON.parse(raw); if(c) return c; } }catch{}
-      const ck = getCookie("cart"); if(ck){ const c = decodeCartBase64(ck); if(c) return c; }
-      return { burger:{}, drink:{}, fries:null };
-    }
-    const cart = parseCartFromAnywhere();
+    const cart=parseCart();
 
     function renderResumen(){
       lista.innerHTML=""; let total=0; let count=0;
-      if(cart.fries){ friesLine.style.display="block"; friesLine.textContent = `Papas: ${cart.fries==="con_sazon"?"Con sazón":"Sin sazonar"}`; }
-      else { friesLine.style.display="none"; }
-      if(cart.burger){
-        for(const o of Object.values(cart.burger)){
-          const ex=[]; if(o.extras?.patty) ex.push(`+${o.extras.patty} medallón(es)`); if(o.extras?.cheddar) ex.push(`+${o.extras.cheddar} cheddar`);
-          const li=document.createElement("li");
-          li.innerHTML=`<div class="row"><div><strong>${o.item?.name||"Producto"}</strong>${ex.length?`<div class="muted">${ex.join(" · ")}</div>`:""}${o.notes?`<div class="muted">Notas: ${o.notes}</div>`:""}</div><div>${money((o.item?.price||0)*(o.qty||0))}</div></div>`;
-          lista.appendChild(li);
-          total+=(o.item?.price||0)*(o.qty||0); count+=(o.qty||0);
-        }
-      }
-      if(cart.drink){
-        for(const o of Object.values(cart.drink)){
-          const li=document.createElement("li");
-          li.innerHTML=`<div class="row"><div><strong>${o.item?.name||"Bebida"}</strong></div><div>${money((o.item?.price||0)*(o.qty||0))}</div></div>`;
-          lista.appendChild(li);
-          total+=(o.item?.price||0)*(o.qty||0); count+=(o.qty||0);
-        }
-      }
-      totalSpan.textContent=money(total);
-      itemsCount.textContent = count ? `${count} ítem(s)` : "No hay productos en tu pedido.";
+      if(cart.fries){ friesLine.style.display="block"; friesLine.textContent=`Papas: ${cart.fries==="con_sazon"?"Con sazón":"Sin sazonar"}`; }
+      if(cart.burger){ for(const o of Object.values(cart.burger)){ const ex=[]; if(o.extras?.patty) ex.push(`+${o.extras.patty} medallón(es)`); if(o.extras?.cheddar) ex.push(`+${o.extras.cheddar} cheddar`); const li=document.createElement("li"); li.innerHTML=`<div class="row"><div><strong>${o.item?.name||"Producto"}</strong>${ex.length?`<div class="muted">${ex.join(" · ")}</div>`:""}${o.notes?`<div class="muted">Notas: ${o.notes}</div>`:""}</div><div>${money((o.item?.price||0)*(o.qty||0))}</div></div>`; lista.appendChild(li); total+=(o.item?.price||0)*(o.qty||0); count+=(o.qty||0);} }
+      if(cart.drink){ for(const o of Object.values(cart.drink)){ const li=document.createElement("li"); li.innerHTML=`<div class="row"><div><strong>${o.item?.name||"Bebida"}</strong></div><div>${money((o.item?.price||0)*(o.qty||0))}</div></div>`; lista.appendChild(li); total+=(o.item?.price||0)*(o.qty||0); count+=(o.qty||0);} }
+      totalSpan.textContent=money(total); itemsCount.textContent = count?`${count} ítem(s)`:"";
     }
     renderResumen();
 
-    const form = $("#formPedido");
-    const direccionField=$("#direccionField");
-    const errMsg=$("#errMsg"), okMsg=$("#okMsg");
+    const form=$("#formPedido"), direccionField=$("#direccionField"), errMsg=$("#errMsg"), okMsg=$("#okMsg");
+    $("#entregaRow").addEventListener("change", ()=>{ const val=(new FormData(form).get("entrega"))||""; direccionField.style.display=(val==="Delivery")?"block":"none"; if(val!=="Delivery") $("#direccion").value=""; });
+    $("#btnVolver").addEventListener("click", ()=>location.href="index.html");
 
-    $("#entregaRow").addEventListener("change", ()=>{
-      const val = (new FormData(form).get("entrega")) || "";
-      direccionField.style.display = (val==="Delivery") ? "block" : "none";
-      if(val!=="Delivery") $("#direccion").value="";
-    });
-    $("#btnVolver").addEventListener("click", ()=>{ location.href="index.html"; });
+    const withTimeout = (p,ms=20000)=>Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error("TIMEOUT: No se pudo contactar a Firestore")),ms))]);
+    const showError = m=>{ errMsg.style.display="block"; errMsg.textContent=m; };
+    const showOK = m=>{ okMsg.style.display="block"; okMsg.textContent=m; };
 
-    /* ===== Helpers + Timeout ===== */
-    function showError(msg){ errMsg.style.display="block"; errMsg.textContent=msg; }
-    function showOK(msg){ okMsg.style.display="block"; okMsg.textContent=msg; }
-    function withTimeout(promise, ms=15000){
-      return Promise.race([
-        promise,
-        new Promise((_,rej)=>setTimeout(()=>rej(new Error("TIMEOUT: No se pudo contactar a Firestore")), ms))
-      ]);
-    }
-
-    /* ===== Fallback REST (por si el SDK se bloquea) ===== */
-    async function restCreate(collectionName, obj){
-      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/${encodeURIComponent(collectionName)}?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
-      const body = {
-        fields: {
-          raw: { stringValue: JSON.stringify(obj) },
-          ts:  { timestampValue: new Date().toISOString() }
-        }
-      };
-      const res = await fetch(url, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body) });
-      if(!res.ok){ const txt = await res.text().catch(()=>String(res.status)); throw new Error(`REST ${res.status}: ${txt}`); }
-      const data = await res.json();
-      return (data.name||"").split("/").pop() || "sin_id";
-    }
-    async function pingSDK(){ return addDoc(collection(db, "_healthchecks"), { t: serverTimestamp(), src: "pedido_cliente" }); }
-    async function pingREST(){ return restCreate("_healthchecks", { src:"pedido_cliente_rest" }); }
-
-    /* ===== Submit del pedido ===== */
     form.addEventListener("submit", async (e)=>{
       e.preventDefault(); errMsg.style.display="none"; okMsg.style.display="none";
-
-      const nombre=$("#nombre").value.trim();
-      const apellido=$("#apellido").value.trim();
-      const telefono=$("#telefono").value.trim();
-      const pago=form.querySelector('input[name="pago"]:checked')?.value||"";
-      const entrega=form.querySelector('input[name="entrega"]:checked')?.value||"";
-      const direccion=$("#direccion")?.value.trim()||"";
-      const notas=$("#notas")?.value.trim()||"";
-
-      if(!nombre || !apellido) return showError("Completá nombre y apellido.");
-      if(!pago) return showError("Elegí un método de pago.");
-      if(!entrega) return showError("Indicá si es Delivery o Take Away.");
-      if(entrega==="Delivery" && !direccion) return showError("Ingresá la dirección para el Delivery.");
-
-      const hasItems = (cart && (Object.keys(cart.burger||{}).length || Object.keys(cart.drink||{}).length));
-      if(!hasItems) return showError("Tu pedido está vacío. Volvé al menú para agregar productos.");
+      const nombre=$("#nombre").value.trim(); const apellido=$("#apellido").value.trim(); const telefono=$("#telefono").value.trim();
+      const pago=form.querySelector('input[name="pago"]:checked')?.value||""; const entrega=form.querySelector('input[name="entrega"]:checked')?.value||"";
+      const direccion=$("#direccion")?.value.trim()||""; const notas=$("#notas")?.value.trim()||"";
+      if(!nombre||!apellido) return showError("Completá nombre y apellido.");
+      if(!pago) return showError("Elegí un método de pago."); if(!entrega) return showError("Indicá si es Delivery o Take Away."); if(entrega==="Delivery"&&!direccion) return showError("Ingresá la dirección para el Delivery.");
+      const hasItems = (cart && (Object.keys(cart.burger||{}).length || Object.keys(cart.drink||{}).length)); if(!hasItems) return showError("Tu pedido está vacío.");
 
       const btn=$("#btnConfirmar"); btn.disabled=true; btn.textContent="Confirmando...";
-
-      const payload = {
-        cliente:{ nombre, apellido, telefono: telefono||null },
-        pago, entrega, direccion: entrega==="Delivery"?direccion:null,
-        notas: notas||null, fries: cart.fries||null,
-        items:{ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) },
-        total: calcTotal(cart),
-        createdAt: new Date().toISOString(),
-        status:"pendiente"
-      };
+      const payload = { cliente:{nombre,apellido,telefono:telefono||null}, pago, entrega, direccion: entrega==="Delivery"?direccion:null, notas: notas||null, fries: cart.fries||null, items:{ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) }, total: calcTotal(cart), createdAt: serverTimestamp(), status:"pendiente" };
 
       try{
-        // 1) Diagnóstico rápido
-        try{ await withTimeout(pingSDK(), 8000); }
-        catch(e){ console.warn("[ping SDK] falla, pruebo REST:", e); await withTimeout(pingREST(), 8000); }
-
-        // 2) Guardar: SDK primero; si falla o demora, REST
-        try{
-          const ref = await withTimeout(addDoc(collection(db,"pedidos"), { ...payload, createdAt: serverTimestamp() }), 12000);
-          showOK(`¡Listo! Tu pedido fue creado. Código: ${ref.id}`);
-        }catch(errSDK){
-          console.warn("[addDoc SDK] error, uso REST:", errSDK);
-          const id = await withTimeout(restCreate("pedidos", payload), 12000);
-          showOK(`¡Listo! Tu pedido fue creado. Código: ${id} (REST)`);
-        }
-
-        try{ sessionStorage.removeItem(CART_KEY); }catch{}
-        document.cookie = "cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
-      }catch(errAny){
-        console.error("[pedido] error final:", errAny);
-        const code = errAny?.code ? `(${errAny.code}) ` : "";
-        showError(`${code}${errAny?.message || errAny}`);
-      }finally{
-        btn.disabled=false; btn.textContent="Confirmar pedido";
-      }
+        const ref = await withTimeout(addDoc(collection(db,"pedidos"), payload), 20000);
+        showOK(`¡Listo! Tu pedido fue creado. Código: ${ref.id}`);
+        try{ sessionStorage.removeItem(CART_KEY); }catch{} document.cookie="cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
+      }catch(err){ console.error(err); showError(err?.code?`${err.code}: ${err.message}`:String(err)); }
+      finally{ btn.disabled=false; btn.textContent="Confirmar pedido"; }
     });
 
-    function calcTotal(c){ let t=0; if(c?.burger){ for(const o of Object.values(c.burger)){ t+=(o.item?.price||0)*(o.qty||0); } } if(c?.drink){ for(const o of Object.values(c.drink)){ t+=(o.item?.price||0)*(o.qty||0); } } return t; }
+    function calcTotal(c){ let t=0; if(c?.burger){ for(const o of Object.values(c.burger)){ t+=(o.item?.price||0)*(o.qty||0);} } if(c?.drink){ for(const o of Object.values(c.drink)){ t+=(o.item?.price||0)*(o.qty||0);} } return t; }
     function mapBurgers(b){ if(!b) return []; return Object.values(b).map(o=>({ id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0, extras:o.extras||{}, notes:o.notes||null })); }
     function mapDrinks(d){ if(!d) return []; return Object.values(d).map(o=>({ id:o.item?.id||null, name:o.item?.name||null, price:o.item?.price||0, qty:o.qty||0 })); }
   </script>
