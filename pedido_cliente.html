@@ -28,7 +28,6 @@
     .muted{ color:var(--muted); font-size:14px }
     .item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid #efefef }
     .total{ display:flex; align-items:center; justify-content:space-between; font-weight:800; font-size:18px; margin-top:10px }
-    .hid{ display:none }
     .row-actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px }
     .numPedido{ font-weight:700; letter-spacing:.5px }
   </style>
@@ -49,7 +48,7 @@
     <div class="container">
       <h1>Confirmar pedido</h1>
       <div class="grid">
-        <!-- Columna izquierda: datos -->
+        <!-- Columna izquierda -->
         <div class="card">
           <div class="field">
             <label>Número de pedido</label>
@@ -95,7 +94,7 @@
           <p class="muted" id="status" style="margin-top:8px"></p>
         </div>
 
-        <!-- Columna derecha: resumen -->
+        <!-- Columna derecha -->
         <div class="card">
           <h3>Resumen</h3>
           <div id="items"></div>
@@ -105,12 +104,12 @@
     </div>
   </main>
 
-  <!-- Firebase (solo pedido_cliente) -->
+  <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    /*************** FIREBASE CONFIG ***************/
+    /*************** FIREBASE ***************/
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -122,22 +121,90 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    /*************** ESTADO / UTIL ***************/
+    /*************** UTIL ***************/
     const $ = s => document.querySelector(s);
     const money = n => n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const CART_KEY = "rhodes_cart_v3";
+    const CART_KEYS = ["rhodes_cart_v3","rhodes_cart_v2","rhodes_cart","cart"];
 
-    const itemsEl = $("#items");
-    const totalEl = $("#total");
-    const statusEl = $("#status");
-    const inpNombre = $("#inpNombre");
-    const inpNro = $("#inpNro");
+    // Normaliza cualquier formato de carrito a {burger:{}, drink:{}, fries:null}
+    function normalizeCart(raw){
+      const blank = { burger:{}, drink:{}, fries:null };
+      if(!raw) return blank;
+
+      // Si venía como array: [{type:'burger'|'drink', item|id,name,price, qty, ...}, ...]
+      if(Array.isArray(raw)) {
+        const out = { ...blank };
+        for(const it of raw){
+          const type = it.type === "drink" ? "drink" : "burger";
+          const item = it.item ? it.item : { id: it.id, name: it.name, price: it.price };
+          if(!item || !item.id) continue;
+          const bucket = out[type];
+          bucket[item.id] = {
+            qty: it.qty || 1,
+            item,
+            extras: it.extras || { patty:0, cheddar:0 },
+            notes: it.notes || ""
+          };
+        }
+        return out;
+      }
+
+      // Si venía como objeto
+      const burger = {};
+      const drink  = {};
+      const fries  = raw.fries ?? null;
+
+      // v3 esperada
+      if(raw.burger || raw.drink){
+        for(const [id,obj] of Object.entries(raw.burger || {})){
+          const itm = obj.item ? obj.item : { id, name: obj.name, price: obj.price };
+          if(!itm || !itm.id) continue;
+          burger[itm.id] = {
+            qty: obj.qty || 1,
+            item: itm,
+            extras: obj.extras || { patty:0, cheddar:0 },
+            notes: obj.notes || ""
+          };
+        }
+        for(const [id,obj] of Object.entries(raw.drink || {})){
+          const itm = obj.item ? obj.item : { id, name: obj.name, price: obj.price };
+          if(!itm || !itm.id) continue;
+          drink[itm.id] = {
+            qty: obj.qty || 1,
+            item: itm
+          };
+        }
+        return { burger, drink, fries };
+      }
+
+      // fallback ultra-tolerante
+      for(const maybe of ["items","products","lista"]){
+        if(Array.isArray(raw[maybe])){
+          return normalizeCart(raw[maybe]);
+        }
+      }
+      return blank;
+    }
 
     function loadCart(){
-      try{ return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{},fries:null}; }
-      catch{ return {burger:{},drink:{},fries:null}; }
+      for(const key of CART_KEYS){
+        try{
+          const val = localStorage.getItem(key);
+          if(!val) continue;
+          const parsed = JSON.parse(val);
+          const norm = normalizeCart(parsed);
+          // si hay algo, retornamos
+          if(Object.keys(norm.burger).length || Object.keys(norm.drink).length || norm.fries){
+            return norm;
+          }
+        }catch(e){}
+      }
+      return { burger:{}, drink:{}, fries:null };
     }
-    function clearCart(){ localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{},fries:null})); }
+
+    function clearCart(){
+      localStorage.setItem("rhodes_cart_v3", JSON.stringify({burger:{},drink:{},fries:null}));
+    }
 
     let cart = loadCart();
 
@@ -145,34 +212,41 @@
       let t=0;
       for(const b of Object.values(cart.burger)){
         const base=b.item?.price||0;
-        const extras=(b.extras?.patty||0)*0 + (b.extras?.cheddar||0)*0; // extras sin costo
-        t+=(base+extras)*b.qty;
+        t += base * (b.qty||1);
       }
-      for(const d of Object.values(cart.drink)) t+=(d.item?.price||0)*d.qty;
+      for(const d of Object.values(cart.drink)){
+        t += (d.item?.price||0) * (d.qty||1);
+      }
       return t;
     }
+
+    const itemsEl = $("#items");
+    const totalEl = $("#total");
+    const statusEl = $("#status");
+    const inpNombre = $("#inpNombre");
+    const inpNro = $("#inpNro");
 
     function renderResumen(){
       const rows=[];
       for(const obj of Object.values(cart.burger)){
         const extras=[];
-        if(obj.extras?.patty) extras.push(`+${obj.extras.patty} medallón(es)`);
+        if(obj.extras?.patty)   extras.push(`+${obj.extras.patty} medallón(es)`);
         if(obj.extras?.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`);
         rows.push(`
           <div class="item">
             <div>
-              <strong>${obj.item.name}</strong>
+              <strong>${obj.item?.name||"Producto"}</strong>
               ${extras.length?`<div class="muted">${extras.join(" · ")}</div>`:""}
               ${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}
             </div>
-            <div>${money((obj.item.price)*obj.qty)}</div>
+            <div>${money((obj.item?.price||0)*(obj.qty||1))}</div>
           </div>`);
       }
       for(const obj of Object.values(cart.drink)){
         rows.push(`
           <div class="item">
-            <div><strong>${obj.item.name}</strong></div>
-            <div>${money((obj.item.price)*obj.qty)}</div>
+            <div><strong>${obj.item?.name||"Bebida"}</strong></div>
+            <div>${money((obj.item?.price||0)*(obj.qty||1))}</div>
           </div>`);
       }
       itemsEl.innerHTML = rows.join("") || `<p class="muted">No hay productos en el carrito.</p>`;
@@ -199,8 +273,7 @@
     $("#btnCancelar").onclick = ()=> { window.location.href = "index.html"; };
 
     $("#btnConfirmar").onclick = async ()=>{
-      // Validaciones
-      if(Object.keys(cart.burger||{}).length===0 && Object.keys(cart.drink||{}).length===0){
+      if(Object.keys(cart.burger).length===0 && Object.keys(cart.drink).length===0){
         alert("Tu carrito está vacío."); return;
       }
       const nombre = inpNombre.value.trim();
@@ -211,7 +284,6 @@
       if(!papasEl){ alert("Elegí una opción de papas (obligatorio)."); return; }
       const comentarios = ($("#inpComentarios").value||"").trim();
 
-      // Armar items para Firestore y MP
       const items=[];
       for(const o of Object.values(cart.burger)) items.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:o.item.price});
       for(const o of Object.values(cart.drink))  items.push({type:"drink",  id:o.item.id, name:o.item.name, qty:o.qty, price:o.item.price});
@@ -240,7 +312,6 @@
         return;
       }
 
-      // Flujo de pago
       if(pagoEl.value === "mercado_pago"){
         try{
           const mpItems = items.map(it => ({ title: it.name, quantity: it.qty, unit_price: it.price }));
@@ -257,10 +328,9 @@
           const data = await resp.json();
           if(data && data.init_point){
             clearCart();
-            window.location.href = data.init_point; // Redirección a MP
+            window.location.href = data.init_point;
             return;
           }else{
-            console.log("Respuesta MP:", data);
             alert("No recibimos el link de pago (init_point). Revisá la función serverless.");
             return;
           }
@@ -270,8 +340,9 @@
           return;
         }
       }else{
-        // Efectivo → WhatsApp (si ya lo tenías) o pantalla de gracias
         clearCart();
+        // podés cambiar a WhatsApp si ya lo tenías configurado:
+        // window.location.href = "https://wa.me/54...?...";
         window.location.href = "gracias.html";
       }
     };
