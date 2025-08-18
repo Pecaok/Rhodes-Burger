@@ -6,13 +6,13 @@
   <title>Mi Pedido - Rhodes Burgers</title>
   <link rel="icon" href="images/logo.png" />
   <style>
-    :root{ --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff; --radius:18px; --shadow:0 4px 12px rgba(0,0,0,.08); --logo-url:url("images/logo.png"); }
+    :root{ --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff; --shadow:0 4px 12px rgba(0,0,0,.08); --logo-url:url("images/logo.png") }
     *{ box-sizing:border-box }
     html,body{ margin:0; font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif; color:var(--text); background:var(--bg) }
-    body::before{ content:""; position:fixed; inset:0; z-index:0; pointer-events:none; background-image:var(--logo-url); background-repeat:no-repeat; background-position:center 120px; background-size:clamp(260px,45vw,560px); opacity:.08; filter:grayscale(100%) }
+    body::before{ content:""; position:fixed; inset:0; background:var(--logo-url) center 120px/360px no-repeat; opacity:.06; pointer-events:none; z-index:0; filter:grayscale(100%) }
     header{ position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06) }
     .topbar{ max-width:1000px; margin:0 auto; padding:10px 12px; display:flex; align-items:center; gap:12px }
-    .brand img{ height:48px; width:auto; object-fit:contain; display:block }
+    .brand img{ height:48px; width:auto; object-fit:contain }
     .spacer{ flex:1 }
     .btn{ display:inline-flex; align-items:center; gap:8px; padding:10px 16px; border-radius:999px; cursor:pointer; border:2px solid var(--primary); background:#fff; color:var(--primary); font-weight:700; text-decoration:none }
     .btn.primary{ background:var(--primary); color:#fff }
@@ -105,30 +105,25 @@
     </div>
   </main>
 
-  <!-- Form oculto para que Netlify detecte la estructura en build -->
-  <form name="pedido" data-netlify="true" netlify-honeypot="bot-field" hidden>
-    <input name="nombre" />
-    <input name="apellido" />
-    <input name="telefono" />
-    <input name="pago" />
-    <input name="entrega" />
-    <input name="direccion" />
-    <input name="notas" />
-    <input name="fries" />
-    <input name="total" />
+  <!-- Form oculto para que Netlify detecte el schema en el deploy -->
+  <form name="pedido" method="POST" data-netlify="true" netlify-honeypot="bot-field" hidden>
+    <input type="hidden" name="form-name" value="pedido">
+    <input name="nombre" /><input name="apellido" /><input name="telefono" />
+    <input name="pago" /><input name="entrega" /><input name="direccion" />
+    <input name="notas" /><input name="fries" /><input name="total" />
     <textarea name="items"></textarea>
     <input name="bot-field" />
   </form>
 
-  <!-- Resolver logo para header y fondo -->
+  <!-- Resolver logo (png/jpg) para header + fondo -->
   <script>
     (function(){
-      const opts=["images/logo.png","images/logo.jpg","/images/logo.png","/images/logo.jpg","images/Logo.png","images/Logo.jpg"];
+      const opts=["images/logo.png","images/logo.jpg","/images/logo.png","/images/logo.jpg"];
       (async()=>{for(const s of opts){const i=new Image();i.src=s+"?v="+Date.now();try{await i.decode();document.getElementById("logo").src=s;document.documentElement.style.setProperty("--logo-url",`url("${s}")`);let l=document.querySelector('link[rel="icon"]');if(!l){l=document.createElement("link");l.rel="icon";document.head.appendChild(l);}l.href=s;return;}catch{}}})();
     })();
   </script>
 
-  <!-- JS: enviar a Netlify Forms (sin servicios externos) -->
+  <!-- Lógica del pedido + envío a Netlify Forms -->
   <script>
     const CART_KEY="rhodes_cart_v3";
     const $=s=>document.querySelector(s);
@@ -155,27 +150,44 @@
     function renderResumen(){
       lista.innerHTML=""; let total=0; let count=0;
       if(cart.fries){ friesLine.style.display="block"; friesLine.textContent=`Papas: ${cart.fries==="con_sazon"?"Con sazón":"Sin sazonar"}`; }
-      if(cart.burger){ for(const o of Object.values(cart.burger)){ const ex=[]; if(o.extras?.patty) ex.push(`+${o.extras.patty} medallón(es)`); if(o.extras?.cheddar) ex.push(`+${o.extras.cheddar} cheddar`); const li=document.createElement("li"); li.innerHTML=`<div class="row"><div><strong>${o.item?.name||"Producto"}</strong>${ex.length?`<div class="muted">${ex.join(" · ")}</div>`:""}${o.notes?`<div class="muted">Notas: ${o.notes}</div>`:""}</div><div>${money((o.item?.price||0)*(o.qty||0))}</div></div>`; lista.appendChild(li); total+=(o.item?.price||0)*(o.qty||0); count+=(o.qty||0);} }
-      if(cart.drink){ for(const o of Object.values(cart.drink)){ const li=document.createElement("li"); li.innerHTML=`<div class="row"><div><strong>${o.item?.name||"Bebida"}</strong></div><div>${money((o.item?.price||0)*(o.qty||0))}</div></div>`; lista.appendChild(li); total+=(o.item?.price||0)*(o.qty||0); count+=(o.qty||0);} }
+      if(cart.burger){ for(const o of Object.values(cart.burger)){
+        const ex=[]; if(o.extras?.patty) ex.push(`+${o.extras.patty} medallón(es)`); if(o.extras?.cheddar) ex.push(`+${o.extras.cheddar} cheddar`);
+        const li=document.createElement("li");
+        li.innerHTML=`<div class="row"><div><strong>${o.item?.name||"Producto"}</strong>${ex.length?`<div class="muted">${ex.join(" · ")}</div>`:""}${o.notes?`<div class="muted">Notas: ${o.notes}</div>`:""}</div><div>${money((o.item?.price||0)*(o.qty||0))}</div></div>`;
+        lista.appendChild(li); total+=(o.item?.price||0)*(o.qty||0); count+=(o.qty||0);
+      } }
+      if(cart.drink){ for(const o of Object.values(cart.drink)){
+        const li=document.createElement("li");
+        li.innerHTML=`<div class="row"><div><strong>${o.item?.name||"Bebida"}</strong></div><div>${money((o.item?.price||0)*(o.qty||0))}</div></div>`;
+        lista.appendChild(li); total+=(o.item?.price||0)*(o.qty||0); count+=(o.qty||0);
+      } }
       totalSpan.textContent=money(total); itemsCount.textContent = count?`${count} ítem(s)`:"";
     }
     renderResumen();
 
-    // ----- envío a Netlify Forms -----
-    const form = $("#formPedido");
+    // Mostrar/ocultar dirección
+    const form=$("#formPedido"), direccionField=$("#direccionField");
+    $("#entregaRow").addEventListener("change", ()=>{
+      const val=(new FormData(form).get("entrega"))||"";
+      direccionField.style.display=(val==="Delivery")?"block":"none";
+      if(val!=="Delivery") $("#direccion").value="";
+    });
+    $("#btnVolver").addEventListener("click", ()=>location.href="index.html");
+
     const showError = m => { errMsg.style.display="block"; errMsg.textContent=m; };
     const showOK    = m => { okMsg.style.display="block"; okMsg.textContent=m; };
 
+    // Enviar a Netlify Forms
     form.addEventListener("submit", async (e)=>{
       e.preventDefault(); errMsg.style.display="none"; okMsg.style.display="none";
 
-      const nombre   = document.getElementById("nombre").value.trim();
-      const apellido = document.getElementById("apellido").value.trim();
-      const telefono = document.getElementById("telefono").value.trim();
-      const pago     = form.querySelector('input[name="pago"]:checked')?.value || "";
-      const entrega  = form.querySelector('input[name="entrega"]:checked')?.value || "";
-      const direccion= document.getElementById("direccion")?.value.trim() || "";
-      const notas    = document.getElementById("notas")?.value.trim() || "";
+      const nombre=$("#nombre").value.trim();
+      const apellido=$("#apellido").value.trim();
+      const telefono=$("#telefono").value.trim();
+      const pago=form.querySelector('input[name="pago"]:checked')?.value||"";
+      const entrega=form.querySelector('input[name="entrega"]:checked')?.value||"";
+      const direccion=$("#direccion")?.value.trim()||"";
+      const notas=$("#notas")?.value.trim()||"";
 
       if(!nombre||!apellido) return showError("Completá nombre y apellido.");
       if(!pago) return showError("Elegí un método de pago.");
@@ -184,27 +196,24 @@
       const hasItems = (cart && (Object.keys(cart.burger||{}).length || Object.keys(cart.drink||{}).length));
       if(!hasItems) return showError("Tu pedido está vacío.");
 
-      const payload = {
+      const fields = {
+        "form-name":"pedido",
         nombre, apellido, telefono, pago, entrega, direccion, notas,
         fries: cart.fries || "",
         total: calcTotal(cart),
         items: JSON.stringify({ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) }),
-        // Campos obligatorios para Netlify Forms
-        "form-name": "pedido",
-        "bot-field": ""
+        "bot-field":""
       };
-
-      const body = new URLSearchParams(payload).toString();
 
       const btn=$("#btnConfirmar"); btn.disabled=true; btn.textContent="Confirmando...";
       try{
         const res = await fetch("/", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body
+          body: new URLSearchParams(fields).toString()
         });
         if(!res.ok) throw new Error(`Netlify Forms respondió ${res.status}`);
-        showOK("¡Listo! Tu pedido fue enviado. Lo vas a ver en el panel de Netlify → Forms.");
+        showOK("¡Listo! Tu pedido fue enviado. Lo ves en Netlify → Forms.");
         try{ sessionStorage.removeItem(CART_KEY); }catch{}
         document.cookie="cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
       }catch(err){
@@ -213,14 +222,6 @@
       }finally{
         btn.disabled=false; btn.textContent="Confirmar pedido";
       }
-    });
-
-    // Mostrar/ocultar dirección según entrega
-    document.getElementById("entregaRow").addEventListener("change", ()=>{
-      const val=(new FormData(form).get("entrega"))||"";
-      const field=document.getElementById("direccionField");
-      field.style.display=(val==="Delivery")?"block":"none";
-      if(val!=="Delivery") document.getElementById("direccion").value="";
     });
   </script>
 </body>
