@@ -105,19 +105,20 @@
     </div>
   </main>
 
-  <!-- Resolver de logo para header y fondo -->
+  <!-- Resolver logo en header/fondo -->
   <script>
     (function(){
       const opts=["images/logo.png","images/logo.jpg","/images/logo.png","/images/logo.jpg","images/Logo.png","images/Logo.jpg"];
-      (async()=>{for(const s of opts){const i=new Image();i.src=s+"?v="+Date.now();try{await i.decode();document.getElementById("logo").src=s;document.documentElement.style.setProperty("--logo-url",`url("${s}")`);let l=document.querySelector('link[rel="icon"]');if(!l){l=document.createElement("link");l.rel="icon";document.head.appendChild(l);}l.href=s;return;}catch(e){}}})();
+      (async()=>{for(const s of opts){const i=new Image();i.src=s+"?v="+Date.now();try{await i.decode();document.getElementById("logo").src=s;document.documentElement.style.setProperty("--logo-url",`url("${s}")`);let l=document.querySelector('link[rel="icon"]');if(!l){l=document.createElement("link");l.rel="icon";document.head.appendChild(l);}l.href=s;return;}catch{}}})();
     })();
   </script>
 
-  <!-- Firebase + Firestore (SDK only, long-polling) -->
+  <!-- Firebase + Firestore (SDK con long-polling + fallback REST automático) -->
   <script type="module">
     import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { initializeFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
+    // Tu configuración
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5Y0WDE0ouLn-Ib_iD1yUesok5SEh88",
       authDomain: "rhodes-burgers.firebaseapp.com",
@@ -129,21 +130,20 @@
     };
 
     const app = getApps()[0] || initializeApp(firebaseConfig);
-    // Evita el transporte WebChannel que a veces se bloquea
+    // Evita bloqueos del transporte de Firestore
     const db = initializeFirestore(app, { experimentalForceLongPolling: true, useFetchStreams: false });
 
-    // ------- carrito / UI -------
+    // ---------- helpers carrito/UI ----------
     const CART_KEY="rhodes_cart_v3";
     const $=s=>document.querySelector(s);
     const money=n=>n.toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const lista=$("#lista-pedido"), totalSpan=$("#total"), friesLine=$("#friesLine"), itemsCount=$("#itemsCount");
-
-    const getCookie = name => (document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'))||[])[1] && decodeURIComponent((document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'))||[])[1]);
+    const getCookie = name => (document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1] && decodeURIComponent((document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\\]\\\\])/g,"\\\\$1")+'=([^;]*)'))||[])[1]);
     const decodeCartBase64 = b64 => { try{ const bin=atob(b64); const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0)); return JSON.parse(new TextDecoder().decode(bytes)); }catch{ return null; } };
     function parseCart(){
       const p=new URLSearchParams(location.search);
       if(p.has("cart")){ const c=decodeCartBase64(p.get("cart")); if(c) return c; }
-      try{ const raw=sessionStorage.getItem(CART_KEY); if(raw){ return JSON.parse(raw); } }catch{}
+      try{ const raw=sessionStorage.getItem(CART_KEY); if(raw) return JSON.parse(raw); }catch{}
       const ck=getCookie("cart"); if(ck){ const c=decodeCartBase64(ck); if(c) return c; }
       return {burger:{},drink:{},fries:null};
     }
@@ -162,28 +162,85 @@
     $("#entregaRow").addEventListener("change", ()=>{ const val=(new FormData(form).get("entrega"))||""; direccionField.style.display=(val==="Delivery")?"block":"none"; if(val!=="Delivery") $("#direccion").value=""; });
     $("#btnVolver").addEventListener("click", ()=>location.href="index.html");
 
-    const withTimeout = (p,ms=20000)=>Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error("TIMEOUT: No se pudo contactar a Firestore")),ms))]);
+    const withTimeout = (p,ms=15000)=>Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error("TIMEOUT: No se pudo contactar a Firestore")),ms))]);
     const showError = m=>{ errMsg.style.display="block"; errMsg.textContent=m; };
     const showOK = m=>{ okMsg.style.display="block"; okMsg.textContent=m; };
 
+    // ---------- Fallback REST (por si el SDK se cuelga) ----------
+    async function restCreate(collectionName, obj){
+      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/${encodeURIComponent(collectionName)}?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+      const body = {
+        fields: {
+          raw: { stringValue: JSON.stringify(obj) },
+          status: { stringValue: obj.status || "pendiente" },
+          ts:  { timestampValue: new Date().toISOString() }
+        }
+      };
+      const res = await fetch(url, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body) });
+      if(!res.ok){ const txt = await res.text().catch(()=>String(res.status)); throw new Error(`REST ${res.status}: ${txt}`); }
+      const data = await res.json();
+      return (data.name||"").split("/").pop() || "sin_id";
+    }
+
+    async function trySDK(payload){
+      return withTimeout(addDoc(collection(db,"pedidos"), payload), 15000);
+    }
+
     form.addEventListener("submit", async (e)=>{
       e.preventDefault(); errMsg.style.display="none"; okMsg.style.display="none";
-      const nombre=$("#nombre").value.trim(); const apellido=$("#apellido").value.trim(); const telefono=$("#telefono").value.trim();
-      const pago=form.querySelector('input[name="pago"]:checked')?.value||""; const entrega=form.querySelector('input[name="entrega"]:checked')?.value||"";
-      const direccion=$("#direccion")?.value.trim()||""; const notas=$("#notas")?.value.trim()||"";
+
+      const nombre=$("#nombre").value.trim();
+      const apellido=$("#apellido").value.trim();
+      const telefono=$("#telefono").value.trim();
+      const pago=form.querySelector('input[name="pago"]:checked')?.value||"";
+      const entrega=form.querySelector('input[name="entrega"]:checked')?.value||"";
+      const direccion=$("#direccion")?.value.trim()||"";
+      const notas=$("#notas")?.value.trim()||"";
+
       if(!nombre||!apellido) return showError("Completá nombre y apellido.");
-      if(!pago) return showError("Elegí un método de pago."); if(!entrega) return showError("Indicá si es Delivery o Take Away."); if(entrega==="Delivery"&&!direccion) return showError("Ingresá la dirección para el Delivery.");
-      const hasItems = (cart && (Object.keys(cart.burger||{}).length || Object.keys(cart.drink||{}).length)); if(!hasItems) return showError("Tu pedido está vacío.");
+      if(!pago) return showError("Elegí un método de pago.");
+      if(!entrega) return showError("Indicá si es Delivery o Take Away.");
+      if(entrega==="Delivery" && !direccion) return showError("Ingresá la dirección para el Delivery.");
+      const hasItems = (cart && (Object.keys(cart.burger||{}).length || Object.keys(cart.drink||{}).length));
+      if(!hasItems) return showError("Tu pedido está vacío.");
 
       const btn=$("#btnConfirmar"); btn.disabled=true; btn.textContent="Confirmando...";
-      const payload = { cliente:{nombre,apellido,telefono:telefono||null}, pago, entrega, direccion: entrega==="Delivery"?direccion:null, notas: notas||null, fries: cart.fries||null, items:{ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) }, total: calcTotal(cart), createdAt: serverTimestamp(), status:"pendiente" };
+
+      const payloadSDK = {
+        cliente:{ nombre, apellido, telefono: telefono||null },
+        pago, entrega, direccion: entrega==="Delivery"?direccion:null,
+        notas: notas||null, fries: cart.fries||null,
+        items:{ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) },
+        total: calcTotal(cart),
+        createdAt: serverTimestamp(),
+        status:"pendiente"
+      };
+
+      const payloadREST = {
+        ...payloadSDK,
+        createdAt: new Date().toISOString() // para REST guardo ISO
+      };
 
       try{
-        const ref = await withTimeout(addDoc(collection(db,"pedidos"), payload), 20000);
-        showOK(`¡Listo! Tu pedido fue creado. Código: ${ref.id}`);
-        try{ sessionStorage.removeItem(CART_KEY); }catch{} document.cookie="cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
-      }catch(err){ console.error(err); showError(err?.code?`${err.code}: ${err.message}`:String(err)); }
-      finally{ btn.disabled=false; btn.textContent="Confirmar pedido"; }
+        // 1) Intento con SDK
+        try{
+          const ref = await trySDK(payloadSDK);
+          showOK(`¡Listo! Pedido creado. Código: ${ref.id}`);
+        }catch(errSDK){
+          console.warn("[SDK] falló o tardó, uso REST:", errSDK);
+          const id = await restCreate("pedidos", payloadREST);
+          showOK(`¡Listo! Pedido creado. Código: ${id} (REST)`);
+        }
+
+        // limpiar carrito
+        try{ sessionStorage.removeItem(CART_KEY); }catch{}
+        document.cookie = "cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
+      }catch(errAny){
+        console.error(errAny);
+        showError(errAny?.message || String(errAny));
+      }finally{
+        btn.disabled=false; btn.textContent="Confirmar pedido";
+      }
     });
 
     function calcTotal(c){ let t=0; if(c?.burger){ for(const o of Object.values(c.burger)){ t+=(o.item?.price||0)*(o.qty||0);} } if(c?.drink){ for(const o of Object.values(c.drink)){ t+=(o.item?.price||0)*(o.qty||0);} } return t; }
