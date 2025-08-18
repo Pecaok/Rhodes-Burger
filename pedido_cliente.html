@@ -4,9 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Mi Pedido - Rhodes Burgers</title>
-
   <link rel="icon" href="images/logo.png" />
-
   <style>
     :root{
       --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
@@ -15,21 +13,18 @@
     }
     *{ box-sizing:border-box }
     html,body{ margin:0; font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif; color:var(--text); background:var(--bg) }
-
     body::before{
-      content:""; position:fixed; inset:0;
+      content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
       background-image:var(--logo-url); background-repeat:no-repeat;
       background-position:center 120px; background-size:clamp(260px,45vw,560px);
-      opacity:.08; pointer-events:none; z-index:0; filter:grayscale(100%);
+      opacity:.08; filter:grayscale(100%);
     }
-
     header{ position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06) }
     .topbar{ max-width:1000px; margin:0 auto; padding:10px 12px; display:flex; align-items:center; gap:12px }
-    .brand img{ height:48px; width:auto; object-fit:contain; display:block; background:transparent; border-radius:0 }
+    .brand img{ height:48px; width:auto; object-fit:contain; display:block }
     .spacer{ flex:1 }
-    .btn{ display:inline-flex; align-items:center; gap:8px; padding:10px 16px; border-radius:999px; cursor:pointer; border:2px solid --primary; border:2px solid var(--primary); background:#fff; color:var(--primary); font-weight:700; text-decoration:none }
+    .btn{ display:inline-flex; align-items:center; gap:8px; padding:10px 16px; border-radius:999px; cursor:pointer; border:2px solid var(--primary); background:#fff; color:var(--primary); font-weight:700; text-decoration:none }
     .btn.primary{ background:var(--primary); color:#fff }
-
     .container{ max-width:1000px; margin:24px auto; padding:0 12px; position:relative; z-index:1 }
     .layout{ display:grid; grid-template-columns:1fr 1fr; gap:20px }
     @media (max-width:900px){ .layout{ grid-template-columns:1fr } }
@@ -42,9 +37,7 @@
     .total{ font-weight:800; font-size:18px; margin-top:10px }
     form .field{ margin:10px 0 }
     form label{ display:block; font-weight:700; margin-bottom:6px }
-    form input[type="text"], form input[type="tel"]{
-      width:100%; padding:10px; border:1px solid #e7e7e7; border-radius:12px; font-size:15px; background:#fff;
-    }
+    form input[type="text"], form input[type="tel"]{ width:100%; padding:10px; border:1px solid #e7e7e7; border-radius:12px; font-size:15px; background:#fff }
     .radio-row{ display:flex; gap:12px; flex-wrap:wrap }
     .radio-row label{ display:inline-flex; align-items:center; gap:8px; border:1px solid #e7e7e7; border-radius:999px; padding:8px 12px; cursor:pointer }
     .actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px }
@@ -121,7 +114,7 @@
     </div>
   </main>
 
-  <!-- Resolver de LOGO -->
+  <!-- Resolver de logo -->
   <script>
     (function resolveLogo(){
       const candidates = [
@@ -155,11 +148,12 @@
     })();
   </script>
 
-  <!-- Pedido + Firebase (con ping y timeout) -->
+  <!-- Firebase + Pedido (long-polling + ping + timeout) -->
   <script type="module">
     import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { initializeFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
+    // Tu config:
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5Y0WDE0ouLn-Ib_iD1yUesok5SEh88",
       authDomain: "rhodes-burgers.firebaseapp.com",
@@ -172,7 +166,12 @@
 
     const app = getApps()[0] || initializeApp(firebaseConfig);
     console.log("[firebase] app options:", app.options);
-    const db = getFirestore(app);
+
+    // 👇 Forzamos long-polling para evitar bloqueos del transport
+    const db = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+      useFetchStreams: false
+    });
 
     const CART_KEY = "rhodes_cart_v3";
     const $ = s=>document.querySelector(s);
@@ -233,7 +232,7 @@
     });
     $("#btnVolver").addEventListener("click", ()=>{ location.href="index.html"; });
 
-    // ===== helpers UI + timeout =====
+    // --- helpers UI + timeout ---
     function showError(msg){ errMsg.style.display="block"; errMsg.textContent=msg; }
     function showOK(msg){ okMsg.style.display="block"; okMsg.textContent=msg; }
     function withTimeout(promise, ms=15000){
@@ -243,7 +242,6 @@
       ]);
     }
     async function pingFirestore(){
-      // pequeño write a colección de salud para detectar reglas/config
       return addDoc(collection(db, "_healthchecks"), { t: serverTimestamp(), src: "pedido_cliente" });
     }
 
@@ -269,15 +267,18 @@
       const btn=$("#btnConfirmar"); btn.disabled=true; btn.textContent="Confirmando...";
 
       try{
-        // 1) Ping para diagnosticar rápido
+        // 1) Ping rápido (detecta reglas/config/transporte)
         await withTimeout(pingFirestore(), 8000);
 
-        // 2) Guardar pedido
+        // 2) Crear pedido
         const payload = {
           cliente:{ nombre, apellido, telefono: telefono||null },
           pago, entrega, direccion: entrega==="Delivery"?direccion:null,
           notas: notas||null, fries: cart.fries||null,
-          items:{ burgers: mapBurgers(cart.burger), drinks: mapDrinks(cart.drink) },
+          items:{
+            burgers: mapBurgers(cart.burger),
+            drinks: mapDrinks(cart.drink)
+          },
           total: calcTotal(cart),
           createdAt: serverTimestamp(),
           status:"pendiente"
@@ -285,7 +286,6 @@
 
         const ref = await withTimeout(addDoc(collection(db,"pedidos"), payload), 15000);
         showOK(`¡Listo! Tu pedido fue creado. Código: ${ref.id}`);
-
         try{ sessionStorage.removeItem(CART_KEY); }catch{}
         document.cookie = "cart=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax";
       }catch(errAny){
