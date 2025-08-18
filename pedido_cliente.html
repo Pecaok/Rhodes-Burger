@@ -90,39 +90,28 @@
     const CART_KEY = "rhodes_cart_v3";
     const warn = $("#warn");
 
-    // helpers
+    // base64 utils
+    const dec = b64 => { try{ return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), c=>c.charCodeAt(0)))); }catch{ return null; } };
     function getCookie(name){
       const m=document.cookie.match(new RegExp("(?:^|; )"+name.replace(/([.$?*|{}()\\[\\]\\\\/+^])/g,"\\$1")+"=([^;]*)"));
       return m?decodeURIComponent(m[1]):null;
     }
-    function fromUrl(){
-      try{
-        const q=new URLSearchParams(location.search);
-        if(!q.has("cart")) return null;
-        return JSON.parse(decodeURIComponent(escape(atob(q.get("cart")))));
-      }catch{ return null; }
-    }
-    function normalize(raw){
-      const blank={burger:{},drink:{},fries:null};
-      if(!raw) return blank;
-      // ya viene en el formato correcto
-      return {
-        burger: raw.burger||{},
-        drink : raw.drink||{},
-        fries : raw.fries??null
-      };
-    }
-    function loadCart(){
-      let c=null;
-      // localStorage
-      try{ const v=localStorage.getItem(CART_KEY); if(v) c=JSON.parse(v); }catch{}
-      // sessionStorage
-      if(!c) try{ const v=sessionStorage.getItem(CART_KEY); if(v) c=JSON.parse(v); }catch{}
-      // URL
-      if(!c){ c=fromUrl(); }
-      // cookie
-      if(!c){ const ck=getCookie("cart"); if(ck){ try{ c=JSON.parse(decodeURIComponent(escape(atob(ck)))) }catch{} } }
-      return normalize(c);
+
+    function loadCart() {
+      // 1) URL
+      const qs = new URLSearchParams(location.search);
+      if (qs.has("cart")) {
+        const c = dec(qs.get("cart"));
+        if (c) return c;
+      }
+      // 2) sessionStorage
+      try { const v=sessionStorage.getItem(CART_KEY); if(v) return JSON.parse(v); } catch {}
+      // 3) localStorage
+      try { const v=localStorage.getItem(CART_KEY); if(v) return JSON.parse(v); } catch {}
+      // 4) cookie backup
+      const ck = getCookie("cart");
+      if (ck) { const c = dec(ck); if (c) return c; }
+      return {burger:{},drink:{},fries:null};
     }
     function saveCart(c){
       try{
@@ -161,8 +150,7 @@
       }
       for(const obj of Object.values(cart.drink)){
         rows.push(`<div class="item">
-          <div>
-            <strong>${obj.item.name}</strong>
+          <div><strong>${obj.item.name}</strong>
             <div class="muted">${money(obj.item.price)} x ${obj.qty}</div>
           </div>
           <div>${money((Number(obj.item.price)||0)*obj.qty)}</div>
@@ -184,27 +172,22 @@
       }
     }
 
-    // Mostrar/ocultar dirección por tipo de entrega
+    // Mostrar/ocultar dirección
     document.querySelectorAll('input[name="entrega"]').forEach(r=>{
       r.addEventListener("change", ()=>{ dirWrap.style.display = (r.value==="delivery") ? "block" : "none"; });
     });
 
     $("#btnCancelar").onclick = ()=> { window.location.href = "index.html"; };
 
-    // Confirmar
+    // Confirmar → guarda en Firestore (orders) y gestiona MP/Efectivo
     btnConfirmar.onclick = async ()=>{
       if(cartCount(cart)===0){ alert("Tu carrito está vacío."); return; }
-      const nombre = inpNombre.value.trim();
-      if(!nombre){ alert("Ingresá tu nombre y apellido."); return; }
-      const pagoEl = document.querySelector('input[name="pago"]:checked');
-      if(!pagoEl){ alert("Elegí un método de pago."); return; }
-      const entregaEl = document.querySelector('input[name="entrega"]:checked');
-      if(!entregaEl){ alert("Elegí si es Delivery o Take Away."); return; }
-      const papasEl = document.querySelector('input[name="papas"]:checked');
-      if(!papasEl){ alert("Elegí una opción de papas (obligatorio)."); return; }
+      const nombre = inpNombre.value.trim(); if(!nombre){ alert("Ingresá tu nombre y apellido."); return; }
+      const pagoEl = document.querySelector('input[name="pago"]:checked'); if(!pagoEl){ alert("Elegí un método de pago."); return; }
+      const entregaEl = document.querySelector('input[name="entrega"]:checked'); if(!entregaEl){ alert("Elegí si es Delivery o Take Away."); return; }
+      const papasEl = document.querySelector('input[name="papas"]:checked'); if(!papasEl){ alert("Elegí una opción de papas (obligatorio)."); return; }
 
-      cart.fries = papasEl.value;
-      saveCart(cart);
+      cart.fries = papasEl.value; saveCart(cart);
 
       const entrega = entregaEl.value;
       const direccion = entrega==="delivery" ? (inpDireccion.value.trim()) : "";
@@ -258,7 +241,7 @@
           return;
         }
 
-        // Efectivo → WhatsApp (si querés, lo dejás como estaba)
+        // Efectivo
         clearCart();
         alert("¡Pedido enviado! ✅");
         window.location.href = "index.html";
