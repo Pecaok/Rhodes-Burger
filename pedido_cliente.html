@@ -16,8 +16,13 @@
     body::before{
       content:"";
       position:fixed; inset:0;
-      background: var(--logo-url) center 120px/320px no-repeat;
+      background: var(--logo-url) center 140px/320px no-repeat;
       opacity:.06; pointer-events:none; z-index:0; filter:grayscale(100%);
+    }
+    @media (max-width: 520px){
+      body::before{
+        background: var(--logo-url) center 120px/240px no-repeat;
+      }
     }
 
     .brand img{ width:40px; height:40px; border-radius:10px; background:#fff; object-fit:contain }
@@ -31,6 +36,10 @@
       background:#fff;
     }
     .muted{ color:#777 }
+
+    /* Botones un poquito más vivos */
+    .btn.primary{ background:#22c55e; border-color:#22c55e }
+    .btn.primary:hover{ filter:brightness(.95) }
 
     /* Ajustes para teléfono */
     @media (max-width: 520px){
@@ -102,21 +111,8 @@
         <div class="field">
           <label>Tipo de entrega</label>
           <div class="inline">
-            <label class="pill">
-              <input type="radio" name="entrega" value="delivery">
-              <span class="icon" aria-hidden="true">
-                <!-- Delivery -->
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M3 16V6h11v10H3Z"></path>
-                  <path d="M14 9h4l3 3v4h-7V9Z"></path>
-                  <circle cx="7.5" cy="17.5" r="1.5"></circle>
-                  <circle cx="17.5" cy="17.5" r="1.5"></circle>
-                </svg>
-              </span>
-              <span>Delivery</span>
-            </label>
-
-            <label class="pill">
+            <!-- Solo Take Away (no preseleccionado) -->
+            <label class="pill" title="Solo retiro por el local">
               <input type="radio" name="entrega" value="take_away">
               <span class="icon" aria-hidden="true">
                 <!-- Take away / bolsa -->
@@ -128,11 +124,12 @@
               <span>Take Away</span>
             </label>
           </div>
+          <div class="muted" style="margin-top:6px">* Solo retiro por el local.</div>
         </div>
 
-        <div class="field" id="dirWrap" style="display:none">
-          <label>Dirección (solo si es Delivery)</label>
-          <input id="inpDireccion" placeholder="Calle, número, piso" autocomplete="address-line1" />
+        <div class="field">
+          <label>Notas (opcional)</label>
+          <textarea id="inpNotas" placeholder="Ej: paso a las 20:30, sin cebolla, etc." rows="3"></textarea>
         </div>
 
         <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
@@ -184,9 +181,9 @@
     const itemsEl = $("#items");
     const totalEl = $("#total");
     const statusEl = $("#status");
-    const dirWrap = $("#dirWrap"), inpDireccion=$("#inpDireccion");
     const inpNombre = $("#inpNombre");
     const inpTelefono = $("#inpTelefono");
+    const inpNotas   = $("#inpNotas");
     const btnConfirmar = $("#btnConfirmar");
 
     function renderResumen(){
@@ -214,27 +211,23 @@
       totalEl.textContent = money(calcTotal(cart));
     }
 
-    // Mostrar/ocultar dirección por tipo de entrega
-    document.querySelectorAll('input[name="entrega"]').forEach(r=>{
-      r.addEventListener("change", ()=>{ dirWrap.style.display = (r.value==="delivery") ? "block" : "none"; });
-    });
-
     $("#btnCancelar").onclick = ()=> { window.location.href = "index.html"; };
 
-    // Confirmar (sin validar papas aquí)
+    // Confirmar (requiere pago + entrega seleccionados)
     btnConfirmar.onclick = async ()=>{
       if(cartCount(cart)===0){ alert("Tu carrito está vacío."); return; }
       const nombre = inpNombre.value.trim();
       if(!nombre){ alert("Ingresá tu nombre y apellido."); return; }
-      const pagoEl = document.querySelector('input[name="pago"]:checked');
-      if(!pagoEl){ alert("Elegí un método de pago."); return; }
-      const entregaEl = document.querySelector('input[name="entrega"]:checked');
-      if(!entregaEl){ alert("Elegí si es Delivery o Take Away."); return; }
 
-      const entrega = entregaEl.value;
+      const pagoEl = document.querySelector('input[name="pago"]:checked');
+      if(!pagoEl){ alert("Elegí un medio de pago (Mercado Pago o Efectivo)."); return; }
+
+      const entregaEl = document.querySelector('input[name="entrega"]:checked');
+      if(!entregaEl){ alert("Elegí el tipo de entrega (Take Away)."); return; }
+
+      const entrega = entregaEl.value; // será "take_away"
       const telefono = inpTelefono.value.trim();
-      const direccion = entrega==="delivery" ? (inpDireccion.value.trim()) : "";
-      if(entrega==="delivery" && !direccion){ alert("Ingresá la dirección para Delivery."); return; }
+      const notas    = inpNotas.value.trim();
 
       const itemsFS=[], mpItems=[];
       for(const o of Object.values(cart.burger)){
@@ -251,11 +244,11 @@
         nombre,
         telefono,                 // opcional
         pago: pagoEl.value,
-        entrega,
-        direccion,
-        // si en tu flujo guardás papas por hamburguesa, eso ya viene dentro de items/notes; aquí no es obligatorio
+        entrega,                  // selección del usuario
+        direccion: "",            // no aplica
         items: itemsFS,
         total: calcTotal(cart),
+        notes: notas || null,     // << caja de comentarios
         status: "accepted"
       };
 
