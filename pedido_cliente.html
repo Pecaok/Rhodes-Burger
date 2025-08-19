@@ -8,11 +8,10 @@
   <!-- Favicon con id para poder cambiarlo si el PNG no existe -->
   <link id="favicon" rel="icon" href="images/logo.png" />
 
-  <!-- Tu hoja de estilos existente -->
   <link rel="stylesheet" href="css/theme.css" />
 
   <style>
-    /* Marca de agua del logo usando variable; el JS al final cambia a .jpg si .png no existe */
+    /* Marca de agua del logo; el JS de abajo cambia a .jpg si .png no existe */
     :root{ --logo-url: url("images/logo.png"); }
     body::before{
       content:"";
@@ -21,7 +20,6 @@
       opacity:.06; pointer-events:none; z-index:0; filter:grayscale(100%);
     }
 
-    /* Mini toques de UI (no rompe tu theme.css) */
     .brand img{ width:40px; height:40px; border-radius:10px; background:#fff; object-fit:contain }
     .inline{ display:flex; gap:12px; flex-wrap:wrap; margin:8px 0 }
     .pill{ display:inline-flex; align-items:center; gap:10px; border:1px solid #e7e7e7; border-radius:999px; padding:10px 14px; background:#fff }
@@ -33,15 +31,23 @@
       background:#fff;
     }
     .muted{ color:#777 }
+
+    /* Ajustes para teléfono */
+    @media (max-width: 520px){
+      .pill{ gap:8px; padding:8px 12px; font-size:14px }
+      .icon svg{ width:16px; height:16px }
+      .btn{ padding:10px 14px }
+      .topbar .btn.ghost{ padding:8px 12px }
+      h1{ font-size:26px }
+    }
   </style>
 </head>
 <body>
   <header>
     <div class="topbar">
+      <!-- SOLO LOGO (sin texto) -->
       <a href="index.html" class="brand">
-        <!-- Logo con id para fallback PNG -> JPG -->
         <img id="logo" src="images/logo.png" alt="Rhodes Burgers">
-        <span>Rhodes Burgers</span>
       </a>
       <div class="spacer"></div>
       <a class="btn ghost" href="index.html">← Seguir comprando</a>
@@ -129,15 +135,6 @@
           <input id="inpDireccion" placeholder="Calle, número, piso" autocomplete="address-line1" />
         </div>
 
-        <div class="field" style="margin-top:10px">
-          <label>Papas (obligatorio)</label>
-          <div class="inline">
-            <label class="pill"><input type="radio" name="papas" value="con_sazon"> <span>Con sazón</span></label>
-            <label class="pill"><input type="radio" name="papas" value="sin_sazon"> <span>Sin sazonar</span></label>
-          </div>
-          <div class="muted">Se toma lo que elegiste en el menú; si querés, podés cambiarlo acá.</div>
-        </div>
-
         <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
           <button class="btn" id="btnCancelar">Cancelar</button>
           <button class="btn primary" id="btnConfirmar">Ir a pagar</button>
@@ -176,9 +173,9 @@
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const CART_KEY = "rhodes_cart_v3";
 
-    function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{},fries:null}; }catch{ return {burger:{},drink:{},fries:null}; } }
+    function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}}; }catch{ return {burger:{},drink:{}}; } }
     function saveCart(c){ localStorage.setItem(CART_KEY, JSON.stringify(c)); }
-    function clearCart(){ saveCart({burger:{},drink:{},fries:null}); }
+    function clearCart(){ saveCart({burger:{},drink:{}}); }
     function cartCount(c){ let n=0; for(const b of Object.values(c.burger)) n+=b.qty; for(const d of Object.values(c.drink)) n+=d.qty; return n; }
     function calcTotal(c){ let t=0; for(const b of Object.values(c.burger)) t+=(Number(b.item?.price)||0)*b.qty; for(const d of Object.values(c.drink)) t+=(Number(d.item?.price)||0)*d.qty; return t; }
 
@@ -215,11 +212,6 @@
       }
       itemsEl.innerHTML = rows.join("") || `<p class="muted">No hay productos en el carrito.</p>`;
       totalEl.textContent = money(calcTotal(cart));
-
-      if(cart.fries){
-        const r = document.querySelector(`input[name="papas"][value="${cart.fries}"]`);
-        if(r) r.checked = true;
-      }
     }
 
     // Mostrar/ocultar dirección por tipo de entrega
@@ -229,7 +221,7 @@
 
     $("#btnCancelar").onclick = ()=> { window.location.href = "index.html"; };
 
-    // Confirmar
+    // Confirmar (sin validar papas aquí)
     btnConfirmar.onclick = async ()=>{
       if(cartCount(cart)===0){ alert("Tu carrito está vacío."); return; }
       const nombre = inpNombre.value.trim();
@@ -238,11 +230,6 @@
       if(!pagoEl){ alert("Elegí un método de pago."); return; }
       const entregaEl = document.querySelector('input[name="entrega"]:checked');
       if(!entregaEl){ alert("Elegí si es Delivery o Take Away."); return; }
-      const papasEl = document.querySelector('input[name="papas"]:checked');
-      if(!papasEl){ alert("Elegí una opción de papas (obligatorio)."); return; }
-
-      cart.fries = papasEl.value;
-      saveCart(cart);
 
       const entrega = entregaEl.value;
       const telefono = inpTelefono.value.trim();
@@ -262,11 +249,11 @@
       const order = {
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         nombre,
-        telefono,                 // << vuelve el teléfono (opcional)
+        telefono,                 // opcional
         pago: pagoEl.value,
         entrega,
         direccion,
-        fries: cart.fries,
+        // si en tu flujo guardás papas por hamburguesa, eso ya viene dentro de items/notes; aquí no es obligatorio
         items: itemsFS,
         total: calcTotal(cart),
         status: "accepted"
