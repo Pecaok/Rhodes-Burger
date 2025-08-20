@@ -61,7 +61,7 @@
     .field{ margin:10px 0 14px }
     .field label{ display:block; font-weight:700; margin:0 0 6px; }
 
-    /* Inputs pill */
+    /* Inputs “pill” */
     .input-pill{
       width:100%;
       padding:14px 16px;
@@ -214,20 +214,18 @@
       return t;
     }
 
-    // Helpers para mostrar papas por hamburguesa
+    // Helpers PAPAS por hamburguesa
     function friesLabelFromValue(v){
       if(!v) return null;
       return v === 'con_sazon' ? 'Con sazón' : 'Sin sazonar';
     }
     function computeFriesLineForBurger(o, globalFries){
-      // 1) Objeto de conteo: {con_sazon: n, sin_sazon: m}
       if (o?.friesByQty && typeof o.friesByQty === 'object') {
         const parts=[];
         if (o.friesByQty.con_sazon) parts.push(`Con sazón x ${o.friesByQty.con_sazon}`);
         if (o.friesByQty.sin_sazon) parts.push(`Sin sazonar x ${o.friesByQty.sin_sazon}`);
         if (parts.length) return "Papas: " + parts.join(", ");
       }
-      // 2) Array por unidad: ['con_sazon','sin_sazon',...]
       if (Array.isArray(o?.friesPerUnit)) {
         const count = { con_sazon:0, sin_sazon:0 };
         o.friesPerUnit.forEach(v => { if(v==='con_sazon') count.con_sazon++; if(v==='sin_sazon') count.sin_sazon++; });
@@ -236,12 +234,10 @@
         if (count.sin_sazon) parts.push(`Sin sazonar x ${count.sin_sazon}`);
         if (parts.length) return "Papas: " + parts.join(", ");
       }
-      // 3) Un único valor por ítem
       if (o?.fries) {
         const lbl = friesLabelFromValue(o.fries);
         if (lbl) return "Papas: " + lbl;
       }
-      // 4) Fallback al global del carrito
       if (globalFries) {
         const lbl = friesLabelFromValue(globalFries);
         if (lbl) return "Papas: " + lbl;
@@ -251,7 +247,7 @@
 
     let cart = loadCart();
 
-    /* UI helpers */
+    // Marcar pill seleccionada
     document.querySelectorAll('.pillrow .pill input').forEach(r=>{
       r.addEventListener('change', ()=>{
         r.closest('.pillrow').querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
@@ -268,12 +264,21 @@
       itemsEl.innerHTML = "";
       const rows=[];
       for(const o of Object.values(cart.burger)){
-        const lineFries = computeFriesLineForBurger(o, cart.fries);
+        const friesLine = computeFriesLineForBurger(o, cart.fries);
+        const extrasParts=[];
+        if (o?.extras) {
+          if (o.extras.patty)   extrasParts.push(`+${o.extras.patty} medallón(es)`);
+          if (o.extras.cheddar) extrasParts.push(`+${o.extras.cheddar} cheddar`);
+        }
+        const extrasLine = extrasParts.length ? `Extras: ${extrasParts.join(" · ")}` : "";
+
         rows.push(`<div class="item">
           <div class="left">
             <strong>${o.item.name}</strong>
             <div class="muted">$ ${Number(o.item.price).toLocaleString('es-AR')} x ${o.qty}</div>
-            ${lineFries ? `<div class="muted">${lineFries}</div>` : ``}
+            ${friesLine ? `<div class="muted">${friesLine}</div>` : ``}
+            ${extrasLine ? `<div class="muted">${extrasLine}</div>` : ``}
+            ${o.notes ? `<div class="muted">Notas: ${o.notes}</div>` : ``}
           </div>
           <div>${money((Number(o.item.price)||0)*o.qty)}</div>
         </div>`);
@@ -307,10 +312,14 @@
       const telefono = $("#inpTelefono").value.trim();
       const notas = $("#inpNotas").value.trim();
 
-      // Ítems para Firestore y para MP
+      // Ítems para Firestore y para MP (incluimos detalle de papas y extras)
       const itemsFS=[], mpItems=[];
       for(const o of Object.values(cart.burger)){
-        const friesInfo = computeFriesLineForBurger(o, cart.fries); // guardamos el resumen de papas por hamburguesa
+        const friesInfo = computeFriesLineForBurger(o, cart.fries);
+        const extras = (o?.extras && (o.extras.patty || o.extras.cheddar))
+          ? { patty: Number(o.extras.patty)||0, cheddar: Number(o.extras.cheddar)||0 }
+          : null;
+
         itemsFS.push({
           type:"burger",
           id:o.item.id,
@@ -318,8 +327,10 @@
           qty:o.qty,
           price:Number(o.item.price)||0,
           ...(o.notes?{notes:o.notes}:{ }),
-          ...(friesInfo?{friesInfo}:{})
+          ...(friesInfo?{friesInfo}:{ }),
+          ...(extras?{extras}:{ })
         });
+
         mpItems.push({title:o.item.name, quantity:Number(o.qty)||1, currency_id:"ARS", unit_price:Number(o.item.price)||0});
       }
       for(const o of Object.values(cart.drink)){
@@ -334,7 +345,7 @@
         pago: pagoEl.value,
         entrega: entregaEl.value,      // "take_away"
         direccion: "",                 // no se usa en take away
-        fries: cart.fries || null,     // global si lo hubiere (por compatibilidad)
+        fries: cart.fries || null,     // global si lo hubiere
         notes: notas || null,
         items: itemsFS,
         total: calcTotal(cart),
@@ -349,7 +360,6 @@
         const docRef = await db.collection("orders").add(order);
 
         if (order.pago === "mercado_pago") {
-          // saneo de items para MP
           const valid = mpItems.filter(x => x.quantity>0 && Number.isFinite(x.unit_price) && x.unit_price>0);
           const payloadItems = valid.length ? valid : [{ title:"Pedido Rhodes Burgers", quantity:1, currency_id:"ARS", unit_price:Number(order.total)||0 }];
 
