@@ -22,13 +22,13 @@
     *{ box-sizing:border-box }
     html,body{ margin:0; color:var(--text); font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif; background:var(--bg) }
 
-    /* Marca de agua a pantalla completa + un poquito más oscura */
+    /* Marca de agua a pantalla completa */
     body::before{
       content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
       background:
         radial-gradient(ellipse at center, rgba(255,255,255,.55), rgba(255,255,255,.75)),
         url("images/logo.png") center/ min(90vmin, 880px) no-repeat;
-      opacity:.11;           /* más oscuro que antes */
+      opacity:.11;
       filter:grayscale(100%);
     }
 
@@ -61,7 +61,7 @@
     .field{ margin:10px 0 14px }
     .field label{ display:block; font-weight:700; margin:0 0 6px; }
 
-    /* === Inputs estilo “pill” iguales al resto === */
+    /* Inputs pill */
     .input-pill{
       width:100%;
       padding:14px 16px;
@@ -80,7 +80,6 @@
       border-color:#d1d5db;
       box-shadow: 0 0 0 4px rgba(34,197,94,.12), inset 0 1px 2px rgba(0,0,0,.04);
     }
-
     textarea.input-pill{ min-height:104px; resize:vertical }
 
     /* Pills (radios) */
@@ -102,7 +101,8 @@
     .status{ color:#ef4444; margin-top:8px; min-height:24px }
 
     /* Resumen items */
-    .item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid #f1f2f4 }
+    .item{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid #f1f2f4 }
+    .item .left{max-width:75%}
     .item .muted{ font-size:13px }
 
     @media (max-width:520px){
@@ -153,7 +153,6 @@
         <div class="field">
           <label>Tipo de entrega</label>
           <div class="pillrow" id="shipRow">
-            <!-- Solo Take Away -->
             <label class="pill"><input type="radio" name="entrega" value="take_away">
               <span class="ico">🛍️</span><span>Take Away</span></label>
           </div>
@@ -177,17 +176,15 @@
       <aside class="card">
         <h2 style="margin:4px 0 14px">Resumen</h2>
         <div id="items"></div>
-        <div id="friesLine" class="muted" style="display:none; margin-top:6px"></div>
         <div class="total"><span>Total</span><span id="total">$ 0</span></div>
       </aside>
     </div>
   </main>
 
-  <!-- Firebase compat (no toco tu conexión) -->
+  <!-- Firebase compat (sin tocar tu conexión) -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script>
-    /* Tu config de Firebase tal como me pasaste */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -217,6 +214,41 @@
       return t;
     }
 
+    // Helpers para mostrar papas por hamburguesa
+    function friesLabelFromValue(v){
+      if(!v) return null;
+      return v === 'con_sazon' ? 'Con sazón' : 'Sin sazonar';
+    }
+    function computeFriesLineForBurger(o, globalFries){
+      // 1) Objeto de conteo: {con_sazon: n, sin_sazon: m}
+      if (o?.friesByQty && typeof o.friesByQty === 'object') {
+        const parts=[];
+        if (o.friesByQty.con_sazon) parts.push(`Con sazón x ${o.friesByQty.con_sazon}`);
+        if (o.friesByQty.sin_sazon) parts.push(`Sin sazonar x ${o.friesByQty.sin_sazon}`);
+        if (parts.length) return "Papas: " + parts.join(", ");
+      }
+      // 2) Array por unidad: ['con_sazon','sin_sazon',...]
+      if (Array.isArray(o?.friesPerUnit)) {
+        const count = { con_sazon:0, sin_sazon:0 };
+        o.friesPerUnit.forEach(v => { if(v==='con_sazon') count.con_sazon++; if(v==='sin_sazon') count.sin_sazon++; });
+        const parts=[];
+        if (count.con_sazon) parts.push(`Con sazón x ${count.con_sazon}`);
+        if (count.sin_sazon) parts.push(`Sin sazonar x ${count.sin_sazon}`);
+        if (parts.length) return "Papas: " + parts.join(", ");
+      }
+      // 3) Un único valor por ítem
+      if (o?.fries) {
+        const lbl = friesLabelFromValue(o.fries);
+        if (lbl) return "Papas: " + lbl;
+      }
+      // 4) Fallback al global del carrito
+      if (globalFries) {
+        const lbl = friesLabelFromValue(globalFries);
+        if (lbl) return "Papas: " + lbl;
+      }
+      return null;
+    }
+
     let cart = loadCart();
 
     /* UI helpers */
@@ -229,7 +261,6 @@
 
     const itemsEl = $("#items");
     const totalEl = $("#total");
-    const friesLine = $("#friesLine");
     const statusEl = $("#status");
     const btnConfirmar = $("#btnConfirmar");
 
@@ -237,17 +268,20 @@
       itemsEl.innerHTML = "";
       const rows=[];
       for(const o of Object.values(cart.burger)){
+        const lineFries = computeFriesLineForBurger(o, cart.fries);
         rows.push(`<div class="item">
-          <div>
+          <div class="left">
             <strong>${o.item.name}</strong>
             <div class="muted">$ ${Number(o.item.price).toLocaleString('es-AR')} x ${o.qty}</div>
+            ${lineFries ? `<div class="muted">${lineFries}</div>` : ``}
           </div>
           <div>${money((Number(o.item.price)||0)*o.qty)}</div>
         </div>`);
       }
       for(const o of Object.values(cart.drink)){
         rows.push(`<div class="item">
-          <div><strong>${o.item.name}</strong>
+          <div class="left">
+            <strong>${o.item.name}</strong>
             <div class="muted">$ ${Number(o.item.price).toLocaleString('es-AR')} x ${o.qty}</div>
           </div>
           <div>${money((Number(o.item.price)||0)*o.qty)}</div>
@@ -255,14 +289,6 @@
       }
       itemsEl.innerHTML = rows.join("") || `<p class="muted">No hay productos en el carrito.</p>`;
       totalEl.textContent = money(calcTotal(cart));
-
-      // Mostrar selección de papas (si viene desde el index)
-      if(cart.fries){
-        friesLine.style.display = "block";
-        friesLine.textContent = "Papas: " + (cart.fries==="con_sazon" ? "Con sazón" : "Sin sazonar");
-      }else{
-        friesLine.style.display = "none";
-      }
     }
 
     /* ====== Confirmar ====== */
@@ -284,7 +310,16 @@
       // Ítems para Firestore y para MP
       const itemsFS=[], mpItems=[];
       for(const o of Object.values(cart.burger)){
-        itemsFS.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0, ...(o.notes?{notes:o.notes}:{})});
+        const friesInfo = computeFriesLineForBurger(o, cart.fries); // guardamos el resumen de papas por hamburguesa
+        itemsFS.push({
+          type:"burger",
+          id:o.item.id,
+          name:o.item.name,
+          qty:o.qty,
+          price:Number(o.item.price)||0,
+          ...(o.notes?{notes:o.notes}:{ }),
+          ...(friesInfo?{friesInfo}:{})
+        });
         mpItems.push({title:o.item.name, quantity:Number(o.qty)||1, currency_id:"ARS", unit_price:Number(o.item.price)||0});
       }
       for(const o of Object.values(cart.drink)){
@@ -299,22 +334,22 @@
         pago: pagoEl.value,
         entrega: entregaEl.value,      // "take_away"
         direccion: "",                 // no se usa en take away
-        fries: cart.fries || null,
+        fries: cart.fries || null,     // global si lo hubiere (por compatibilidad)
         notes: notas || null,
         items: itemsFS,
         total: calcTotal(cart),
-        status: "accepted"             // dejamos igual a como venías usando
+        status: "accepted"
       };
 
       try{
         statusEl.textContent = "";
         btnConfirmar.disabled = true;
 
-        // Guarda en Firestore (mantenemos tu flujo original)
+        // Guardar pedido
         const docRef = await db.collection("orders").add(order);
 
         if (order.pago === "mercado_pago") {
-          // Sanear por si algún ítem vino con precio 0
+          // saneo de items para MP
           const valid = mpItems.filter(x => x.quantity>0 && Number.isFinite(x.unit_price) && x.unit_price>0);
           const payloadItems = valid.length ? valid : [{ title:"Pedido Rhodes Burgers", quantity:1, currency_id:"ARS", unit_price:Number(order.total)||0 }];
 
