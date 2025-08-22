@@ -12,7 +12,7 @@
     }
     *{ box-sizing:border-box }
     html,body{ margin:0; background:var(--bg); color:var(--text); font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif }
-    body::before{ content:""; position:fixed; inset:0; background:url("images/logo.png") center 120px/320px no-repeat; opacity:.06; pointer-events:none; z-index:0; filter:grayscale(100%) }
+    body::before{ content:""; position:fixed; inset:0; background:url("images/logo.png") center 120px/380px no-repeat; opacity:.06; pointer-events:none; z-index:0; filter:grayscale(100%) }
     header{ position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06) }
     .topbar{ max-width:1100px; margin:0 auto; padding:10px 12px; display:flex; align-items:center; gap:12px }
     .brand img{ width:40px; height:40px; border-radius:10px; background:#fff; object-fit:contain }
@@ -33,8 +33,6 @@
     .price{ font-weight:800 }
     .actions{ display:flex; gap:8px; flex-wrap:wrap }
 
-    /* Selector de papas */
-    .inline{ display:flex; gap:12px; flex-wrap:wrap; margin:8px 0 }
     .pill{ display:inline-flex; align-items:center; gap:8px; border:1px solid #e7e7e7; border-radius:999px; padding:8px 12px }
 
     /* Drawer */
@@ -58,6 +56,10 @@
     textarea{ width:100%; min-height:70px; padding:10px; border:1px solid #e7e7e7; border-radius:12px }
 
     .badge{ font-size:12px; color:#0a0; background:#eaffea; border:1px solid #bff0bf; padding:2px 8px; border-radius:999px; }
+    .chips{ display:flex; gap:10px; flex-wrap:wrap; }
+    .chip{ border:1px solid #e7e7e7; padding:8px 12px; border-radius:999px; display:flex; align-items:center; gap:8px; cursor:pointer; }
+    .chip input{ transform:scale(1.2) }
+    .muted-right{ color:var(--muted); font-size:12px; text-align:right; }
   </style>
 </head>
 <body>
@@ -75,14 +77,6 @@
 
       <h2>Hamburguesas</h2>
       <div id="burgersGrid" class="grid"></div>
-
-      <!-- PAPAS OBLIGATORIAS -->
-      <h2>Papas fritas (obligatorio)</h2>
-      <div class="inline" id="papas-opciones">
-        <label class="pill"><input type="radio" name="papas" value="con_sazon"> Con sazón</label>
-        <label class="pill"><input type="radio" name="papas" value="sin_sazon"> Sin sazonar</label>
-      </div>
-      <p class="muted">Debés elegir una opción de papas para agregar productos.</p>
 
       <h2>Bebidas</h2>
       <div id="drinksGrid" class="grid"></div>
@@ -105,11 +99,21 @@
     </div>
   </aside>
 
-  <!-- Modal Personalizar -->
+  <!-- Modal (Fries + Opcional Extras) -->
   <div class="overlay" id="overlay">
     <div class="modal">
       <h3 id="modTitle">Personalizar</h3>
 
+      <!-- PAPAS (obligatorio) -->
+      <div class="rowx" style="flex-direction:column; align-items:flex-start">
+        <strong>Tipo de papas (obligatorio)</strong>
+        <div class="chips" id="friesWrap">
+          <label class="chip"><input type="radio" name="modFries" value="con_sazon"> Con sazón</label>
+          <label class="chip"><input type="radio" name="modFries" value="sin_sazon"> Sin sazonar</label>
+        </div>
+      </div>
+
+      <!-- Cantidad -->
       <div class="rowx">
         <div>Cantidad</div>
         <div class="qtybox">
@@ -119,6 +123,7 @@
         </div>
       </div>
 
+      <!-- EXTRAS -->
       <div id="extrasWrap">
         <div class="rowx" id="rowPatties" style="display:none">
           <div>
@@ -149,14 +154,18 @@
         <div class="muted" id="noExtras" style="display:none">Este producto no admite extras.</div>
       </div>
 
+      <!-- Notas -->
       <div class="rowx" style="align-items:flex-start; flex-direction:column">
         <label>Notas (opcional)</label>
         <textarea id="notes" placeholder="Sin cebolla, extra salsa, etc."></textarea>
       </div>
 
-      <div class="rowx" style="justify-content:flex-end">
-        <button class="btn ghost" id="btnCancel">Cancelar</button>
-        <button class="btn primary" id="btnAdd">Agregar al carrito</button>
+      <div class="rowx" style="justify-content:space-between; align-items:flex-end">
+        <div class="muted-right" id="extrasHint"></div>
+        <div style="display:flex; gap:10px">
+          <button class="btn ghost" id="btnCancel">Cancelar</button>
+          <button class="btn primary" id="btnAdd">Agregar</button>
+        </div>
       </div>
     </div>
   </div>
@@ -214,17 +223,6 @@
       return t;
     }
 
-    // PAPAS: validación y persistencia (por ítem se guarda lo que esté seleccionado al agregar)
-    function getSelectedFries(){
-      const sel=document.querySelector('input[name="papas"]:checked');
-      return sel? sel.value : null;
-    }
-    function validarPapas(){
-      const v=getSelectedFries();
-      if(!v){ alert("Por favor elegí papas: con sazón o sin sazonar."); return false; }
-      return true;
-    }
-
     /*************** RENDER MENÚ ***************/
     const gridBurgers = $("#burgersGrid"), gridDrinks = $("#drinksGrid");
     function renderCard(item,type){
@@ -252,9 +250,9 @@
       if(type==="drink"){
         card.querySelector("[data-add]").onclick = ()=> quickAddDrink(item);
       }else{
-        card.querySelector("[data-quick]").onclick  = ()=> quickAddBurger(item);
+        card.querySelector("[data-quick]").onclick  = ()=> openModal(item, false); // sin extras
         const customBtn=card.querySelector("[data-custom]");
-        if(customBtn) customBtn.onclick = ()=> openCustomize(item);
+        if(customBtn) customBtn.onclick = ()=> openModal(item, true); // con extras (dobles/pollo)
       }
       return card;
     }
@@ -264,24 +262,13 @@
       renderCart();
     }
 
-    /*************** QUICK ADD ***************/
+    /*************** CLAVES / ADD ***************/
     function composeKey(item, fries, extras, notes){
-      // Para agrupar iguales en una misma línea
       const p = extras?.patty||0, c = extras?.cheddar||0;
       const n = (notes||"").trim().toLowerCase();
       return `${item.id}|f:${fries||'-'}|p:${p}|c:${c}|n:${n||'-'}`;
     }
 
-    function quickAddBurger(item){
-      if(!validarPapas()) return;
-      const fries = getSelectedFries();
-      const extras = { patty:0, cheddar:0 }; // en quick add no hay extras
-      const key = composeKey(item, fries, extras, "");
-      const bucket = cart.burger || (cart.burger={});
-      if(!bucket[key]) bucket[key] = { qty:0, item, fries, extras, notes:"" };
-      bucket[key].qty += 1;
-      saveCart(); renderCart(); openDrawer();
-    }
     function quickAddDrink(item){
       const bucket = cart.drink || (cart.drink={});
       const key = item.id;
@@ -295,25 +282,21 @@
     function renderCart(){
       cartItems.innerHTML="";
       for(const [key,obj] of Object.entries(cart.burger)){
-        const extrasTxt=[];
-        let extrasSum=0;
+        const extrasTxt=[]; let extrasSum=0;
         if(obj.extras){
-          if(obj.extras.patty){
-            extrasTxt.push(`+${obj.extras.patty} medallón(es)`);
-            extrasSum += obj.extras.patty*EXTRA_PRICE_PATTY;
-          }
-          if(obj.extras.cheddar){
-            extrasTxt.push(`+${obj.extras.cheddar} cheddar`);
-            extrasSum += obj.extras.cheddar*EXTRA_PRICE_CHEDDAR;
-          }
+          if(obj.extras.patty){ extrasTxt.push(`+${obj.extras.patty} medallón(es)`); extrasSum += obj.extras.patty*EXTRA_PRICE_PATTY; }
+          if(obj.extras.cheddar){ extrasTxt.push(`+${obj.extras.cheddar} cheddar`); extrasSum += obj.extras.cheddar*EXTRA_PRICE_CHEDDAR; }
         }
-        const unit = (obj.item.price||0)+extrasSum;
+        const unitBase = (obj.item.price||0);
+        const unit = unitBase + extrasSum;
+
         cartItems.innerHTML += `
           <div class="item">
             <div>
               <strong>${obj.item.name}</strong>
               <div class="muted">Papas: ${friesLabel(obj.fries)} ${extrasTxt.length?`· ${extrasTxt.join(" · ")}`:""}</div>
               ${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}
+              ${extrasSum>0?`<div class="muted">(${money(unitBase)} + ${money(extrasSum)} extras)</div>`:`<div class="muted">(${money(unitBase)})</div>`}
             </div>
             <div style="display:flex;align-items:center;gap:10px">
               <button class="btn ghost" onclick="changeQty('burger','${key}',-1)">-</button>
@@ -346,7 +329,7 @@
       saveCart(); renderCart();
     }
 
-    /*************** MODAL PERSONALIZAR ***************/
+    /*************** MODAL (fries + opcional extras) ***************/
     const overlay=$("#overlay"), modTitle=$("#modTitle");
     const qtyVal=$("#qtyVal"), qtyInc=$("#qtyInc"), qtyDec=$("#qtyDec");
     const rowPatties=$("#rowPatties"), rowCheddar=$("#rowCheddar"), noExtras=$("#noExtras"), cheHint=$("#cheHint");
@@ -354,36 +337,60 @@
     const cheVal=$("#cheVal"), cheInc=$("#cheInc"), cheDec=$("#cheDec");
     const notes=$("#notes"), btnAdd=$("#btnAdd"), btnCancel=$("#btnCancel");
     const patPriceBadge=$("#patPriceBadge"), chePriceBadge=$("#chePriceBadge");
+    const friesWrap=$("#friesWrap"), extrasHint=$("#extrasHint");
 
-    let currentItem=null; // {id,name,price,kind}
+    let currentItem=null; 
+    let allowExtras=false;
 
-    function openCustomize(item){
+    function resetFries(){
+      document.querySelectorAll('input[name="modFries"]').forEach(r=>r.checked=false);
+    }
+    function selectedFries(){
+      const r=document.querySelector('input[name="modFries"]:checked');
+      return r? r.value : null;
+    }
+
+    function openModal(item, withExtras){
       currentItem = item;
-      modTitle.textContent = "Personalizar: " + item.name;
+      allowExtras = !!withExtras;
+
+      modTitle.textContent = (withExtras?'Personalizar: ':'Agregar: ') + item.name;
       qtyVal.textContent="1"; notes.value="";
       patVal.textContent="0"; cheVal.textContent="0";
+      resetFries();
 
       patPriceBadge.textContent = `+ ${money(EXTRA_PRICE_PATTY)} c/u`;
       chePriceBadge.textContent = `+ ${money(EXTRA_PRICE_CHEDDAR)} c/u`;
+      extrasHint.textContent = withExtras
+        ? 'Las dobles pueden sumar hasta 2 medallones y 3 cheddar. Pollo: solo cheddar (máx. 3).'
+        : 'Podés personalizar desde el botón “Personalizar”.';
 
-      if(item.kind==="double"){
-        rowPatties.style.display="flex";
-        rowCheddar.style.display="flex";
-        cheHint.textContent="(máx. +3)";
-        noExtras.style.display="none";
-      }else if(item.kind==="chicken"){
-        rowPatties.style.display="none";
-        rowCheddar.style.display="flex";
-        cheHint.textContent="(máx. +3)";
-        noExtras.style.display="none";
+      // Mostrar/ocultar extras según tipo + allowExtras
+      if(withExtras){
+        if(item.kind==="double"){
+          rowPatties.style.display="flex";
+          rowCheddar.style.display="flex";
+          cheHint.textContent="(máx. +3)";
+          noExtras.style.display="none";
+        }else if(item.kind==="chicken"){
+          rowPatties.style.display="none";
+          rowCheddar.style.display="flex";
+          cheHint.textContent="(máx. +3)";
+          noExtras.style.display="none";
+        }else{ // simples -> sin extras
+          rowPatties.style.display="none";
+          rowCheddar.style.display="none";
+          noExtras.style.display="block";
+        }
       }else{
         rowPatties.style.display="none";
         rowCheddar.style.display="none";
         noExtras.style.display="block";
       }
+
       overlay.classList.add("open");
     }
-    function closeCustomize(){ overlay.classList.remove("open"); }
+    function closeModal(){ overlay.classList.remove("open"); }
 
     qtyInc.onclick = ()=> qtyVal.textContent = String(Math.min(99,(+qtyVal.textContent||1)+1));
     qtyDec.onclick = ()=> qtyVal.textContent = String(Math.max(1,(+qtyVal.textContent||1)-1));
@@ -392,28 +399,29 @@
     cheInc.onclick = ()=> { if(+cheVal.textContent < 3) cheVal.textContent = (+cheVal.textContent)+1; };
     cheDec.onclick = ()=> { if(+cheVal.textContent > 0) cheVal.textContent = (+cheVal.textContent)-1; };
 
-    btnCancel.onclick = closeCustomize;
+    btnCancel.onclick = closeModal;
 
     btnAdd.onclick = ()=>{
-      if(!validarPapas()) return;
-      const fries = getSelectedFries();
+      const fries = selectedFries();
+      if(!fries){ alert("Elegí el tipo de papas."); return; }
+
       const qty = +qtyVal.textContent || 1;
 
       const extras = { patty:0, cheddar:0 };
-      if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
-      else if(currentItem.kind==="chicken"){ extras.patty=0; extras.cheddar=+cheVal.textContent||0; }
-      const txt = notes.value.trim();
+      if(allowExtras && currentItem.kind==="double"){
+        extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0;
+      }else if(allowExtras && currentItem.kind==="chicken"){
+        extras.patty=0; extras.cheddar=+cheVal.textContent||0;
+      }
 
+      const txt = notes.value.trim();
       const key = composeKey(currentItem, fries, extras, txt);
       const bucket = cart.burger || (cart.burger={});
       const prev = bucket[key];
-      if(prev){
-        prev.qty += qty;
-        // mantener extras y notas máximos/últimos no es necesario porque la clave ya discrimina
-      }else{
-        bucket[key] = { qty, item: currentItem, fries, extras, ...(txt?{notes:txt}:{}) };
-      }
-      saveCart(); renderCart(); closeCustomize(); openDrawer();
+      if(prev){ prev.qty += qty; } 
+      else { bucket[key] = { qty, item: currentItem, fries, extras, ...(txt?{notes:txt}:{}) }; }
+
+      saveCart(); renderCart(); closeModal(); openDrawer();
     };
 
     /*************** NAV / EVENTOS ***************/
