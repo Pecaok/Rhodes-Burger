@@ -87,17 +87,15 @@
       <aside class="card">
         <h3>Resumen</h3>
         <div id="items"></div>
-        <div id="friesLine" class="muted" style="margin-top:8px;display:none"></div>
         <div class="total"><span>Total</span> <span id="total">$0</span></div>
       </aside>
     </div>
   </main>
 
-  <!-- Firebase compat (no toco la conexión) -->
+  <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script>
-    // ⚠️ Usa tu config actual; no la toco.
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -136,12 +134,9 @@
 
     const itemsEl = $("#items");
     const totalEl = $("#total");
-    const friesLine = $("#friesLine");
 
     function renderResumen(){
       const rows=[];
-      let anyFries = false;
-
       for(const obj of Object.values(cart.burger)){
         const extrasTxt=[];
         if(obj.extras){
@@ -156,37 +151,65 @@
           </div>
           <div>${money((obj.item.price + (obj.extras?.patty||0)*(obj.extras?.EXTRA_PRICE_PATTY||0) + (obj.extras?.cheddar||0)*(obj.extras?.EXTRA_PRICE_CHEDDAR||0)) * obj.qty)}</div>
         </div>`);
-        anyFries = true;
       }
       for(const obj of Object.values(cart.drink)){
-        rows.push(`<div class="item"><div><strong>${obj.item.name}</strong></div><div>${money(obj.item.price*obj.qty)}</div></div>`);
+        rows.push(`<div class="item">
+          <div><strong>${obj.item.name}</strong></div>
+          <div>${money(obj.item.price*obj.qty)}</div>
+        </div>`);
       }
       itemsEl.innerHTML = rows.join("") || `<p class="muted">No hay productos en el carrito.</p>`;
       totalEl.textContent = money(calcTotal(cart));
-      friesLine.style.display = anyFries ? "block":"none";
     }
     renderResumen();
+
+    /*************** NUMERAR + GUARDAR PEDIDO ***************/
+    async function createNumberedOrder(orderBase){
+      const countersRef = db.collection("config").doc("counters");
+      const orderRef = db.collection("orders").doc(); // id ya creado
+
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(countersRef);
+        let last = 0;
+        if (snap.exists && typeof snap.data().orderLast === "number") {
+          last = snap.data().orderLast;
+        }
+        const next = last + 1;
+
+        if (snap.exists) {
+          tx.update(countersRef, { orderLast: next });
+        } else {
+          // si no existe, lo creo
+          tx.set(countersRef, { orderLast: next });
+        }
+
+        tx.set(orderRef, {
+          ...orderBase,
+          nro: next
+        });
+
+        return { nro: next, id: orderRef.id };
+      });
+
+      return { ...result, id: orderRef.id };
+    }
 
     /*************** CONFIRMAR ***************/
     const btnConfirmar = $("#btnConfirmar");
     btnConfirmar.onclick = async ()=>{
-      // Validaciones básicas
       if(Object.keys(cart.burger).length===0 && Object.keys(cart.drink).length===0){
         alert("Tu carrito está vacío."); return;
       }
       const nombre = $("#inpNombre").value.trim();
       if(!nombre){ alert("Ingresá tu nombre y apellido."); return; }
-
       const pagoEl = document.querySelector('input[name="pago"]:checked');
       if(!pagoEl){ alert("Elegí un medio de pago."); return; }
 
-      // 🔒 Entrega SIEMPRE forzada a Take Away
-      const entrega = "take_away";
-
+      const entrega = "take_away"; // fijo
       const telefono = $("#inpTelefono").value.trim();
-      const notas = $("#inpNotas").value.trim();
+      const notas = $("#inpNotas")?.value.trim() || "";
 
-      // Construyo items para guardar/mostrar
+      // Construir items para guardar/mostrar
       const itemsFS=[];
       for(const o of Object.values(cart.burger)){
         itemsFS.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0,
@@ -196,31 +219,34 @@
         itemsFS.push({type:"drink", id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0});
       }
 
-      const order = {
+      const orderBase = {
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         nombre, telefono,
         pago: pagoEl.value,
-        entrega, direccion: "", // ya no se usa
+        entrega, direccion: "",
         items: itemsFS,
         total: calcTotal(cart),
-        notes: notas || "",
-        status: "accepted"
+        notes: notas,
+        status: pagoEl.value === "mercado_pago" ? "pending_payment" : "accepted",
+        paid: false
       };
 
       try{
         btnConfirmar.disabled = true;
 
-        // ⬇️ Si usás WhatsApp para “Mercado Pago”, armá el mensaje acá (opcional)
-        if (order.pago === "mercado_pago") {
-          // 👉 Cambiá por el teléfono del local (código país sin +)
-          const phone = "541170596483"; // ejemplo
+        // 1) Guardar con NÚMERO de pedido (siempre)
+        const { nro, id } = await createNumberedOrder(orderBase);
+
+        if (orderBase.pago === "mercado_pago") {
+          // 2) Redirigir a WhatsApp con detalle + número de pedido
+          const phone = "541170596483"; // <-- poné aquí el número de la hamburguesería (sin +)
           const lines = [];
-          lines.push(`*Nuevo pedido*`);
-          lines.push(`Nombre: ${order.nombre}`);
-          if(order.telefono) lines.push(`Tel: ${order.telefono}`);
+          lines.push(`*Pedido #${nro}*`);
+          lines.push(`Nombre: ${orderBase.nombre}`);
+          if(orderBase.telefono) lines.push(`Tel: ${orderBase.telefono}`);
           lines.push(`Entrega: Take Away`);
           lines.push(`---------------------`);
-          for(const it of order.items){
+          for(const it of orderBase.items){
             if(it.type==="burger"){
               const ex = [];
               if(it.extras?.patty) ex.push(`+${it.extras.patty} med.`);
@@ -231,18 +257,20 @@
             }
           }
           lines.push(`---------------------`);
-          lines.push(`Total: ${money(order.total)}`);
-          if(order.notes) lines.push(`Notas: ${order.notes}`);
+          lines.push(`Total: ${money(orderBase.total)}`);
+          if(orderBase.notes) lines.push(`Notas: ${orderBase.notes}`);
+          // opcional, referencia interna
+          lines.push(`ID: ${id}`);
+
           const txt = encodeURIComponent(lines.join("\n"));
           clearCart();
           window.location.href = `https://wa.me/${phone}?text=${txt}`;
           return;
         }
 
-        // Efectivo: guardo y vuelvo
-        await db.collection("orders").add(order);
+        // Efectivo: ya quedó guardado con nro; confirmo y regreso
         clearCart();
-        alert("¡Pedido enviado! ✅");
+        alert(`¡Pedido #${nro} enviado! ✅`);
         window.location.href = "index.html";
       }catch(err){
         console.error(err);
