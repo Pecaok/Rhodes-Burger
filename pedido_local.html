@@ -47,6 +47,22 @@
     .divider{height:1px;background:#efefef;margin:10px 0}
     input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
   </style>
+
+  <!-- Guard de sesión: redirige al login si no hay sesión válida -->
+  <script>
+    const SESS_KEY = "rb_admin_session_v1";
+    (function enforceLogin(){
+      try{
+        const raw = localStorage.getItem(SESS_KEY);
+        if(!raw) throw new Error("no session");
+        const s = JSON.parse(raw);
+        if(!s || !s.exp || Date.now() > s.exp) throw new Error("expired");
+      }catch(e){
+        const next = location.pathname + location.search;
+        location.replace("login.html?next=" + encodeURIComponent(next));
+      }
+    })();
+  </script>
 </head>
 <body>
   <header>
@@ -57,6 +73,7 @@
       </a>
       <div class="spacer"></div>
       <button id="btnBell" class="btn ghost" title="Activar/desactivar sonido">🔔 Sonido</button>
+      <button id="btnLogout" class="btn ghost" title="Cerrar sesión">⎋ Cerrar sesión</button>
     </div>
   </header>
 
@@ -111,7 +128,7 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-    // 👉 Preferimos 'nro' (nuevo); caemos a 'orderNumber' si existiera en pedidos viejos.
+    // Preferimos 'nro'; fallback a 'orderNumber' si existiera en pedidos viejos
     function getOrderNumber(o){
       if (typeof o?.nro === "number" && o.nro > 0) return o.nro;
       if (typeof o?.orderNumber === "number" && o.orderNumber > 0) return o.orderNumber;
@@ -242,7 +259,6 @@
       const end   = new Date(y, m,   1, 0,0,0,0);
       return {start, end};
     }
-    function daysInMonth(y,m){ return new Date(y, m, 0).getDate(); }
 
     let monthChart;
     function ensureChart(labels, orders, revenue){
@@ -361,6 +377,7 @@
           ? '<p class="muted">No hay pedidos.</p>'
           : snap.docs.map(renderOrder).join("");
 
+        // Beep para pedidos nuevos (luego de la carga inicial)
         snap.docChanges().forEach(ch=>{
           if(ch.type==='added'){
             const id = ch.doc.id;
@@ -373,6 +390,15 @@
         });
         initialLoaded = true;
       });
+
+    // Logout
+    const btnLogout = document.getElementById("btnLogout");
+    if (btnLogout) {
+      btnLogout.onclick = ()=>{
+        try { localStorage.removeItem("rb_admin_session_v1"); } catch(e){}
+        location.replace("login.html");
+      };
+    }
   </script>
 </body>
 </html>
