@@ -20,6 +20,7 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600}
     .btn.ghost{background:#fff}
     .btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .btn.sm{ padding:6px 10px; font-size:13px; border-radius:10px }
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
 
@@ -31,6 +32,10 @@
     .kvalue{font-weight:800;font-size:20px}
     .chartwrap{width:100%;margin-top:10px}
     .chartbox{width:100%;height:260px}
+
+    .filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px}
+    .fbtn{border:1px solid var(--ring);background:#fff;border-radius:999px;padding:6px 12px;cursor:pointer}
+    .fbtn.active{background:#e9f8ef;border-color:#b7ebc9}
 
     .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
@@ -46,9 +51,16 @@
     .money{white-space:nowrap}
     .divider{height:1px;background:#efefef;margin:10px 0}
     input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
+
+    /* Chip de estado por color */
+    .chip.st-new    { background:#eafaf1; border-color:#bcebd0; }
+    .chip.st-prep   { background:#fff5e6; border-color:#ffd9a0; }
+    .chip.st-ready  { background:#e8f1ff; border-color:#b9d4ff; }
+    .chip.st-done   { background:#eef9ff; border-color:#bfe9ff; opacity:.85 }
+    .chip.st-cancel { background:#fff0f0; border-color:#ffc7c7; color:#aa2e25 }
   </style>
 
-  <!-- Guard de sesión: redirige al login si no hay sesión válida -->
+  <!-- Guard de sesión -->
   <script>
     const SESS_KEY = "rb_admin_session_v1";
     (function enforceLogin(){
@@ -96,13 +108,23 @@
         </div>
       </div>
 
-      <!-- Gráfico -->
       <div class="chartwrap">
         <canvas id="monthChart" class="chartbox"></canvas>
       </div>
     </div>
 
     <h1>Últimos pedidos</h1>
+
+    <!-- Filtros por estado -->
+    <div class="filters" id="filters">
+      <button class="fbtn active" data-filter="all">Todos <span class="muted" id="cnt_all">(—)</span></button>
+      <button class="fbtn" data-filter="nuevo">Nuevos <span class="muted" id="cnt_nuevo">(—)</span></button>
+      <button class="fbtn" data-filter="en_preparacion">En preparación <span class="muted" id="cnt_en_preparacion">(—)</span></button>
+      <button class="fbtn" data-filter="listo">Listos <span class="muted" id="cnt_listo">(—)</span></button>
+      <button class="fbtn" data-filter="entregado">Entregados <span class="muted" id="cnt_entregado">(—)</span></button>
+      <button class="fbtn" data-filter="cancelado">Cancelados <span class="muted" id="cnt_cancelado">(—)</span></button>
+    </div>
+
     <div id="orders"></div>
   </main>
 
@@ -128,7 +150,46 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-    // Preferimos 'nro'; fallback a 'orderNumber' si existiera en pedidos viejos
+    // Estado del pedido
+    const STATUS = {
+      NUEVO: "nuevo",
+      PREP: "en_preparacion",
+      LISTO: "listo",
+      ENTREGADO: "entregado",
+      CANCELADO: "cancelado",
+    };
+    const STATUS_LABEL = {
+      [STATUS.NUEVO]: "Nuevo",
+      [STATUS.PREP]: "En preparación",
+      [STATUS.LISTO]: "Listo",
+      [STATUS.ENTREGADO]: "Entregado",
+      [STATUS.CANCELADO]: "Cancelado",
+    };
+    const STATUS_CLASS = {
+      [STATUS.NUEVO]: "st-new",
+      [STATUS.PREP]: "st-prep",
+      [STATUS.LISTO]: "st-ready",
+      [STATUS.ENTREGADO]: "st-done",
+      [STATUS.CANCELADO]: "st-cancel",
+    };
+    // Prioridad para ordenar
+    const STATUS_PRIORITY = {
+      [STATUS.NUEVO]: 0,
+      [STATUS.PREP]: 1,
+      [STATUS.LISTO]: 2,
+      [STATUS.ENTREGADO]: 3,
+      [STATUS.CANCELADO]: 4,
+    };
+    function nextActions(current){
+      switch(current){
+        case STATUS.NUEVO: return [STATUS.PREP, STATUS.CANCELADO];
+        case STATUS.PREP:  return [STATUS.LISTO, STATUS.CANCELADO];
+        case STATUS.LISTO: return [STATUS.ENTREGADO, STATUS.CANCELADO];
+        default:           return [];
+      }
+    }
+
+    // Nro pedido
     function getOrderNumber(o){
       if (typeof o?.nro === "number" && o.nro > 0) return o.nro;
       if (typeof o?.orderNumber === "number" && o.orderNumber > 0) return o.orderNumber;
@@ -156,11 +217,35 @@
     }
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
 
-    function renderOrder(doc){
+    async function updateStatus(orderId, nextStatus){
+      if(!orderId || !nextStatus) return;
+      try{
+        await db.collection("orders").doc(orderId).update({
+          status: nextStatus,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          statusHistory: firebase.firestore.FieldValue.arrayUnion({
+            status: nextStatus,
+            at: firebase.firestore.FieldValue.serverTimestamp()
+          })
+        });
+        // Avisito cuando pasa a "Listo"
+        if(nextStatus === STATUS.LISTO){ playBeep(); }
+      }catch(e){
+        alert("No se pudo actualizar el estado: " + (e?.message||e));
+        console.error(e);
+      }
+    }
+
+    function renderOrder(doc, id){
       const o = doc.data();
       const when = o.createdAt?.toDate ? o.createdAt.toDate() : null;
       const dt   = when ? when.toLocaleDateString('es-AR') + ', ' + when.toLocaleTimeString('es-AR') : '—';
       const items = Array.isArray(o.items) ? o.items : [];
+      const nro = getOrderNumber(o);
+      const nroTxt = nro ? `#${nro}` : "#(s/n)";
+      const st = o.status || "nuevo";
+      const stLabel = STATUS_LABEL[st] || st;
+      const stClass = STATUS_CLASS[st] || "";
 
       const lines = items.map(it=>{
         if(it.type === "burger"){
@@ -189,8 +274,9 @@
       }).join("");
 
       const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
-      const nro = getOrderNumber(o);
-      const nroTxt = nro ? `#${nro}` : "#(s/n)";
+      const actions = nextActions(st).map(ns=>`
+        <button class="btn sm" onclick="updateStatus('${id}','${ns}')">${STATUS_LABEL[ns]}</button>
+      `).join("");
 
       return `
         <div class="order">
@@ -199,6 +285,7 @@
               <div class="order-title">${nroTxt} — ${o.nombre ?? 'Cliente'}</div>
               <div class="muted">${dt}</div>
               <div class="chips">
+                <span class="chip ${stClass}">Estado: ${stLabel}</span>
                 <span class="chip">Retiro: ${o.entrega||'—'}</span>
                 ${telChip}
                 <span class="chip">Pago: ${o.pago||'—'}</span>
@@ -206,6 +293,9 @@
             </div>
             <div class="right-total">${money(computeOrderTotal(o))}</div>
           </div>
+
+          ${actions ? `<div class="chips" style="margin-top:8px">${actions}</div>` : ''}
+
           <div class="divider"></div>
           <div class="items">
             ${lines || '<div class="muted">Sin ítems.</div>'}
@@ -366,16 +456,85 @@
     monthPicker.onchange = loadKPI;
     loadKPI();
 
-    /* ===================== LISTADO + AVISO SONORO ===================== */
+    /* ===================== LISTADO + FILTROS + AVISO NUEVOS ===================== */
     const ordersHost = $("#orders");
+    const filtersWrap = $("#filters");
+    const cnt_all = $("#cnt_all");
+    const cnt_nuevo = $("#cnt_nuevo");
+    const cnt_en_prep = $("#cnt_en_preparacion");
+    const cnt_listo = $("#cnt_listo");
+    const cnt_entregado = $("#cnt_entregado");
+    const cnt_cancelado = $("#cnt_cancelado");
+
+    let currentFilter = "all";
+    let lastDocs = []; // cache para re-render con filtros
     const seenIds = new Set();
     let initialLoaded = false;
 
-    db.collection("orders").orderBy("createdAt","desc").limit(100)
+    function setFilterUI(val){
+      currentFilter = val;
+      filtersWrap.querySelectorAll(".fbtn").forEach(b=>{
+        b.classList.toggle("active", b.dataset.filter===val);
+      });
+      renderListFromCache();
+    }
+
+    filtersWrap.addEventListener("click", (e)=>{
+      const b = e.target.closest(".fbtn");
+      if(!b) return;
+      setFilterUI(b.dataset.filter);
+    });
+
+    function updateCounters(docs){
+      const counts = {
+        all: docs.length,
+        nuevo: 0,
+        en_preparacion: 0,
+        listo: 0,
+        entregado: 0,
+        cancelado: 0
+      };
+      docs.forEach(d=>{
+        const st = (d.data().status || "nuevo");
+        if(counts[st] !== undefined) counts[st]++;
+      });
+      cnt_all.textContent = `(${counts.all})`;
+      cnt_nuevo.textContent = `(${counts.nuevo})`;
+      cnt_en_prep.textContent = `(${counts.en_preparacion})`;
+      cnt_listo.textContent = `(${counts.listo})`;
+      cnt_entregado.textContent = `(${counts.entregado})`;
+      cnt_cancelado.textContent = `(${counts.cancelado})`;
+    }
+
+    function renderListFromCache(){
+      if (!lastDocs.length){
+        ordersHost.innerHTML = '<p class="muted">No hay pedidos.</p>';
+        return;
+      }
+      // Filtro por estado
+      let docs = lastDocs;
+      if(currentFilter !== "all"){
+        docs = docs.filter(d => (d.data().status || "nuevo") === currentFilter);
+      }
+      // Orden por prioridad de estado y fecha desc
+      docs.sort((a,b)=>{
+        const A = a.data(), B = b.data();
+        const stA = STATUS_PRIORITY[A.status || "nuevo"] ?? 99;
+        const stB = STATUS_PRIORITY[B.status || "nuevo"] ?? 99;
+        if(stA !== stB) return stA - stB;
+        const tA = A.createdAt?.toMillis ? A.createdAt.toMillis() : 0;
+        const tB = B.createdAt?.toMillis ? B.createdAt.toMillis() : 0;
+        return tB - tA; // más nuevos arriba
+      });
+
+      ordersHost.innerHTML = docs.map(d => renderOrder(d, d.id)).join("");
+    }
+
+    db.collection("orders").orderBy("createdAt","desc").limit(300)
       .onSnapshot(snap=>{
-        ordersHost.innerHTML = snap.empty
-          ? '<p class="muted">No hay pedidos.</p>'
-          : snap.docs.map(renderOrder).join("");
+        lastDocs = snap.docs.slice();          // cache
+        updateCounters(lastDocs);              // contadores filtros
+        renderListFromCache();                 // pinto según filtro
 
         // Beep para pedidos nuevos (luego de la carga inicial)
         snap.docChanges().forEach(ch=>{
