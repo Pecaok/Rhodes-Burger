@@ -29,6 +29,8 @@
     .kbadge{min-width:160px;background:#f7f7f7;border:1px solid var(--ring);border-radius:14px;padding:10px 14px}
     .klabel{font-size:12px;color:var(--muted)}
     .kvalue{font-weight:800;font-size:20px}
+    .chartwrap{width:100%;margin-top:10px}
+    .chartbox{width:100%;height:260px}
 
     .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
@@ -76,12 +78,19 @@
           <div class="kvalue" id="kpiRevenue">—</div>
         </div>
       </div>
+
+      <!-- Gráfico -->
+      <div class="chartwrap">
+        <canvas id="monthChart" class="chartbox"></canvas>
+      </div>
     </div>
 
     <h1>Últimos pedidos</h1>
     <div id="orders"></div>
   </main>
 
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
   <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -206,13 +215,13 @@
       }catch(e){}
     }
 
-    /* ===================== KPI (Mensual) ===================== */
+    /* ===================== KPI + CHART (Mensual) ===================== */
     const monthPicker = $("#monthPicker");
     const kpiCount = $("#kpiCount");
     const kpiRevenue = $("#kpiRevenue");
     const btnReloadKPI = $("#btnReloadKPI");
 
-    // set default current month
+    // default: mes actual
     (function setDefaultMonth(){
       const d = new Date();
       const m = (d.getMonth()+1).toString().padStart(2,"0");
@@ -226,14 +235,91 @@
       const end   = new Date(y, m,   1, 0,0,0,0);
       return {start, end};
     }
+    function daysInMonth(y,m){ return new Date(y, m, 0).getDate(); } // m: 1-12
+
+    // Chart init
+    let monthChart;
+    function ensureChart(labels, orders, revenue){
+      const ctx = document.getElementById("monthChart").getContext("2d");
+      if(monthChart){ monthChart.destroy(); }
+      monthChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              type: 'bar',
+              label: 'Pedidos',
+              data: orders,
+              backgroundColor: 'rgba(46, 204, 113, 0.35)',
+              borderColor: '#2ecc71',
+              borderWidth: 1,
+              yAxisID: 'y',
+            },
+            {
+              type: 'line',
+              label: 'Ingresos ($)',
+              data: revenue,
+              borderColor: '#2ecc71',
+              backgroundColor: 'rgba(46, 204, 113, 0.10)',
+              borderWidth: 2,
+              tension: .25,
+              yAxisID: 'y2',
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: true },
+            tooltip: {
+              callbacks: {
+                label: function(ctx){
+                  if(ctx.datasetIndex===1){
+                    const v = ctx.parsed.y || 0;
+                    return `${ctx.dataset.label}: ${ (v).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}) }`;
+                  }
+                  return `${ctx.dataset.label}: ${ctx.parsed.y}`;
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero:true,
+              title: { display:true, text:'Pedidos' },
+              grid:{ color:'rgba(0,0,0,0.05)' }
+            },
+            y2: {
+              beginAtZero:true,
+              position:'right',
+              title: { display:true, text:'Ingresos ($)' },
+              grid:{ drawOnChartArea:false }
+            },
+            x: { grid:{ display:false } }
+          }
+        }
+      });
+    }
 
     async function loadKPI(){
       const ym = monthPicker.value;
       if(!ym) return;
+
+      // Rango & arreglo por días
+      const [yStr,mStr] = ym.split("-");
+      const y = parseInt(yStr,10), m = parseInt(mStr,10);
+      const totalDays = daysInMonth(y,m);
+      const labels = Array.from({length:totalDays}, (_,i)=> (i+1).toString());
+      const dayOrders = Array.from({length:totalDays}, ()=>0);
+      const dayRevenue = Array.from({length:totalDays}, ()=>0);
+
       const {start, end} = monthRange(ym);
       let count=0, revenue=0;
 
-      // Query por rango de fechas
+      // Query
       const snap = await db.collection("orders")
         .where("createdAt", ">=", firebase.firestore.Timestamp.fromDate(start))
         .where("createdAt", "<",  firebase.firestore.Timestamp.fromDate(end))
@@ -241,12 +327,22 @@
 
       snap.forEach(doc=>{
         const data = doc.data();
+        const when = data.createdAt?.toDate ? data.createdAt.toDate() : null;
+        const d = when ? when.getDate() : 1;
+        const idx = Math.max(0, Math.min(totalDays-1, d-1));
+        const total = computeOrderTotal(data);
         count += 1;
-        revenue += computeOrderTotal(data);
+        revenue += total;
+        dayOrders[idx] += 1;
+        dayRevenue[idx] += total;
       });
 
+      // KPIs
       kpiCount.textContent = count.toLocaleString("es-AR");
       kpiRevenue.textContent = money(revenue);
+
+      // Chart
+      ensureChart(labels, dayOrders, dayRevenue);
     }
 
     btnReloadKPI.onclick = loadKPI;
@@ -260,19 +356,17 @@
 
     db.collection("orders").orderBy("createdAt","desc").limit(100)
       .onSnapshot(snap=>{
-        // Render
         ordersHost.innerHTML = snap.empty
           ? '<p class="muted">No hay pedidos.</p>'
           : snap.docs.map(renderOrder).join("");
 
-        // Sonido para cambios "added" posteriores a la carga inicial
+        // Beep para nuevos luego de la carga inicial
         snap.docChanges().forEach(ch=>{
           if(ch.type==='added'){
             const id = ch.doc.id;
             if(!initialLoaded && !seenIds.has(id)){
               seenIds.add(id);
             } else {
-              // agregado luego de la primer carga
               playBeep();
             }
           }
