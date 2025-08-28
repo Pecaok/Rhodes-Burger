@@ -56,6 +56,9 @@
     .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
     .pill{border:1px solid var(--ring);background:#fff;border-radius:999px;padding:8px 12px;font-weight:600;cursor:pointer}
     .pill.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+
+    /* Banner de error suave */
+    .err{max-width:1100px;margin:0 auto 10px auto;padding:10px 14px;border-radius:12px;background:#fff3f3;border:1px solid #ffd0d0;color:#a33}
   </style>
 </head>
 <body>
@@ -67,6 +70,8 @@
       <button id="btnLogout" class="btn">⏻ Cerrar sesión</button>
     </div>
   </header>
+
+  <div id="err" class="err" style="display:none"></div>
 
   <main class="container">
     <div class="kpi">
@@ -95,28 +100,33 @@
     <div id="orders"></div>
   </main>
 
+  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script>
-    /* ===== GUARD (login simple) ===== */
+    // ===== Guard de sesión (login simple)
     const SESSION_KEY="rb_auth_v1";
     if(!localStorage.getItem(SESSION_KEY)) location.href="login.html";
     document.getElementById("btnLogout").onclick=()=>{localStorage.removeItem(SESSION_KEY);location.href="login.html";};
 
-    /* ===== FIREBASE ===== */
+    // ===== Firebase
     const firebaseConfig={apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
     firebase.initializeApp(firebaseConfig);
     const db=firebase.firestore();
 
-    /* ===== HELPERS ===== */
+    // ===== Helpers
     const $=s=>document.querySelector(s);
+    const errBox=$("#err");
+    function showErr(msg){ errBox.textContent=msg; errBox.style.display="block"; }
+    function hideErr(){ errBox.style.display="none"; errBox.textContent=""; }
     const money=n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const friesName=f=>f==="con_sazon"?"Con sazón":(f==="sin_sazon"?"Sin sazonar":"—");
     function unitWithExtras(it){const b=it.price||0,p=(it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0),c=(it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0);return b+p+c;}
     function computeOrderTotal(o){if(typeof o.total==="number")return o.total;let t=0;const items=Array.isArray(o.items)?o.items:[];for(const it of items){t+= (it.type==="burger"?unitWithExtras(it):(it.price||0))*(it.qty||0);}return t;}
+    let monthChart;
 
-    /* ===== RENDER ===== */
     function renderOrder(doc){
       const o=doc.data(), id=doc.id;
       const when=o.createdAt?.toDate?o.createdAt.toDate():null;
@@ -161,7 +171,7 @@
         </div>`;
     }
 
-    /* ===== BEEP ===== */
+    // ===== Sonido
     let soundEnabled=JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     const btnBell=$("#btnBell");
     function updateBellUI(){btnBell.classList.toggle("active",soundEnabled);}
@@ -169,47 +179,92 @@
     btnBell.onclick=()=>{soundEnabled=!soundEnabled;localStorage.setItem("rb_bell_enabled",JSON.stringify(soundEnabled));updateBellUI();};
     function playBeep(){if(!soundEnabled)return;try{const c=new (window.AudioContext||window.webkitAudioContext)(),o=c.createOscillator(),g=c.createGain();o.type="sine";o.frequency.value=880;o.connect(g);g.connect(c.destination);o.start();g.gain.setValueAtTime(0.0001,c.currentTime);g.gain.exponentialRampToValueAtTime(0.2,c.currentTime+0.02);g.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+0.18);o.stop(c.currentTime+0.2);}catch(e){}}
 
-    /* ===== KPI & CHART ===== */
-    const monthPicker=$("#monthPicker"),kpiCount=$("#kpiCount"),kpiRevenue=$("#kpiRevenue"),btnReloadKPI=$("#btnReloadKPI");
-    (function(){const d=new Date();const m=(d.getMonth()+1).toString().padStart(2,"0");monthPicker.value=`${d.getFullYear()}-${m}`;})();
-    function monthRange(ym){const [y,m]=ym.split("-").map(n=>parseInt(n,10));return {start:new Date(y,m-1,1,0,0,0,0),end:new Date(y,m,1,0,0,0,0)};}
-    let monthChart;
+    // ===== KPI + Chart
     function ensureChart(labels,orders,revenue){
-      const ctx=document.getElementById("monthChart").getContext("2d");
-      if(monthChart){monthChart.destroy();}
+      const canvas=$("#monthChart");
+      if(!window.Chart || !canvas) return; // Chart.js no cargó; seguir sin gráfico
+      if(monthChart){ try{ monthChart.destroy(); }catch{} }
+      const ctx=canvas.getContext("2d");
       monthChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[
         {type:'bar',label:'Pedidos',data:orders,backgroundColor:'rgba(46, 204, 113, 0.35)',borderColor:'#2ecc71',borderWidth:1,yAxisID:'y'},
         {type:'line',label:'Ingresos ($)',data:revenue,borderColor:'#2ecc71',backgroundColor:'rgba(46, 204, 113, 0.10)',borderWidth:2,tension:.25,yAxisID:'y2'}
       ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:true},tooltip:{callbacks:{label:(ctx)=>ctx.datasetIndex===1?`${ctx.dataset.label}: ${(ctx.parsed.y||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0})}`:`${ctx.dataset.label}: ${ctx.parsed.y}`}}},scales:{y:{beginAtZero:true,title:{display:true,text:'Pedidos'},grid:{color:'rgba(0,0,0,0.05)'}},y2:{beginAtZero:true,position:'right',title:{display:true,text:'Ingresos ($)'},grid:{drawOnChartArea:false}},x:{grid:{display:false}}}});
     }
+
     async function loadKPI(){
-      const ym=monthPicker.value;if(!ym)return;
-      const [yStr,mStr]=ym.split("-");const y=parseInt(yStr,10),m=parseInt(mStr,10);
-      const totalDays=new Date(y,m,0).getDate();
-      const labels=Array.from({length:totalDays},(_,i)=>String(i+1));
-      const dayOrders=Array.from({length:totalDays},()=>0);
-      const dayRevenue=Array.from({length:totalDays},()=>0);
-      const {start,end}=monthRange(ym);
-      let count=0,revenue=0;
-      const snap=await db.collection("orders")
-        .where("createdAt",">=",firebase.firestore.Timestamp.fromDate(start))
-        .where("createdAt","<",firebase.firestore.Timestamp.fromDate(end))
-        .get();
-      snap.forEach(d=>{const data=d.data();const when=data.createdAt?.toDate?data.createdAt.toDate():null;const idx=Math.max(0,Math.min(totalDays-1,(when?when.getDate():1)-1));const tot=computeOrderTotal(data);count+=1;revenue+=tot;dayOrders[idx]+=1;dayRevenue[idx]+=tot;});
-      kpiCount.textContent=count.toLocaleString("es-AR");kpiRevenue.textContent=money(revenue);
-      ensureChart(labels,dayOrders,dayRevenue);
+      try{
+        hideErr();
+        const monthPicker=$("#monthPicker");
+        const ym=monthPicker?.value || '';
+        if(!ym){ kpiCount.textContent='—'; kpiRevenue.textContent='—'; ensureChart([],[],[]); return; }
+
+        // rango
+        const [yStr,mStr]=ym.split("-");
+        const y=parseInt(yStr,10), m=parseInt(mStr,10);
+        if(!y || !m){ ensureChart([],[],[]); return; }
+
+        const totalDays=new Date(y,m,0).getDate();
+        const labels=Array.from({length:totalDays},(_,i)=>String(i+1));
+        const dayOrders=Array.from({length:totalDays},()=>0);
+        const dayRevenue=Array.from({length:totalDays},()=>0);
+
+        const start=new Date(y,m-1,1,0,0,0,0);
+        const end  =new Date(y,m,  1,0,0,0,0);
+
+        const snap=await db.collection("orders")
+          .where("createdAt",">=",firebase.firestore.Timestamp.fromDate(start))
+          .where("createdAt","<", firebase.firestore.Timestamp.fromDate(end))
+          .get();
+
+        let count=0,revenue=0;
+        snap.forEach(d=>{
+          const data=d.data();
+          const when=data.createdAt?.toDate?data.createdAt.toDate():null;
+          const idx=Math.max(0,Math.min(totalDays-1,(when?when.getDate():1)-1));
+          const tot=computeOrderTotal(data);
+          count++; revenue+=tot;
+          dayOrders[idx]+=1;
+          dayRevenue[idx]+=tot;
+        });
+
+        $("#kpiCount").textContent = count.toLocaleString("es-AR");
+        $("#kpiRevenue").textContent = money(revenue);
+        ensureChart(labels,dayOrders,dayRevenue);
+      }catch(err){
+        console.error(err);
+        showErr("No se pudieron cargar los KPIs: "+(err?.message||err));
+        ensureChart([],[],[]);
+      }
     }
-    btnReloadKPI.onclick=loadKPI;monthPicker.onchange=loadKPI;loadKPI();
 
-    /* ===== LISTADO + SONIDO ===== */
-    const ordersHost=$("#orders");const seenIds=new Set();let initialLoaded=false;
-    db.collection("orders").orderBy("createdAt","desc").limit(100).onSnapshot(snap=>{
-      ordersHost.innerHTML=snap.empty?'<p class="muted">No hay pedidos.</p>':snap.docs.map(renderOrder).join("");
-      snap.docChanges().forEach(ch=>{if(ch.type==='added'){const id=ch.doc.id;if(!initialLoaded&&!seenIds.has(id)){seenIds.add(id);}else{playBeep();}}});
-      initialLoaded=true;
-    });
+    // ===== Listado + Beep
+    const ordersHost=$("#orders");
+    function bindRealtime(){
+      const seenIds=new Set(); let initialLoaded=false;
+      db.collection("orders").orderBy("createdAt","desc").limit(100)
+        .onSnapshot(snap=>{
+          try{
+            hideErr();
+            ordersHost.innerHTML=snap.empty?'<p class="muted">No hay pedidos.</p>':snap.docs.map(renderOrder).join("");
+            snap.docChanges().forEach(ch=>{
+              if(ch.type==='added'){
+                const id=ch.doc.id;
+                if(!initialLoaded && !seenIds.has(id)){ seenIds.add(id); }
+                else { playBeep(); }
+              }
+            });
+            initialLoaded=true;
+          }catch(err){
+            console.error(err);
+            showErr("No se pudo renderizar el listado: "+(err?.message||err));
+          }
+        }, err=>{
+          console.error(err);
+          showErr("No se pudo suscribir a los pedidos: "+(err?.message||err));
+        });
+    }
 
-    /* ===== CAMBIO DE ESTADO (SIN arrayUnion, SIN serverTimestamp) ===== */
+    // ===== Cambio de estado (sin arrayUnion/serverTimestamp)
     async function setStatus(orderId,nextStatus){
       const ref=db.collection("orders").doc(orderId);
       await db.runTransaction(async tx=>{
@@ -221,12 +276,40 @@
       });
     }
     document.addEventListener("click",async e=>{
-      const btn=e.target.closest("[data-status]");if(!btn)return;
-      const id=btn.getAttribute("data-id");const st=btn.getAttribute("data-status");
-      btn.disabled=true;btn.classList.add("primary");
-      try{await setStatus(id,st);}catch(err){console.error(err);alert("No se pudo actualizar el estado: "+(err?.message||err));}
-      finally{btn.disabled=false;btn.classList.remove("primary");}
+      const btn=e.target.closest("[data-status]"); if(!btn) return;
+      const id=btn.getAttribute("data-id"), st=btn.getAttribute("data-status");
+      btn.disabled=true; btn.classList.add("primary");
+      try{ await setStatus(id,st); }
+      catch(err){ console.error(err); alert("No se pudo actualizar el estado: "+(err?.message||err)); }
+      finally{ btn.disabled=false; btn.classList.remove("primary"); }
     });
+
+    // ===== Inicio
+    async function start(){
+      try{
+        // Mes por defecto
+        const mp=$("#monthPicker");
+        if(mp){
+          const d=new Date();
+          const ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+          mp.value=ym; // fuerza el valor "YYYY-MM"
+          mp.onchange=loadKPI;
+          $("#btnReloadKPI").onclick=loadKPI;
+        }
+        await loadKPI();
+        bindRealtime();
+      }catch(err){
+        console.error(err);
+        showErr("Error inicializando la página: "+(err?.message||err));
+      }
+
+      // Sonido toggle
+      const btnBell=$("#btnBell");
+      function updateBellUI(){btnBell.classList.toggle("active",soundEnabled);}
+      updateBellUI();
+    }
+
+    window.addEventListener('load', start);
   </script>
 </body>
 </html>
