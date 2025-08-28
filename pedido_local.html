@@ -21,6 +21,7 @@
     .btn.ghost{background:#fff}
     .btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
     .btn.sm{ padding:6px 10px; font-size:13px; border-radius:10px }
+    .btn.sm[disabled]{opacity:.5; pointer-events:none}
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
 
@@ -150,7 +151,7 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-    // Estado del pedido
+    // Estados
     const STATUS = {
       NUEVO: "nuevo",
       PREP: "en_preparacion",
@@ -161,7 +162,7 @@
     const STATUS_LABEL = {
       [STATUS.NUEVO]: "Nuevo",
       [STATUS.PREP]: "En preparación",
-      [STATUS.LISTO]: "Listo",
+      [STATUS.LISTO]: "Listo para retirar",
       [STATUS.ENTREGADO]: "Entregado",
       [STATUS.CANCELADO]: "Cancelado",
     };
@@ -172,7 +173,6 @@
       [STATUS.ENTREGADO]: "st-done",
       [STATUS.CANCELADO]: "st-cancel",
     };
-    // Prioridad para ordenar
     const STATUS_PRIORITY = {
       [STATUS.NUEVO]: 0,
       [STATUS.PREP]: 1,
@@ -180,14 +180,6 @@
       [STATUS.ENTREGADO]: 3,
       [STATUS.CANCELADO]: 4,
     };
-    function nextActions(current){
-      switch(current){
-        case STATUS.NUEVO: return [STATUS.PREP, STATUS.CANCELADO];
-        case STATUS.PREP:  return [STATUS.LISTO, STATUS.CANCELADO];
-        case STATUS.LISTO: return [STATUS.ENTREGADO, STATUS.CANCELADO];
-        default:           return [];
-      }
-    }
 
     // Nro pedido
     function getOrderNumber(o){
@@ -228,8 +220,7 @@
             at: firebase.firestore.FieldValue.serverTimestamp()
           })
         });
-        // Avisito cuando pasa a "Listo"
-        if(nextStatus === STATUS.LISTO){ playBeep(); }
+        if(nextStatus === STATUS.LISTO){ playBeep(); } // ping al marcar "Listo"
       }catch(e){
         alert("No se pudo actualizar el estado: " + (e?.message||e));
         console.error(e);
@@ -243,7 +234,7 @@
       const items = Array.isArray(o.items) ? o.items : [];
       const nro = getOrderNumber(o);
       const nroTxt = nro ? `#${nro}` : "#(s/n)";
-      const st = o.status || "nuevo";
+      const st = o.status || STATUS.NUEVO;
       const stLabel = STATUS_LABEL[st] || st;
       const stClass = STATUS_CLASS[st] || "";
 
@@ -274,9 +265,17 @@
       }).join("");
 
       const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
-      const actions = nextActions(st).map(ns=>`
-        <button class="btn sm" onclick="updateStatus('${id}','${ns}')">${STATUS_LABEL[ns]}</button>
-      `).join("");
+
+      // SIEMPRE mostrar los 3 botones. Deshabilitar si ya está entregado/cancelado.
+      const isLocked = (st === STATUS.ENTREGADO || st === STATUS.CANCELADO);
+      const actions = `
+        <button class="btn sm ${st===STATUS.PREP?'active':''}" ${isLocked?'disabled':''}
+                onclick="updateStatus('${id}','${STATUS.PREP}')">En preparación</button>
+        <button class="btn sm ${st===STATUS.LISTO?'active':''}" ${isLocked?'disabled':''}
+                onclick="updateStatus('${id}','${STATUS.LISTO}')">Listo para retirar</button>
+        <button class="btn sm ${st===STATUS.ENTREGADO?'active':''}" ${isLocked?'disabled':''}
+                onclick="updateStatus('${id}','${STATUS.ENTREGADO}')">Entregado</button>
+      `;
 
       return `
         <div class="order">
@@ -294,7 +293,7 @@
             <div class="right-total">${money(computeOrderTotal(o))}</div>
           </div>
 
-          ${actions ? `<div class="chips" style="margin-top:8px">${actions}</div>` : ''}
+          <div class="chips" style="margin-top:10px">${actions}</div>
 
           <div class="divider"></div>
           <div class="items">
@@ -313,7 +312,6 @@
       localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled));
       updateBellUI();
     };
-
     function playBeep(){
       if(!soundEnabled) return;
       try{
@@ -467,7 +465,7 @@
     const cnt_cancelado = $("#cnt_cancelado");
 
     let currentFilter = "all";
-    let lastDocs = []; // cache para re-render con filtros
+    let lastDocs = [];
     const seenIds = new Set();
     let initialLoaded = false;
 
@@ -511,12 +509,10 @@
         ordersHost.innerHTML = '<p class="muted">No hay pedidos.</p>';
         return;
       }
-      // Filtro por estado
       let docs = lastDocs;
       if(currentFilter !== "all"){
         docs = docs.filter(d => (d.data().status || "nuevo") === currentFilter);
       }
-      // Orden por prioridad de estado y fecha desc
       docs.sort((a,b)=>{
         const A = a.data(), B = b.data();
         const stA = STATUS_PRIORITY[A.status || "nuevo"] ?? 99;
@@ -524,7 +520,7 @@
         if(stA !== stB) return stA - stB;
         const tA = A.createdAt?.toMillis ? A.createdAt.toMillis() : 0;
         const tB = B.createdAt?.toMillis ? B.createdAt.toMillis() : 0;
-        return tB - tA; // más nuevos arriba
+        return tB - tA;
       });
 
       ordersHost.innerHTML = docs.map(d => renderOrder(d, d.id)).join("");
@@ -532,11 +528,10 @@
 
     db.collection("orders").orderBy("createdAt","desc").limit(300)
       .onSnapshot(snap=>{
-        lastDocs = snap.docs.slice();          // cache
-        updateCounters(lastDocs);              // contadores filtros
-        renderListFromCache();                 // pinto según filtro
+        lastDocs = snap.docs.slice();
+        updateCounters(lastDocs);
+        renderListFromCache();
 
-        // Beep para pedidos nuevos (luego de la carga inicial)
         snap.docChanges().forEach(ch=>{
           if(ch.type==='added'){
             const id = ch.doc.id;
