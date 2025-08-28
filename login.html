@@ -1,77 +1,110 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Login - Rhodes</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Acceso • Rhodes Burgers</title>
+  <link rel="icon" href="images/logo.png" />
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 20px;
-      background: #f0f0f0;
+    :root{
+      --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
+      --radius:22px; --shadow:0 12px 34px rgba(0,0,0,.10); --ring:#eaeaea;
     }
-    .container {
-      max-width: 400px;
-      margin: 100px auto;
-      background: white;
-      padding: 30px;
-      border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-      text-align: center;
-    }
-    input {
-      width: 100%;
-      padding: 12px;
-      margin-bottom: 12px;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-    }
-    button {
-      width: 100%;
-      background: #333;
-      color: white;
-      border: none;
-      padding: 12px;
-      border-radius: 6px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-    p#error {
-      color: red;
-      margin-top: 10px;
-    }
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
+    header{position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06)}
+    .topbar{max-width:500px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
+    .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700}
+    .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain;margin-right:8px}
+    .container{max-width:500px;margin:32px auto;padding:0 12px}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px}
+    h1{font-size:24px;margin:8px 0 16px}
+    label{font-weight:600;margin-bottom:6px;display:block}
+    input{width:100%;padding:12px;border:1px solid var(--ring);border-radius:12px;outline:none}
+    .row{display:flex;gap:10px;align-items:center}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:2px solid var(--primary);background:#fff;padding:10px 16px;border-radius:999px;cursor:pointer;font-weight:700;color:var(--primary)}
+    .btn.primary{background:var(--primary);color:#fff}
+    .muted{color:var(--muted);font-size:14px}
+    .err{color:#c0392b;font-size:14px;margin-top:8px;display:none}
   </style>
 </head>
 <body>
-  <div class="container">
-    <h2>Acceso al panel del local</h2>
-    <input type="text" id="user" placeholder="Usuario" />
-    <input type="password" id="pass" placeholder="Contraseña" />
-    <button onclick="login()">Ingresar</button>
-    <p id="error"></p>
-  </div>
+  <header>
+    <div class="topbar">
+      <a class="brand" href="#">
+        <img src="images/logo.png" alt="Rhodes Burgers">
+        Acceso al local
+      </a>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="card">
+      <h1>Iniciar sesión</h1>
+
+      <div style="margin-bottom:12px">
+        <label>Usuario</label>
+        <input id="inpUser" placeholder="Ej: local" autocomplete="username" />
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label>Contraseña</label>
+        <div class="row">
+          <input id="inpPass" type="password" placeholder="********" autocomplete="current-password" style="flex:1" />
+          <button id="btnShow" class="btn" type="button" aria-label="Mostrar/ocultar">👁️</button>
+        </div>
+      </div>
+
+      <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px">
+        <button id="btnLogin" class="btn primary" type="button">Ingresar</button>
+        <div class="muted">Solo personal del local</div>
+      </div>
+
+      <div id="msgErr" class="err">Usuario o contraseña incorrectos.</div>
+    </div>
+  </main>
 
   <script>
-    const EXPIRA_MS = 10 * 60 * 1000;
+    // ===== Config de sesión y credenciales =====
+    const SESS_KEY = "rb_admin_session_v1";
+    // Cambiá estas credenciales:
+    const USERS = { "local": "Rhodes2025!" };
 
-    function login() {
-      const user = document.getElementById("user").value;
-      const pass = document.getElementById("pass").value;
-      const error = document.getElementById("error");
-
-      if (user === "admin" && pass === "rhodes123") {
-        localStorage.setItem("rhodesAuthTime", Date.now());
-        window.location.href = "pedido_local.html";
-      } else {
-        error.textContent = "Usuario o contraseña incorrectos.";
-      }
+    function setSession(user, hours=12){
+      const exp = Date.now() + hours*60*60*1000;
+      localStorage.setItem(SESS_KEY, JSON.stringify({ user, exp }));
+    }
+    function getNext(){
+      const u = new URL(location.href);
+      return u.searchParams.get("next") || "pedido_local.html";
     }
 
-    const lastLogin = localStorage.getItem("rhodesAuthTime");
-    if (lastLogin && (new Date() - new Date(parseInt(lastLogin)) < EXPIRA_MS)) {
-      window.location.href = "pedido_local.html";
+    // UI
+    const $ = s => document.querySelector(s);
+    const inpUser = $("#inpUser");
+    const inpPass = $("#inpPass");
+    const btnLogin = $("#btnLogin");
+    const btnShow  = $("#btnShow");
+    const msgErr   = $("#msgErr");
+
+    btnShow.onclick = ()=>{
+      inpPass.type = (inpPass.type === "password") ? "text" : "password";
+    };
+
+    function doLogin(){
+      msgErr.style.display = "none";
+      const u = (inpUser.value || "").trim();
+      const p = inpPass.value || "";
+      if (!u || !p){ msgErr.textContent = "Completá usuario y contraseña."; msgErr.style.display="block"; return; }
+      const ok = USERS[u] && USERS[u] === p;
+      if (!ok){ msgErr.textContent = "Usuario o contraseña incorrectos."; msgErr.style.display = "block"; return; }
+      setSession(u, 12);
+      location.replace(getNext());
     }
+
+    btnLogin.onclick = doLogin;
+    inpPass.addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
+    inpUser.addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
   </script>
 </body>
 </html>
