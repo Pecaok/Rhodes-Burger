@@ -23,8 +23,6 @@
     .danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
-
-    /* KPI Box */
     .kpi{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:14px 16px;margin:0 0 18px 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
     .kpi .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
     .kbadge{min-width:160px;background:#f7f7f7;border:1px solid var(--ring);border-radius:14px;padding:10px 14px}
@@ -32,13 +30,9 @@
     .kvalue{font-weight:800;font-size:20px}
     .chartwrap{width:100%;margin-top:10px}
     .chartbox{width:100%;height:260px}
-
-    /* Filtros */
     .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
     .chipf{background:#f3f3f3;border:1px solid var(--ring);color:#333;border-radius:999px;padding:6px 10px;font-size:13px;cursor:pointer}
     .chipf.active{background:#2ecc71;color:#fff;border-color:#2ecc71}
-
-    /* Órdenes */
     .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
     .order-title{font-weight:800}
@@ -57,6 +51,18 @@
   </style>
 </head>
 <body>
+  <script>
+    // Guard unificado — sólo protegemos aquí (login no redirige)
+    function isAdminOk(){
+      const raw = localStorage.getItem("rb_admin_ok");
+      if (raw == null) return false;
+      try { return JSON.parse(raw) === true; } catch(e){ return raw === "true"; }
+    }
+    (function guard(){
+      if (!isAdminOk()) { window.location.href = "login.html"; }
+    })();
+  </script>
+
   <header>
     <div class="topbar">
       <a class="brand" href="#">
@@ -87,16 +93,12 @@
           <div class="kvalue" id="kpiRevenue">—</div>
         </div>
       </div>
-
-      <!-- Gráfico -->
       <div class="chartwrap">
         <canvas id="monthChart" class="chartbox"></canvas>
       </div>
     </div>
 
     <h1>Últimos pedidos</h1>
-
-    <!-- Filtros de estado -->
     <div class="tabs" id="tabs">
       <span class="chipf active" data-f="all">Todos</span>
       <span class="chipf" data-f="new">Nuevos</span>
@@ -105,25 +107,13 @@
       <span class="chipf" data-f="delivered">Entregados</span>
       <span class="chipf" data-f="cancelled">Cancelados</span>
     </div>
-
     <div id="orders"></div>
   </main>
 
-  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
-  <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script>
-    /* ========== GUARD: exigir login ========== */
-    (function guard(){
-      try{
-        const ok = JSON.parse(localStorage.getItem("rb_admin_ok")||"false");
-        if(!ok) { window.location.href="login.html"; }
-      }catch(e){ window.location.href="login.html"; }
-    })();
-
-    /* ===================== FIREBASE ===================== */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -135,12 +125,11 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    /* ===================== HELPERS ===================== */
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
 
-    // ► NUEVO: número visible siempre
+    // Nº de pedido visible (usa orderNumber, si no, últimos 5 del id)
     function displayOrderNumber(doc){
       const o = doc.data();
       const n = o.orderNumber ?? o.number ?? o.seq ?? o.n;
@@ -159,16 +148,13 @@
       const items = Array.isArray(o.items) ? o.items : [];
       let t=0;
       for(const it of items){
-        if(it.type==="burger"){
-          t += unitWithExtras(it) * (it.qty||0);
-        }else{
-          t += (it.price||0) * (it.qty||0);
-        }
+        if(it.type==="burger"){ t += unitWithExtras(it) * (it.qty||0); }
+        else                 { t += (it.price||0) * (it.qty||0); }
       }
       return t;
     }
 
-    /* ===================== AUDIO (BEEP) ===================== */
+    // Sonido
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     const btnBell = $("#btnBell");
     function updateBellUI(){ btnBell.classList.toggle("active", soundEnabled); }
@@ -184,8 +170,7 @@
         const ctx = new (window.AudioContext||window.webkitAudioContext)();
         const o = ctx.createOscillator();
         const g = ctx.createGain();
-        o.type = "sine";
-        o.frequency.value = 880;
+        o.type = "sine"; o.frequency.value = 880;
         o.connect(g); g.connect(ctx.destination);
         o.start();
         g.gain.setValueAtTime(0.0001, ctx.currentTime);
@@ -195,19 +180,17 @@
       }catch(e){}
     }
 
-    /* ===================== LOGOUT ===================== */
+    // Logout
     $("#btnLogout").onclick = ()=>{
       localStorage.removeItem("rb_admin_ok");
       window.location.href="login.html";
     };
 
-    /* ===================== KPI + CHART (Mensual) ===================== */
+    // KPI + Chart
     const monthPicker = $("#monthPicker");
     const kpiCount = $("#kpiCount");
     const kpiRevenue = $("#kpiRevenue");
     const btnReloadKPI = $("#btnReloadKPI");
-
-    // default: mes actual
     (function setDefaultMonth(){
       const d = new Date();
       const m = (d.getMonth()+1).toString().padStart(2,"0");
@@ -231,67 +214,36 @@
         data: {
           labels,
           datasets: [
-            {
-              type: 'bar',
-              label: 'Pedidos',
-              data: orders,
-              backgroundColor: 'rgba(46, 204, 113, 0.35)',
-              borderColor: '#2ecc71',
-              borderWidth: 1,
-              yAxisID: 'y',
-            },
-            {
-              type: 'line',
-              label: 'Ingresos ($)',
-              data: revenue,
-              borderColor: '#2ecc71',
-              backgroundColor: 'rgba(46, 204, 113, 0.10)',
-              borderWidth: 2,
-              tension: .25,
-              yAxisID: 'y2',
-            }
+            { type:'bar',  label:'Pedidos',     data:orders,
+              backgroundColor:'rgba(46, 204, 113, 0.35)', borderColor:'#2ecc71', borderWidth:1, yAxisID:'y' },
+            { type:'line', label:'Ingresos ($)', data:revenue,
+              borderColor:'#2ecc71', backgroundColor:'rgba(46, 204, 113, 0.10)', borderWidth:2, tension:.25, yAxisID:'y2' }
           ]
         },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: { display: true },
-            tooltip: {
-              callbacks: {
-                label: function(ctx){
-                  if(ctx.datasetIndex===1){
-                    const v = ctx.parsed.y || 0;
-                    return `${ctx.dataset.label}: ${ (v).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}) }`;
-                  }
-                  return `${ctx.dataset.label}: ${ctx.parsed.y}`;
-                }
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          interaction:{mode:'index',intersect:false},
+          plugins:{ legend:{display:true},
+            tooltip:{ callbacks:{ label(ctx){
+              if(ctx.datasetIndex===1){
+                const v = ctx.parsed.y || 0;
+                return `${ctx.dataset.label}: ${(v).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0})}`;
               }
-            }
+              return `${ctx.dataset.label}: ${ctx.parsed.y}`;
+            }}}
           },
-          scales: {
-            y: {
-              beginAtZero:true,
-              title: { display:true, text:'Pedidos' },
-              grid:{ color:'rgba(0,0,0,0.05)' }
-            },
-            y2: {
-              beginAtZero:true,
-              position:'right',
-              title: { display:true, text:'Ingresos ($)' },
-              grid:{ drawOnChartArea:false }
-            },
-            x: { grid:{ display:false } }
+          scales:{
+            y:{beginAtZero:true,title:{display:true,text:'Pedidos'},grid:{color:'rgba(0,0,0,0.05)'}},
+            y2:{beginAtZero:true,position:'right',title:{display:true,text:'Ingresos ($)'},
+                grid:{drawOnChartArea:false}},
+            x:{grid:{display:false}}
           }
         }
       });
     }
 
     async function loadKPI(){
-      const ym = monthPicker.value;
-      if(!ym) return;
-
+      const ym = monthPicker.value; if(!ym) return;
       const [yStr,mStr] = ym.split("-");
       const y = parseInt(yStr,10), m = parseInt(mStr,10);
       const totalDays = daysInMonth(y,m);
@@ -313,39 +265,30 @@
         const d = when ? when.getDate() : 1;
         const idx = Math.max(0, Math.min(totalDays-1, d-1));
         const total = computeOrderTotal(data);
-        count += 1;
-        revenue += total;
-        dayOrders[idx] += 1;
-        dayRevenue[idx] += total;
+        count += 1; revenue += total;
+        dayOrders[idx] += 1; dayRevenue[idx] += total;
       });
 
       kpiCount.textContent = count.toLocaleString("es-AR");
       kpiRevenue.textContent = money(revenue);
       ensureChart(labels, dayOrders, dayRevenue);
     }
-
     btnReloadKPI.onclick = loadKPI;
     monthPicker.onchange = loadKPI;
     loadKPI();
 
-    /* ===================== LISTADO + ESTADOS + AVISO ===================== */
+    // Listado + estados
     const ordersHost = $("#orders");
     const tabs = $("#tabs");
-    let currentFilter = "all"; // all | new | in_prep | ready | delivered | cancelled
-
+    let currentFilter = "all";
     tabs.addEventListener("click", (e)=>{
       const el = e.target.closest("[data-f]");
       if(!el) return;
       currentFilter = el.dataset.f;
       tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
       el.classList.add("active");
-      // re-render con el último snapshot
       if(lastSnap) renderList(lastSnap);
     });
-
-    const seenIds = new Set();
-    let initialLoaded = false;
-    let lastSnap = null;
 
     function passFilter(o){
       if(currentFilter==="all") return true;
@@ -353,16 +296,13 @@
       return (o.status ?? "") === currentFilter;
     }
 
-    // Botones de estado -> update simple con fecha local (para evitar el error de serverTimestamp dentro de arrayUnion)
     async function setOrderStatus(id, next){
       try{
         const now = new Date();
         await db.collection("orders").doc(id).update({
           status: next,
-          // guardo pequeño historial simple
           statusHistory: firebase.firestore.FieldValue.arrayUnion({
-            to: next,
-            at: now.toISOString()
+            to: next, at: now.toISOString()
           })
         });
       }catch(e){
@@ -404,7 +344,6 @@
 
       const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
 
-      // Botones de estado (sólo visibles si no está entregado/cancelado)
       const st = o.status ?? "accepted";
       let stateBtns = "";
       if(st!=="delivered" && st!=="cancelled"){
@@ -439,6 +378,10 @@
         </div>`;
     }
 
+    let lastSnap = null;
+    const seenIds = new Set();
+    let initialLoaded = false;
+
     function renderList(snap){
       ordersHost.innerHTML = snap.empty
         ? '<p class="muted">No hay pedidos.</p>'
@@ -447,7 +390,6 @@
             .map(renderOrder)
             .join("");
 
-      // wire acciones de estado
       ordersHost.querySelectorAll(".order").forEach(card=>{
         const id = card.dataset.id;
         card.querySelectorAll("[data-act]").forEach(btn=>{
@@ -461,7 +403,6 @@
         lastSnap = snap;
         renderList(snap);
 
-        // Beep para nuevos luego de la carga inicial
         snap.docChanges().forEach(ch=>{
           if(ch.type==='added'){
             const id = ch.doc.id;
@@ -474,6 +415,8 @@
         });
         initialLoaded = true;
       });
+
+    (async ()=>{ await loadKPI(); })();
   </script>
 </body>
 </html>
