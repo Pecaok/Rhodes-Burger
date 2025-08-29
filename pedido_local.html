@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
+  <!-- Guardia de acceso con soporte ?auth=1 -->
   <script>
-    /* ===== Guardia anti-loop con soporte ?auth=1 ===== */
     (function guard(){
       const qs = new URLSearchParams(location.search);
       if (qs.get('auth') === '1') {
@@ -134,6 +134,47 @@
     const kpiErr = $("#kpiError");
     const ordersErr = $("#ordersError");
 
+    // mes por defecto (aunque el input no lo soporte)
+    (function setDefaultMonth(){
+      const d = new Date();
+      const m = String(d.getMonth()+1).padStart(2,"0");
+      try{ monthPicker.value = `${d.getFullYear()}-${m}`; }catch(_){}
+    })();
+
+    // Detecta y devuelve la fecha de un documento (sea Timestamp, ms o string)
+    function pickDocDate(obj){
+      const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
+      for (const k of cand){
+        if (obj[k]==null) continue;
+        const v = obj[k];
+        try{
+          if (v?.toDate) return v.toDate();                 // Firestore Timestamp
+          if (typeof v === 'number') return new Date(v);    // ms
+          if (typeof v === 'string') {
+            // ISO o similar, o yyyy-mm-dd
+            const d = new Date(v);
+            if (!isNaN(d.getTime())) return d;
+            // intentar parsear dd/mm/yyyy hh:mm
+            const m = v.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
+            if (m){
+              const day=+m[1], mon=+m[2]-1, yr=+m[3]<100?2000+(+m[3]):+m[3];
+              const hh=+m[4]||0, mm=+m[5]||0;
+              const d2=new Date(yr,mon,day,hh,mm,0,0);
+              if(!isNaN(d2.getTime())) return d2;
+            }
+          }
+        }catch(e){}
+      }
+      return null;
+    }
+
+    // Busca el "campo fecha" preferido, si existe
+    function chooseDateField(obj){
+      const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
+      for (const k of cand){ if (obj && obj[k]!=null) return k; }
+      return null;
+    }
+
     function displayOrderNumber(doc){
       const o = doc.data();
       const candidates = [
@@ -147,6 +188,7 @@
       }
       return `#${doc.id.slice(-5).toUpperCase()}`;
     }
+
     function unitWithExtras(it){
       const base = it.price || 0;
       const pz = (it.extras?.patty||0)   * (it.extras?.EXTRA_PRICE_PATTY||0);
@@ -190,24 +232,6 @@
     }
 
     /* ===================== KPI + CHART ===================== */
-    // Mes por defecto (aunque el input type="month" no sea soportado)
-    (function setDefaultMonth(){
-      const d = new Date();
-      const m = String(d.getMonth()+1).padStart(2,"0");
-      try{ monthPicker.value = `${d.getFullYear()}-${m}`; }catch(_){}
-    })();
-
-    function selectedYearMonth(){
-      const d = new Date();
-      return (monthPicker && monthPicker.value) ? monthPicker.value
-        : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    }
-    function daysInMonth(y,m){ return new Date(y, m, 0).getDate(); }
-    function monthRange(ym){
-      const [y,m] = ym.split("-").map(n=>parseInt(n,10));
-      return {start:new Date(y,m-1,1,0,0,0,0), end:new Date(y,m,1,0,0,0,0)};
-    }
-
     let monthChart;
     function ensureChart(labels, orders, revenue){
       const ctx = document.getElementById("monthChart").getContext("2d");
@@ -222,41 +246,53 @@
       });
     }
 
+    const monthKey = ()=> {
+      const d = monthPicker && monthPicker.value
+        ? new Date(monthPicker.value + '-01T00:00:00')
+        : new Date();
+      return {y:d.getFullYear(), m:d.getMonth()+1, days:new Date(d.getFullYear(), d.getMonth()+1, 0).getDate()};
+    };
+
     async function loadKPI(){
       kpiErr.style.display="none"; kpiErr.textContent="";
       try{
-        const ym = selectedYearMonth();
-        const [yStr,mStr] = ym.split("-"); const y=+yStr, m=+mStr;
-        const totalDays = daysInMonth(y,m);
-        const labels = Array.from({length:totalDays},(_,i)=>`${i+1}`);
-        const dayOrders = Array(totalDays).fill(0), dayRevenue = Array(totalDays).fill(0);
-        const {start,end} = monthRange(ym);
+        // Traemos hasta 1000 docs, ordenados por el campo de fecha si existe,
+        // o por documentId() si no sabemos.
+        const probe = await db.collection('orders').limit(1).get();
+        let dateField = null;
+        if (!probe.empty) dateField = chooseDateField(probe.docs[0].data());
+
+        let q = db.collection('orders');
+        if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
+        const snap = await q.limit(1000).get();
+
+        const {y,m,days} = monthKey();
+        const labels = Array.from({length:days},(_,i)=>`${i+1}`);
+        const dayOrders = Array(days).fill(0);
+        const dayRevenue = Array(days).fill(0);
         let count=0, revenue=0;
 
-        const snap = await db.collection("orders")
-          .where("createdAt", ">=", firebase.firestore.Timestamp.fromDate(start))
-          .where("createdAt", "<",  firebase.firestore.Timestamp.fromDate(end))
-          .get();
-
         snap.forEach(doc=>{
-          const d = doc.data(); const when = d.createdAt?.toDate ? d.createdAt.toDate() : null;
-          const idx = Math.max(0, Math.min(totalDays-1, (when?when.getDate():1)-1));
-          const tot = computeOrderTotal(d);
-          count += 1; revenue += tot;
-          dayOrders[idx] += 1; dayRevenue[idx] += tot;
+          const data=doc.data();
+          const dt = pickDocDate(data); if(!dt) return;
+          if (dt.getFullYear()!==y || (dt.getMonth()+1)!==m) return; // filtrar por mes elegido
+          const d = dt.getDate()-1;
+          dayOrders[d] += 1;
+          const tot = computeOrderTotal(data);
+          dayRevenue[d] += tot;
+          count++; revenue += tot;
         });
 
         $("#kpiCount").textContent = count.toLocaleString("es-AR");
         $("#kpiRevenue").textContent = money(revenue);
         ensureChart(labels, dayOrders, dayRevenue);
       }catch(err){
+        console.error(err);
         kpiErr.textContent = "No se pudo cargar el resumen mensual.";
         kpiErr.style.display="block";
-        console.error(err);
       }
     }
     $("#btnReloadKPI").onclick = loadKPI;
-    loadKPI();
 
     /* ===================== LISTADO + ESTADOS ===================== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
@@ -286,8 +322,8 @@
     }
 
     function renderOrder(doc){
-      const o=doc.data(); const when=o.createdAt?.toDate?o.createdAt.toDate():null;
-      const dt=when?when.toLocaleDateString('es-AR')+', '+when.toLocaleTimeString('es-AR'):'—';
+      const o=doc.data(); const dt=pickDocDate(o);
+      const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
       const items = Array.isArray(o.items)?o.items:[];
       const lines = items.map(it=>{
         if(it.type==="burger"){
@@ -317,7 +353,7 @@
         <div class="order-head">
           <div>
             <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
-            <div class="muted">${dt}</div>
+            <div class="muted">${dtText}</div>
             <div class="chips">
               <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
               <span class="chip">Estado: ${st}</span>
@@ -346,10 +382,15 @@
       });
     }
 
-    let lastSnap=null, initialLoaded=false; const seenIds=new Set();
-    try{
-      db.collection("orders").orderBy("createdAt","desc").limit(100)
-        .onSnapshot(snap=>{
+    // Suscripción robusta: intenta ordenar por el campo de fecha si existe, si no por documentId()
+    (async function subscribeOrders(){
+      try{
+        const probe = await db.collection("orders").limit(1).get();
+        let dateField = null;
+        if (!probe.empty) dateField = chooseDateField(probe.docs[0].data());
+        let q = db.collection("orders");
+        if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
+        q.limit(100).onSnapshot(snap=>{
           ordersErr.style.display="none"; ordersErr.textContent="";
           lastSnap=snap; renderList(snap);
           snap.docChanges().forEach(ch=>{
@@ -360,16 +401,20 @@
           });
           initialLoaded=true;
         }, (err)=>{
+          console.error(err);
           ordersErr.textContent="No se pudo cargar la lista de pedidos.";
           ordersErr.style.display="block";
-          console.error(err);
         });
-    }catch(err){
-      ordersErr.textContent="No se pudo inicializar la lista de pedidos.";
-      ordersErr.style.display="block";
-      console.error(err);
-    }
-  }); // DOMContentLoaded
+      }catch(err){
+        console.error(err);
+        ordersErr.textContent="No se pudo inicializar la lista de pedidos.";
+        ordersErr.style.display="block";
+      }
+    })();
+
+    // Cargar KPI al iniciar
+    loadKPI();
+  });
   </script>
 </body>
 </html>
