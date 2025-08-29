@@ -50,11 +50,23 @@
 </head>
 <body>
   <script>
+    // ===== Guardia ultra-robusta: evita loops y revalida con ?auth=1
     (function guard(){
-      const okV2 = localStorage.getItem("rb_auth_v2") === "ok";
-      const okLegacy = localStorage.getItem("rb_admin_ok") === "true";
-      if (!(okV2 || okLegacy)) {
-        location.replace("login.html?reason=guard");
+      const qs = new URLSearchParams(location.search);
+      if (qs.get('auth') === '1') {
+        try{
+          localStorage.setItem('rb_auth_v2','ok');
+          localStorage.setItem('rb_admin_ok','true'); // compat
+          sessionStorage.setItem('rb_auth_v2','ok');
+        }catch(e){}
+        // quitamos el query sin recargar
+        try{ history.replaceState(null,'',location.pathname); }catch(e){}
+      }
+      const ok = (localStorage.getItem('rb_auth_v2')==='ok')
+              || (localStorage.getItem('rb_admin_ok')==='true')
+              || (sessionStorage.getItem('rb_auth_v2')==='ok');
+      if (!ok) {
+        location.replace('login.html?reason=guard');
       }
     })();
   </script>
@@ -99,6 +111,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script>
+    /* ===================== FIREBASE ===================== */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -110,11 +123,11 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
+    /* ===================== HELPERS ===================== */
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
 
-    // === Nº de pedido robusto ===
     function displayOrderNumber(doc){
       const o = doc.data();
       const candidates = [
@@ -126,7 +139,6 @@
         const n = (typeof c === "string") ? parseInt(c,10) : c;
         if (Number.isFinite(n)) return `#${n}`;
       }
-      // fallback legible por si aún no generás número secuencial
       return `#${doc.id.slice(-5).toUpperCase()}`;
     }
 
@@ -142,7 +154,7 @@
       return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
     }
 
-    // Sonido + logout
+    /* ===================== AUDIO + SALIR ===================== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     const btnBell = $("#btnBell");
     const updateBellUI = ()=> btnBell.classList.toggle("active", soundEnabled);
@@ -155,6 +167,7 @@
     $("#btnLogout").onclick = ()=>{
       localStorage.removeItem("rb_auth_v2");
       localStorage.removeItem("rb_admin_ok");
+      sessionStorage.removeItem("rb_auth_v2");
       location.replace("login.html?reason=logout");
     };
     function playBeep(){
@@ -171,19 +184,22 @@
       }catch(e){}
     }
 
-    // KPI + chart
+    /* ===================== KPI + CHART ===================== */
     const monthPicker = $("#monthPicker");
     const kpiCount = $("#kpiCount");
     const kpiRevenue = $("#kpiRevenue");
+
     (function setDefaultMonth(){
       const d = new Date(); const m = (d.getMonth()+1).toString().padStart(2,"0");
       monthPicker.value = `${d.getFullYear()}-${m}`;
     })();
+
     function daysInMonth(y,m){ return new Date(y, m, 0).getDate(); }
     function monthRange(ym){
       const [y,m] = ym.split("-").map(n=>parseInt(n,10));
       return {start:new Date(y,m-1,1,0,0,0,0), end:new Date(y,m,1,0,0,0,0)};
     }
+
     let monthChart;
     function ensureChart(labels, orders, revenue){
       const ctx = document.getElementById("monthChart").getContext("2d");
@@ -197,6 +213,7 @@
           scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
       });
     }
+
     async function loadKPI(){
       const ym = monthPicker.value; if(!ym) return;
       const [yStr,mStr] = ym.split("-"); const y=+yStr, m=+mStr;
@@ -205,34 +222,45 @@
       const dayOrders = Array(totalDays).fill(0), dayRevenue = Array(totalDays).fill(0);
       const {start,end} = monthRange(ym);
       let count=0, revenue=0;
+
       const snap = await db.collection("orders")
         .where("createdAt", ">=", firebase.firestore.Timestamp.fromDate(start))
         .where("createdAt", "<",  firebase.firestore.Timestamp.fromDate(end)).get();
+
       snap.forEach(doc=>{
         const d = doc.data(); const when = d.createdAt?.toDate ? d.createdAt.toDate() : null;
         const idx = Math.max(0, Math.min(totalDays-1, (when?when.getDate():1)-1));
-        const tot = computeOrderTotal(d); count += 1; revenue += tot; dayOrders[idx] += 1; dayRevenue[idx] += tot;
+        const tot = computeOrderTotal(d);
+        count += 1; revenue += tot;
+        dayOrders[idx] += 1; dayRevenue[idx] += tot;
       });
+
       kpiCount.textContent = count.toLocaleString("es-AR");
       kpiRevenue.textContent = money(revenue);
       ensureChart(labels, dayOrders, dayRevenue);
     }
+
     monthPicker.onchange = loadKPI;
     loadKPI();
 
-    // Listado + estados
+    /* ===================== LISTADO + ESTADOS ===================== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
     let currentFilter="all", lastSnap=null, initialLoaded=false; const seenIds=new Set();
+
     tabs.addEventListener("click",(e)=>{
       const el=e.target.closest("[data-f]"); if(!el) return;
-      currentFilter=el.dataset.f; tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active")); el.classList.add("active");
+      currentFilter=el.dataset.f;
+      tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+      el.classList.add("active");
       if(lastSnap) renderList(lastSnap);
     });
+
     const passFilter = (o)=>{
       if(currentFilter==="all") return true;
       if(currentFilter==="new") return (o.status??"accepted")==="accepted"||(o.status??"accepted")==="pending_payment";
       return (o.status??"")===currentFilter;
     };
+
     async function setOrderStatus(id,next){
       try{
         await db.collection("orders").doc(id).update({
@@ -241,7 +269,8 @@
         });
       }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
     }
-    const renderOrder = (doc)=>{
+
+    function renderOrder(doc){
       const o=doc.data(); const when=o.createdAt?.toDate?o.createdAt.toDate():null;
       const dt=when?when.toLocaleDateString('es-AR')+', '+when.toLocaleTimeString('es-AR'):'—';
       const items = Array.isArray(o.items)?o.items:[];
@@ -259,6 +288,7 @@
           <div class="sub">Unit: <span class="money">${money(it.price||0)}</span> — Subtotal: <span class="money">${money(sub)}</span></div></div>`;
         }
       }).join("");
+
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
       const st=o.status??"accepted";
       const stateBtns = (st!=="delivered"&&st!=="cancelled")?
@@ -287,19 +317,20 @@
         <div class="divider"></div>
         <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
       </div>`;
-    };
+    }
+
     function renderList(snap){
       const docs = snap.docs.filter(d=>passFilter(d.data()));
       document.getElementById("orders").innerHTML = docs.length
         ? docs.map(renderOrder).join("")
         : '<p class="muted">No hay pedidos.</p>';
-
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id; card.querySelectorAll("[data-act]").forEach(btn=>{
           btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act));
         });
       });
     }
+
     let lastSnap=null, initialLoaded=false; const seenIds=new Set();
     db.collection("orders").orderBy("createdAt","desc").limit(100)
       .onSnapshot(snap=>{
