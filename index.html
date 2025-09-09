@@ -43,39 +43,13 @@
     .actions{display:flex;gap:8px;flex-wrap:wrap}
 
     /* Drawer carrito */
-    .drawer{
-      position:fixed;top:0;right:-460px;width:460px;max-width:92vw;
-      height:100vh; height:100dvh; /* asegura altura correcta en móviles */
-      background:#fff; box-shadow:-8px 0 30px rgba(0,0,0,.18); transition:right .25s; z-index:30;
-      display:flex;flex-direction:column;
-    }
+    .drawer{position:fixed;top:0;right:-460px;width:460px;max-width:92vw;height:100vh;background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.18);transition:right .25s;z-index:30;display:flex;flex-direction:column}
     .drawer.open{right:0}
     .drawer header{padding:14px 16px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
-    .drawer .body{
-      padding:14px 16px;overflow:auto;flex:1 1 auto;
-      -webkit-overflow-scrolling:touch;
-    }
-    .drawer-footer{
-      position:sticky; bottom:0; z-index:1; /* SIEMPRE visible */
-      flex:0 0 auto; border-top:1px solid #efefef; background:#fff;
-      padding:12px 16px max(12px, env(safe-area-inset-bottom));
-      box-shadow:0 -6px 16px rgba(0,0,0,.06);
-    }
-    .drawer-footer .total{
-      display:flex;align-items:center;justify-content:space-between;
-      font-weight:800;font-size:18px; margin-bottom:10px; /* espacio para botones */
-    }
-    .drawer-actions{display:flex;gap:10px}
-    .drawer-actions .btn{flex:1}
-
-    /* Mejor UX en pantallas estrechas: botones apilados y CTA full width */
-    @media (max-width:520px){
-      .drawer-actions{flex-direction:column}
-      .drawer-actions .btn{width:100%;justify-content:center}
-    }
-
+    .drawer .body{padding:14px 16px;overflow:auto;flex:1}
     .item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #efefef}
     .total{display:flex;align-items:center;justify-content:space-between;font-weight:800;font-size:18px;margin-top:10px}
+    .cart-actions{margin-top:12px;display:flex;gap:10px}
 
     /* Modal */
     .overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);display:none;align-items:center;justify-content:center;z-index:40}
@@ -92,6 +66,11 @@
     .pill input{accent-color:var(--primary)}
 
     .micro{font-size:12px;color:var(--muted)}
+
+    /* Asegurar que en mobile se pueda scrollear hasta los botones */
+    @media (max-width:480px){
+      .drawer .body{padding-bottom:120px}
+    }
   </style>
 </head>
 <body>
@@ -119,23 +98,19 @@
   <aside class="drawer" id="drawer">
     <header>
       <strong>Tu pedido</strong>
-      <button class="close btn ghost" id="closeDrawer" style="float:right">✕</button>
+      <button class="btn ghost" id="closeDrawer" style="float:right">✕</button>
     </header>
-
     <div class="body">
       <div id="cartItems"></div>
-    </div>
-
-    <footer class="drawer-footer">
       <div class="total">
         <span>Total</span>
         <span id="cartTotal">$0</span>
       </div>
-      <div class="drawer-actions">
+      <div class="cart-actions">
         <button class="btn ghost" id="btnVaciar">Vaciar</button>
-        <a class="btn primary" id="btnIrPagar" href="pedido_cliente.html">Ir a pagar</a>
+        <a class="btn primary" href="pedido_cliente.html">Ir a pagar</a>
       </div>
-    </footer>
+    </div>
   </aside>
 
   <!-- Modal Personalizar / Agregar -->
@@ -198,26 +173,56 @@
     </div>
   </div>
 
+  <!-- Firebase (App, Firestore y Auth – compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.firebasestorage.app",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+    };
+    if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+    window.ensureAuthReady = new Promise((resolve)=>{
+      firebase.auth().onAuthStateChanged(async (user)=>{
+        try{ if(!user) await firebase.auth().signInAnonymously(); }
+        catch(e){ console.error("Auth anónimo:", e); }
+        finally{
+          window.db = firebase.firestore();
+          resolve();
+        }
+      });
+    });
+  </script>
+
+  <script>
+  window.ensureAuthReady.then(()=>{
+
     /*************** PRECIOS DE EXTRAS ***************/
     const EXTRA_PRICE_PATTY   = 1000; // por medallón extra
     const EXTRA_PRICE_CHEDDAR = 500;  // por feta de cheddar extra
 
     /*************** DATOS ***************/
     const BURGERS = [
-      { id:"bigjohn_simple",name:"Big John Simple",price:10900,img:"images/Big John Simple.jpg",kind:"simple",desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan brioche.Incluye papas fritas." },
-      { id:"bigjohn_doble",name:"Big John Doble",price:13900,img:"images/Big John Doble.jpg",kind:"double",desc:"Doble Medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan briocheIncluye papas fritas." },
-      { id:"burguesa_simple",name:"Burguesa Simple",price:11900,img:"images/Burguesa Simple.jpg",kind:"simple",desc:"Medallón con doble cheddar, salsa mostaza y miel y cebolla caramelizada en pan Burgerluna.Incluye papas fritas." },
-      { id:"burguesa_doble",name:"Burguesa Doble",price:14900,img:"images/Burguesa Doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar, salsa mostaza y miel y cebolla caramelizada en pan Burgerluna.Incluye papas fritas." },
-      { id:"cheesebacon_spl",name:"CheeseBacon Simple",price:10500,img:"images/CheeseBacon Simple.jpg",kind:"simple",desc:"Medallón con doble cheddar y bacon en pan brioche.Incluye papas fritas." },
-      { id:"cheesebacon_dbl",name:"CheeseBacon Doble",price:13500,img:"images/CheeseBacon Doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar y bacon en pan brioche.Incluye papas fritas." },
-      { id:"cheese_simple",name:"Cheeseburger Simple",price:9500,img:"images/cheeseburger simple.jpg",kind:"simple",desc:"Medallón con doble cheddar en pan brioche.Incluye papas fritas." },
-      { id:"cheese_doble",name:"Cheeseburger Doble",price:12500,img:"images/cheeseburger doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar en pan brioche.Incluye papas fritas." },
-      { id:"rhodes_simple",name:"Rhodes Simple",price:11900,img:"images/Rhodes Simple.jpg",kind:"simple",desc:"Medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy en pan brioche.Incluye papas fritas." },
-      { id:"rhodes_doble",name:"Rhodes Doble",price:14900,img:"images/Rhodes Doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy en pan brioche.Incluye papas fritas." },
-      { id:"morgan_simple",name:"Morgan Simple",price:10900,img:"images/Morgan Simple.jpg",kind:"simple",desc:"Medallón con doble cheddar, bacon, salsa barbacoa y cebolla crispy en pan brioche.Incluye papas fritas." },
-      { id:"morgan_doble",name:"Morgan Doble",price:14500,img:"images/Morgan Doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar, bacon, salsa barbacoa y cebolla crispy en pan brioche.Incluye papas fritas." },
-      { id:"pollo_crispy",name:"Pollo Crispy",price:8900,img:"images/Pollo crispy.jpg",kind:"chicken",desc:"Pechuga de pollo crispy con lechuga y mayonesa en pan brioche.Incluye papas fritas." }
+      { id:"bigjohn_simple",name:"Big John Simple",price:10900,img:"images/Big John Simple.jpg",kind:"simple",desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan brioche. Incluye papas fritas." },
+      { id:"bigjohn_doble",name:"Big John Doble",price:13900,img:"images/Big John Doble.jpg",kind:"double",desc:"Doble Medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan brioche. Incluye papas fritas." },
+      { id:"burguesa_simple",name:"Burguesa Simple",price:11900,img:"images/Burguesa Simple.jpg",kind:"simple",desc:"Medallón con doble cheddar, salsa mostaza y miel y cebolla caramelizada en pan Burgerluna. Incluye papas fritas." },
+      { id:"burguesa_doble",name:"Burguesa Doble",price:14900,img:"images/Burguesa Doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar, salsa mostaza y miel y cebolla caramelizada en pan Burgerluna. Incluye papas fritas." },
+      { id:"cheesebacon_spl",name:"CheeseBacon Simple",price:10500,img:"images/CheeseBacon Simple.jpg",kind:"simple",desc:"Medallón con doble cheddar y bacon en pan brioche. Incluye papas fritas." },
+      { id:"cheesebacon_dbl",name:"CheeseBacon Doble",price:13500,img:"images/CheeseBacon Doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar y bacon en pan brioche. Incluye papas fritas." },
+      { id:"cheese_simple",name:"Cheeseburger Simple",price:9500,img:"images/cheeseburger simple.jpg",kind:"simple",desc:"Medallón con doble cheddar en pan brioche. Incluye papas fritas." },
+      { id:"cheese_doble",name:"Cheeseburger Doble",price:12500,img:"images/cheeseburger doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar en pan brioche. Incluye papas fritas." },
+      { id:"rhodes_simple",name:"Rhodes Simple",price:11900,img:"images/Rhodes Simple.jpg",kind:"simple",desc:"Medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy en pan brioche. Incluye papas fritas." },
+      { id:"rhodes_doble",name:"Rhodes Doble",price:14900,img:"images/Rhodes Doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy en pan brioche. Incluye papas fritas." },
+      { id:"morgan_simple",name:"Morgan Simple",price:10900,img:"images/Morgan Simple.jpg",kind:"simple",desc:"Medallón con doble cheddar, bacon, salsa barbacoa y cebolla crispy en pan brioche. Incluye papas fritas." },
+      { id:"morgan_doble",name:"Morgan Doble",price:14500,img:"images/Morgan Doble.jpg",kind:"double",desc:"Doble Medallón con doble cheddar, bacon, salsa barbacoa y cebolla crispy en pan brioche. Incluye papas fritas." },
+      { id:"pollo_crispy",name:"Pollo Crispy",price:8900,img:"images/Pollo crispy.jpg",kind:"chicken",desc:"Pechuga de pollo crispy con lechuga y mayonesa en pan brioche. Incluye papas fritas." },
+      // Hamburguesa de prueba $1
+      { id:"test_peso1",name:"Hamburguesa Test $1",price:1,img:"images/logo.png",kind:"simple",desc:"Para pruebas." }
     ];
     const DRINKS = [
       { id:"coca_org",  name:"Coca-Cola Original 500ml", price:0, img:"images/coca cola original.jpg" },
@@ -274,8 +279,7 @@
       if(type==="drink"){
         card.querySelector("[data-add]").onclick = ()=> addDrink(item);
       }else{
-        // Abrimos SIEMPRE el modal (para elegir papas). En simples mostrará "sin extras".
-        card.querySelector("[data-add]").onclick  = ()=> openCustomize(item);
+        card.querySelector("[data-add]").onclick  = ()=> openCustomize(item); // abrir modal para papas
         card.querySelector("[data-custom]").onclick = ()=> openCustomize(item);
       }
       return card;
@@ -339,7 +343,7 @@
       cartTotal.textContent = money(calcTotal());
       document.getElementById("cartBubble").textContent = `(${cartCount()})`;
     }
-    function changeQty(type,id,delta){
+    window.changeQty = function(type,id,delta){
       const bucket = cart[type]; if(!bucket) return;
       const cur = bucket[id]?.qty || 0;
       const next = Math.max(0, cur+delta);
@@ -352,8 +356,7 @@
       const bucket = cart.drink || (cart.drink={});
       if(!bucket[item.id]) bucket[item.id] = { qty:0, item };
       bucket[item.id].qty += 1;
-      saveCart(); renderCart();
-      // No abrir el carrito automáticamente
+      saveCart(); renderCart(); /* no abrir automáticamente el drawer */
     }
 
     /*************** MODAL PERSONALIZAR ***************/
@@ -390,13 +393,13 @@
       cheVal.textContent="0";
       resetFries();
 
-      // Precios visibles
+      // Precios en los rótulos
       const pi = document.getElementById("pattiesInfo");
       const ci = document.getElementById("cheInfo");
       if (pi) pi.textContent = `( + ${money(EXTRA_PRICE_PATTY)} c/u, máx. +2 )`;
       if (ci) ci.textContent = `( + ${money(EXTRA_PRICE_CHEDDAR)} c/u, máx. +3 )`;
 
-      // Extras según tipo
+      // Mostrar/ocultar extras según el tipo
       if(item.kind==="double"){
         rowPatties.style.display="flex";
         rowCheddar.style.display="flex";
@@ -414,11 +417,13 @@
     }
 
     btnAdd.onclick = ()=>{
+      // Papas obligatorias por hamburguesa
       const friesEl = document.querySelector('input[name="fries"]:checked');
       if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
 
       const qty = +qtyVal.textContent || 1;
 
+      // Extras + precios adjuntos para cálculo en todas las pantallas
       const extras = {
         patty:   0,
         cheddar: 0,
@@ -426,11 +431,11 @@
         EXTRA_PRICE_CHEDDAR
       };
       if(currentItem.kind==="double"){
-        extras.patty   = +patVal.textContent||0;
-        extras.cheddar = +cheVal.textContent||0;
+        extras.patty   = +patVal.textContent||0;    // máx 2
+        extras.cheddar = +cheVal.textContent||0;    // máx 3
       }else if(currentItem.kind==="chicken"){
         extras.patty   = 0;
-        extras.cheddar = +cheVal.textContent||0;
+        extras.cheddar = +cheVal.textContent||0;    // máx 3
       }
       const txt = notes.value.trim();
 
@@ -456,12 +461,13 @@
         };
       }
 
-      saveCart(); renderCart(); overlay.classList.remove("open");
-      // No abrir el carrito automáticamente
+      saveCart(); renderCart(); overlay.classList.remove("open"); /* no abrir automáticamente */
     };
 
     // start
     mount();
+
+  }); // ensureAuthReady
   </script>
 </body>
 </html>
