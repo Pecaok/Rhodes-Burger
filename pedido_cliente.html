@@ -107,8 +107,8 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    /*************** CONFIG FIREBASE (tu proyecto) ***************/
-    const firebaseConfig = {
+    /* ================== FIREBASE ================== */
+    var firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
       projectId: "rhodes-burguers",
@@ -116,208 +116,228 @@
       messagingSenderId: "951646688091",
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
-    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
+    if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+    var db = firebase.firestore();
 
-    /*************** UTILS + ESTADO ***************/
-    const CART_KEY = "rhodes_cart_v3";
-    const $ = s => document.querySelector(s);
-    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    /* ================== UTIL & ESTADO ================== */
+    var CART_KEY = "rhodes_cart_v3";
+    function $(s){ return document.querySelector(s); }
+    function money(n){ return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}); }
 
     function loadCart(){
-      try{ return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}}; }
-      catch{ return {burger:{},drink:{}}; }
+      try { return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}}; }
+      catch(e){ return {burger:{},drink:{}}; }
     }
-    let cart = loadCart();
+    var cart = loadCart();
 
     function unitWithExtras(it){
-      const base = it.item?.price || it.price || 0;
-      const pz = (it.extras?.patty||0)   * (it.extras?.EXTRA_PRICE_PATTY||0);
-      const ch = (it.extras?.cheddar||0) * (it.extras?.EXTRA_PRICE_CHEDDAR||0);
+      var base = (it.item && it.item.price) ? it.item.price : (it.price||0);
+      var pz = ((it.extras && it.extras.patty) ? it.extras.patty : 0) * ((it.extras && it.extras.EXTRA_PRICE_PATTY) ? it.extras.EXTRA_PRICE_PATTY : 0);
+      var ch = ((it.extras && it.extras.cheddar) ? it.extras.cheddar : 0) * ((it.extras && it.extras.EXTRA_PRICE_CHEDDAR) ? it.extras.EXTRA_PRICE_CHEDDAR : 0);
       return base + pz + ch;
     }
     function calcTotal(){
-      let t=0;
-      for(const b of Object.values(cart.burger)) t += unitWithExtras(b) * (b.qty||0);
-      for(const d of Object.values(cart.drink))  t += (d.item?.price||0) * (d.qty||0);
+      var t=0, k, obj;
+      for(k in cart.burger){ obj = cart.burger[k]; t += unitWithExtras(obj) * (obj.qty||0); }
+      for(k in cart.drink){ obj = cart.drink[k]; t += ((obj.item && obj.item.price)||0) * (obj.qty||0); }
       return t;
     }
-
     function friesName(v){ return v==="con_sazon" ? "Con sazón" : "Sin sazonar"; }
 
-    /*************** RENDER RESUMEN ***************/
-    const resumen = $("#resumen"), resTotal = $("#resTotal");
+    /* ================== RESUMEN ================== */
+    var resumen = $("#resumen"), resTotal = $("#resTotal");
     function renderResumen(){
       resumen.innerHTML = "";
+      var k, obj, extras, unit, line, html;
+
       // burgers
-      for(const obj of Object.values(cart.burger)){
-        const extras = [];
-        if(obj.extras?.patty)   extras.push(+${obj.extras.patty} medallón(es));
-        if(obj.extras?.cheddar) extras.push(+${obj.extras.cheddar} cheddar);
-        const unit = unitWithExtras(obj);
-        const line = unit * (obj.qty||0);
-        const sub = `
-          <div class="row" style="align-items:flex-start">
-            <div>
-              <div><strong>${obj.qty||0}× ${obj.item?.name||""}</strong></div>
-              <div class="muted">Papas: ${friesName(obj.fries)}${extras.length?` · ${extras.join(" · ")}`:""}</div>
-              ${obj.notes?<div class="muted">Notas: ${obj.notes}</div>:""}
-            </div>
-            <div>${money(line)}</div>
-          </div>`;
-        resumen.insertAdjacentHTML("beforeend", sub);
+      for(k in cart.burger){
+        obj = cart.burger[k];
+        extras = [];
+        if(obj.extras && obj.extras.patty){ extras.push("+"+obj.extras.patty+" medallón(es)"); }
+        if(obj.extras && obj.extras.cheddar){ extras.push("+"+obj.extras.cheddar+" cheddar"); }
+        unit = unitWithExtras(obj);
+        line = unit * (obj.qty||0);
+
+        html  = '<div class="row" style="align-items:flex-start">';
+        html +=   '<div>';
+        html +=     '<div><strong>'+(obj.qty||0)+'× '+(obj.item?obj.item.name:"")+'</strong></div>';
+        html +=     '<div class="muted">Papas: '+friesName(obj.fries)+(extras.length?(' · '+extras.join(' · ')):'')+'</div>';
+        if(obj.notes){ html += '<div class="muted">Notas: '+obj.notes+'</div>'; }
+        html +=   '</div>';
+        html +=   '<div>'+money(line)+'</div>';
+        html += '</div>';
+
+        resumen.insertAdjacentHTML("beforeend", html);
       }
+
       // drinks
-      for(const d of Object.values(cart.drink)){
-        const line = (d.item?.price||0) * (d.qty||0);
-        const sub = `
-          <div class="row">
-            <div><strong>${d.qty||0}× ${d.item?.name||""}</strong></div>
-            <div>${money(line)}</div>
-          </div>`;
-        resumen.insertAdjacentHTML("beforeend", sub);
+      for(k in cart.drink){
+        obj = cart.drink[k];
+        line = ((obj.item && obj.item.price)||0) * (obj.qty||0);
+
+        html  = '<div class="row">';
+        html +=   '<div><strong>'+(obj.qty||0)+'× '+(obj.item?obj.item.name:"")+'</strong></div>';
+        html +=   '<div>'+money(line)+'</div>';
+        html += '</div>';
+
+        resumen.insertAdjacentHTML("beforeend", html);
       }
       resTotal.textContent = money(calcTotal());
     }
     renderResumen();
 
-    /*************** CREAR PEDIDO ***************/
-    async function takeNextOrderNumber(tx){
-      const ref = db.collection("config").doc("counters");
-      const snap = await tx.get(ref);
-      const prev = snap.exists ? (snap.data().orderNumber||0) : 0;
-      const next = prev + 1;
-      tx.set(ref, {orderNumber: next}, {merge:true});
-      return next;
+    /* ================== ORDEN ================== */
+    function takeNextOrderNumber(tx){
+      var ref = db.collection("config").doc("counters");
+      return tx.get(ref).then(function(snap){
+        var prev = snap.exists ? (snap.data().orderNumber||0) : 0;
+        var next = prev + 1;
+        tx.set(ref, {orderNumber: next}, {merge:true});
+        return next;
+      });
+    }
+
+    function selectedPago(){
+      var el = document.querySelector('input[name="pago"]:checked');
+      return el ? el.value : "";
     }
 
     function buildOrder(orderNumber){
-      // aplanar items
-      const items = [];
-      for(const b of Object.values(cart.burger)){
+      var items = [], k, b, d;
+      // burgers
+      for(k in cart.burger){
+        b = cart.burger[k];
         items.push({
           type: "burger",
-          id: b.item?.id,
-          name: b.item?.name,
+          id: b.item ? b.item.id : "",
+          name: b.item ? b.item.name : "",
           qty: b.qty||0,
-          price: b.item?.price||0,
+          price: b.item ? (b.item.price||0) : 0,
           fries: b.fries||"sin_sazon",
           extras: {
-            patty: b.extras?.patty||0,
-            cheddar: b.extras?.cheddar||0,
-            EXTRA_PRICE_PATTY: b.extras?.EXTRA_PRICE_PATTY||0,
-            EXTRA_PRICE_CHEDDAR: b.extras?.EXTRA_PRICE_CHEDDAR||0
+            patty:   (b.extras && b.extras.patty)   ? b.extras.patty   : 0,
+            cheddar: (b.extras && b.extras.cheddar) ? b.extras.cheddar : 0,
+            EXTRA_PRICE_PATTY:   (b.extras && b.extras.EXTRA_PRICE_PATTY)   ? b.extras.EXTRA_PRICE_PATTY   : 0,
+            EXTRA_PRICE_CHEDDAR: (b.extras && b.extras.EXTRA_PRICE_CHEDDAR) ? b.extras.EXTRA_PRICE_CHEDDAR : 0
           },
           notes: b.notes||""
         });
       }
-      for(const d of Object.values(cart.drink)){
+      // drinks
+      for(k in cart.drink){
+        d = cart.drink[k];
         items.push({
-          type:"drink",
-          id: d.item?.id,
-          name: d.item?.name,
+          type: "drink",
+          id: d.item ? d.item.id : "",
+          name: d.item ? d.item.name : "",
           qty: d.qty||0,
-          price: d.item?.price||0
+          price: d.item ? (d.item.price||0) : 0
         });
       }
+
+      var pago = selectedPago();
+
       return {
-        orderNumber,
+        orderNumber: orderNumber,
         nombre: $("#inpNombre").value.trim(),
         telefono: $("#inpTelefono").value.trim(),
         entrega: "take_away",
-        pago: (document.querySelector('input[name="pago"]:checked')?.value)||"",
+        pago: pago,
         notes: $("#inpNotas").value.trim(),
-        status: (document.querySelector('input[name="pago"]:checked')?.value)==="mercado_pago" ? "pending_payment" : "accepted",
-        items,
+        status: (pago==="mercado_pago" ? "pending_payment" : "accepted"),
+        items: items,
         total: calcTotal(),
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
     }
 
     function buildWhatsappText(order){
-      const lines = [];
-      lines.push(Hola! Quiero pagar el pedido #${order.orderNumber});
-      lines.push(Nombre: ${order.nombre}${order.telefono? — Tel: ${order.telefono}:""});
-      lines.push(Retiro: Take Away);
-      lines.push(Medio de pago: Mercado Pago);
-      lines.push(------------------------------);
-      for(const it of order.items){
+      var lines = [];
+      lines.push("Hola! Quiero pagar el pedido #"+order.orderNumber);
+      lines.push("Nombre: "+order.nombre+(order.telefono?(" — Tel: "+order.telefono):""));
+      lines.push("Retiro: Take Away");
+      lines.push("Medio de pago: Mercado Pago");
+      lines.push("------------------------------");
+      var i, it, extras;
+      for(i=0;i<order.items.length;i++){
+        it = order.items[i];
         if(it.type === "burger"){
-          const extras = [];
-          if(it.extras?.patty)   extras.push(+${it.extras.patty} med);
-          if(it.extras?.cheddar) extras.push(+${it.extras.cheddar} cheddar);
-          lines.push(${it.qty}× ${it.name} (Papas: ${it.fries==="con_sazon"?"Con sazón":"Sin sazonar"}${extras.length? · ${extras.join(" · ")}:""}));
-          if(it.notes) lines.push(`  Notas: ${it.notes}`);
+          extras = [];
+          if(it.extras && it.extras.patty){ extras.push("+"+it.extras.patty+" med"); }
+          if(it.extras && it.extras.cheddar){ extras.push("+"+it.extras.cheddar+" cheddar"); }
+          lines.push(it.qty+"× "+it.name+" (Papas: "+(it.fries==="con_sazon"?"Con sazón":"Sin sazonar")+(extras.length?(" · "+extras.join(" · ")):"")+")");
+          if(it.notes){ lines.push("  Notas: "+it.notes); }
         }else{
-          lines.push(${it.qty}× ${it.name});
+          lines.push(it.qty+"× "+it.name);
         }
       }
-      lines.push(------------------------------);
-      lines.push(Total: ${money(order.total)});
+      lines.push("------------------------------");
+      lines.push("Total: "+money(order.total));
       return encodeURIComponent(lines.join("\n"));
     }
 
     function openWhatsApp(order){
-      // Cambiá por el número del local en formato internacional sin signos. Ej: 5493411234567
-      const PHONE_NUMBER = "5493411234567";
-      const txt = buildWhatsappText(order);
-      const url = https://wa.me/${PHONE_NUMBER}?text=${txt};
+      // Reemplazá por el número del local (ej. 5493411234567)
+      var PHONE_NUMBER = "5493411234567";
+      var txt = buildWhatsappText(order);
+      var url = "https://wa.me/"+PHONE_NUMBER+"?text="+txt;
       window.open(url, "_blank");
     }
 
-    async function createOrder(){
+    function clearCart(){
+      try { localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{}})); } catch(e){}
+    }
+
+    function createOrder(){
       if(!Object.keys(cart.burger||{}).length && !Object.keys(cart.drink||{}).length){
         alert("Tu carrito está vacío.");
-        return null;
+        return Promise.resolve(null);
       }
-      const nombre = $("#inpNombre").value.trim();
-      if(!nombre){ alert("Ingresá tu nombre."); return null; }
-      const pago = document.querySelector('input[name="pago"]:checked')?.value;
-      if(!pago){ alert("Elegí un medio de pago."); return null; }
+      var nombre = $("#inpNombre").value.trim();
+      if(!nombre){ alert("Ingresá tu nombre."); return Promise.resolve(null); }
+      var pago = selectedPago();
+      if(!pago){ alert("Elegí un medio de pago."); return Promise.resolve(null); }
 
-      let createdId = null;
-      let orderNumber = null;
+      var createdId = null, orderNumber = null;
 
-      await db.runTransaction(async (tx)=>{
-        orderNumber = await takeNextOrderNumber(tx);
-        const order = buildOrder(orderNumber);
-        const ref = db.collection("orders").doc(); // id auto
-        tx.set(ref, order);
-        createdId = ref.id;
+      return db.runTransaction(function(tx){
+        return takeNextOrderNumber(tx).then(function(next){
+          orderNumber = next;
+          var order = buildOrder(orderNumber);
+          var ref = db.collection("orders").doc(); // id auto
+          tx.set(ref, order);
+          createdId = ref.id;
+          return true;
+        });
+      }).then(function(){
+        return { id: createdId, orderNumber: orderNumber };
       });
-
-      return { id: createdId, orderNumber };
     }
 
-    function clearCart(){
-      try{ localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{}})); }catch{}
-    }
-
-    /*************** CONFIRMAR ***************/
-    document.getElementById("btnConfirmar").onclick = async ()=>{
-      try{
-        const res = await createOrder();
+    /* ================== CONFIRMAR ================== */
+    document.getElementById("btnConfirmar").onclick = function(){
+      createOrder().then(function(res){
         if(!res) return;
-        const pago = document.querySelector('input[name="pago"]:checked')?.value;
+        var pago = selectedPago();
 
-        // Guardamos para la pantalla de gracias
         localStorage.setItem("last_order_id", res.id);
 
-        // Obtenemos el pedido recién creado para WhatsApp (con items completos)
-        const doc = await db.collection("orders").doc(res.id).get();
-        const order = { id: res.id, ...doc.data() };
+        db.collection("orders").doc(res.id).get().then(function(doc){
+          var order = { id: res.id };
+          if(doc.exists){ order = Object.assign(order, doc.data()); }
 
-        if(pago === "mercado_pago"){
-          openWhatsApp(order); // abre nueva pestaña
-        }
+          if(pago === "mercado_pago"){
+            openWhatsApp(order);
+          }
 
-        clearCart();
-        // Vamos a gracias (con id por querystring)
-        location.href = gracias.html?id=${encodeURIComponent(res.id)};
-      }catch(e){
+          clearCart();
+          window.location.href = "gracias.html?id="+encodeURIComponent(res.id);
+        });
+      }).catch(function(e){
         console.error(e);
         alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
-      }
+      });
     };
   </script>
 </body>
