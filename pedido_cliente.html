@@ -92,10 +92,23 @@
     </div>
   </main>
 
+  <!-- Firebase compat -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script>
-    /*************** CONFIG API (Netlify → Neon) ***************/
-    const API_CREATE = "/.netlify/functions/create_order";
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.firebasestorage.app",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+  </script>
 
+  <script>
     /*************** UTIL ***************/
     const $ = s => document.querySelector(s);
     const CART_KEY = "rhodes_cart_v3";
@@ -127,16 +140,16 @@
       for(const obj of Object.values(cart.burger)){
         const extrasTxt=[];
         if(obj.extras){
-          if(obj.extras.patty) extrasTxt.push(+${obj.extras.patty} medallón(es));
-          if(obj.extras.cheddar) extrasTxt.push(+${obj.extras.cheddar} cheddar);
+          if(obj.extras.patty) extrasTxt.push(`+${obj.extras.patty} medallón(es)`);
+          if(obj.extras.cheddar) extrasTxt.push(`+${obj.extras.cheddar} cheddar`);
         }
         rows.push(`<div class="item">
           <div>
             <strong>${obj.item.name}</strong>
             <div class="muted">Papas: ${obj.fries==="con_sazon"?"Con sazón":"Sin sazonar"}</div>
-            ${extrasTxt.length?<div class="muted">${extrasTxt.join(" · ")}</div>:""}
+            ${extrasTxt.length?`<div class="muted">${extrasTxt.join(" · ")}</div>`:""}
           </div>
-          <div>${money((obj.item.price + (obj.extras?.patty||0)(obj.extras?.EXTRA_PRICE_PATTY||0) + (obj.extras?.cheddar||0)(obj.extras?.EXTRA_PRICE_CHEDDAR||0)) * obj.qty)}</div>
+          <div>${money((obj.item.price + (obj.extras?.patty||0)*(obj.extras?.EXTRA_PRICE_PATTY||0) + (obj.extras?.cheddar||0)*(obj.extras?.EXTRA_PRICE_CHEDDAR||0)) * obj.qty)}</div>
         </div>`);
       }
       for(const obj of Object.values(cart.drink)){
@@ -145,42 +158,45 @@
           <div>${money(obj.item.price*obj.qty)}</div>
         </div>`);
       }
-      itemsEl.innerHTML = rows.join("") || <p class="muted">No hay productos en el carrito.</p>;
+      itemsEl.innerHTML = rows.join("") || `<p class="muted">No hay productos en el carrito.</p>`;
       totalEl.textContent = money(calcTotal(cart));
     }
     renderResumen();
 
-    /*************** GUARDAR PEDIDO EN NEON ***************/
-    async function createOrderNeon(orderBase){
-      // Armamos payload para la Function
-      const body = {
-        items: orderBase.items,
-        total: orderBase.total,
-        datosCliente: {
-          nombre: orderBase.nombre,
-          telefono: orderBase.telefono || "",
-          pago: orderBase.pago,
-          entrega: orderBase.entrega,
-          notas: orderBase.notes || ""
-        }
-      };
+    /*************** NUMERAR + GUARDAR PEDIDO ***************/
+    async function createNumberedOrder(orderBase){
+      const countersRef = db.collection("config").doc("counters");
+      const orderRef = db.collection("orders").doc(); // id ya creado
 
-      const res = await fetch(API_CREATE, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body)
+      const result = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(countersRef);
+        let last = 0;
+        if (snap.exists && typeof snap.data().orderLast === "number") {
+          last = snap.data().orderLast;
+        }
+        const next = last + 1;
+
+        if (snap.exists) {
+          tx.update(countersRef, { orderLast: next });
+        } else {
+          // si no existe, lo creo
+          tx.set(countersRef, { orderLast: next });
+        }
+
+        tx.set(orderRef, {
+          ...orderBase,
+          nro: next
+        });
+
+        return { nro: next, id: orderRef.id };
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "No se pudo crear el pedido");
-      }
-      // data.pedido -> { id, numero, estado, created_at }
-      return data.pedido;
+
+      return { ...result, id: orderRef.id };
     }
 
     /*************** CONFIRMAR ***************/
     const btnConfirmar = $("#btnConfirmar");
-    btnConfirmar.onclick = async ()=> {
+    btnConfirmar.onclick = async ()=>{
       if(Object.keys(cart.burger).length===0 && Object.keys(cart.drink).length===0){
         alert("Tu carrito está vacío."); return;
       }
@@ -193,7 +209,7 @@
       const telefono = $("#inpTelefono").value.trim();
       const notas = $("#inpNotas")?.value.trim() || "";
 
-      // Construir items
+      // Construir items para guardar/mostrar
       const itemsFS=[];
       for(const o of Object.values(cart.burger)){
         itemsFS.push({type:"burger", id:o.item.id, name:o.item.name, qty:o.qty, price:Number(o.item.price)||0,
@@ -204,55 +220,57 @@
       }
 
       const orderBase = {
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         nombre, telefono,
         pago: pagoEl.value,
-        entrega,
+        entrega, direccion: "",
         items: itemsFS,
         total: calcTotal(cart),
-        notes: notas
+        notes: notas,
+        status: pagoEl.value === "mercado_pago" ? "pending_payment" : "accepted",
+        paid: false
       };
 
       try{
         btnConfirmar.disabled = true;
 
-        // Crear en Neon (vía Netlify Function) y obtener número
-        const pedido = await createOrderNeon(orderBase);
-        const nro = pedido.numero;
-        const id = pedido.id;
+        // 1) Guardar con NÚMERO de pedido (siempre)
+        const { nro, id } = await createNumberedOrder(orderBase);
 
         if (orderBase.pago === "mercado_pago") {
-          // Redirigimos a WhatsApp con detalle + número de pedido
-          const phone = "541170596483"; // <-- número del local (sin +)
+          // 2) Redirigir a WhatsApp con detalle + número de pedido
+          const phone = "541170596483"; // <-- poné aquí el número de la hamburguesería (sin +)
           const lines = [];
-          lines.push(*Pedido #${nro}*);
-          lines.push(Nombre: ${orderBase.nombre});
-          if(orderBase.telefono) lines.push(Tel: ${orderBase.telefono});
-          lines.push(Entrega: Take Away);
-          lines.push(---------------------);
+          lines.push(`*Pedido #${nro}*`);
+          lines.push(`Nombre: ${orderBase.nombre}`);
+          if(orderBase.telefono) lines.push(`Tel: ${orderBase.telefono}`);
+          lines.push(`Entrega: Take Away`);
+          lines.push(`---------------------`);
           for(const it of orderBase.items){
             if(it.type==="burger"){
               const ex = [];
-              if(it.extras?.patty) ex.push(+${it.extras.patty} med.);
-              if(it.extras?.cheddar) ex.push(+${it.extras.cheddar} cheddar);
-              lines.push(• ${it.qty}× ${it.name} — Papas: ${it.fries==="con_sazon"?"Con sazón":"Sin sazonar"}${ex.length? — ${ex.join(" / ")}:""});
+              if(it.extras?.patty) ex.push(`+${it.extras.patty} med.`);
+              if(it.extras?.cheddar) ex.push(`+${it.extras.cheddar} cheddar`);
+              lines.push(`• ${it.qty}× ${it.name} — Papas: ${it.fries==="con_sazon"?"Con sazón":"Sin sazonar"}${ex.length?` — ${ex.join(" / ")}`:""}`);
             }else{
-              lines.push(• ${it.qty}× ${it.name});
+              lines.push(`• ${it.qty}× ${it.name}`);
             }
           }
-          lines.push(---------------------);
-          lines.push(Total: ${money(orderBase.total)});
-          if(orderBase.notes) lines.push(Notas: ${orderBase.notes});
-          lines.push(ID: ${id});
+          lines.push(`---------------------`);
+          lines.push(`Total: ${money(orderBase.total)}`);
+          if(orderBase.notes) lines.push(`Notas: ${orderBase.notes}`);
+          // opcional, referencia interna
+          lines.push(`ID: ${id}`);
 
           const txt = encodeURIComponent(lines.join("\n"));
           clearCart();
-          window.location.href = https://wa.me/${phone}?text=${txt};
+          window.location.href = `https://wa.me/${phone}?text=${txt}`;
           return;
         }
 
-        // Efectivo: ya quedó guardado con nro
+        // Efectivo: ya quedó guardado con nro; confirmo y regreso
         clearCart();
-        alert(¡Pedido #${nro} enviado! ✅);
+        alert(`¡Pedido #${nro} enviado! ✅`);
         window.location.href = "index.html";
       }catch(err){
         console.error(err);
