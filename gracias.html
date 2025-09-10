@@ -134,12 +134,20 @@
       });
     }
 
+    // ================== STATE ==================
+    var orderId = qs("id");
+    var token = qs("t");
+    if(!orderId || !token){
+      $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
+    }
+
     // ================== REALTIME: PUBLIC STATUS ==================
-    function attachPublicListener(){
-      if(!token) return;
+    if(token){
       db.collection("order_public").doc(token).onSnapshot(function(snap){
         if(!snap.exists){ $("#info").innerHTML = '<span class="error">No encontramos este pedido público. Verificá el link.</span>'; return; }
         var d = snap.data();
+        // limpiar mensaje "Cargando estado…" cuando recibimos el primer snapshot
+        try{ var infoEl = document.getElementById("info"); if(infoEl) infoEl.textContent = ""; }catch(e){}
         $("#greet").textContent = d && d.nombre ? `, ${d.nombre}` : "";
         $("#badge").textContent = "Estado: "+statusLabel(d.status);
         $("#num").textContent = "#" + (d.orderNumber || "—");
@@ -147,6 +155,7 @@
         $("#pay").textContent = d.pago === 'efectivo' ? 'Efectivo' : 'Mercado Pago';
         $("#deliv").textContent = d.entrega === 'take_away' ? 'Take Away' : (d.entrega || '—');
         setActive(d.status);
+        // Si desde el doc público viene el orderId, priorizarlo
         if(d.orderId && !orderId){ orderId = d.orderId; attachPrivateListener(); }
       }, function(err){
         $("#info").innerHTML = '<span class="error">Error de conexión al estado público: '+(err && err.message ? err.message : err)+'</span>';
@@ -198,6 +207,7 @@
       privateUnsub = db.collection("orders").doc(orderId).onSnapshot(function(doc){
         if(!doc.exists){ return; }
         var d = doc.data();
+        // Seguridad básica: el trackToken del pedido debe coincidir con el token del link
         if(d.trackToken && token && d.trackToken !== token){
           $("#items").innerHTML = '<div class="small error">Por seguridad no mostramos el detalle porque el token no coincide.</div>';
           $("#resTotal").textContent = money(0);
@@ -209,28 +219,8 @@
       });
     }
 
-    // ================== BOOT: recuperar token si falta, luego adjuntar listeners ==================
-    function qs(name){ const p = new URLSearchParams(location.search); return p.get(name)||""; }
-    var orderId = qs("id");
-    var token   = qs("t");
-
-    (async function boot(){
-      if(!orderId && !token){
-        $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
-        return;
-      }
-      if(!token && orderId){
-        try{
-          var snap = await db.collection("orders").doc(orderId).get();
-          if(snap.exists && snap.data().trackToken){
-            token = snap.data().trackToken;
-            history.replaceState(null, "", location.pathname + "?id="+encodeURIComponent(orderId)+"&t="+encodeURIComponent(token));
-          }
-        }catch(e){}
-      }
-      if(token){ attachPublicListener(); }
-      attachPrivateListener();
-    })();
+    // Adjuntar listener si ya vino id por query
+    attachPrivateListener();
   </script>
 </body>
 </html>
