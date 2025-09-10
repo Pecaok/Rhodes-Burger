@@ -106,7 +106,7 @@
     function $(s){ return document.querySelector(s); }
     function qs(name){ const p = new URLSearchParams(location.search); return p.get(name)||""; }
     function money(n){ return (Number(n)||0).toLocaleString("es-AR", {style:"currency", currency:"ARS", maximumFractionDigits:0}); }
-    function fmt(ts){ if(!ts) return "—"; var d = ts.toDate(); return d.toLocaleString("es-AR", { dateStyle:"medium", timeStyle:"short" }); }
+    function fmt(ts){ if(!ts) return "—"; var d = ts.toDate ? ts.toDate() : new Date(ts); return d.toLocaleString("es-AR", { dateStyle:"medium", timeStyle:"short" }); }
     function friesName(v){ return v==="con_sazon" ? "Con sazón" : "Sin sazonar"; }
     function unitWithExtras(it){
       var base = (it.item && it.item.price) ? it.item.price : (it.price||0);
@@ -134,35 +134,36 @@
       });
     }
 
-    // ================== STATE ==================
-    var orderId = qs("id");
-    var token = qs("t");
-    if(!orderId || !token){
-      $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
+    // Mapear estado interno → estado público
+    function toPublic(s){
+      return ({
+        accepted:'accepted',
+        pending_payment:'pending_payment',
+        in_prep:'preparing',
+        preparing:'preparing',
+        ready:'ready_for_pickup',
+        ready_for_pickup:'ready_for_pickup',
+        delivered:'completed',
+        completed:'completed',
+        cancelled:'cancelled'
+      })[s] || s || 'accepted';
     }
 
-    // ================== REALTIME: PUBLIC STATUS ==================
-    if(token){
-      db.collection("order_public").doc(token).onSnapshot(function(snap){
-        if(!snap.exists){ $("#info").innerHTML = '<span class="error">No encontramos este pedido público. Verificá el link.</span>'; return; }
-        var d = snap.data();
-        // limpiar mensaje "Cargando estado…" cuando recibimos el primer snapshot
-        try{ var infoEl = document.getElementById("info"); if(infoEl) infoEl.textContent = ""; }catch(e){}
-        $("#greet").textContent = d && d.nombre ? `, ${d.nombre}` : "";
-        $("#badge").textContent = "Estado: "+statusLabel(d.status);
-        $("#num").textContent = "#" + (d.orderNumber || "—");
-        $("#time").textContent = fmt(d.updatedAt || d.createdAt);
-        $("#pay").textContent = d.pago === 'efectivo' ? 'Efectivo' : 'Mercado Pago';
-        $("#deliv").textContent = d.entrega === 'take_away' ? 'Take Away' : (d.entrega || '—');
-        setActive(d.status);
-        // Si desde el doc público viene el orderId, priorizarlo
-        if(d.orderId && !orderId){ orderId = d.orderId; attachPrivateListener(); }
-      }, function(err){
-        $("#info").innerHTML = '<span class="error">Error de conexión al estado público: '+(err && err.message ? err.message : err)+'</span>';
-      });
+    // ================== UI helpers para estado ==================
+    function updateStatusUI(pubStatus, updatedAt, pago, entrega){
+      // limpiar “Cargando estado…”
+      var infoEl = document.getElementById("info");
+      if(infoEl) infoEl.textContent = "";
+      // badge + pasos
+      $("#badge").textContent = "Estado: " + statusLabel(pubStatus);
+      setActive(pubStatus);
+      // times & datos
+      if(updatedAt) $("#time").textContent = fmt(updatedAt);
+      if(pago) $("#pay").textContent = pago === 'efectivo' ? 'Efectivo' : 'Mercado Pago';
+      if(entrega) $("#deliv").textContent = entrega === 'take_away' ? 'Take Away' : entrega;
     }
 
-    // ================== REALTIME: PRIVATE ITEMS ==================
+    // ================== ITEMS ==================
     function renderItems(order){
       var cont = $("#items");
       cont.innerHTML = "";
@@ -200,6 +201,26 @@
       $("#resTotal").textContent = money(total || order.total || 0);
     }
 
+    // ================== BOOT & LISTENERS ==================
+    var orderId = qs("id");
+    var token   = qs("t");
+
+    function attachPublicListener(){
+      if(!token) return;
+      db.collection("order_public").doc(token).onSnapshot(function(snap){
+        if(!snap.exists){
+          $("#info").innerHTML = '<span class="error">No encontramos este pedido público. Verificá el link.</span>';
+          return;
+        }
+        var d = snap.data();
+        $("#greet").textContent = d && d.nombre ? `, ${d.nombre}` : "";
+        $("#num").textContent = "#" + (d.orderNumber || "—");
+        updateStatusUI(d.status, d.updatedAt || d.createdAt, d.pago, d.entrega);
+      }, function(err){
+        $("#info").innerHTML = '<span class="error">Error de conexión al estado público: '+(err && err.message ? err.message : err)+'</span>';
+      });
+    }
+
     var privateUnsub = null;
     function attachPrivateListener(){
       if(!orderId) return;
@@ -207,20 +228,38 @@
       privateUnsub = db.collection("orders").doc(orderId).onSnapshot(function(doc){
         if(!doc.exists){ return; }
         var d = doc.data();
-        // Seguridad básica: el trackToken del pedido debe coincidir con el token del link
+        // Seguridad: solo si el token coincide mostramos detalle y usamos su estado
         if(d.trackToken && token && d.trackToken !== token){
           $("#items").innerHTML = '<div class="small error">Por seguridad no mostramos el detalle porque el token no coincide.</div>';
           $("#resTotal").textContent = money(0);
           return;
         }
         renderItems(d);
+        // ✅ Fallback: actualizar estado en la UI a partir del doc privado
+        updateStatusUI(toPublic(d.status || 'accepted'), d.updatedAt || d.createdAt, d.pago, d.entrega);
       }, function(err){
         $("#items").innerHTML = '<div class="small error">Error de conexión al detalle: '+(err && err.message ? err.message : err)+'</div>';
       });
     }
 
-    // Adjuntar listener si ya vino id por query
-    attachPrivateListener();
+    (async function boot(){
+      if(!orderId && !token){
+        $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
+        return;
+      }
+      // Si falta token, lo recuperamos del pedido y reescribimos URL
+      if(!token && orderId){
+        try{
+          var snap = await db.collection("orders").doc(orderId).get();
+          if(snap.exists && snap.data().trackToken){
+            token = snap.data().trackToken;
+            history.replaceState(null, "", location.pathname + "?id="+encodeURIComponent(orderId)+"&t="+encodeURIComponent(token));
+          }
+        }catch(e){}
+      }
+      if(token){ attachPublicListener(); }
+      attachPrivateListener();
+    })();
   </script>
 </body>
 </html>
