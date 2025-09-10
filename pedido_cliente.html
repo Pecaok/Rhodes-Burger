@@ -88,7 +88,7 @@
         <button class="btn primary" id="btnConfirmar">Ir a pagar</button>
       </div>
 
-      <div class="statusHint">Si elegís <strong>Mercado Pago</strong>, te redirigimos a WhatsApp con el detalle y el número de pedido.</div>
+      <div class="statusHint">Si elegís <strong>Efectivo</strong>, te redirigimos a WhatsApp con el detalle y el número de pedido.</div>
     </section>
 
     <!-- Derecha: resumen -->
@@ -162,7 +162,7 @@
         html  = '<div class="row" style="align-items:flex-start">';
         html +=   '<div>';
         html +=     '<div><strong>'+(obj.qty||0)+'× '+(obj.item?obj.item.name:"")+'</strong></div>';
-        html +=     '<div class="muted">Papas: '+friesName(obj.fries)+(extras.length?(' · '+extras.join(' · ')):'')+'</div>';
+        html +=     '<div class="muted">Papas: '+friesName(obj.fries)+(extras.length?(' · '+extras.join(' · ')):'' )+'</div>';
         if(obj.notes){ html += '<div class="muted">Notas: '+obj.notes+'</div>'; }
         html +=   '</div>';
         html +=   '<div>'+money(line)+'</div>';
@@ -254,10 +254,11 @@
 
     function buildWhatsappText(order){
       var lines = [];
-      lines.push("Hola! Quiero pagar el pedido #"+order.orderNumber);
+      var pagoLabel = (order.pago === 'efectivo') ? 'Efectivo' : 'Mercado Pago';
+      lines.push("Hola! Quiero confirmar el pedido #"+order.orderNumber);
       lines.push("Nombre: "+order.nombre+(order.telefono?(" — Tel: "+order.telefono):""));
       lines.push("Retiro: Take Away");
-      lines.push("Medio de pago: Mercado Pago");
+      lines.push("Medio de pago: "+pagoLabel);
       lines.push("------------------------------");
       var i, it, extras;
       for(i=0;i<order.items.length;i++){
@@ -274,11 +275,12 @@
       }
       lines.push("------------------------------");
       lines.push("Total: "+money(order.total));
+      if(order.notes){ lines.push("Notas del pedido: "+order.notes); }
       return encodeURIComponent(lines.join("\n"));
     }
 
     function openWhatsApp(order){
-      // Reemplazá por el número del local (ej. 5493411234567)
+      // ⚠️ Reemplazá por el número del local en formato internacional, sin + ni espacios. Ej: Argentina (Rosario): 5493411234567
       var PHONE_NUMBER = "5493411234567";
       var txt = buildWhatsappText(order);
       var url = "https://wa.me/"+PHONE_NUMBER+"?text="+txt;
@@ -327,7 +329,8 @@
           var order = { id: res.id };
           if(doc.exists){ order = Object.assign(order, doc.data()); }
 
-          if(pago === "mercado_pago"){
+          // ✅ Redirigir a WhatsApp SOLO si es EFECTIVO
+          if(pago === "efectivo"){
             openWhatsApp(order);
           }
 
