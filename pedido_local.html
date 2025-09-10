@@ -130,6 +130,36 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
+
+    // 🔁 Mapeos de estado: interno (UI local) → público (cliente) + etiquetas
+    const MAP_PUBLIC = {
+      'accepted':'accepted',
+      'pending_payment':'pending_payment',
+      'in_prep':'preparing',
+      'ready':'ready_for_pickup',
+      'delivered':'completed',
+      'cancelled':'cancelled',
+      // por si llega alguno de estos desde otra herramienta
+      'preparing':'preparing',
+      'ready_for_pickup':'ready_for_pickup',
+      'completed':'completed'
+    };
+    const LABELS = {
+      accepted:'Recibido',
+      pending_payment:'Pago pendiente',
+      in_prep:'En preparación',
+      preparing:'Preparando',
+      ready:'Listo para retirar',
+      ready_for_pickup:'Listo para retirar',
+      delivered:'Entregado',
+      completed:'Entregado',
+      cancelled:'Cancelado'
+    };
+    const NORMALIZE = { preparing:'in_prep', ready_for_pickup:'ready', completed:'delivered' };
+    const toPublic = c => MAP_PUBLIC[c] || c;
+    const norm = c => NORMALIZE[c] || c;
+    const labelStatus = c => LABELS[c] || c;
+
     const monthPicker = $("#monthPicker");
     const kpiErr = $("#kpiError");
     const ordersErr = $("#ordersError");
@@ -138,8 +168,8 @@
     (function setDefaultMonth(){
       const d = new Date();
       const m = String(d.getMonth()+1).padStart(2,"0");
-      try{ monthPicker.value = `${d.getFullYear()}-${m}`; }catch(_){}
-    })();
+      try{ monthPicker.value = `${d.getFullYear()}-${m}`; }catch(_){}}
+    )();
 
     // Detecta y devuelve la fecha de un documento (sea Timestamp, ms o string)
     function pickDocDate(obj){
@@ -151,10 +181,8 @@
           if (v?.toDate) return v.toDate();                 // Firestore Timestamp
           if (typeof v === 'number') return new Date(v);    // ms
           if (typeof v === 'string') {
-            // ISO o similar, o yyyy-mm-dd
             const d = new Date(v);
             if (!isNaN(d.getTime())) return d;
-            // intentar parsear dd/mm/yyyy hh:mm
             const m = v.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
             if (m){
               const day=+m[1], mon=+m[2]-1, yr=+m[3]<100?2000+(+m[3]):+m[3];
@@ -168,7 +196,6 @@
       return null;
     }
 
-    // Busca el "campo fecha" preferido, si existe
     function chooseDateField(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){ if (obj && obj[k]!=null) return k; }
@@ -190,7 +217,7 @@
     }
 
     function unitWithExtras(it){
-      const base = it.price || 0;
+      const base = (it.item && it.item.price) ? it.item.price : (it.price||0);
       const pz = (it.extras?.patty||0)   * (it.extras?.EXTRA_PRICE_PATTY||0);
       const ch = (it.extras?.cheddar||0) * (it.extras?.EXTRA_PRICE_CHEDDAR||0);
       return base + pz + ch;
@@ -198,7 +225,7 @@
     function computeOrderTotal(o){
       if (typeof o.total === "number") return o.total;
       const items = Array.isArray(o.items) ? o.items : [];
-      return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
+      return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : ((it.item?.price)||it.price||0)) * (it.qty||0), 0);
     }
 
     /* ===================== AUDIO + SALIR ===================== */
@@ -256,8 +283,6 @@
     async function loadKPI(){
       kpiErr.style.display="none"; kpiErr.textContent="";
       try{
-        // Traemos hasta 1000 docs, ordenados por el campo de fecha si existe,
-        // o por documentId() si no sabemos.
         const probe = await db.collection('orders').limit(1).get();
         let dateField = null;
         if (!probe.empty) dateField = chooseDateField(probe.docs[0].data());
@@ -275,7 +300,7 @@
         snap.forEach(doc=>{
           const data=doc.data();
           const dt = pickDocDate(data); if(!dt) return;
-          if (dt.getFullYear()!==y || (dt.getMonth()+1)!==m) return; // filtrar por mes elegido
+          if (dt.getFullYear()!==y || (dt.getMonth()+1)!==m) return;
           const d = dt.getDate()-1;
           dayOrders[d] += 1;
           const tot = computeOrderTotal(data);
@@ -306,18 +331,33 @@
       if(lastSnap) renderList(lastSnap);
     });
 
+    // Acepta equivalencias: preparing==in_prep, ready_for_pickup==ready, completed==delivered
     const passFilter = (o)=>{
       if(currentFilter==="all") return true;
+      const s = norm(o.status||"");
       if(currentFilter==="new") return (o.status??"accepted")==="accepted"||(o.status??"accepted")==="pending_payment";
-      return (o.status??"")===currentFilter;
+      return s===currentFilter;
     };
 
+    // ✅ Actualiza también el espejo público para el cliente
     async function setOrderStatus(id,next){
       try{
-        await db.collection("orders").doc(id).update({
+        const doc = await db.collection("orders").doc(id).get();
+        const tkn = doc.exists ? (doc.data().trackToken||null) : null;
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        const b = db.batch();
+        b.update(db.collection("orders").doc(id), {
           status: next,
-          statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()})
+          updatedAt: now,
+          statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next, at:new Date().toISOString()})
         });
+        if(tkn){
+          b.set(db.collection("order_public").doc(tkn), {
+            status: toPublic(next),
+            updatedAt: now
+          }, { merge:true });
+        }
+        await b.commit();
       }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
     }
 
@@ -334,15 +374,15 @@
           <div class="sub">Papas: ${friesName(it.fries)}${ex.length?` · ${ex.join(" · ")}`:""}${notes}
           <div>Unit: <span class="money">${money(unit)}</span> — Subtotal: <span class="money">${money(sub)}</span></div></div></div>`;
         } else {
-          const sub=(it.price||0)*(it.qty||0);
+          const price=((it.item?.price)||it.price||0); const sub=price*(it.qty||0);
           return `<div class="item"><div>• <strong>${it.qty||0}× ${it.name}</strong></div>
-          <div class="sub">Unit: <span class="money">${money(it.price||0)}</span> — Subtotal: <span class="money">${money(sub)}</span></div></div>`;
+          <div class="sub">Unit: <span class="money">${money(price)}</span> — Subtotal: <span class="money">${money(sub)}</span></div></div>`;
         }
       }).join("");
 
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
       const st=o.status??"accepted";
-      const stateBtns = (st!=="delivered"&&st!=="cancelled")?
+      const stateBtns = (norm(st)!=="delivered"&&st!=="cancelled")?
         `<div class="stateBtns">
            <button class="btn" data-act="in_prep">En preparación</button>
            <button class="btn" data-act="ready">Listo para retirar</button>
@@ -356,7 +396,7 @@
             <div class="muted">${dtText}</div>
             <div class="chips">
               <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
-              <span class="chip">Estado: ${st}</span>
+              <span class="chip">Estado: ${labelStatus(st)}</span>
               <span class="chip">Retiro: ${o.entrega||'—'}</span>
               ${telChip}
               <span class="chip">Pago: ${o.pago||'—'}</span>
