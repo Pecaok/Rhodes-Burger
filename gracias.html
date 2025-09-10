@@ -134,15 +134,9 @@
       });
     }
 
-    // ================== STATE ==================
-    var orderId = qs("id");
-    var token = qs("t");
-    if(!orderId || !token){
-      $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
-    }
-
     // ================== REALTIME: PUBLIC STATUS ==================
-    if(token){
+    function attachPublicListener(){
+      if(!token) return;
       db.collection("order_public").doc(token).onSnapshot(function(snap){
         if(!snap.exists){ $("#info").innerHTML = '<span class="error">No encontramos este pedido público. Verificá el link.</span>'; return; }
         var d = snap.data();
@@ -153,7 +147,6 @@
         $("#pay").textContent = d.pago === 'efectivo' ? 'Efectivo' : 'Mercado Pago';
         $("#deliv").textContent = d.entrega === 'take_away' ? 'Take Away' : (d.entrega || '—');
         setActive(d.status);
-        // Si desde el doc público viene el orderId, priorizarlo
         if(d.orderId && !orderId){ orderId = d.orderId; attachPrivateListener(); }
       }, function(err){
         $("#info").innerHTML = '<span class="error">Error de conexión al estado público: '+(err && err.message ? err.message : err)+'</span>';
@@ -205,7 +198,6 @@
       privateUnsub = db.collection("orders").doc(orderId).onSnapshot(function(doc){
         if(!doc.exists){ return; }
         var d = doc.data();
-        // Seguridad básica: el trackToken del pedido debe coincidir con el token del link
         if(d.trackToken && token && d.trackToken !== token){
           $("#items").innerHTML = '<div class="small error">Por seguridad no mostramos el detalle porque el token no coincide.</div>';
           $("#resTotal").textContent = money(0);
@@ -217,8 +209,28 @@
       });
     }
 
-    // Adjuntar listener si ya vino id por query
-    attachPrivateListener();
+    // ================== BOOT: recuperar token si falta, luego adjuntar listeners ==================
+    function qs(name){ const p = new URLSearchParams(location.search); return p.get(name)||""; }
+    var orderId = qs("id");
+    var token   = qs("t");
+
+    (async function boot(){
+      if(!orderId && !token){
+        $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
+        return;
+      }
+      if(!token && orderId){
+        try{
+          var snap = await db.collection("orders").doc(orderId).get();
+          if(snap.exists && snap.data().trackToken){
+            token = snap.data().trackToken;
+            history.replaceState(null, "", location.pathname + "?id="+encodeURIComponent(orderId)+"&t="+encodeURIComponent(token));
+          }
+        }catch(e){}
+      }
+      if(token){ attachPublicListener(); }
+      attachPrivateListener();
+    })();
   </script>
 </body>
 </html>
