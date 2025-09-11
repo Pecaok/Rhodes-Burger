@@ -130,56 +130,24 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
-
-    // 🔁 Mapeos de estado: interno (UI local) → público (cliente) + etiquetas
-    const MAP_PUBLIC = {
-      'accepted':'accepted',
-      'pending_payment':'pending_payment',
-      'in_prep':'preparing',
-      'ready':'ready_for_pickup',
-      'delivered':'completed',
-      'cancelled':'cancelled',
-      // por si llega alguno de estos desde otra herramienta
-      'preparing':'preparing',
-      'ready_for_pickup':'ready_for_pickup',
-      'completed':'completed'
-    };
-    const LABELS = {
-      accepted:'Recibido',
-      pending_payment:'Pago pendiente',
-      in_prep:'En preparación',
-      preparing:'Preparando',
-      ready:'Listo para retirar',
-      ready_for_pickup:'Listo para retirar',
-      delivered:'Entregado',
-      completed:'Entregado',
-      cancelled:'Cancelado'
-    };
-    const NORMALIZE = { preparing:'in_prep', ready_for_pickup:'ready', completed:'delivered' };
-    const toPublic = c => MAP_PUBLIC[c] || c;
-    const norm = c => NORMALIZE[c] || c;
-    const labelStatus = c => LABELS[c] || c;
-
     const monthPicker = $("#monthPicker");
     const kpiErr = $("#kpiError");
     const ordersErr = $("#ordersError");
 
-    // mes por defecto (aunque el input no lo soporte)
     (function setDefaultMonth(){
       const d = new Date();
       const m = String(d.getMonth()+1).padStart(2,"0");
-      try{ monthPicker.value = `${d.getFullYear()}-${m}`; }catch(_){}}
-    )();
+      try{ monthPicker.value = `${d.getFullYear()}-${m}`; }catch(_){}
+    })();
 
-    // Detecta y devuelve la fecha de un documento (sea Timestamp, ms o string)
     function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
         if (obj[k]==null) continue;
         const v = obj[k];
         try{
-          if (v?.toDate) return v.toDate();                 // Firestore Timestamp
-          if (typeof v === 'number') return new Date(v);    // ms
+          if (v?.toDate) return v.toDate();
+          if (typeof v === 'number') return new Date(v);
           if (typeof v === 'string') {
             const d = new Date(v);
             if (!isNaN(d.getTime())) return d;
@@ -217,7 +185,7 @@
     }
 
     function unitWithExtras(it){
-      const base = (it.item && it.item.price) ? it.item.price : (it.price||0);
+      const base = it.price || 0;
       const pz = (it.extras?.patty||0)   * (it.extras?.EXTRA_PRICE_PATTY||0);
       const ch = (it.extras?.cheddar||0) * (it.extras?.EXTRA_PRICE_CHEDDAR||0);
       return base + pz + ch;
@@ -225,38 +193,98 @@
     function computeOrderTotal(o){
       if (typeof o.total === "number") return o.total;
       const items = Array.isArray(o.items) ? o.items : [];
-      return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : ((it.item?.price)||it.price||0)) * (it.qty||0), 0);
+      return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
     }
 
-    /* ===================== AUDIO + SALIR ===================== */
+    /* ===================== SONIDO ===================== */
+    // Colocá un archivo en alguno de estos paths para usarlo automáticamente
+    const SOUND_PATHS = [
+      "sound.mp3",          // raíz del sitio
+      "audio/sound.mp3",    // /audio
+      "sounds/sound.mp3"    // /sounds
+    ];
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
+    let soundVolume  = parseFloat(localStorage.getItem("rb_sound_volume")||"0.9"); // más fuerte
+    let audioCtx = null, audioBuffer = null;
+
     const btnBell = $("#btnBell");
     const updateBellUI = ()=> btnBell.classList.toggle("active", soundEnabled);
     updateBellUI();
+
+    function getAudioCtx(){
+      if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      return audioCtx;
+    }
+    async function tryLoadBuffer(path){
+      const res = await fetch(path, {cache:"no-store"});
+      if (!res.ok) throw new Error("not found");
+      const arr = await res.arrayBuffer();
+      const ctx = getAudioCtx();
+      return await ctx.decodeAudioData(arr);
+    }
+    async function loadCustomSound(){
+      for (const p of SOUND_PATHS){
+        try{
+          audioBuffer = await tryLoadBuffer(p);
+          localStorage.setItem("rb_sound_src", p);
+          return true;
+        }catch(e){}
+      }
+      return false;
+    }
+    function unlockAudio(){
+      try{ getAudioCtx().resume(); }catch(e){}
+    }
+    // Desbloqueo por primer interacción (iOS/Chrome)
+    window.addEventListener("pointerdown", unlockAudio, {once:true});
+
+    // Tono por defecto (si no hay MP3)
+    function playBeep(){
+      if(!soundEnabled) return;
+      try{
+        const ctx = getAudioCtx();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+
+        if (audioBuffer){
+          // Reproduce el MP3/WAV
+          const src = ctx.createBufferSource();
+          src.buffer = audioBuffer;
+          const gain = ctx.createGain();
+          gain.gain.value = soundVolume; // 0.0–1.0
+          src.connect(gain).connect(ctx.destination);
+          src.start(0);
+        } else {
+          // Beep WebAudio (más fuerte)
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type = "square";           // más presente que "sine"
+          o.frequency.value = 1000;    // 1kHz
+          o.connect(g); g.connect(ctx.destination);
+          const now = ctx.currentTime;
+          g.gain.setValueAtTime(0.0001, now);
+          g.gain.exponentialRampToValueAtTime(soundVolume, now + 0.02);  // sube rápido
+          g.gain.exponentialRampToValueAtTime(0.0001, now + 0.40);       // cola más larga
+          o.start(now); o.stop(now + 0.42);
+        }
+      }catch(e){}
+    }
+
+    // Carga el archivo custom si existe
+    loadCustomSound();
+
     btnBell.onclick = ()=>{
       soundEnabled = !soundEnabled;
       localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled));
       updateBellUI();
+      unlockAudio(); // y de paso desbloquea el contexto
     };
+
     $("#btnLogout").onclick = ()=>{
       localStorage.removeItem("rb_auth_v2");
       localStorage.removeItem("rb_admin_ok");
       sessionStorage.removeItem("rb_auth_v2");
       location.replace("login.html?reason=logout");
     };
-    function playBeep(){
-      if(!soundEnabled) return;
-      try{
-        const ctx = new (window.AudioContext||window.webkitAudioContext)();
-        const o = ctx.createOscillator(); const g = ctx.createGain();
-        o.type = "sine"; o.frequency.value = 880;
-        o.connect(g); g.connect(ctx.destination); o.start();
-        g.gain.setValueAtTime(0.0001, ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
-        o.stop(ctx.currentTime + 0.2);
-      }catch(e){}
-    }
 
     /* ===================== KPI + CHART ===================== */
     let monthChart;
@@ -331,33 +359,21 @@
       if(lastSnap) renderList(lastSnap);
     });
 
-    // Acepta equivalencias: preparing==in_prep, ready_for_pickup==ready, completed==delivered
     const passFilter = (o)=>{
       if(currentFilter==="all") return true;
-      const s = norm(o.status||"");
       if(currentFilter==="new") return (o.status??"accepted")==="accepted"||(o.status??"accepted")==="pending_payment";
-      return s===currentFilter;
+      return (o.status??"")===currentFilter;
     };
 
-    // ✅ Actualiza también el espejo público para el cliente
     async function setOrderStatus(id,next){
       try{
-        const doc = await db.collection("orders").doc(id).get();
-        const tkn = doc.exists ? (doc.data().trackToken||null) : null;
-        const now = firebase.firestore.FieldValue.serverTimestamp();
-        const b = db.batch();
-        b.update(db.collection("orders").doc(id), {
+        await db.collection("orders").doc(id).update({
           status: next,
-          updatedAt: now,
-          statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next, at:new Date().toISOString()})
+          statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        if(tkn){
-          b.set(db.collection("order_public").doc(tkn), {
-            status: toPublic(next),
-            updatedAt: now
-          }, { merge:true });
-        }
-        await b.commit();
+        // beep al cambiar
+        playBeep();
       }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
     }
 
@@ -374,15 +390,15 @@
           <div class="sub">Papas: ${friesName(it.fries)}${ex.length?` · ${ex.join(" · ")}`:""}${notes}
           <div>Unit: <span class="money">${money(unit)}</span> — Subtotal: <span class="money">${money(sub)}</span></div></div></div>`;
         } else {
-          const price=((it.item?.price)||it.price||0); const sub=price*(it.qty||0);
+          const sub=(it.price||0)*(it.qty||0);
           return `<div class="item"><div>• <strong>${it.qty||0}× ${it.name}</strong></div>
-          <div class="sub">Unit: <span class="money">${money(price)}</span> — Subtotal: <span class="money">${money(sub)}</span></div></div>`;
+          <div class="sub">Unit: <span class="money">${money(it.price||0)}</span> — Subtotal: <span class="money">${money(sub)}</span></div></div>`;
         }
       }).join("");
 
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
       const st=o.status??"accepted";
-      const stateBtns = (norm(st)!=="delivered"&&st!=="cancelled")?
+      const stateBtns = (st!=="delivered"&&st!=="cancelled")?
         `<div class="stateBtns">
            <button class="btn" data-act="in_prep">En preparación</button>
            <button class="btn" data-act="ready">Listo para retirar</button>
@@ -396,7 +412,7 @@
             <div class="muted">${dtText}</div>
             <div class="chips">
               <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
-              <span class="chip">Estado: ${labelStatus(st)}</span>
+              <span class="chip">Estado: ${st}</span>
               <span class="chip">Retiro: ${o.entrega||'—'}</span>
               ${telChip}
               <span class="chip">Pago: ${o.pago||'—'}</span>
@@ -422,7 +438,6 @@
       });
     }
 
-    // Suscripción robusta: intenta ordenar por el campo de fecha si existe, si no por documentId()
     (async function subscribeOrders(){
       try{
         const probe = await db.collection("orders").limit(1).get();
