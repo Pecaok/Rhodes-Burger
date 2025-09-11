@@ -50,22 +50,28 @@
   </style>
 </head>
 <body>
-  <!-- Guardia de acceso con soporte ?auth=1 -->
+  <!-- Guardia de acceso con sesión de 10 minutos -->
   <script>
     (function guard(){
-      const qs = new URLSearchParams(location.search);
-      if (qs.get('auth') === '1') {
-        try{
-          localStorage.setItem('rb_auth_v2','ok');
-          localStorage.setItem('rb_admin_ok','true');
-          sessionStorage.setItem('rb_auth_v2','ok');
-        }catch(e){}
-        try{ history.replaceState(null,'',location.pathname); }catch(e){}
+      const exp = parseInt(localStorage.getItem('rb_auth_expires')||'0',10);
+      const now = Date.now();
+      if (!exp || now > exp) {
+        // limpiar restos de sesión vieja
+        localStorage.removeItem('rb_auth_token');
+        localStorage.removeItem('rb_auth_expires');
+        localStorage.removeItem('rb_auth_v2');
+        localStorage.removeItem('rb_admin_ok');
+        // redirigir a login con next
+        const next = encodeURIComponent(location.pathname + location.search);
+        location.replace('login.html?reason=expired&next=' + next);
+        return;
       }
-      const ok = (localStorage.getItem('rb_auth_v2')==='ok')
-              || (localStorage.getItem('rb_admin_ok')==='true')
-              || (sessionStorage.getItem('rb_auth_v2')==='ok');
-      if (!ok) location.replace('login.html?reason=guard');
+      // Auto-expirar si se queda abierto más de 10 min
+      const msLeft = exp - now;
+      setTimeout(()=>{
+        const next = encodeURIComponent(location.pathname + location.search);
+        location.replace('login.html?reason=expired&next=' + next);
+      }, Math.min(msLeft, 2147483647)); // evitar overflow
     })();
   </script>
 
@@ -196,49 +202,30 @@
       return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
     }
 
-    /* ===================== SONIDO ===================== */
-    // Colocá un archivo en alguno de estos paths para usarlo automáticamente
-    const SOUND_PATHS = [
-      "sound.mp3",          // raíz del sitio
-      "audio/sound.mp3",    // /audio
-      "sounds/sound.mp3"    // /sounds
-    ];
+    /* ===================== SONIDO (más fuerte + MP3 opcional) ===================== */
+    const SOUND_PATHS = ["sound.mp3","audio/sound.mp3","sounds/sound.mp3"];
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
-    let soundVolume  = parseFloat(localStorage.getItem("rb_sound_volume")||"0.9"); // más fuerte
+    let soundVolume  = parseFloat(localStorage.getItem("rb_sound_volume")||"0.9");
     let audioCtx = null, audioBuffer = null;
 
     const btnBell = $("#btnBell");
     const updateBellUI = ()=> btnBell.classList.toggle("active", soundEnabled);
     updateBellUI();
 
-    function getAudioCtx(){
-      if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-      return audioCtx;
-    }
+    function getAudioCtx(){ if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
     async function tryLoadBuffer(path){
-      const res = await fetch(path, {cache:"no-store"});
-      if (!res.ok) throw new Error("not found");
-      const arr = await res.arrayBuffer();
-      const ctx = getAudioCtx();
-      return await ctx.decodeAudioData(arr);
+      const res = await fetch(path,{cache:"no-store"}); if(!res.ok) throw new Error("not found");
+      const arr = await res.arrayBuffer(); const ctx = getAudioCtx(); return await ctx.decodeAudioData(arr);
     }
     async function loadCustomSound(){
       for (const p of SOUND_PATHS){
-        try{
-          audioBuffer = await tryLoadBuffer(p);
-          localStorage.setItem("rb_sound_src", p);
-          return true;
-        }catch(e){}
+        try{ audioBuffer = await tryLoadBuffer(p); localStorage.setItem("rb_sound_src", p); return true; }catch(_){}
       }
       return false;
     }
-    function unlockAudio(){
-      try{ getAudioCtx().resume(); }catch(e){}
-    }
-    // Desbloqueo por primer interacción (iOS/Chrome)
+    function unlockAudio(){ try{ getAudioCtx().resume(); }catch(e){} }
     window.addEventListener("pointerdown", unlockAudio, {once:true});
 
-    // Tono por defecto (si no hay MP3)
     function playBeep(){
       if(!soundEnabled) return;
       try{
@@ -246,44 +233,33 @@
         if (audioCtx.state === "suspended") audioCtx.resume();
 
         if (audioBuffer){
-          // Reproduce el MP3/WAV
           const src = ctx.createBufferSource();
           src.buffer = audioBuffer;
           const gain = ctx.createGain();
-          gain.gain.value = soundVolume; // 0.0–1.0
+          gain.gain.value = soundVolume;
           src.connect(gain).connect(ctx.destination);
           src.start(0);
         } else {
-          // Beep WebAudio (más fuerte)
-          const o = ctx.createOscillator();
-          const g = ctx.createGain();
-          o.type = "square";           // más presente que "sine"
-          o.frequency.value = 1000;    // 1kHz
+          const o = ctx.createOscillator(); const g = ctx.createGain();
+          o.type = "square"; o.frequency.value = 1000;
           o.connect(g); g.connect(ctx.destination);
           const now = ctx.currentTime;
           g.gain.setValueAtTime(0.0001, now);
-          g.gain.exponentialRampToValueAtTime(soundVolume, now + 0.02);  // sube rápido
-          g.gain.exponentialRampToValueAtTime(0.0001, now + 0.40);       // cola más larga
+          g.gain.exponentialRampToValueAtTime(soundVolume, now + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, now + 0.40);
           o.start(now); o.stop(now + 0.42);
         }
       }catch(e){}
     }
-
-    // Carga el archivo custom si existe
     loadCustomSound();
 
-    btnBell.onclick = ()=>{
-      soundEnabled = !soundEnabled;
-      localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled));
-      updateBellUI();
-      unlockAudio(); // y de paso desbloquea el contexto
-    };
-
+    btnBell.onclick = ()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); unlockAudio(); };
     $("#btnLogout").onclick = ()=>{
+      localStorage.removeItem('rb_auth_token');
+      localStorage.removeItem('rb_auth_expires');
       localStorage.removeItem("rb_auth_v2");
       localStorage.removeItem("rb_admin_ok");
-      sessionStorage.removeItem("rb_auth_v2");
-      location.replace("login.html?reason=logout");
+      location.replace('login.html?reason=guard');
     };
 
     /* ===================== KPI + CHART ===================== */
@@ -372,8 +348,7 @@
           statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        // beep al cambiar
-        playBeep();
+        playBeep(); // sonido al cambiar estado
       }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
     }
 
