@@ -88,7 +88,7 @@
         <button class="btn primary" id="btnConfirmar">Ir a pagar</button>
       </div>
 
-      <div class="statusHint">Si elegís <strong>Efectivo</strong>, te redirigimos a WhatsApp con el detalle y un link para seguir el estado.</div>
+      <div class="statusHint">Te redirigimos a WhatsApp con el detalle y un link para seguir el estado.</div>
     </section>
 
     <!-- Derecha: resumen -->
@@ -126,7 +126,6 @@
     var CART_KEY = "rhodes_cart_v3";
     function $(s){ return document.querySelector(s); }
     function money(n){ return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}); }
-
     function genTrackToken(len=22){
       var c="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", s="";
       for (var i=0;i<len;i++) s += c[Math.floor(Math.random()*c.length)];
@@ -286,7 +285,7 @@
       lines.push("Total: "+money(order.total));
       if(order.notes){ lines.push("Notas del pedido: "+order.notes); }
 
-      // ✅ Link directo de seguimiento
+      // Link de seguimiento
       if(order.trackToken){
         var base = (window.PUBLIC_BASE_URL && typeof window.PUBLIC_BASE_URL==='string'
                     ? window.PUBLIC_BASE_URL.replace(/\/$/, '')
@@ -300,7 +299,7 @@
 
     function openWhatsApp(order){
       // ⚠️ Reemplazá por el número del local en formato internacional, sin + ni espacios. Ej: 54911XXXXXXXX
-      var PHONE_NUMBER = "5491170596483";
+      var PHONE_NUMBER = "5493411234567";
       var txt = buildWhatsappText(order);
       var url = "https://wa.me/"+PHONE_NUMBER+"?text="+txt;
       window.open(url, "_blank");
@@ -321,13 +320,13 @@
       if(!pago){ alert("Elegí un medio de pago."); return Promise.resolve(null); }
 
       var createdId = null, orderNumber = null;
-      var trackToken = genTrackToken(); // ✅ NUEVO
+      var trackToken = genTrackToken(); // token único
 
       return db.runTransaction(function(tx){
         return takeNextOrderNumber(tx).then(function(next){
           orderNumber = next;
           var order = buildOrder(orderNumber);
-          order.trackToken = trackToken; // ✅ guardar token en el pedido privado
+          order.trackToken = trackToken; // guardar token en el pedido privado
 
           var ref = db.collection("orders").doc(); // id auto
           tx.set(ref, order);
@@ -335,7 +334,7 @@
           return true;
         });
       }).then(function(){
-        // ✅ espejo público de seguimiento (solo campos necesarios)
+        // espejo público de seguimiento (solo campos necesarios)
         return db.collection("order_public").doc(trackToken).set({
           orderId: createdId,
           orderNumber: orderNumber,
@@ -365,12 +364,13 @@
           // por las dudas
           order.trackToken = order.trackToken || res.trackToken;
 
-          if(pago === "efectivo"){
+          // ✅ abrir WhatsApp tanto en efectivo como en Mercado Pago
+          if (pago === "efectivo" || pago === "mercado_pago") {
             openWhatsApp(order);
           }
 
           clearCart();
-          // ✅ mandar id y token
+          // mandar id y token para seguimiento en tiempo real
           window.location.href = "gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
         });
       }).catch(function(e){
