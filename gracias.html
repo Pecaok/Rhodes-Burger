@@ -39,6 +39,22 @@
     .error{color:#b00020}
     .items .line{display:flex;align-items:flex-start;justify-content:space-between;margin:10px 0}
     .items .muted{font-size:13px}
+
+    /* === Watermark de logo (overlay, visible en PC + móvil) === */
+    html, body { min-height: 100%; }
+    body { position: relative; }
+    body::before{
+      content: "";
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: clamp(240px, 48vmin, 560px);
+      background: url("images/logo.png") center / contain no-repeat;
+      opacity: 0.08;
+      pointer-events: none;
+      z-index: 5;
+    }
   </style>
 </head>
 <body>
@@ -151,13 +167,10 @@
 
     // ================== UI helpers para estado ==================
     function updateStatusUI(pubStatus, updatedAt, pago, entrega){
-      // limpiar “Cargando estado…”
       var infoEl = document.getElementById("info");
       if(infoEl) infoEl.textContent = "";
-      // badge + pasos
       $("#badge").textContent = "Estado: " + statusLabel(pubStatus);
       setActive(pubStatus);
-      // times & datos
       if(updatedAt) $("#time").textContent = fmt(updatedAt);
       if(pago) $("#pay").textContent = pago === 'efectivo' ? 'Efectivo' : 'Mercado Pago';
       if(entrega) $("#deliv").textContent = entrega === 'take_away' ? 'Take Away' : entrega;
@@ -228,14 +241,12 @@
       privateUnsub = db.collection("orders").doc(orderId).onSnapshot(function(doc){
         if(!doc.exists){ return; }
         var d = doc.data();
-        // Seguridad: solo si el token coincide mostramos detalle y usamos su estado
         if(d.trackToken && token && d.trackToken !== token){
           $("#items").innerHTML = '<div class="small error">Por seguridad no mostramos el detalle porque el token no coincide.</div>';
           $("#resTotal").textContent = money(0);
           return;
         }
         renderItems(d);
-        // ✅ Fallback: actualizar estado en la UI a partir del doc privado
         updateStatusUI(toPublic(d.status || 'accepted'), d.updatedAt || d.createdAt, d.pago, d.entrega);
       }, function(err){
         $("#items").innerHTML = '<div class="small error">Error de conexión al detalle: '+(err && err.message ? err.message : err)+'</div>';
@@ -247,7 +258,6 @@
         $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
         return;
       }
-      // Si falta token, lo recuperamos del pedido y reescribimos URL
       if(!token && orderId){
         try{
           var snap = await db.collection("orders").doc(orderId).get();
