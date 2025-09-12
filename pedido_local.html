@@ -32,7 +32,7 @@
     .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
     .chipf{background:#f3f3f3;border:1px solid var(--ring);color:#333;border-radius:999px;padding:6px 10px;font-size:13px;cursor:pointer}
     .chipf.active{background:#2ecc71;color:#fff;border-color:#2ecc71}
-    .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
+    .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0;transition:filter .2s, opacity .2s}
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
     .order-title{font-weight:800}
     .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
@@ -48,14 +48,24 @@
     input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
     .stateBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
     .err{color:var(--danger);font-weight:600}
+
+    /* Pago (botones grandes) */
     .payGroup{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
     .paybtn{font-size:18px;padding:14px 18px;border-width:2px;border-radius:14px;cursor:pointer}
     .paybtn.paid{background:var(--primary);border-color:var(--primary);color:#fff}
     .paybtn.unpaid{background:#fff3e0;border-color:var(--warn);color:var(--warnText)}
+
+    /* === TACHADO al cancelar === */
+    .order.cancelled{
+      text-decoration: line-through;
+      text-decoration-thickness: 2px;
+      opacity: .55;
+      filter: grayscale(0.4);
+    }
   </style>
 </head>
 <body>
-  <!-- Guardia de acceso con sesión (usa rb_auth_expires seteado en login) -->
+  <!-- Guardia de acceso (usa expiración guardada por login: 20 hs) -->
   <script>
     (function guard(){
       const exp = parseInt(localStorage.getItem('rb_auth_expires')||'0',10);
@@ -122,7 +132,7 @@
 
   <script>
   window.addEventListener('DOMContentLoaded', () => {
-    /* ============== FIREBASE ============== */
+    /* ===================== FIREBASE ===================== */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -134,7 +144,7 @@
     try{ firebase.initializeApp(firebaseConfig); }catch(e){}
     const db = firebase.firestore();
 
-    /* ============== HELPERS ============== */
+    /* ===================== HELPERS ===================== */
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
@@ -198,7 +208,7 @@
       return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
     }
 
-    /* ============== SONIDO (fuerte + MP3 opcional) ============== */
+    /* ===================== SONIDO (más fuerte + MP3 opcional) ===================== */
     const SOUND_PATHS = ["sound.mp3","audio/sound.mp3","sounds/sound.mp3"];
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let soundVolume  = parseFloat(localStorage.getItem("rb_sound_volume")||"0.9");
@@ -256,7 +266,7 @@
       location.replace('login.html?reason=guard');
     };
 
-    /* ============== KPI + CHART ============== */
+    /* ===================== KPI + CHART ===================== */
     let monthChart;
     function ensureChart(labels, orders, revenue){
       const ctx = document.getElementById("monthChart").getContext("2d");
@@ -317,7 +327,7 @@
     }
     $("#btnReloadKPI").onclick = loadKPI;
 
-    /* ============== LISTADO + ESTADOS + PAGO ============== */
+    /* ===================== LISTADO + ESTADOS + PAGO ===================== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
     let currentFilter="all", lastSnap=null, initialLoaded=false; const seenIds=new Set();
 
@@ -335,9 +345,8 @@
       return (o.status??"")===currentFilter;
     };
 
-    async function setOrderStatus(id,next,orderData){
+    async function setOrderStatus(id,next,orderData,card){
       try{
-        // Confirmaciones útiles
         if(next==='cancelled'){
           const ok = confirm('¿Seguro querés CANCELAR este pedido?');
           if(!ok) return;
@@ -347,6 +356,13 @@
           const ok2 = confirm('Este pedido en efectivo está PENDIENTE DE PAGO. ¿Confirmás ENTREGADO igualmente?');
           if(!ok2) return;
         }
+
+        // Feedback visual inmediato (tachado si cancelado, caso contrario quitar)
+        if (card){
+          if (next==='cancelled') card.classList.add('cancelled');
+          else card.classList.remove('cancelled');
+        }
+
         await db.collection("orders").doc(id).update({
           status: next,
           statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
@@ -391,7 +407,6 @@
       const payState = o.paymentStatus || (o.pago==='efectivo' ? 'unpaid' : 'paid');
       const payChip = `<span class="chip">Pago: ${o.pago||'—'}${o.pago==='efectivo' ? ' — ' + (payState==='paid'?'PAGADO':'PENDIENTE') : ''}</span>`;
 
-      // Botones de estado: siempre visibles (permiten revertir entregado/cancelado)
       const stateBtns =
         `<div class="stateBtns">
            <button class="btn" data-act="accepted">Recibido</button>
@@ -401,7 +416,6 @@
            <button class="btn danger" data-act="cancelled">Cancelar</button>
          </div>`;
 
-      // Botones grandes de pago (solo para efectivo)
       const payBtns = (o.pago==='efectivo')
         ? `<div class="payGroup">
              <button class="paybtn paid"   data-pay="paid"   title="Marcar como PAGADO">PAGO</button>
@@ -409,7 +423,9 @@
            </div>`
         : "";
 
-      return `<div class="order" data-id="${doc.id}">
+      const cancelledClass = (st==='cancelled') ? 'cancelled' : '';
+
+      return `<div class="order ${cancelledClass}" data-id="${doc.id}">
         <div class="order-head">
           <div>
             <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
@@ -440,12 +456,12 @@
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
 
-        // Clicks de estado (necesitamos el orderData para la confirmación)
+        // Clicks de estado (le pasamos el card para tachar/quitar tachado al instante)
         card.querySelectorAll("[data-act]").forEach(btn=>{
           btn.addEventListener("click",()=>{
             const doc = lastSnap?.docs?.find(d=>d.id===id);
             const o = doc?.data?.() || {};
-            setOrderStatus(id, btn.dataset.act, o);
+            setOrderStatus(id, btn.dataset.act, o, card);
           });
         });
 
