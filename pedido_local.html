@@ -38,7 +38,26 @@
     .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
     .chip{background:#f3f3f3;border:1px solid var(--ring);color:#333;border-radius:999px;padding:6px 10px;font-size:13px}
     .muted{color:var(--muted)}
+    .right-col{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:180px}
     .right-total{font-weight:800;font-size:18px;white-space:nowrap}
+
+    /* Badge de pago debajo del precio */
+    .payBadge{
+      font-weight:800;
+      font-size:15px;
+      padding:8px 14px;
+      border-radius:999px;
+      border:2px solid;
+      line-height:1;
+      white-space:nowrap;
+    }
+    .payBadge.paid{ background:#e8f8ef; color:#0b7a3a; border-color:#2ecc71; }
+    .payBadge.unpaid{
+      background:#fff3e0; color:var(--warnText); border-color:var(--warn);
+      box-shadow:0 0 0 5px rgba(255,183,77,.18);
+      transform:translateZ(0) scale(1.02);
+    }
+
     .items{margin-top:10px}
     .item{margin:8px 0 6px 0}
     .item strong{font-weight:700}
@@ -362,7 +381,7 @@
           if(!ok2) return;
         }
 
-        // Feedback visual inmediato (tachado si cancelado)
+        // Tachado instantáneo si cancelado
         if (card){
           if (next==='cancelled') card.classList.add('cancelled');
           else card.classList.remove('cancelled');
@@ -377,20 +396,28 @@
       }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
     }
 
-    async function setPaymentStatus(id,next,groupEl){
+    async function setPaymentStatus(id,next,groupEl,card){
       try{
         await db.collection("orders").doc(id).set({
-          paymentStatus: next,
+          paymentStatus: next, // 'paid' | 'unpaid'
           paymentHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, { merge:true });
 
-        // Destaque inmediato
+        // Feedback inmediato: énfasis en botón + badge debajo del precio
         if (groupEl){
           const unpaidBtn = groupEl.querySelector('[data-pay="unpaid"]');
           const paidBtn   = groupEl.querySelector('[data-pay="paid"]');
           if (unpaidBtn) unpaidBtn.classList.toggle('emph', next==='unpaid');
           if (paidBtn)   paidBtn.classList.toggle('emph', false);
+        }
+        if (card){
+          const badge = card.querySelector('.payBadge');
+          if (badge){
+            badge.classList.toggle('paid', next==='paid');
+            badge.classList.toggle('unpaid', next!=='paid');
+            badge.textContent = `Pago: efectivo — ${next==='paid'?'PAGADO':'PENDIENTE'}`;
+          }
         }
         playBeep();
       }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
@@ -417,8 +444,18 @@
 
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
       const st=o.status??"accepted";
-      const payState = o.paymentStatus || (o.pago==='efectivo' ? 'unpaid' : 'paid');
-      const payChip = `<span class="chip">Pago: ${o.pago||'—'}${o.pago==='efectivo' ? ' — ' + (payState==='paid'?'PAGADO':'PENDIENTE') : ''}</span>`;
+
+      // Badge de pago (debajo del precio)
+      let badgeText = '';
+      let badgeClass = 'paid';
+      if (o.pago==='efectivo'){
+        const payState = o.paymentStatus || 'unpaid';
+        badgeText  = `Pago: efectivo — ${payState==='paid' ? 'PAGADO' : 'PENDIENTE'}`;
+        badgeClass = (payState==='paid') ? 'paid' : 'unpaid';
+      } else if (o.pago){
+        badgeText  = (o.pago==='mercado_pago') ? 'Mercado Pago' : `Pago: ${o.pago}`;
+        badgeClass = 'paid';
+      }
 
       const stateBtns =
         `<div class="stateBtns">
@@ -432,7 +469,7 @@
       const payBtns = (o.pago==='efectivo')
         ? `<div class="payGroup" data-paygroup>
              <button class="btn paybtn paid"   data-pay="paid"   title="Marcar como PAGADO">PAGO</button>
-             <button class="btn paybtn unpaid ${payState==='unpaid'?'emph':''}" data-pay="unpaid" title="Marcar como PENDIENTE">PENDIENTE DE PAGO</button>
+             <button class="btn paybtn unpaid ${(o.paymentStatus||'unpaid')==='unpaid'?'emph':''}" data-pay="unpaid" title="Marcar como PENDIENTE">PENDIENTE DE PAGO</button>
            </div>`
         : "";
 
@@ -448,13 +485,17 @@
               <span class="chip">Estado: ${st}</span>
               <span class="chip">Retiro: ${o.entrega||'—'}</span>
               ${telChip}
-              ${payChip}
             </div>
             ${stateBtns}
             ${payBtns}
           </div>
-          <div class="right-total">${money(computeOrderTotal(o))}</div>
+
+          <div class="right-col">
+            <div class="right-total">${money(computeOrderTotal(o))}</div>
+            ${badgeText?`<div class="payBadge ${badgeClass}">${badgeText}</div>`:''}
+          </div>
         </div>
+
         <div class="divider"></div>
         <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
       </div>`;
@@ -468,6 +509,8 @@
 
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
+
+        // Estados
         card.querySelectorAll("[data-act]").forEach(btn=>{
           btn.addEventListener("click",()=>{
             const doc = lastSnap?.docs?.find(d=>d.id===id);
@@ -475,16 +518,19 @@
             setOrderStatus(id, btn.dataset.act, o, card);
           });
         });
+
+        // Pago
         const groupEl = card.querySelector('[data-paygroup]');
         if (groupEl){
           groupEl.querySelectorAll("[data-pay]").forEach(btn=>{
-            btn.addEventListener("click",()=> setPaymentStatus(id, btn.dataset.pay, groupEl));
+            btn.addEventListener("click",()=> setPaymentStatus(id, btn.dataset.pay, groupEl, card));
           });
         }
       });
     }
 
     /* ===================== SUSCRIPCIÓN ===================== */
+    let lastSnap=null, initialLoaded=false;
     (async function subscribeOrders(){
       try{
         const probe = await db.collection("orders").limit(1).get();
@@ -497,9 +543,7 @@
           lastSnap=snap; renderList(snap);
           snap.docChanges().forEach(ch=>{
             if(ch.type==='added'){
-              const id=ch.doc.id;
-              if(!initialLoaded){ initialLoaded=true; }
-              else{ playBeep(); }
+              if(!initialLoaded){ initialLoaded=true; } else { playBeep(); }
             }
           });
         }, (err)=>{
