@@ -49,11 +49,21 @@
     .stateBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
     .err{color:var(--danger);font-weight:600}
 
-    /* Pago (botones grandes) */
+    /* === Pago (mismo tamaño que .btn) === */
     .payGroup{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-    .paybtn{font-size:18px;padding:14px 18px;border-width:2px;border-radius:14px;cursor:pointer}
+    .paybtn{ /* hereda .btn, sólo colores */
+      border-width:1px;
+    }
     .paybtn.paid{background:var(--primary);border-color:var(--primary);color:#fff}
     .paybtn.unpaid{background:#fff3e0;border-color:var(--warn);color:var(--warnText)}
+
+    /* Enfatizar “Pendiente de pago” cuando el estado actual es unpaid */
+    .paybtn.unpaid.emph{
+      transform: scale(1.1);
+      border-width:2px;
+      box-shadow: 0 0 0 4px rgba(255,183,77,.25);
+      font-weight:800;
+    }
 
     /* === TACHADO al cancelar === */
     .order.cancelled{
@@ -65,7 +75,7 @@
   </style>
 </head>
 <body>
-  <!-- Guardia de acceso (usa expiración guardada por login: 20 hs) -->
+  <!-- Guardia de acceso (sesión 20 hs) -->
   <script>
     (function guard(){
       const exp = parseInt(localStorage.getItem('rb_auth_expires')||'0',10);
@@ -357,7 +367,7 @@
           if(!ok2) return;
         }
 
-        // Feedback visual inmediato (tachado si cancelado, caso contrario quitar)
+        // Tachado instantáneo si cancelado
         if (card){
           if (next==='cancelled') card.classList.add('cancelled');
           else card.classList.remove('cancelled');
@@ -372,13 +382,22 @@
       }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
     }
 
-    async function setPaymentStatus(id,next){
+    async function setPaymentStatus(id,next,groupEl){
       try{
         await db.collection("orders").doc(id).set({
           paymentStatus: next, // 'paid' | 'unpaid'
           paymentHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, { merge:true });
+
+        // Feedback visual inmediato del destaque
+        if (groupEl){
+          const unpaidBtn = groupEl.querySelector('[data-pay="unpaid"]');
+          const paidBtn   = groupEl.querySelector('[data-pay="paid"]');
+          if (unpaidBtn) unpaidBtn.classList.toggle('emph', next==='unpaid');
+          if (paidBtn)   paidBtn.classList.toggle('emph', false);
+        }
+
         playBeep();
       }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
     }
@@ -416,10 +435,11 @@
            <button class="btn danger" data-act="cancelled">Cancelar</button>
          </div>`;
 
+      // Botones de pago: MISMO tamaño que .btn (reutilizamos .btn + .paybtn)
       const payBtns = (o.pago==='efectivo')
-        ? `<div class="payGroup">
-             <button class="paybtn paid"   data-pay="paid"   title="Marcar como PAGADO">PAGO</button>
-             <button class="paybtn unpaid" data-pay="unpaid" title="Marcar como PENDIENTE">PENDIENTE DE PAGO</button>
+        ? `<div class="payGroup" data-paygroup>
+             <button class="btn paybtn paid"   data-pay="paid"   title="Marcar como PAGADO">PAGO</button>
+             <button class="btn paybtn unpaid ${payState==='unpaid'?'emph':''}" data-pay="unpaid" title="Marcar como PENDIENTE">PENDIENTE DE PAGO</button>
            </div>`
         : "";
 
@@ -456,7 +476,7 @@
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
 
-        // Clicks de estado (le pasamos el card para tachar/quitar tachado al instante)
+        // Estados (con referencia al card para tachado instantáneo)
         card.querySelectorAll("[data-act]").forEach(btn=>{
           btn.addEventListener("click",()=>{
             const doc = lastSnap?.docs?.find(d=>d.id===id);
@@ -465,13 +485,18 @@
           });
         });
 
-        // Clicks de pago
-        card.querySelectorAll("[data-pay]").forEach(btn=>{
-          btn.addEventListener("click",()=> setPaymentStatus(id, btn.dataset.pay));
-        });
+        // Pago (aplica/enfoca al instante)
+        const groupEl = card.querySelector('[data-paygroup]');
+        if (groupEl){
+          groupEl.querySelectorAll("[data-pay]").forEach(btn=>{
+            btn.addEventListener("click",()=> setPaymentStatus(id, btn.dataset.pay, groupEl));
+          });
+        }
       });
     }
 
+    /* ===================== SUSCRIPCIÓN ===================== */
+    let lastSnap=null, initialLoaded=false; const seenIds=new Set();
     (async function subscribeOrders(){
       try{
         const probe = await db.collection("orders").limit(1).get();
