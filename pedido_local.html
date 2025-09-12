@@ -9,6 +9,7 @@
     :root{
       --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
       --radius:22px; --shadow:0 12px 34px rgba(0,0,0,.10); --ring:#eaeaea;
+      --warn:#ffb74d; --warnText:#8a4b00; --danger:#b00020;
     }
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
@@ -19,7 +20,7 @@
     .spacer{flex:1}
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600}
     .btn.active{background:var(--primary);color:#fff;border-color:#2ecc71}
-    .danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
+    .danger{border-color:#ffdddd;background:#fff5f5;color:#b00000}
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
     .kpi{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:14px 16px;margin:0 0 18px 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
@@ -46,7 +47,13 @@
     .divider{height:1px;background:#efefef;margin:10px 0}
     input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
     .stateBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-    .err{color:#b00020;font-weight:600}
+    .err{color:var(--danger);font-weight:600}
+
+    /* Botonera de pago (grande) */
+    .payGroup{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .paybtn{font-size:18px;padding:14px 18px;border-width:2px;border-radius:14px;cursor:pointer}
+    .paybtn.paid{background:var(--primary);border-color:var(--primary);color:#fff}
+    .paybtn.unpaid{background:#fff3e0;border-color:var(--warn);color:var(--warnText)}
   </style>
 </head>
 <body>
@@ -56,22 +63,19 @@
       const exp = parseInt(localStorage.getItem('rb_auth_expires')||'0',10);
       const now = Date.now();
       if (!exp || now > exp) {
-        // limpiar restos de sesión vieja
         localStorage.removeItem('rb_auth_token');
         localStorage.removeItem('rb_auth_expires');
         localStorage.removeItem('rb_auth_v2');
         localStorage.removeItem('rb_admin_ok');
-        // redirigir a login con next
         const next = encodeURIComponent(location.pathname + location.search);
         location.replace('login.html?reason=expired&next=' + next);
         return;
       }
-      // Auto-expirar si se queda abierto más de 10 min
       const msLeft = exp - now;
       setTimeout(()=>{
         const next = encodeURIComponent(location.pathname + location.search);
         location.replace('login.html?reason=expired&next=' + next);
-      }, Math.min(msLeft, 2147483647)); // evitar overflow
+      }, Math.min(msLeft, 2147483647));
     })();
   </script>
 
@@ -169,19 +173,14 @@
       }
       return null;
     }
-
     function chooseDateField(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){ if (obj && obj[k]!=null) return k; }
       return null;
     }
-
     function displayOrderNumber(doc){
       const o = doc.data();
-      const candidates = [
-        o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro,
-        o.orderNo, o.seq, o.n, o.idPedido, o.pedidoNumber, o.pedido
-      ];
+      const candidates = [o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro, o.orderNo, o.seq, o.n, o.idPedido, o.pedidoNumber, o.pedido];
       for (const c of candidates){
         if (c == null) continue;
         const n = (typeof c === "string") ? parseInt(c,10) : c;
@@ -189,7 +188,6 @@
       }
       return `#${doc.id.slice(-5).toUpperCase()}`;
     }
-
     function unitWithExtras(it){
       const base = it.price || 0;
       const pz = (it.extras?.patty||0)   * (it.extras?.EXTRA_PRICE_PATTY||0);
@@ -225,13 +223,11 @@
     }
     function unlockAudio(){ try{ getAudioCtx().resume(); }catch(e){} }
     window.addEventListener("pointerdown", unlockAudio, {once:true});
-
     function playBeep(){
       if(!soundEnabled) return;
       try{
         const ctx = getAudioCtx();
         if (audioCtx.state === "suspended") audioCtx.resume();
-
         if (audioBuffer){
           const src = ctx.createBufferSource();
           src.buffer = audioBuffer;
@@ -323,7 +319,7 @@
     }
     $("#btnReloadKPI").onclick = loadKPI;
 
-    /* ===================== LISTADO + ESTADOS ===================== */
+    /* ===================== LISTADO + ESTADOS + PAGO ===================== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
     let currentFilter="all", lastSnap=null, initialLoaded=false; const seenIds=new Set();
 
@@ -341,15 +337,32 @@
       return (o.status??"")===currentFilter;
     };
 
-    async function setOrderStatus(id,next){
+    async function setOrderStatus(id,next,orderData){
       try{
+        // Confirmación si marcan entregado pero el efectivo está pendiente
+        const payState = (orderData?.paymentStatus) || (orderData?.pago==='efectivo' ? 'unpaid' : 'paid');
+        if(next==='delivered' && orderData?.pago==='efectivo' && payState!=='paid'){
+          const ok = confirm('Este pedido en efectivo está marcado como PENDIENTE DE PAGO. ¿Confirmás ENTREGADO igualmente?');
+          if(!ok) return;
+        }
         await db.collection("orders").doc(id).update({
           status: next,
           statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        playBeep(); // sonido al cambiar estado
+        playBeep();
       }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
+    }
+
+    async function setPaymentStatus(id,next){
+      try{
+        await db.collection("orders").doc(id).set({
+          paymentStatus: next, // 'paid' | 'unpaid'
+          paymentHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge:true });
+        playBeep();
+      }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
     }
 
     function renderOrder(doc){
@@ -373,12 +386,29 @@
 
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
       const st=o.status??"accepted";
-      const stateBtns = (st!=="delivered"&&st!=="cancelled")?
-        `<div class="stateBtns">
-           <button class="btn" data-act="in_prep">En preparación</button>
-           <button class="btn" data-act="ready">Listo para retirar</button>
-           <button class="btn" data-act="delivered">Entregado</button>
-         </div>`:"";
+
+      // Estado de pago
+      const payState = o.paymentStatus || (o.pago==='efectivo' ? 'unpaid' : 'paid'); // default
+      const payChip = `<span class="chip">Pago: ${o.pago||'—'}${o.pago==='efectivo' ? ' — ' + (payState==='paid'?'PAGADO':'PENDIENTE') : ''}</span>`;
+
+      // Botones de estado (ahora SIEMPRE visibles, salvo cancelado)
+      const showStateBtns = (st!=='cancelled');
+      const stateBtns = showStateBtns
+        ? `<div class="stateBtns">
+             <button class="btn" data-act="accepted">Recibido</button>
+             <button class="btn" data-act="in_prep">En preparación</button>
+             <button class="btn" data-act="ready">Listo para retirar</button>
+             <button class="btn" data-act="delivered">Entregado</button>
+           </div>`
+        : "";
+
+      // Botones grandes de pago (solo para efectivo)
+      const payBtns = (o.pago==='efectivo')
+        ? `<div class="payGroup">
+             <button class="paybtn paid"   data-pay="paid"   title="Marcar como PAGADO">PAGO</button>
+             <button class="paybtn unpaid" data-pay="unpaid" title="Marcar como PENDIENTE">PENDIENTE DE PAGO</button>
+           </div>`
+        : "";
 
       return `<div class="order" data-id="${doc.id}">
         <div class="order-head">
@@ -390,9 +420,10 @@
               <span class="chip">Estado: ${st}</span>
               <span class="chip">Retiro: ${o.entrega||'—'}</span>
               ${telChip}
-              <span class="chip">Pago: ${o.pago||'—'}</span>
+              ${payChip}
             </div>
             ${stateBtns}
+            ${payBtns}
           </div>
           <div class="right-total">${money(computeOrderTotal(o))}</div>
         </div>
@@ -406,9 +437,22 @@
       ordersHost.innerHTML = docs.length
         ? docs.map(renderOrder).join("")
         : '<p class="muted">No hay pedidos.</p>';
+
       document.querySelectorAll(".order").forEach(card=>{
-        const id=card.dataset.id; card.querySelectorAll("[data-act]").forEach(btn=>{
-          btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act));
+        const id=card.dataset.id;
+
+        // Clicks de estado (con orden actual para validaciones)
+        card.querySelectorAll("[data-act]").forEach(btn=>{
+          btn.addEventListener("click",()=>{
+            const doc = lastSnap?.docs?.find(d=>d.id===id);
+            const o = doc?.data?.() || {};
+            setOrderStatus(id, btn.dataset.act, o);
+          });
+        });
+
+        // Clicks de pago
+        card.querySelectorAll("[data-pay]").forEach(btn=>{
+          btn.addEventListener("click",()=> setPaymentStatus(id, btn.dataset.pay));
         });
       });
     }
