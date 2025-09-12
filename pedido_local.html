@@ -48,8 +48,6 @@
     input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
     .stateBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
     .err{color:var(--danger);font-weight:600}
-
-    /* Botonera de pago (grande) */
     .payGroup{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
     .paybtn{font-size:18px;padding:14px 18px;border-width:2px;border-radius:14px;cursor:pointer}
     .paybtn.paid{background:var(--primary);border-color:var(--primary);color:#fff}
@@ -57,7 +55,7 @@
   </style>
 </head>
 <body>
-  <!-- Guardia de acceso con sesión de 10 minutos -->
+  <!-- Guardia de acceso con sesión (usa rb_auth_expires seteado en login) -->
   <script>
     (function guard(){
       const exp = parseInt(localStorage.getItem('rb_auth_expires')||'0',10);
@@ -124,7 +122,7 @@
 
   <script>
   window.addEventListener('DOMContentLoaded', () => {
-    /* ===================== FIREBASE ===================== */
+    /* ============== FIREBASE ============== */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -136,7 +134,7 @@
     try{ firebase.initializeApp(firebaseConfig); }catch(e){}
     const db = firebase.firestore();
 
-    /* ===================== HELPERS ===================== */
+    /* ============== HELPERS ============== */
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
@@ -200,7 +198,7 @@
       return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
     }
 
-    /* ===================== SONIDO (más fuerte + MP3 opcional) ===================== */
+    /* ============== SONIDO (fuerte + MP3 opcional) ============== */
     const SOUND_PATHS = ["sound.mp3","audio/sound.mp3","sounds/sound.mp3"];
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let soundVolume  = parseFloat(localStorage.getItem("rb_sound_volume")||"0.9");
@@ -258,7 +256,7 @@
       location.replace('login.html?reason=guard');
     };
 
-    /* ===================== KPI + CHART ===================== */
+    /* ============== KPI + CHART ============== */
     let monthChart;
     function ensureChart(labels, orders, revenue){
       const ctx = document.getElementById("monthChart").getContext("2d");
@@ -319,7 +317,7 @@
     }
     $("#btnReloadKPI").onclick = loadKPI;
 
-    /* ===================== LISTADO + ESTADOS + PAGO ===================== */
+    /* ============== LISTADO + ESTADOS + PAGO ============== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
     let currentFilter="all", lastSnap=null, initialLoaded=false; const seenIds=new Set();
 
@@ -339,11 +337,15 @@
 
     async function setOrderStatus(id,next,orderData){
       try{
-        // Confirmación si marcan entregado pero el efectivo está pendiente
+        // Confirmaciones útiles
+        if(next==='cancelled'){
+          const ok = confirm('¿Seguro querés CANCELAR este pedido?');
+          if(!ok) return;
+        }
         const payState = (orderData?.paymentStatus) || (orderData?.pago==='efectivo' ? 'unpaid' : 'paid');
         if(next==='delivered' && orderData?.pago==='efectivo' && payState!=='paid'){
-          const ok = confirm('Este pedido en efectivo está marcado como PENDIENTE DE PAGO. ¿Confirmás ENTREGADO igualmente?');
-          if(!ok) return;
+          const ok2 = confirm('Este pedido en efectivo está PENDIENTE DE PAGO. ¿Confirmás ENTREGADO igualmente?');
+          if(!ok2) return;
         }
         await db.collection("orders").doc(id).update({
           status: next,
@@ -386,21 +388,18 @@
 
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
       const st=o.status??"accepted";
-
-      // Estado de pago
-      const payState = o.paymentStatus || (o.pago==='efectivo' ? 'unpaid' : 'paid'); // default
+      const payState = o.paymentStatus || (o.pago==='efectivo' ? 'unpaid' : 'paid');
       const payChip = `<span class="chip">Pago: ${o.pago||'—'}${o.pago==='efectivo' ? ' — ' + (payState==='paid'?'PAGADO':'PENDIENTE') : ''}</span>`;
 
-      // Botones de estado (ahora SIEMPRE visibles, salvo cancelado)
-      const showStateBtns = (st!=='cancelled');
-      const stateBtns = showStateBtns
-        ? `<div class="stateBtns">
-             <button class="btn" data-act="accepted">Recibido</button>
-             <button class="btn" data-act="in_prep">En preparación</button>
-             <button class="btn" data-act="ready">Listo para retirar</button>
-             <button class="btn" data-act="delivered">Entregado</button>
-           </div>`
-        : "";
+      // Botones de estado: siempre visibles (permiten revertir entregado/cancelado)
+      const stateBtns =
+        `<div class="stateBtns">
+           <button class="btn" data-act="accepted">Recibido</button>
+           <button class="btn" data-act="in_prep">En preparación</button>
+           <button class="btn" data-act="ready">Listo para retirar</button>
+           <button class="btn" data-act="delivered">Entregado</button>
+           <button class="btn danger" data-act="cancelled">Cancelar</button>
+         </div>`;
 
       // Botones grandes de pago (solo para efectivo)
       const payBtns = (o.pago==='efectivo')
@@ -441,7 +440,7 @@
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
 
-        // Clicks de estado (con orden actual para validaciones)
+        // Clicks de estado (necesitamos el orderData para la confirmación)
         card.querySelectorAll("[data-act]").forEach(btn=>{
           btn.addEventListener("click",()=>{
             const doc = lastSnap?.docs?.find(d=>d.id===id);
