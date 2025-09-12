@@ -49,15 +49,11 @@
     .stateBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
     .err{color:var(--danger);font-weight:600}
 
-    /* === Pago (mismo tamaño que .btn) === */
+    /* Pago (mismo tamaño que .btn) */
     .payGroup{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-    .paybtn{ /* hereda .btn, sólo colores */
-      border-width:1px;
-    }
+    .paybtn{border-width:1px}
     .paybtn.paid{background:var(--primary);border-color:var(--primary);color:#fff}
     .paybtn.unpaid{background:#fff3e0;border-color:var(--warn);color:var(--warnText)}
-
-    /* Enfatizar “Pendiente de pago” cuando el estado actual es unpaid */
     .paybtn.unpaid.emph{
       transform: scale(1.1);
       border-width:2px;
@@ -65,12 +61,11 @@
       font-weight:800;
     }
 
-    /* === TACHADO al cancelar === */
+    /* TACHADO al cancelar */
     .order.cancelled{
       text-decoration: line-through;
       text-decoration-thickness: 2px;
-      opacity: .55;
-      filter: grayscale(0.4);
+      opacity:.55; filter:grayscale(.4);
     }
   </style>
 </head>
@@ -367,7 +362,7 @@
           if(!ok2) return;
         }
 
-        // Tachado instantáneo si cancelado
+        // Feedback visual inmediato (tachado si cancelado)
         if (card){
           if (next==='cancelled') card.classList.add('cancelled');
           else card.classList.remove('cancelled');
@@ -385,19 +380,18 @@
     async function setPaymentStatus(id,next,groupEl){
       try{
         await db.collection("orders").doc(id).set({
-          paymentStatus: next, // 'paid' | 'unpaid'
+          paymentStatus: next,
           paymentHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, { merge:true });
 
-        // Feedback visual inmediato del destaque
+        // Destaque inmediato
         if (groupEl){
           const unpaidBtn = groupEl.querySelector('[data-pay="unpaid"]');
           const paidBtn   = groupEl.querySelector('[data-pay="paid"]');
           if (unpaidBtn) unpaidBtn.classList.toggle('emph', next==='unpaid');
           if (paidBtn)   paidBtn.classList.toggle('emph', false);
         }
-
         playBeep();
       }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
     }
@@ -435,7 +429,6 @@
            <button class="btn danger" data-act="cancelled">Cancelar</button>
          </div>`;
 
-      // Botones de pago: MISMO tamaño que .btn (reutilizamos .btn + .paybtn)
       const payBtns = (o.pago==='efectivo')
         ? `<div class="payGroup" data-paygroup>
              <button class="btn paybtn paid"   data-pay="paid"   title="Marcar como PAGADO">PAGO</button>
@@ -475,8 +468,6 @@
 
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
-
-        // Estados (con referencia al card para tachado instantáneo)
         card.querySelectorAll("[data-act]").forEach(btn=>{
           btn.addEventListener("click",()=>{
             const doc = lastSnap?.docs?.find(d=>d.id===id);
@@ -484,8 +475,6 @@
             setOrderStatus(id, btn.dataset.act, o, card);
           });
         });
-
-        // Pago (aplica/enfoca al instante)
         const groupEl = card.querySelector('[data-paygroup]');
         if (groupEl){
           groupEl.querySelectorAll("[data-pay]").forEach(btn=>{
@@ -496,7 +485,6 @@
     }
 
     /* ===================== SUSCRIPCIÓN ===================== */
-    let lastSnap=null, initialLoaded=false; const seenIds=new Set();
     (async function subscribeOrders(){
       try{
         const probe = await db.collection("orders").limit(1).get();
@@ -510,10 +498,10 @@
           snap.docChanges().forEach(ch=>{
             if(ch.type==='added'){
               const id=ch.doc.id;
-              if(!initialLoaded && !seenIds.has(id)){ seenIds.add(id); } else { playBeep(); }
+              if(!initialLoaded){ initialLoaded=true; }
+              else{ playBeep(); }
             }
           });
-          initialLoaded=true;
         }, (err)=>{
           console.error(err);
           ordersErr.textContent="No se pudo cargar la lista de pedidos.";
@@ -526,7 +514,7 @@
       }
     })();
 
-    // Cargar KPI al iniciar
+    // KPI inicial
     loadKPI();
   });
   </script>
