@@ -20,6 +20,8 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600}
     .danger{border-color:#ffdddd;background:#fff5f5;color:#b00000}
     main{max-width:1200px;margin:22px auto;padding:0 12px}
+    .filters{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+    input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
     .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px}
     .kpi{background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:16px}
     .kpi .label{font-size:13px;color:var(--muted)}
@@ -27,9 +29,7 @@
     .row{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
     .card{background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:16px}
     h2{font-size:18px;margin:0 0 10px}
-    .filters{display:flex;gap:10px;align-items:center;margin-bottom:14px}
-    input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
-    .chartbox{width:100%;height:320px} /* ALTURA EXPLÍCITA PARA QUE SE VEAN */
+    .chartbox{width:100%;height:360px} /* altura explícita */
     .err{color:#b00020;font-weight:600;margin-top:8px}
     @media (max-width:960px){
       .kpis{grid-template-columns:1fr}
@@ -127,18 +127,19 @@
       for (const k of cand){
         const v = obj?.[k]; if (v==null) continue;
         try{
-          if (v?.toDate) return v.toDate();           // Firestore Timestamp
+          if (v?.toDate) return v.toDate();
           if (typeof v === 'number') return new Date(v);
-          if (typeof v === 'string') {
-            const d = new Date(v); if(!isNaN(d)) return d;
-          }
+          if (typeof v === 'string') { const d = new Date(v); if(!isNaN(d)) return d; }
         }catch(_){}
       }
       return null;
     }
 
-    // ======= Charts holders (para poder destruirlos) =======
+    // ======= Charts holders =======
     const charts = { daily:null, pay:null };
+
+    const fmtInt = v => v.toLocaleString('es-AR');
+    const fmtCurrency = v => (Number(v)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
     function drawDaily(labels, ordersArr, revenueArr){
       const ctx = document.getElementById('dailyChart').getContext('2d');
@@ -148,17 +149,32 @@
         data: {
           labels,
           datasets: [
-            { type:'bar', label:'Pedidos', data:ordersArr, backgroundColor:'rgba(46,204,113,.35)', borderColor:'#2ecc71', borderWidth:1, yAxisID:'y' },
-            { type:'line', label:'Ingresos', data:revenueArr, borderColor:'#2ecc71', backgroundColor:'rgba(46,204,113,.10)', borderWidth:2, tension:.25, yAxisID:'y2' }
+            {
+              type:'bar', label:'Pedidos', data:ordersArr,
+              backgroundColor:'rgba(46,204,113,.60)', borderColor:'#22b266', borderWidth:1.5, yAxisID:'y', order:1
+            },
+            {
+              type:'line', label:'Ingresos', data:revenueArr, yAxisID:'y2', order:2,
+              borderColor:'#1b6a3c', borderWidth:3, pointRadius:3, pointHoverRadius:5, fill:false, tension:.25
+            }
           ]
         },
         options: {
           responsive:true,
           maintainAspectRatio:false,
           interaction:{mode:'index',intersect:false},
+          plugins:{
+            legend:{labels:{usePointStyle:true}},
+            tooltip:{callbacks:{
+              label:(ctx)=>{
+                if (ctx.dataset.yAxisID==='y2') return `Ingresos: ${fmtCurrency(ctx.parsed.y)}`;
+                return `Pedidos: ${fmtInt(ctx.parsed.y)}`;
+              }
+            }}
+          },
           scales:{
-            y:{beginAtZero:true},
-            y2:{beginAtZero:true, position:'right'},
+            y:{beginAtZero:true, ticks:{callback:v=>fmtInt(v)}},
+            y2:{beginAtZero:true, position:'right', grid:{drawOnChartArea:false}, ticks:{callback:v=>fmtCurrency(v)}},
             x:{grid:{display:false}}
           }
         }
@@ -169,13 +185,28 @@
       const ctx = document.getElementById('payChart').getContext('2d');
       if (charts.pay) charts.pay.destroy();
       charts.pay = new Chart(ctx, {
-        type: 'horizontalBar', // en v3 ya no existe; hacemos bar + indexAxis:'y'
-        data: { labels, datasets: [{ label:'Pedidos', data:values, backgroundColor:'rgba(46,204,113,.35)', borderColor:'#2ecc71', borderWidth:1 }] },
+        type: 'bar',                // <- fijo (no horizontalBar)
+        data: {
+          labels,
+          datasets: [{
+            label:'Pedidos', data:values,
+            backgroundColor:['#22b266','#2ecc71','#9adfb8'],
+            borderColor:['#1b8e52','#22b266','#78c79b'],
+            borderWidth:1.5
+          }]
+        },
         options: {
-          indexAxis: 'y',
+          indexAxis:'y',            // <- horizontal
           responsive:true,
           maintainAspectRatio:false,
-          scales:{ x:{beginAtZero:true}, y:{grid:{display:false}} }
+          plugins:{
+            legend:{display:false},
+            tooltip:{callbacks:{label:(ctx)=>` ${fmtInt(ctx.parsed.x)} pedidos`}}
+          },
+          scales:{
+            x:{beginAtZero:true, ticks:{callback:v=>fmtInt(v)}},
+            y:{grid:{display:false}}
+          }
         }
       });
     }
@@ -184,7 +215,7 @@
     async function loadFinance(){
       const monthStr = $("#monthPicker").value; // yyyy-mm
       const d = new Date(monthStr + '-01T00:00:00');
-      const Y = d.getFullYear(), M = d.getMonth(); // 0-based
+      const Y = d.getFullYear(), M = d.getMonth();
       const daysInMonth = new Date(Y, M+1, 0).getDate();
       const labels = Array.from({length:daysInMonth}, (_,i)=> String(i+1));
       const dayOrders = Array(daysInMonth).fill(0);
@@ -195,7 +226,6 @@
       $("#errPay").style.display = "none";
 
       try{
-        // Intentamos ordenar por un campo de fecha si existe
         const probe = await db.collection('orders').limit(1).get();
         let dateField = null;
         if (!probe.empty) {
@@ -215,7 +245,7 @@
           const dt = pickDocDate(o); if (!dt) return;
           if (dt.getFullYear() !== Y || dt.getMonth() !== M) return;
 
-          const dIdx = dt.getDate() - 1;
+          const idx = dt.getDate() - 1;
           const items = Array.isArray(o.items) ? o.items : [];
           const tot = (typeof o.total === 'number') ? o.total : items.reduce((t,it)=>{
             const base = it.price||0;
@@ -225,8 +255,8 @@
             return t + unit*(it.qty||0);
           },0);
 
-          dayOrders[dIdx] += 1;
-          dayRevenue[dIdx] += tot;
+          dayOrders[idx] += 1;
+          dayRevenue[idx] += tot;
           totalOrders += 1;
           totalRevenue += tot;
 
@@ -241,19 +271,19 @@
         $("#kpiRevenue").textContent = money(totalRevenue);
         $("#kpiAvg").textContent = totalOrders ? money(totalRevenue/totalOrders) : money(0);
 
-        // Render gráficos (o cartel sin datos)
+        // Render
         const hasDaily = dayOrders.some(v=>v>0) || dayRevenue.some(v=>v>0);
         if (hasDaily) drawDaily(labels, dayOrders, dayRevenue);
-        else {
+        else{
           if (charts.daily) charts.daily.destroy();
           $("#errDaily").textContent = "Sin datos para el mes seleccionado.";
           $("#errDaily").style.display = "block";
         }
 
-        const payLabels = Object.keys(payDist);
-        const payValues = payLabels.map(k=>payDist[k]);
+        const payLabels = ['Mercado Pago','Efectivo','Otro'];
+        const payValues = [payDist.mercado_pago, payDist.efectivo, payDist.otro];
         const hasPay = payValues.some(v=>v>0);
-        if (hasPay) drawPay(['Mercado Pago','Efectivo','Otro'], [payDist.mercado_pago, payDist.efectivo, payDist.otro]);
+        if (hasPay) drawPay(payLabels, payValues);
         else{
           if (charts.pay) charts.pay.destroy();
           $("#errPay").textContent = "Sin datos de medios de pago.";
@@ -278,7 +308,7 @@
 
     // Go!
     document.addEventListener('DOMContentLoaded', loadFinance);
-    window.addEventListener('load', loadFinance); // asegurar que el canvas ya esté visible
+    window.addEventListener('load', loadFinance);
   </script>
 </body>
 </html>
