@@ -4,10 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Finanzas • Rhodes Burgers</title>
-<link rel="icon" href="images/logo.png" />
+<link rel="icon" href="/images/icon-32.png" />
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#2ecc71">
-<link rel="apple-touch-icon" href="images/icon-192.png">
+<link rel="apple-touch-icon" href="/images/icon-192.png">
 <style>
   :root{
     --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff; --ring:#eaeaea;
@@ -77,7 +77,7 @@
 <body>
 <header>
   <div class="topbar">
-    <a class="brand" href="#"><img src="images/logo.png" alt="">Rhodes Burgers</a>
+    <a class="brand" href="#"><img src="/images/logo.png" alt="">Rhodes Burgers</a>
     <div class="spacer"></div>
     <a class="btn" href="pedido_local.html">← Volver a pedidos</a>
     <button id="btnLogout" class="btn danger">⏻ Cerrar sesión</button>
@@ -337,6 +337,13 @@
   const btnRefreshMenu = document.getElementById('btnRefreshMenu');
   const menuInfo = document.getElementById('menuInfo');
 
+  // Fallback estático editable (por si no hay nada en Firestore ni pedidos aún)
+  const STATIC_MENU = [
+    { id: 'big_john_simple', name: 'Big John Simple', price: 10900 },
+    { id: 'big_john_doble',  name: 'Big John Doble',  price: 13900 }
+    // ← agregá acá si querés
+  ];
+
   // Catálogo en memoria
   let MENU_BURGERS = []; // {id,name,price}
 
@@ -349,43 +356,98 @@
   mPago.addEventListener('change', payBadgeUpdate);
   mPagado.addEventListener('change', payBadgeUpdate);
 
-  // Intentamos obtener hamburguesas del menú de varias colecciones conocidas
   async function tryFetchCollection(coll){
     try{
-      const snap = await db.collection(coll).limit(200).get();
-      const arr=[];
+      const snap = await db.collection(coll).limit(300).get();
+      const out=[];
       snap.forEach(d=>{
         const x=d.data()||{};
         const type = (x.type||x.tipo||x.category||x.categoria||'').toString().toLowerCase();
-        const isBurger = ['burger','hamburguesa','hamburguesas'].some(t=> type.includes(t)) || (coll.toLowerCase().includes('burger'));
-        const name = x.name || x.title || x.nombre || '';
-        const price= x.price || x.precio || 0;
-        if (name && (isBurger || coll.toLowerCase().includes('burger'))) {
-          arr.push({ id:d.id, name, price:Number(price)||0 });
-        }
+        const name = (x.name || x.title || x.nombre || '').toString();
+        const price= Number(x.price || x.precio || 0);
+        const looksBurger = ['burger','hamburguesa','hamburguesas'].some(t=> type.includes(t)) || coll.toLowerCase().includes('burger');
+        if (name && (looksBurger || !type)) out.push({ id:d.id, name, price: price>0?price:0 });
       });
-      return arr;
+      return out;
     }catch(_){ return []; }
   }
+
+  async function tryFetchSubcollection(root, doc, sub){
+    try{
+      const snap = await db.collection(root).doc(doc).collection(sub).limit(300).get();
+      const out=[];
+      snap.forEach(d=>{
+        const x=d.data()||{};
+        const name = (x.name || x.title || x.nombre || '').toString();
+        const price= Number(x.price || x.precio || 0);
+        if (name) out.push({ id:d.id, name, price: price>0?price:0 });
+      });
+      return out;
+    }catch(_){ return []; }
+  }
+
+  async function inferMenuFromOrders(){
+    try{
+      let q = db.collection('orders').orderBy('createdAt','desc').limit(500);
+      const snap = await q.get();
+      const map = new Map(); // nameLower -> {name, price}
+      snap.forEach(doc=>{
+        const it = Array.isArray(doc.data().items) ? doc.data().items : [];
+        it.forEach(x=>{
+          const nm = (x.name||'').toString().trim();
+          if (!nm) return;
+          const key = nm.toLowerCase();
+          const pr  = Number(x.price||0);
+          if (!map.has(key)) map.set(key,{name:nm, price: pr>0?pr:0});
+          else if (pr>0) map.set(key,{name:nm,price:pr}); // preferir último con precio
+        });
+      });
+      return Array.from(map.values());
+    }catch(_){ return []; }
+  }
+
   async function loadMenuBurgers(){
     menuInfo.textContent = 'Cargando menú...';
-    const found = new Map(); // key: name lower -> {name,price,id}
-    const pushUnique = (it)=>{
-      const k = it.name.trim().toLowerCase();
-      if(!k) return;
-      if(!found.has(k)) found.set(k, {id:it.id, name:it.name, price:it.price});
-      // si aparecen repetidos con distinto precio, quedate con el mayor (suele ser el actual)
-      else if (it.price > found.get(k).price) found.set(k, it);
-    };
-    const sources = [
-      ...await tryFetchCollection('menu'),
-      ...await tryFetchCollection('products'),
-      ...await tryFetchCollection('burgers'),
-      ...await tryFetchCollection('menu_burgers'),
+    const found = new Map(); // k=nameLower -> obj
+
+    function pushArr(arr, tag){
+      arr.forEach(it=>{
+        const k=it.name.trim().toLowerCase(); if(!k) return;
+        const prev = found.get(k);
+        if (!prev || (it.price||0) > (prev.price||0)) found.set(k,{...it,__source:tag});
+      });
+    }
+
+    // 1) Colecciones típicas
+    const cands = ['menu','products','burgers','menu_burgers'];
+    for (const coll of cands){
+      const arr = await tryFetchCollection(coll);
+      pushArr(arr, coll);
+    }
+    // 2) Subcolecciones conocidas
+    const subcands = [
+      ['menu','burgers','items'],
+      ['menu','hamburguesas','items'],
+      ['catalog','burgers','items']
     ];
-    sources.forEach(pushUnique);
-    MENU_BURGERS = Array.from(found.values()).sort((a,b)=> a.name.localeCompare(b.name, 'es'));
-    menuInfo.textContent = MENU_BURGERS.length ? `Menú cargado: ${MENU_BURGERS.length} hamburguesas` : 'No se encontraron hamburguesas en Firestore (usá “Otro”).';
+    for (const [root,doc,sub] of subcands){
+      const arr = await tryFetchSubcollection(root,doc,sub);
+      pushArr(arr, `${root}/${doc}/${sub}`);
+    }
+    // 3) Inferir desde pedidos si no hay nada
+    if (found.size===0){
+      const fromOrders = await inferMenuFromOrders();
+      pushArr(fromOrders,'orders');
+    }
+    // 4) Fallback estático
+    if (found.size===0){
+      pushArr(STATIC_MENU,'static');
+    }
+
+    MENU_BURGERS = Array.from(found.values()).sort((a,b)=> a.name.localeCompare(b.name,'es'));
+    menuInfo.textContent = MENU_BURGERS.length
+      ? `Menú cargado: ${MENU_BURGERS.length} hamburguesas`
+      : 'No se encontraron hamburguesas (usá “Otro”).';
 
     // Actualizar selects existentes
     document.querySelectorAll('.prod').forEach(sel => fillSelectOptions(sel));
@@ -394,9 +456,8 @@
   function fillSelectOptions(selectEl){
     const cur = selectEl.value;
     selectEl.innerHTML = '<option value="">Seleccionar...</option>' +
-      MENU_BURGERS.map(m => `<option value="${m.id}" data-price="${m.price}">${m.name} — ${money(m.price)}</option>`).join('') +
+      MENU_BURGERS.map(m => `<option value="${m.id||m.name}" data-price="${m.price||0}">${m.name}${(m.price>0?` — ${money(m.price)}`:'')}</option>`).join('') +
       '<option value="__other">Otro (especificar)</option>';
-    // Restaurar selección si coincide ID
     if (cur) {
       const opt = Array.from(selectEl.options).find(o=>o.value===cur);
       if (opt) selectEl.value = cur;
@@ -426,40 +487,31 @@
 
     fillSelectOptions(prodSel);
 
-    // Si viene con id (prefill), setearlo; si viene nombre custom, mostrar input
     if (pref.id){
-      prodSel.value = pref.id;
-      cell.classList.remove('showName');
+      prodSel.value = pref.id; cell.classList.remove('showName');
     } else if (pref.name){
-      prodSel.value = '__other';
-      cell.classList.add('showName');
+      prodSel.value = '__other'; cell.classList.add('showName');
     }
 
     function recalc(){
       const q = Math.max(0, parseInt(qtyI.value||'0',10));
       const p = Math.max(0, Math.round(parseFloat(priceI.value||'0')));
-      const sub = q*p;
-      subEl.textContent = money(sub);
+      subEl.textContent = money(q*p);
       updateTotal();
     }
     [qtyI, priceI, nameI, prodSel].forEach(i=> i.addEventListener('input', recalc));
 
     prodSel.addEventListener('change', ()=>{
       const val = prodSel.value;
-      if (!val) return; // "Seleccionar..."
-
+      if (!val) return;
       if (val === '__other'){
-        // Modo manual
         cell.classList.add('showName');
         if (!nameI.value.trim()) nameI.focus();
-        // no tocar precio
       } else {
-        // Modo menú: ocultar input manual y setear precio sugerido
         cell.classList.remove('showName');
         const opt = prodSel.selectedOptions[0];
         const price = Number(opt?.dataset?.price||0);
         priceI.value = price>0 ? price : priceI.value;
-        // Nombre para guardar: texto de la opción antes del " — $"
         const label = (opt?.textContent||'').split(' — ')[0];
         nameI.value = label;
         if (!qtyI.value || +qtyI.value===0) qtyI.value = 1;
@@ -468,7 +520,6 @@
     });
 
     priceI.addEventListener('dblclick', ()=>{
-      // Copiar último precio usado
       const prev = Array.from(rowsHost.querySelectorAll('.price')).slice(0,-1).reverse().find(x=>+x.value>0);
       if(prev){ priceI.value = prev.value; priceI.dispatchEvent(new Event('input')); }
     });
@@ -487,7 +538,6 @@
       const sel = prodSel.value;
       let name = '';
       if (sel && sel !== '__other'){
-        // tomar label de la opción (antes del " — ")
         const label = (prodSel.selectedOptions[0]?.textContent||'').split(' — ')[0];
         name = label || '';
       } else {
@@ -523,13 +573,11 @@
     updateTotal();
   }
 
-  // Inicializar con 2 filas
   clearManualForm();
-
   document.getElementById('btnAddLine').addEventListener('click', ()=> addRow());
   btnRefreshMenu.addEventListener('click', loadMenuBurgers);
 
-  // Al abrir, cargar menú
+  // Cargar menú al abrir
   loadMenuBurgers();
 
   function takeNextOrderNumber(tx){
@@ -561,7 +609,7 @@
     btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando...';
 
     try{
-      let createdId=null, orderNumber=null;
+      let orderNumber=null;
       await db.runTransaction(async (tx)=>{
         orderNumber = await takeNextOrderNumber(tx);
         const order = {
@@ -580,12 +628,10 @@
         };
         const ref = db.collection('orders').doc();
         tx.set(ref, order);
-        createdId = ref.id;
       });
 
       showToast(`Venta registrada (Pedido #${orderNumber})`,'success');
       clearManualForm();
-      // refrescar KPIs/gráficos
       await loadFinance();
 
     }catch(e){
