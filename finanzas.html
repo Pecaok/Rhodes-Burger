@@ -25,18 +25,32 @@
     .board{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:14px 16px;margin-bottom:16px}
     .board-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
     .board-kpis{display:flex;gap:12px;flex-wrap:wrap;margin-left:auto}
-    .kbadge{min-width:160px;background:#f7f7f7;border:1px solid var(--ring);border-radius:14px;padding:10px 14px}
+    .kbadge{min-width:150px;background:#f7f7f7;border:1px solid var(--ring);border-radius:14px;padding:10px 14px}
     .klabel{font-size:12px;color:var(--muted)}
     .kvalue{font-weight:800;font-size:20px}
-    .chartwrap{width:100%;margin-top:10px}
-    .chartbox{width:100%;height:260px} /* igual que pedido_local */
-
+    .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+    .chartwrap{background:#fff;border:1px solid var(--ring);border-radius:12px;padding:8px}
+    .chartbox{width:100%;height:260px} /* fijo como pedido_local */
     input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
-
-    .card{background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:16px}
-    h2{font-size:18px;margin:0 0 10px}
-    .row{display:grid;grid-template-columns:1fr;gap:16px}
     .err{color:#b00020;font-weight:600;margin-top:8px}
+
+    /* ===== card para pedidos presenciales ===== */
+    .card{background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:16px;margin-top:16px}
+    .row{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+    .row .col-2{grid-column:span 2}
+    .row .col-3{grid-column:span 3}
+    .row .col-6{grid-column:span 6}
+    label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}
+    input[type="text"], input[type="number"], select{
+      width:100%;border:1px solid var(--ring);border-radius:10px;padding:10px;outline:none
+    }
+    .muted{color:var(--muted);font-size:13px}
+    .ok{color:#0b7a3a;font-weight:700}
+    @media (max-width:900px){
+      .charts{grid-template-columns:1fr}
+      .row{grid-template-columns:1fr 1fr}
+      .row .col-2,.row .col-3,.row .col-6{grid-column:span 2}
+    }
   </style>
 </head>
 <body>
@@ -69,7 +83,7 @@
   </header>
 
   <main>
-    <!-- ====== tablero superior con KPIs + gráfico (como pedido_local) -->
+    <!-- ====== tablero superior con KPIs + dos gráficos fijos -->
     <section class="board">
       <div class="board-head">
         <strong>Resumen mensual</strong>
@@ -82,16 +96,65 @@
           <div class="kbadge"><div class="klabel">Ticket promedio</div><div class="kvalue" id="kpiAvg">—</div></div>
         </div>
       </div>
-      <div class="chartwrap"><canvas id="monthChart" class="chartbox"></canvas></div>
+
+      <div class="charts">
+        <div class="chartwrap">
+          <canvas id="monthChart" class="chartbox"></canvas>
+        </div>
+        <div class="chartwrap">
+          <canvas id="payChart" class="chartbox"></canvas>
+        </div>
+      </div>
+
       <div id="kpiError" class="err" style="display:none;margin-top:6px"></div>
     </section>
 
-    <!-- abajo, otros gráficos/analíticas -->
-    <section class="row">
-      <div class="card">
-        <h2>Distribución de medios de pago</h2>
-        <canvas id="payChart" class="chartbox" style="height:320px"></canvas>
-        <div id="errPay" class="err" style="display:none"></div>
+    <!-- ====== Alta rápida de pedidos presenciales ====== -->
+    <section class="card">
+      <h2 style="margin-top:0">Agregar pedido presencial</h2>
+      <div class="row">
+        <div class="col-3">
+          <label>Nombre (opcional)</label>
+          <input type="text" id="mpNombre" placeholder="Ej: Juan Pérez">
+        </div>
+        <div class="col-2">
+          <label>Total</label>
+          <input type="number" id="mpTotal" placeholder="Ej: 10900" min="0" step="1">
+          <div class="muted">En ARS, sin puntos ni comas.</div>
+        </div>
+        <div class="col-2">
+          <label>Medio de pago</label>
+          <select id="mpPago">
+            <option value="efectivo">Efectivo</option>
+            <option value="mercado_pago">Mercado Pago</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+        <div class="col-2">
+          <label>Estado</label>
+          <select id="mpEstado">
+            <option value="delivered">Entregado</option>
+            <option value="ready">Listo para retirar</option>
+            <option value="in_prep">En preparación</option>
+            <option value="accepted">Recibido</option>
+          </select>
+        </div>
+        <div class="col-6">
+          <label>Notas (opcional)</label>
+          <input type="text" id="mpNotas" placeholder="Ej: sin cebolla, pasó 20:30, etc.">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;align-items:center">
+        <div class="col-3">
+          <label style="display:flex;gap:8px;align-items:center;font-weight:600">
+            <input type="checkbox" id="mpPagado" checked> Marcar como PAGADO
+          </label>
+          <div class="muted">Si es efectivo y no pagó, destildá.</div>
+        </div>
+        <div class="col-3">
+          <button id="btnCrearManual" class="btn">➕ Crear pedido</button>
+          <span id="mpMsg" class="muted" style="margin-left:8px"></span>
+        </div>
       </div>
     </section>
   </main>
@@ -136,7 +199,6 @@
       }
       return null;
     }
-
     function unitWithExtras(it){
       const base = it.price || 0;
       const pz = (it.extras?.patty||0)   * (it.extras?.EXTRA_PRICE_PATTY||0);
@@ -157,14 +219,13 @@
       if(monthChart) monthChart.destroy();
       monthChart = new Chart(ctx,{type:'bar',data:{labels,
         datasets:[
-          {type:'bar',label:'Pedidos',data:orders,backgroundColor:'rgba(46,204,113,.35)',borderColor:'#2ecc71',borderWidth:1,yAxisID:'y'},
-          {type:'line',label:'Ingresos ($)',data:revenue,borderColor:'#2ecc71',backgroundColor:'rgba(46,204,113,.10)',borderWidth:2,tension:.25,yAxisID:'y2'}
+          {type:'bar',label:'Pedidos',data:orders,backgroundColor:'rgba(46,204,113,.55)',borderColor:'#22b266',borderWidth:1.5,yAxisID:'y'},
+          {type:'line',label:'Ingresos ($)',data:revenue,borderColor:'#1b6a3c',backgroundColor:'rgba(46,204,113,.10)',borderWidth:3,tension:.25,pointRadius:3,fill:false,yAxisID:'y2'}
         ]},
         options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-          scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
+          scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false}},x:{grid:{display:false}}}}
       });
     }
-
     function ensurePayChart(labels, values){
       const ctx = document.getElementById('payChart').getContext('2d');
       if (payChart) payChart.destroy();
@@ -178,8 +239,6 @@
     /* ===================== CARGA DE DATOS ===================== */
     async function loadFinance(){
       $("#kpiError").style.display="none"; $("#kpiError").textContent="";
-      $("#errPay").style.display="none"; $("#errPay").textContent="";
-
       try{
         // ordenar por campo fecha si existe
         const probe = await db.collection('orders').limit(1).get();
@@ -220,10 +279,8 @@
         $("#kpiRevenue").textContent = money(revenue);
         $("#kpiAvg").textContent = count ? money(revenue/count) : money(0);
 
-        // Gráfico superior (igual a pedido_local)
+        // Gráficos fijos
         ensureMonthChart(labels, dayOrders, dayRevenue);
-
-        // Distribución
         ensurePayChart(['Mercado Pago','Efectivo','Otro'], [payDist.mercado_pago, payDist.efectivo, payDist.otro]);
 
       }catch(err){
@@ -233,9 +290,71 @@
       }
     }
 
+    // ===== Contador y creación de pedidos presenciales =====
+    async function takeNextOrderNumber(tx){
+      const ref = db.collection("config").doc("counters");
+      const snap = await tx.get(ref);
+      const prev = snap.exists ? (snap.data().orderNumber||0) : 0;
+      const next = prev + 1;
+      tx.set(ref,{orderNumber:next},{merge:true});
+      return next;
+    }
+    async function createManualOrder(){
+      const nombre = $("#mpNombre").value.trim();
+      const total  = parseInt($("#mpTotal").value, 10);
+      const pago   = $("#mpPago").value;
+      const estado = $("#mpEstado").value;
+      const notas  = $("#mpNotas").value.trim();
+      const pagado = $("#mpPagado").checked;
+
+      const msg = $("#mpMsg"); msg.textContent=""; msg.className="muted";
+
+      if (!Number.isFinite(total) || total<=0){
+        msg.textContent = "Ingresá un total válido."; return;
+      }
+
+      try{
+        let newId=null, orderNumber=null;
+        await db.runTransaction(async (tx)=>{
+          const next = await takeNextOrderNumber(tx);
+          orderNumber = next;
+          const ref = db.collection("orders").doc();
+          const order = {
+            orderNumber,
+            nombre,
+            telefono: "",
+            entrega: "take_away",
+            pago,
+            paymentStatus: (pago==='efectivo' ? (pagado?'paid':'unpaid') : 'paid'),
+            notes: notas,
+            status: estado,
+            items: [],                // sin ítems: usamos 'total' directo
+            total: total,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          tx.set(ref, order, {merge:false});
+          newId = ref.id;
+        });
+
+        msg.textContent = `Pedido #${orderNumber} creado.`;
+        msg.className = "ok";
+        // limpiar
+        $("#mpNombre").value=""; $("#mpTotal").value=""; $("#mpNotas").value="";
+        $("#mpPago").value="efectivo"; $("#mpEstado").value="delivered"; $("#mpPagado").checked=true;
+
+        // refrescar tablero
+        await loadFinance();
+      }catch(e){
+        console.error(e);
+        msg.textContent = "No se pudo crear el pedido. Probá de nuevo.";
+        msg.className = "err";
+      }
+    }
+
     // Eventos
     $("#btnReload").addEventListener('click', loadFinance);
     $("#monthPicker").addEventListener('change', loadFinance);
+    $("#btnCrearManual").addEventListener('click', createManualOrder);
     $("#btnLogout").addEventListener('click', ()=>{
       localStorage.removeItem('rb_auth_token');
       localStorage.removeItem('rb_auth_expires');
