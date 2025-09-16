@@ -7,21 +7,13 @@
   <link rel="icon" href="images/logo.png" />
   <style>
     :root{
-      --primary:#2ecc71;
-      --text:#111;
-      --muted:#666;
-      --bg:#f6f6f6;
-      --card:#fff;
-      --radius:18px;
-      --shadow:0 10px 30px rgba(0,0,0,.08);
-      --ring:#eaeaea;
+      --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
+      --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.08); --ring:#eaeaea;
+      --ok:#2ecc71; --warn:#ffb74d; --danger:#d32f2f;
     }
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
-    header{
-      position:sticky;top:0;z-index:20;background:#fff;
-      box-shadow:0 2px 12px rgba(0,0,0,.06)
-    }
+    header{position:sticky;top:0;z-index:20;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .topbar{max-width:1100px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
     .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit}
     .brand img{width:40px;height:40px;border-radius:10px;background:#fff;object-fit:contain}
@@ -29,6 +21,7 @@
     .btn{display:inline-flex;align-items:center;gap:10px;border:2px solid var(--primary);padding:10px 16px;border-radius:999px;color:var(--primary);background:#fff;font-weight:700;text-decoration:none;cursor:pointer}
     .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
     .btn.ghost{border-color:#e7e7e7;color:#333}
+    .btn[disabled], .btn.disabled{opacity:.65;cursor:not-allowed;filter:grayscale(.2)}
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:34px;margin:14px 4px 18px}
     h2{font-size:26px;margin:24px 4px 14px}
@@ -42,14 +35,21 @@
     .price{font-weight:800}
     .actions{display:flex;gap:8px;flex-wrap:wrap}
 
+    /* Pills de estado */
+    .pill{display:inline-flex;align-items:center;gap:8px;border:2px solid;border-radius:999px;padding:6px 10px;font-weight:800;line-height:1}
+    .pill.ok{border-color:var(--ok);color:var(--ok);background:#e8f8ef}
+    .pill.bad{border-color:#bbb;color:#555;background:#f5f5f5}
+    .pill.eta{border-color:#b3e5c5;color:#0b7a3a;background:#eefcf4}
+
     /* Drawer carrito */
     .drawer{position:fixed;top:0;right:-460px;width:460px;max-width:92vw;height:100vh;background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.18);transition:right .25s;z-index:30;display:flex;flex-direction:column}
     .drawer.open{right:0}
-    .drawer header{padding:14px 16px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+    .drawer header{padding:14px 16px;box-shadow:0 2px 12px rgba(0,0,0,.06);display:flex;align-items:center;gap:10px}
     .drawer .body{padding:14px 16px;overflow:auto;flex:1}
     .item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #efefef}
     .total{display:flex;align-items:center;justify-content:space-between;font-weight:800;font-size:18px;margin-top:10px}
     .cart-actions{margin-top:12px;display:flex;gap:10px}
+    .etaBox{margin-top:10px;padding:8px 10px;border:1px dashed var(--ring);border-radius:10px;font-size:14px;color:#0b7a3a;background:#f7fff9;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 
     /* Modal */
     .overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);display:none;align-items:center;justify-content:center;z-index:40}
@@ -62,13 +62,11 @@
     textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--ring);border-radius:12px}
     .muted{color:var(--muted);font-size:14px}
     .inline{display:flex;gap:12px;flex-wrap:wrap}
-    .pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);border-radius:999px;padding:8px 12px;cursor:pointer}
-    .pill input{accent-color:var(--primary)}
+    .pillOpt{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);border-radius:999px;padding:8px 12px;cursor:pointer}
+    .pillOpt input{accent-color:var(--primary)}
     .micro{font-size:12px;color:var(--muted)}
 
-    @media (max-width:480px){
-      .drawer .body{padding-bottom:120px}
-    }
+    @media (max-width:480px){ .drawer .body{padding-bottom:120px} }
   </style>
 </head>
 <body>
@@ -78,6 +76,11 @@
         <img src="images/logo.png" alt="Rhodes Burgers" />
         <strong>Rhodes Burgers</strong>
       </a>
+
+      <!-- Estado de apertura + ETA (preview) -->
+      <span id="openPill" class="pill bad">Cargando horarios…</span>
+      <span id="etaPill" class="pill eta" style="display:none">—</span>
+
       <div class="spacer"></div>
       <button class="btn primary" id="btnCart">Ver pedido <span id="cartBubble" class="muted">(0)</span></button>
     </div>
@@ -97,7 +100,8 @@
   <aside class="drawer" id="drawer">
     <header>
       <strong>Tu pedido</strong>
-      <button class="btn ghost" id="closeDrawer" style="float:right">✕</button>
+      <span id="openHint" class="pill bad" style="margin-left:8px">—</span>
+      <button class="btn ghost" id="closeDrawer" style="margin-left:auto">✕</button>
     </header>
     <div class="body">
       <div id="cartItems"></div>
@@ -105,6 +109,13 @@
         <span>Total</span>
         <span id="cartTotal">$0</span>
       </div>
+
+      <!-- ETA + cola -->
+      <div id="etaBox" class="etaBox" style="display:none">
+        <strong id="etaText">Si pedís ahora: —</strong>
+        <span id="queueText" class="muted">—</span>
+      </div>
+
       <div class="cart-actions">
         <button class="btn ghost" id="btnVaciar">Vaciar</button>
         <a class="btn primary" href="pedido_cliente.html" id="goCheckout">Ir a pagar</a>
@@ -131,8 +142,8 @@
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <div class="muted" style="font-weight:600">Papas (obligatorio)</div>
         <div class="inline">
-          <label class="pill"><input type="radio" name="fries" value="con_sazon"> Con sazón</label>
-          <label class="pill"><input type="radio" name="fries" value="sin_sazon"> Sin sazonar</label>
+          <label class="pillOpt"><input type="radio" name="fries" value="con_sazon"> Con sazón</label>
+          <label class="pillOpt"><input type="radio" name="fries" value="sin_sazon"> Sin sazonar</label>
         </div>
         <div class="micro">Elegí el tipo de papas para esta hamburguesa.</div>
       </div>
@@ -172,7 +183,7 @@
     </div>
   </div>
 
-  <!-- Firebase (App, Firestore y Auth – compat) -->
+  <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -205,7 +216,7 @@
     const EXTRA_PRICE_PATTY   = 1600; // por medallón extra
     const EXTRA_PRICE_CHEDDAR = 300;  // por feta de cheddar extra
 
-    /*************** DATOS ***************/
+    /*************** MENÚ ***************/
     const BURGERS = [
       { id:"bigjohn_simple",name:"Big John Simple",price:10900,img:"images/Big John Simple.jpg",kind:"simple",desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan brioche. Incluye papas fritas." },
       { id:"bigjohn_doble",name:"Big John Doble",price:13900,img:"images/Big John Doble.jpg",kind:"double",desc:"Doble Medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan brioche. Incluye papas fritas." },
@@ -236,17 +247,109 @@
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const uid = () => (Date.now().toString(36)+Math.random().toString(36).slice(2,7)).toUpperCase();
 
-    /*************** ESTADO ***************/
-    // Ahora cada línea del carrito usa clave única -> permite variantes (papas/extras) sin mezclar.
+    /*************** HORARIOS DESDE CONTACTO ***************/
+    let SCHEDULE = null; // { 0:[{start,end}], 1:[...], ... }
+
+    const DAYMAP = {
+      "0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,
+      "domingo":0,"dom":0,
+      "lunes":1,"lun":1,
+      "martes":2,"mar":2,
+      "miercoles":3,"miércoles":3,"mie":3,"mié":3,
+      "jueves":4,"jue":4,
+      "viernes":5,"vie":5,
+      "sabado":6,"sábado":6,"sab":6,"sáb":6
+    };
+    const toMin = hhmm => { if(!hhmm) return null; const m=String(hhmm).trim().replace('.',':'); const [h,mi]=m.split(':'); const H=parseInt(h,10), M=parseInt(mi||'0',10); if(isNaN(H)||isNaN(M)) return null; return H*60+M; };
+
+    function parseScheduleJSON(obj){
+      const out = {0:[],1:[],2:[],3:[],4:[],5:[],6:[]};
+      for (const [k,v] of Object.entries(obj||{})){
+        const day = DAYMAP[String(k).toLowerCase()];
+        if (day==null) continue;
+        const arr = Array.isArray(v)? v : [];
+        out[day] = arr.map(s=>{
+          const a=toMin(s.start), b=toMin(s.end);
+          if(a==null||b==null) return null;
+          return {start: String(Math.floor(a/60)).padStart(2,'0')+':'+String(a%60).padStart(2,'0'),
+                  end:   String(Math.floor(b/60)).padStart(2,'0')+':'+String(b%60).padStart(2,'0')};
+        }).filter(Boolean);
+      }
+      return out;
+    }
+
+    async function loadScheduleFromContacto(){
+      // 1) mismo documento
+      try{
+        const here = document.getElementById('opening-hours');
+        if (here && here.type==='application/json'){
+          return parseScheduleJSON(JSON.parse(here.textContent));
+        }
+      }catch(_){}
+
+      // 2) contacto.html
+      try{
+        const res = await fetch('contacto.html', {cache:'no-store'});
+        if (res.ok){
+          const html = await res.text();
+          const doc = new DOMParser().parseFromString(html,'text/html');
+          const tag = doc.querySelector('#opening-hours[type="application/json"]');
+          if (tag){
+            return parseScheduleJSON(JSON.parse(tag.textContent));
+          }
+          // (Opcional) Si tenés una tabla con id="hours-table", se podría parsear acá.
+        }
+      }catch(_){}
+
+      // 3) fallback por si no hay nada
+      return parseScheduleJSON({
+        "lunes":[{"start":"19:00","end":"23:30"}],
+        "martes":[{"start":"19:00","end":"23:30"}],
+        "miércoles":[{"start":"19:00","end":"23:30"}],
+        "jueves":[{"start":"19:00","end":"23:30"}],
+        "viernes":[{"start":"19:00","end":"23:59"}],
+        "sábado":[{"start":"19:00","end":"23:59"}],
+        "domingo":[{"start":"19:00","end":"23:30"}]
+      });
+    }
+
+    function isOpenNow(d=new Date()){
+      if(!SCHEDULE) return false;
+      const day = d.getDay();
+      const mins = d.getHours()*60 + d.getMinutes();
+      const spans = SCHEDULE[day]||[];
+      return spans.some(({start,end})=>{
+        const a=toMin(start), b=toMin(end);
+        if (a==null||b==null) return false;
+        if (b>a) return mins>=a && mins<b;   // mismo día
+        if (b===a) return false;             // ignorar 0
+        return false;                        // sin cruces medianoche
+      });
+    }
+
+    function nextOpenInfo(d=new Date()){
+      if(!SCHEDULE) return null;
+      const dayNow = d.getDay(); const minsNow = d.getHours()*60 + d.getMinutes();
+      for (let i=0;i<7;i++){
+        const day = (dayNow+i)%7; const spans=SCHEDULE[day]||[];
+        for (const {start} of spans){
+          const s=toMin(start); if(s==null) continue;
+          if (i===0 && s<=minsNow) continue;
+          const when = new Date(d);
+          when.setDate(d.getDate()+i);
+          when.setHours(Math.floor(s/60), s%60,0,0);
+          return when;
+        }
+      }
+      return null;
+    }
+    const fmtTime = d => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+
+    /*************** ESTADO (carrito) ***************/
     let cart = loadCart(); // {burger:{key:{...}},drink:{key:{...}}}
     function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}}; }catch{ return {burger:{},drink:{}}; } }
     function saveCart(){ localStorage.setItem(CART_KEY, JSON.stringify(cart)); }
-    function cartCount(){
-      let n=0;
-      for(const b of Object.values(cart.burger||{})) n+=b.qty||0;
-      for(const d of Object.values(cart.drink||{})) n+=d.qty||0;
-      return n;
-    }
+    function cartCount(){ let n=0; for(const b of Object.values(cart.burger||{})) n+=b.qty||0; for(const d of Object.values(cart.drink||{})) n+=d.qty||0; return n; }
     function calcTotal(){
       let t=0;
       for(const obj of Object.values(cart.burger||{})){
@@ -265,7 +368,7 @@
       const card=document.createElement("div");
       card.className="card";
       card.innerHTML=`
-        <img src="${encodeURI(item.img)}" alt="${item.name}" onerror="this.onerror=null;this.src='${FALLBACK_IMG}'">
+        <img src="${encodeURI(item.img)}" alt="${item.name}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${FALLBACK_IMG}'">
         <div class="content">
           <h3>${item.name}</h3>
           ${item.desc?`<p class="muted" style="margin:4px 0 0">${item.desc}</p>`:""}
@@ -278,10 +381,8 @@
           </div>
         </div>`;
       if(type==="drink"){
-        // Bebida: opcional, sin modal
         card.querySelector("[data-add]").onclick = ()=> addDrink(item);
       }else{
-        // Hamburguesa: obliga a elegir papas en modal
         card.querySelector("[data-add]").onclick  = ()=> openCustomize(item);
         card.querySelector("[data-custom]").onclick = ()=> openCustomize(item);
       }
@@ -300,10 +401,6 @@
     document.getElementById("btnCart").onclick = openDrawer;
     document.getElementById("closeDrawer").onclick = closeDrawer;
     document.getElementById("btnVaciar").onclick = ()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
-    document.getElementById("goCheckout").onclick = (e)=>{
-      // Si querés obligar a que haya al menos 1 hamburguesa, descomentá:
-      // if (!Object.keys(cart.burger||{}).length) { e.preventDefault(); alert("Agregá al menos 1 hamburguesa."); }
-    };
 
     function renderCart(){
       cartItems.innerHTML="";
@@ -349,6 +446,7 @@
       }
       cartTotal.textContent = money(calcTotal());
       document.getElementById("cartBubble").textContent = `(${cartCount()})`;
+      updateETAView();
     }
     window.changeQty = function(type,key,delta){
       const bucket = cart[type]; if(!bucket) return;
@@ -373,7 +471,7 @@
     const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
     const cheVal=$("#cheVal"), cheInc=$("#cheInc"), cheDec=$("#cheDec");
     const notes=$("#notes"), btnAdd=$("#btnAdd"), btnCancel=$("#btnCancel");
-    let currentItem=null; // {id,name,price,kind}
+    let currentItem=null;
 
     qtyInc.onclick = ()=> qtyVal.textContent = String(Math.min(99,(+qtyVal.textContent||1)+1));
     qtyDec.onclick = ()=> qtyVal.textContent = String(Math.max(1,(+qtyVal.textContent||1)-1));
@@ -384,90 +482,117 @@
     cheDec.onclick = ()=> { const v=+cheVal.textContent||0; if(v>0) cheVal.textContent = v-1; };
 
     btnCancel.onclick = ()=> overlay.classList.remove("open");
-
     function resetFries(){ document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false); }
 
     function openCustomize(item){
       currentItem = item;
       modTitle.textContent = "Personalizar: " + item.name;
-
-      // Reset
-      qtyVal.textContent="1";
-      notes.value="";
-      patVal.textContent="0";
-      cheVal.textContent="0";
-      resetFries();
-
-      // Precios en rótulos
+      qtyVal.textContent="1"; notes.value=""; patVal.textContent="0"; cheVal.textContent="0"; resetFries();
       const pi = document.getElementById("pattiesInfo");
       const ci = document.getElementById("cheInfo");
       if (pi) pi.textContent = `( + ${money(EXTRA_PRICE_PATTY)} c/u, máx. +2 )`;
       if (ci) ci.textContent = `( + ${money(EXTRA_PRICE_CHEDDAR)} c/u, máx. +3 )`;
-
-      // Mostrar/ocultar extras según el tipo
-      if(item.kind==="double"){
-        rowPatties.style.display="flex";
-        rowCheddar.style.display="flex";
-        noExtras.style.display="none";
-      }else if(item.kind==="chicken"){
-        rowPatties.style.display="none";
-        rowCheddar.style.display="flex";
-        noExtras.style.display="none";
-      }else{
-        rowPatties.style.display="none";
-        rowCheddar.style.display="none";
-        noExtras.style.display="block";
-      }
+      if(item.kind==="double"){ rowPatties.style.display="flex"; rowCheddar.style.display="flex"; noExtras.style.display="none"; }
+      else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; noExtras.style.display="none"; }
+      else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; noExtras.style.display="block"; }
       overlay.classList.add("open");
     }
 
-    // Papas OBLIGATORIO al agregar hamburguesa
     btnAdd.onclick = ()=>{
       const friesEl = document.querySelector('input[name="fries"]:checked');
       if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
-
       const qty = +qtyVal.textContent || 1;
-
-      const extras = {
-        patty:   0,
-        cheddar: 0,
-        EXTRA_PRICE_PATTY,
-        EXTRA_PRICE_CHEDDAR
-      };
-      if(currentItem.kind==="double"){
-        extras.patty   = +patVal.textContent||0;    // máx 2
-        extras.cheddar = +cheVal.textContent||0;    // máx 3
-      }else if(currentItem.kind==="chicken"){
-        extras.patty   = 0;
-        extras.cheddar = +cheVal.textContent||0;    // máx 3
-      }
-
+      const extras = { patty:0, cheddar:0, EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR };
+      if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
+      else if(currentItem.kind==="chicken"){ extras.patty=0; extras.cheddar=+cheVal.textContent||0; }
       const txt = notes.value.trim();
       const bucket = cart.burger || (cart.burger={});
-
-      // Clave única por línea (para no mezclar variantes)
       const key = currentItem.id + '_' + uid();
-      bucket[key] = {
-        qty,
-        item: { id: currentItem.id, name: currentItem.name, price: currentItem.price },
-        fries: friesEl.value,
-        extras,
-        ...(txt?{notes:txt}:{})
-      };
-
+      bucket[key] = { qty, item:{id:currentItem.id,name:currentItem.name,price:currentItem.price}, fries:friesEl.value, extras, ...(txt?{notes:txt}:{}) };
       saveCart(); renderCart(); overlay.classList.remove("open");
     };
 
-    // start
-    mount();
+    /*************** UI de apertura + ETA ***************/
+    const openPill = document.getElementById('openPill');
+    const etaPill  = document.getElementById('etaPill');
+    const openHint = document.getElementById('openHint');
+    const goCheckout = document.getElementById('goCheckout');
+
+    function updateOpenUI(){
+      const open = isOpenNow();
+      if (open){
+        openPill.textContent = 'Abierto ahora';
+        openPill.className = 'pill ok';
+        openHint.textContent = 'Abierto ahora';
+        openHint.className = 'pill ok';
+        goCheckout.classList.remove('disabled');
+        goCheckout.removeAttribute('aria-disabled');
+      }else{
+        const next = nextOpenInfo();
+        const whenTxt = next ? ((next.toDateString()===new Date().toDateString()) ? `hoy ${fmtTime(next)}` : `${next.toLocaleDateString('es-AR')} ${fmtTime(next)}`) : 'pronto';
+        openPill.textContent = `Cerrado — abrimos ${whenTxt}`;
+        openPill.className = 'pill bad';
+        openHint.textContent = `Cerrado — abrimos ${whenTxt}`;
+        openHint.className = 'pill bad';
+        goCheckout.classList.add('disabled');
+        goCheckout.setAttribute('aria-disabled','true');
+      }
+    }
+
+    goCheckout.addEventListener('click', (e)=>{
+      if (!isOpenNow()){
+        e.preventDefault();
+        alert('Estamos cerrados en este momento. Volvé a partir del horario de apertura 😊');
+      }
+    });
+
+    // ETA + cola (igual que antes)
+    const BASE_MIN = 12, PER_ORDER_MIN = 4, ETA_MAX_EXTRA = 8;
+    const etaBox = document.getElementById('etaBox');
+    const etaText= document.getElementById('etaText');
+    const queueText = document.getElementById('queueText');
+    let unsubscribeQueue=null;
+
+    function startQueueListener(){
+      try{ if(unsubscribeQueue) unsubscribeQueue(); }catch(_){}
+      const q = db.collection('orders').orderBy('createdAt','desc').limit(200);
+      unsubscribeQueue = q.onSnapshot((snap)=>{
+        const ACTIVE = new Set(['accepted','pending_payment','in_prep','ready']);
+        let queue=0;
+        snap.forEach(doc=>{ const st=(doc.data()?.status)||''; if (ACTIVE.has(st)) queue++; });
+        if (!isOpenNow()){ etaBox.style.display='none'; etaPill.style.display='none'; return; }
+        const min = BASE_MIN + queue*PER_ORDER_MIN;
+        const max = min + ETA_MAX_EXTRA;
+        etaText.textContent = `Si pedís ahora: ~ ${min}–${max} min`;
+        queueText.textContent = `En cola: ${queue} pedido${queue===1?'':'s'}`;
+        etaBox.style.display='flex';
+        etaPill.textContent = `${min}–${max} min • ${queue} en cola`;
+        etaPill.style.display='inline-flex';
+      }, (_err)=>{ etaBox.style.display='none'; etaPill.style.display='none'; });
+    }
+
+    function updateETAView(){ /* se llama desde renderCart */ }
+
+    /*************** INIT ***************/
+    async function init(){
+      // 1) cargar horarios desde contacto
+      try{
+        SCHEDULE = await loadScheduleFromContacto();
+      }catch(_){
+        SCHEDULE = null;
+      }
+      // 2) montar UI y listeners
+      mount();
+      updateOpenUI();
+      setInterval(updateOpenUI, 60*1000);
+      startQueueListener();
+    }
+    init();
 
   }); // ensureAuthReady
   </script>
 
-  <!-- =========================================================
-       BLOQUE JSON DEL MENÚ (lo usa finanzas.html)
-       Editá aquí tus productos y precios
-  ========================================================== -->
+  <!-- Menú JSON (lo usa finanzas) -->
   <script id="menu-data" type="application/json">
   {
     "burgers": [
