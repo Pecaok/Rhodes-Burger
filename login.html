@@ -7,7 +7,7 @@
 <link rel="icon" href="images/logo.png" />
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#2ecc71">
-<link rel="apple-touch-icon" href="/images/icon-192.png">
+<link rel="apple-touch-icon" href="images/icon-192.png">
 <style>
   :root{--primary:#2ecc71;--ring:#eaeaea;--text:#111;--muted:#666;--card:#fff;--bg:#f6f6f6;--shadow:0 10px 30px rgba(0,0,0,.08)}
   *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
@@ -28,10 +28,14 @@
 <div class="wrap">
   <div class="card" role="form" aria-labelledby="t">
     <h1 id="t">Ingresar</h1>
-    <label>Email</label>
-    <input id="email" type="email" autocomplete="username" placeholder="admin@rhodes.com">
-    <label>Contraseña</label>
+
+    <label>Usuario</label>
+    <input id="user" type="text" autocomplete="username" placeholder="Ej: local">
+    <div class="muted">Ingresá solo el nombre de usuario (sin @). Ej: <strong>local</strong></div>
+
+    <label style="margin-top:12px">Clave</label>
     <input id="pass" type="password" autocomplete="current-password" placeholder="••••••••">
+
     <button id="btnLogin" class="btn">Ingresar</button>
     <div class="muted">Acceso sólo para el local.</div>
   </div>
@@ -43,17 +47,17 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script>
-  // SW
+  // Registrar Service Worker (PWA)
   if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js'); }
 
-  // Toasts
+  /* =================== TOASTS =================== */
   const toastEl = document.getElementById('toast');
   function showToast(msg,type='success',ms=2500){
     toastEl.textContent = msg; toastEl.className = 'toast '+type;
     requestAnimationFrame(()=>{ toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'), ms); });
   }
 
-  // Firebase
+  /* =================== FIREBASE =================== */
   const firebaseConfig = {
     apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
     authDomain:"rhodes-burguers.firebaseapp.com",
@@ -63,20 +67,50 @@
     appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"
   };
   try{ firebase.initializeApp(firebaseConfig);}catch(_){}
-  const auth = firebase.auth(); const db = firebase.firestore();
+  const auth = firebase.auth();
+  const db   = firebase.firestore();
 
-  // Sesión 20 hs al loguear
+  /* =================== CONFIG =================== */
+  // Dominio "falso" para armar el email interno desde el usuario.
+  // Cambiá esto si querés otro dominio virtual.
+  const USERNAME_DOMAIN = 'rb.local'; // local -> local@rb.local
+
+  // Guardá la sesión por 20 hs
   function setLocalExpiry(hours=20){
     const exp = Date.now() + hours*60*60*1000;
     localStorage.setItem('rb_auth_expires', String(exp));
   }
 
+  // Si ya está logueado, mandalo directo
+  auth.onAuthStateChanged(async (user)=>{
+    if (user){
+      // Verificamos admin antes de pasar
+      const doc = await db.collection('admins').doc(user.uid).get();
+      if (doc.exists && doc.data().enabled === true) {
+        const next = new URLSearchParams(location.search).get('next') || 'pedido_local.html';
+        location.replace(next);
+      } else {
+        await auth.signOut();
+      }
+    }
+  });
+
+  /* =================== LOGIN =================== */
   async function login(){
-    const email = document.getElementById('email').value.trim();
-    const pass  = document.getElementById('pass').value;
-    if(!email || !pass){ showToast('Completá email y contraseña','info'); return; }
+    const usuario = (document.getElementById('user').value || '').trim();
+    const pass    = document.getElementById('pass').value;
+
+    if(!usuario || !pass){
+      showToast('Completá usuario y clave','info'); return;
+    }
+
+    // Mapeamos "usuario" -> email interno
+    const email = `${usuario}@${USERNAME_DOMAIN}`;
+
     try{
       const cred = await auth.signInWithEmailAndPassword(email, pass);
+
+      // Chequeo de admin
       const uid = cred.user.uid;
       const doc = await db.collection('admins').doc(uid).get();
       if (!doc.exists || doc.data().enabled !== true){
@@ -84,13 +118,24 @@
         showToast('No tenés permisos de admin','error');
         return;
       }
+
       setLocalExpiry(20);
       showToast('Ingreso correcto','success');
+
       const next = new URLSearchParams(location.search).get('next') || 'pedido_local.html';
       location.replace(next);
+
     }catch(e){
       console.error(e);
-      showToast('Email/contraseña inválidos','error');
+      // Mensajes más claros
+      const code = e?.code || '';
+      if (code.includes('user-not-found') || code.includes('wrong-password')) {
+        showToast('Usuario o clave inválidos','error');
+      } else if (code.includes('too-many-requests')) {
+        showToast('Demasiados intentos. Probá en unos minutos.','error');
+      } else {
+        showToast('No se pudo iniciar sesión','error');
+      }
     }
   }
 
