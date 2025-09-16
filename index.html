@@ -23,7 +23,7 @@
       box-shadow:0 2px 12px rgba(0,0,0,.06)
     }
     .topbar{max-width:1100px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
-    .brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit}
     .brand img{width:40px;height:40px;border-radius:10px;background:#fff;object-fit:contain}
     .spacer{flex:1}
     .btn{display:inline-flex;align-items:center;gap:10px;border:2px solid var(--primary);padding:10px 16px;border-radius:999px;color:var(--primary);background:#fff;font-weight:700;text-decoration:none;cursor:pointer}
@@ -64,10 +64,8 @@
     .inline{display:flex;gap:12px;flex-wrap:wrap}
     .pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);border-radius:999px;padding:8px 12px;cursor:pointer}
     .pill input{accent-color:var(--primary)}
-
     .micro{font-size:12px;color:var(--muted)}
 
-    /* Asegurar que en mobile se pueda scrollear hasta los botones */
     @media (max-width:480px){
       .drawer .body{padding-bottom:120px}
     }
@@ -78,6 +76,7 @@
     <div class="topbar">
       <a href="index.html" class="brand">
         <img src="images/logo.png" alt="Rhodes Burgers" />
+        <strong>Rhodes Burgers</strong>
       </a>
       <div class="spacer"></div>
       <button class="btn primary" id="btnCart">Ver pedido <span id="cartBubble" class="muted">(0)</span></button>
@@ -108,7 +107,7 @@
       </div>
       <div class="cart-actions">
         <button class="btn ghost" id="btnVaciar">Vaciar</button>
-        <a class="btn primary" href="pedido_cliente.html">Ir a pagar</a>
+        <a class="btn primary" href="pedido_cliente.html" id="goCheckout">Ir a pagar</a>
       </div>
     </div>
   </aside>
@@ -135,7 +134,7 @@
           <label class="pill"><input type="radio" name="fries" value="con_sazon"> Con sazón</label>
           <label class="pill"><input type="radio" name="fries" value="sin_sazon"> Sin sazonar</label>
         </div>
-        <div class="micro">Se toma lo que elijas acá por cada hamburguesa.</div>
+        <div class="micro">Elegí el tipo de papas para esta hamburguesa.</div>
       </div>
 
       <!-- Medallones extra -->
@@ -235,26 +234,28 @@
     /*************** UTIL ***************/
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const uid = () => (Date.now().toString(36)+Math.random().toString(36).slice(2,7)).toUpperCase();
 
     /*************** ESTADO ***************/
-    let cart = loadCart(); // {burger:{},drink:{}}
+    // Ahora cada línea del carrito usa clave única -> permite variantes (papas/extras) sin mezclar.
+    let cart = loadCart(); // {burger:{key:{...}},drink:{key:{...}}}
     function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}}; }catch{ return {burger:{},drink:{}}; } }
     function saveCart(){ localStorage.setItem(CART_KEY, JSON.stringify(cart)); }
     function cartCount(){
       let n=0;
-      for(const b of Object.values(cart.burger)) n+=b.qty;
-      for(const d of Object.values(cart.drink)) n+=d.qty;
+      for(const b of Object.values(cart.burger||{})) n+=b.qty||0;
+      for(const d of Object.values(cart.drink||{})) n+=d.qty||0;
       return n;
     }
     function calcTotal(){
       let t=0;
-      for(const obj of Object.values(cart.burger)){
+      for(const obj of Object.values(cart.burger||{})){
         const base  = (obj.item?.price||0);
         const epat  = (obj.extras?.patty||0)   * (obj.extras?.EXTRA_PRICE_PATTY??EXTRA_PRICE_PATTY);
         const eche  = (obj.extras?.cheddar||0) * (obj.extras?.EXTRA_PRICE_CHEDDAR??EXTRA_PRICE_CHEDDAR);
-        t += (base + epat + eche) * obj.qty;
+        t += (base + epat + eche) * (obj.qty||0);
       }
-      for(const d of Object.values(cart.drink)) t += (d.item?.price||0)*d.qty;
+      for(const d of Object.values(cart.drink||{})) t += (d.item?.price||0) * (d.qty||0);
       return t;
     }
 
@@ -277,9 +278,11 @@
           </div>
         </div>`;
       if(type==="drink"){
+        // Bebida: opcional, sin modal
         card.querySelector("[data-add]").onclick = ()=> addDrink(item);
       }else{
-        card.querySelector("[data-add]").onclick  = ()=> openCustomize(item); // abrir modal para papas
+        // Hamburguesa: obliga a elegir papas en modal
+        card.querySelector("[data-add]").onclick  = ()=> openCustomize(item);
         card.querySelector("[data-custom]").onclick = ()=> openCustomize(item);
       }
       return card;
@@ -297,69 +300,73 @@
     document.getElementById("btnCart").onclick = openDrawer;
     document.getElementById("closeDrawer").onclick = closeDrawer;
     document.getElementById("btnVaciar").onclick = ()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
+    document.getElementById("goCheckout").onclick = (e)=>{
+      // Si querés obligar a que haya al menos 1 hamburguesa, descomentá:
+      // if (!Object.keys(cart.burger||{}).length) { e.preventDefault(); alert("Agregá al menos 1 hamburguesa."); }
+    };
 
     function renderCart(){
       cartItems.innerHTML="";
       // Burgers
-      for(const obj of Object.values(cart.burger)){
+      for(const [key,obj] of Object.entries(cart.burger||{})){
         const extrasTxt=[];
         if(obj.extras){
           if(obj.extras.patty) extrasTxt.push(`+${obj.extras.patty} medallón(es)`);
           if(obj.extras.cheddar) extrasTxt.push(`+${obj.extras.cheddar} cheddar`);
         }
-        const unit = obj.item.price
+        const unit = (obj.item?.price||0)
           + (obj.extras?.patty||0)   * (obj.extras?.EXTRA_PRICE_PATTY??EXTRA_PRICE_PATTY)
           + (obj.extras?.cheddar||0) * (obj.extras?.EXTRA_PRICE_CHEDDAR??EXTRA_PRICE_CHEDDAR);
 
-        cartItems.innerHTML += `
+        cartItems.insertAdjacentHTML('beforeend', `
           <div class="item">
             <div>
-              <strong>${obj.item.name}</strong>
+              <strong>${obj.item?.name||""}</strong>
               <div class="muted">Papas: ${obj.fries==="con_sazon"?"Con sazón":"Sin sazonar"}</div>
               ${extrasTxt.length?`<div class="muted">${extrasTxt.join(" · ")}</div>`:""}
               ${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}
             </div>
             <div style="display:flex;align-items:center;gap:10px">
-              <button class="btn ghost" onclick="changeQty('burger','${obj.item.id}',-1)">-</button>
-              <span>${obj.qty}</span>
-              <button class="btn ghost" onclick="changeQty('burger','${obj.item.id}',1)">+</button>
-              <span>${money(unit*obj.qty)}</span>
+              <button class="btn ghost" onclick="changeQty('burger','${key}',-1)">-</button>
+              <span>${obj.qty||0}</span>
+              <button class="btn ghost" onclick="changeQty('burger','${key}',1)">+</button>
+              <span>${money(unit*(obj.qty||0))}</span>
             </div>
-          </div>`;
+          </div>`);
       }
       // Drinks
-      for(const obj of Object.values(cart.drink)){
-        cartItems.innerHTML += `
+      for(const [key,obj] of Object.entries(cart.drink||{})){
+        cartItems.insertAdjacentHTML('beforeend', `
           <div class="item">
-            <div><strong>${obj.item.name}</strong></div>
+            <div><strong>${obj.item?.name||""}</strong></div>
             <div style="display:flex;align-items:center;gap:10px">
-              <button class="btn ghost" onclick="changeQty('drink','${obj.item.id}',-1)">-</button>
-              <span>${obj.qty}</span>
-              <button class="btn ghost" onclick="changeQty('drink','${obj.item.id}',1)">+</button>
-              <span>${money(obj.item.price*obj.qty)}</span>
+              <button class="btn ghost" onclick="changeQty('drink','${key}',-1)">-</button>
+              <span>${obj.qty||0}</span>
+              <button class="btn ghost" onclick="changeQty('drink','${key}',1)">+</button>
+              <span>${money((obj.item?.price||0)*(obj.qty||0))}</span>
             </div>
-          </div>`;
+          </div>`);
       }
       cartTotal.textContent = money(calcTotal());
       document.getElementById("cartBubble").textContent = `(${cartCount()})`;
     }
-    window.changeQty = function(type,id,delta){
+    window.changeQty = function(type,key,delta){
       const bucket = cart[type]; if(!bucket) return;
-      const cur = bucket[id]?.qty || 0;
+      const cur = bucket[key]?.qty || 0;
       const next = Math.max(0, cur+delta);
-      if(next===0) delete bucket[id]; else bucket[id].qty = next;
+      if(next===0) delete bucket[key]; else bucket[key].qty = next;
+      saveCart(); renderCart();
+    };
+
+    /*************** DRINKS (opcionales) ***************/
+    function addDrink(item){
+      const key = item.id + '_' + uid();
+      const bucket = cart.drink || (cart.drink={});
+      bucket[key] = { qty:1, item: {id:item.id, name:item.name, price:item.price} };
       saveCart(); renderCart();
     }
 
-    /*************** DRINKS ***************/
-    function addDrink(item){
-      const bucket = cart.drink || (cart.drink={});
-      if(!bucket[item.id]) bucket[item.id] = { qty:0, item };
-      bucket[item.id].qty += 1;
-      saveCart(); renderCart(); /* no abrir automáticamente el drawer */
-    }
-
-    /*************** MODAL PERSONALIZAR ***************/
+    /*************** MODAL PERSONALIZAR (papas obligatorio) ***************/
     const overlay=$("#overlay"), modTitle=$("#modTitle");
     const qtyVal=$("#qtyVal"), qtyInc=$("#qtyInc"), qtyDec=$("#qtyDec");
     const rowPatties=$("#rowPatties"), rowCheddar=$("#rowCheddar"), noExtras=$("#noExtras");
@@ -378,9 +385,7 @@
 
     btnCancel.onclick = ()=> overlay.classList.remove("open");
 
-    function resetFries(){
-      document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false);
-    }
+    function resetFries(){ document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false); }
 
     function openCustomize(item){
       currentItem = item;
@@ -393,7 +398,7 @@
       cheVal.textContent="0";
       resetFries();
 
-      // Precios en los rótulos
+      // Precios en rótulos
       const pi = document.getElementById("pattiesInfo");
       const ci = document.getElementById("cheInfo");
       if (pi) pi.textContent = `( + ${money(EXTRA_PRICE_PATTY)} c/u, máx. +2 )`;
@@ -416,14 +421,13 @@
       overlay.classList.add("open");
     }
 
+    // Papas OBLIGATORIO al agregar hamburguesa
     btnAdd.onclick = ()=>{
-      // Papas obligatorias por hamburguesa
       const friesEl = document.querySelector('input[name="fries"]:checked');
       if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
 
       const qty = +qtyVal.textContent || 1;
 
-      // Extras + precios adjuntos para cálculo en todas las pantallas
       const extras = {
         patty:   0,
         cheddar: 0,
@@ -437,31 +441,21 @@
         extras.patty   = 0;
         extras.cheddar = +cheVal.textContent||0;    // máx 3
       }
+
       const txt = notes.value.trim();
-
       const bucket = cart.burger || (cart.burger={});
-      const prev = bucket[currentItem.id];
-      if(prev){
-        prev.qty += qty;
-        prev.extras = {
-          patty:   Math.max(prev.extras?.patty||0,   extras.patty),
-          cheddar: Math.max(prev.extras?.cheddar||0, extras.cheddar),
-          EXTRA_PRICE_PATTY,
-          EXTRA_PRICE_CHEDDAR
-        };
-        prev.fries = friesEl.value;
-        if(txt) prev.notes = txt;
-      }else{
-        bucket[currentItem.id] = {
-          qty,
-          item: currentItem,
-          fries: friesEl.value,
-          extras,
-          ...(txt?{notes:txt}:{})
-        };
-      }
 
-      saveCart(); renderCart(); overlay.classList.remove("open"); /* no abrir automáticamente */
+      // Clave única por línea (para no mezclar variantes)
+      const key = currentItem.id + '_' + uid();
+      bucket[key] = {
+        qty,
+        item: { id: currentItem.id, name: currentItem.name, price: currentItem.price },
+        fries: friesEl.value,
+        extras,
+        ...(txt?{notes:txt}:{})
+      };
+
+      saveCart(); renderCart(); overlay.classList.remove("open");
     };
 
     // start
@@ -469,23 +463,36 @@
 
   }); // ensureAuthReady
   </script>
-</body>
-  <!-- Catálogo para páginas internas (finanzas, etc.) -->
-<script id="menu-data" type="application/json">
-{
-  "burgers": [
-    { "id": "big_john_simple", "name": "Big John Simple", "price": 10900 },
-    { "id": "big_john_doble",  "name": "Big John Doble",  "price": 13900 }
-    /* Agregá todas tus hamburguesas acá: { "id": "...", "name": "...", "price": 0 } */
-  ]
-  /* Si querés, podés agregar más categorías y después las usamos:
-  ,"drinks": [
-    { "id":"coca_lata","name":"Coca-Cola Lata","price":3000 }
-  ]
-  */
-}
-</script>
-</body>
-</html>
 
+  <!-- =========================================================
+       BLOQUE JSON DEL MENÚ (lo usa finanzas.html)
+       Editá aquí tus productos y precios
+  ========================================================== -->
+  <script id="menu-data" type="application/json">
+  {
+    "burgers": [
+      { "id":"bigjohn_simple","name":"Big John Simple","price":10900 },
+      { "id":"bigjohn_doble","name":"Big John Doble","price":13900 },
+      { "id":"burguesa_simple","name":"Burguesa Simple","price":11900 },
+      { "id":"burguesa_doble","name":"Burguesa Doble","price":14900 },
+      { "id":"cheesebacon_spl","name":"CheeseBacon Simple","price":10500 },
+      { "id":"cheesebacon_dbl","name":"CheeseBacon Doble","price":13500 },
+      { "id":"cheese_simple","name":"Cheeseburger Simple","price":9500 },
+      { "id":"cheese_doble","name":"Cheeseburger Doble","price":12500 },
+      { "id":"rhodes_simple","name":"Rhodes Simple","price":11900 },
+      { "id":"rhodes_doble","name":"Rhodes Doble","price":14900 },
+      { "id":"morgan_simple","name":"Morgan Simple","price":10900 },
+      { "id":"morgan_doble","name":"Morgan Doble","price":14500 },
+      { "id":"pollo_crispy","name":"Pollo Crispy","price":8900 }
+    ],
+    "drinks": [
+      { "id":"coca_org","name":"Coca-Cola Original 500ml","price":3000 },
+      { "id":"coca_zero","name":"Coca-Cola Zero 500ml","price":3000 },
+      { "id":"sprite","name":"Sprite 500ml","price":3000 },
+      { "id":"aquarius_pera","name":"Aquarius Pera 500ml","price":3000 },
+      { "id":"aquarius_pomelo","name":"Aquarius Pomelo","price":3000 }
+    ]
+  }
+  </script>
+</body>
 </html>
