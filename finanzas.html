@@ -184,10 +184,9 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script>
-  // SW
   if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js'); }
 
-  // Guardia local (20 hs)
+  /* ===== Guardián de sesión (20 hs) ===== */
   (function guard(){
     const exp = parseInt(localStorage.getItem('rb_auth_expires')||'0',10);
     const tok = localStorage.getItem('rb_auth_token');
@@ -199,14 +198,14 @@
     setTimeout(()=>location.replace('login.html?reason=expired'), Math.min(exp - Date.now(), 2147483647));
   })();
 
-  // Toasts
+  /* ===== Toasts ===== */
   const toastEl = document.getElementById('toast');
   function showToast(msg,type='success',ms=2000){
     toastEl.textContent = msg; toastEl.className = 'toast '+type;
     requestAnimationFrame(()=>{ toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'), ms); });
   }
 
-  // Firebase
+  /* ===== Firebase (KPIs / guardar venta) ===== */
   const firebaseConfig = {
     apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
     authDomain:"rhodes-burguers.firebaseapp.com",
@@ -218,7 +217,7 @@
   try{ firebase.initializeApp(firebaseConfig);}catch(_){}
   const db = firebase.firestore();
 
-  // Helpers
+  /* ===== Helpers ===== */
   const $ = s => document.querySelector(s);
   const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
   (function setDefaultMonth(){ const d=new Date(); const m=String(d.getMonth()+1).padStart(2,"0"); $("#monthPicker").value=`${d.getFullYear()}-${m}`; })();
@@ -231,7 +230,7 @@
   function unitWithExtras(it){ const base=it.price||0; const pz=(it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0); const ch=(it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0); return base+pz+ch; }
   function computeOrderTotal(o){ if(typeof o.total==='number') return o.total; const items=Array.isArray(o.items)?o.items:[]; return items.reduce((t,it)=>t+ (it.type==='burger'?unitWithExtras(it):(it.price||0))*(it.qty||0),0); }
 
-  // ======= CHARTS / KPI =======
+  /* ===== CHARTS / KPI ===== */
   let monthChart, payChart, lastRows=[];
   function ensureMonthChart(labels, orders, revenue){
     const ctx=document.getElementById("monthChart").getContext("2d");
@@ -327,7 +326,7 @@
     location.replace('login.html?reason=logout');
   });
 
-  // ======= Venta Presencial + MENÚ =======
+  /* ===== Venta Presencial + MENÚ (desde index.html) ===== */
   const rowsHost = document.getElementById('rowsHost');
   const manualTotalEl = document.getElementById('manualTotal');
   const mPago = document.getElementById('mPago');
@@ -337,14 +336,11 @@
   const btnRefreshMenu = document.getElementById('btnRefreshMenu');
   const menuInfo = document.getElementById('menuInfo');
 
-  // Fallback estático editable (por si no hay nada en Firestore ni pedidos aún)
+  /* Fallback estático por si no hubiera nada en index.html */
   const STATIC_MENU = [
     { id: 'big_john_simple', name: 'Big John Simple', price: 10900 },
     { id: 'big_john_doble',  name: 'Big John Doble',  price: 13900 }
-    // ← agregá acá si querés
   ];
-
-  // Catálogo en memoria
   let MENU_BURGERS = []; // {id,name,price}
 
   function payBadgeUpdate(){
@@ -356,101 +352,47 @@
   mPago.addEventListener('change', payBadgeUpdate);
   mPagado.addEventListener('change', payBadgeUpdate);
 
-  async function tryFetchCollection(coll){
-    try{
-      const snap = await db.collection(coll).limit(300).get();
-      const out=[];
-      snap.forEach(d=>{
-        const x=d.data()||{};
-        const type = (x.type||x.tipo||x.category||x.categoria||'').toString().toLowerCase();
-        const name = (x.name || x.title || x.nombre || '').toString();
-        const price= Number(x.price || x.precio || 0);
-        const looksBurger = ['burger','hamburguesa','hamburguesas'].some(t=> type.includes(t)) || coll.toLowerCase().includes('burger');
-        if (name && (looksBurger || !type)) out.push({ id:d.id, name, price: price>0?price:0 });
-      });
-      return out;
-    }catch(_){ return []; }
+  /* Lee /index.html y extrae <script id="menu-data" type="application/json"> */
+  async function loadMenuFromIndex(){
+    const tryPaths = ['/index.html','/']; // por si Netlify sirve "/" en lugar del archivo
+    for (const path of tryPaths){
+      try{
+        const res = await fetch(path, {cache:'no-store'});
+        if (!res.ok) continue;
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const script = doc.querySelector('#menu-data[type="application/json"]');
+        if (!script) continue;
+        const data = JSON.parse(script.textContent || '{}');
+        const burgers = Array.isArray(data.burgers) ? data.burgers : [];
+        return burgers.map(b=>({ id: b.id || b.name, name: b.name, price: Number(b.price)||0 }));
+      }catch(e){ /* sigue intentando */ }
+    }
+    return [];
   }
 
-  async function tryFetchSubcollection(root, doc, sub){
-    try{
-      const snap = await db.collection(root).doc(doc).collection(sub).limit(300).get();
-      const out=[];
-      snap.forEach(d=>{
-        const x=d.data()||{};
-        const name = (x.name || x.title || x.nombre || '').toString();
-        const price= Number(x.price || x.precio || 0);
-        if (name) out.push({ id:d.id, name, price: price>0?price:0 });
-      });
-      return out;
-    }catch(_){ return []; }
-  }
-
-  async function inferMenuFromOrders(){
-    try{
-      let q = db.collection('orders').orderBy('createdAt','desc').limit(500);
-      const snap = await q.get();
-      const map = new Map(); // nameLower -> {name, price}
-      snap.forEach(doc=>{
-        const it = Array.isArray(doc.data().items) ? doc.data().items : [];
-        it.forEach(x=>{
-          const nm = (x.name||'').toString().trim();
-          if (!nm) return;
-          const key = nm.toLowerCase();
-          const pr  = Number(x.price||0);
-          if (!map.has(key)) map.set(key,{name:nm, price: pr>0?pr:0});
-          else if (pr>0) map.set(key,{name:nm,price:pr}); // preferir último con precio
-        });
-      });
-      return Array.from(map.values());
-    }catch(_){ return []; }
+  function dedupeAndSort(arr){
+    const map=new Map();
+    arr.forEach(x=>{
+      const k=(x.name||'').trim().toLowerCase(); if(!k) return;
+      const prev=map.get(k);
+      if(!prev || (x.price||0)>(prev.price||0)) map.set(k,{id:x.id||x.name,name:x.name,price:Number(x.price)||0});
+    });
+    return Array.from(map.values()).sort((a,b)=> a.name.localeCompare(b.name,'es'));
   }
 
   async function loadMenuBurgers(){
-    menuInfo.textContent = 'Cargando menú...';
-    const found = new Map(); // k=nameLower -> obj
-
-    function pushArr(arr, tag){
-      arr.forEach(it=>{
-        const k=it.name.trim().toLowerCase(); if(!k) return;
-        const prev = found.get(k);
-        if (!prev || (it.price||0) > (prev.price||0)) found.set(k,{...it,__source:tag});
-      });
+    menuInfo.textContent = 'Cargando menú desde index.html...';
+    let list = await loadMenuFromIndex();
+    if (list.length){
+      MENU_BURGERS = dedupeAndSort(list);
+      menuInfo.textContent = `Menú cargado: ${MENU_BURGERS.length} hamburguesas (index.html)`;
+      document.querySelectorAll('.prod').forEach(fillSelectOptions);
+      return;
     }
-
-    // 1) Colecciones típicas
-    const cands = ['menu','products','burgers','menu_burgers'];
-    for (const coll of cands){
-      const arr = await tryFetchCollection(coll);
-      pushArr(arr, coll);
-    }
-    // 2) Subcolecciones conocidas
-    const subcands = [
-      ['menu','burgers','items'],
-      ['menu','hamburguesas','items'],
-      ['catalog','burgers','items']
-    ];
-    for (const [root,doc,sub] of subcands){
-      const arr = await tryFetchSubcollection(root,doc,sub);
-      pushArr(arr, `${root}/${doc}/${sub}`);
-    }
-    // 3) Inferir desde pedidos si no hay nada
-    if (found.size===0){
-      const fromOrders = await inferMenuFromOrders();
-      pushArr(fromOrders,'orders');
-    }
-    // 4) Fallback estático
-    if (found.size===0){
-      pushArr(STATIC_MENU,'static');
-    }
-
-    MENU_BURGERS = Array.from(found.values()).sort((a,b)=> a.name.localeCompare(b.name,'es'));
-    menuInfo.textContent = MENU_BURGERS.length
-      ? `Menú cargado: ${MENU_BURGERS.length} hamburguesas`
-      : 'No se encontraron hamburguesas (usá “Otro”).';
-
-    // Actualizar selects existentes
-    document.querySelectorAll('.prod').forEach(sel => fillSelectOptions(sel));
+    MENU_BURGERS = dedupeAndSort(STATIC_MENU);
+    menuInfo.textContent = `No se encontró #menu-data en index.html. Usando fallback (${MENU_BURGERS.length}).`;
+    document.querySelectorAll('.prod').forEach(fillSelectOptions);
   }
 
   function fillSelectOptions(selectEl){
@@ -470,12 +412,12 @@
     row.innerHTML = `
       <div class="prodCell">
         <select class="prod"></select>
-        <input class="name" type="text" placeholder="Producto" value="${pref.name||''}">
+        <input class="name" type="text" placeholder="Producto" value="\${pref.name||''}">
       </div>
-      <input class="qty" type="number" step="1" min="0" value="${pref.qty||1}">
-      <input class="price" type="number" step="1" min="0" value="${pref.price||0}">
+      <input class="qty" type="number" step="1" min="0" value="\${pref.qty||1}">
+      <input class="price" type="number" step="1" min="0" value="\${pref.price||0}">
       <div class="subtotal">$ 0</div>
-    `;
+    `.replace(/\\\$/g,'$');
     rowsHost.appendChild(row);
 
     const prodSel = row.querySelector('.prod');
@@ -487,11 +429,8 @@
 
     fillSelectOptions(prodSel);
 
-    if (pref.id){
-      prodSel.value = pref.id; cell.classList.remove('showName');
-    } else if (pref.name){
-      prodSel.value = '__other'; cell.classList.add('showName');
-    }
+    if (pref.id){ prodSel.value = pref.id; cell.classList.remove('showName'); }
+    else if (pref.name){ prodSel.value='__other'; cell.classList.add('showName'); }
 
     function recalc(){
       const q = Math.max(0, parseInt(qtyI.value||'0',10));
@@ -511,7 +450,7 @@
         cell.classList.remove('showName');
         const opt = prodSel.selectedOptions[0];
         const price = Number(opt?.dataset?.price||0);
-        priceI.value = price>0 ? price : priceI.value;
+        if (price>0) priceI.value = price;
         const label = (opt?.textContent||'').split(' — ')[0];
         nameI.value = label;
         if (!qtyI.value || +qtyI.value===0) qtyI.value = 1;
@@ -577,7 +516,7 @@
   document.getElementById('btnAddLine').addEventListener('click', ()=> addRow());
   btnRefreshMenu.addEventListener('click', loadMenuBurgers);
 
-  // Cargar menú al abrir
+  /* Cargar el menú al abrir */
   loadMenuBurgers();
 
   function takeNextOrderNumber(tx){
@@ -645,7 +584,7 @@
 
   document.getElementById('btnGuardar').addEventListener('click', guardarVenta);
 
-  // Cargar datos al abrir
+  /* Cargar KPIs al abrir */
   document.addEventListener('DOMContentLoaded', loadFinance);
 </script>
 </body>
