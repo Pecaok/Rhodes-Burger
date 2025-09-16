@@ -7,7 +7,7 @@
 <link rel="icon" href="images/logo.png" />
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#2ecc71">
-<link rel="apple-touch-icon" href="/images/icon-192.png">
+<link rel="apple-touch-icon" href="images/icon-192.png">
 <style>
   :root{--primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff; --ring:#eaeaea; --shadow:0 12px 34px rgba(0,0,0,.10)}
   *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
@@ -30,10 +30,7 @@
   .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
   .chartwrap{background:#fff;border:1px solid var(--ring);border-radius:12px;padding:8px}
   .chartbox{width:100%;height:260px}
-  .card{background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:16px;margin-top:16px}
   .err{color:#b00020;font-weight:600;margin-top:8px}
-
-  /* Toast */
   .toast{position:fixed;right:14px;bottom:14px;background:#111;color:#fff;padding:12px 14px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.25);opacity:0;transform:translateY(20px);transition:.2s}
   .toast.show{opacity:1;transform:translateY(0)}
   .toast.success{background:#2ecc71}.toast.error{background:#d32f2f}.toast.info{background:#444}
@@ -63,12 +60,10 @@
         <div class="kbadge"><div class="klabel">Ticket promedio</div><div class="kvalue" id="kpiAvg">—</div></div>
       </div>
     </div>
-
     <div class="charts">
       <div class="chartwrap"><canvas id="monthChart" class="chartbox"></canvas></div>
       <div class="chartwrap"><canvas id="payChart" class="chartbox"></canvas></div>
     </div>
-
     <div id="kpiError" class="err" style="display:none;margin-top:6px"></div>
   </section>
 </main>
@@ -77,11 +72,22 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script>
   // SW
   if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js'); }
+
+  // Guardia local
+  (function guard(){
+    const exp = parseInt(localStorage.getItem('rb_auth_expires')||'0',10);
+    const tok = localStorage.getItem('rb_auth_token');
+    if (!exp || Date.now() > exp || !tok) {
+      const next = encodeURIComponent(location.pathname + location.search);
+      location.replace('login.html?reason=expired&next='+next);
+      return;
+    }
+    setTimeout(()=>location.replace('login.html?reason=expired'), Math.min(exp - Date.now(), 2147483647));
+  })();
 
   // Toasts
   const toastEl = document.getElementById('toast');
@@ -100,28 +106,7 @@
     appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"
   };
   try{ firebase.initializeApp(firebaseConfig);}catch(_){}
-  const auth = firebase.auth(); const db = firebase.firestore();
-
-  // Guardia Auth + admin + 20 hs
-  (function guard(){
-    const exp = parseInt(localStorage.getItem('rb_auth_expires')||'0',10);
-    if (!exp || Date.now() > exp) {
-      const next = encodeURIComponent(location.pathname + location.search);
-      location.replace('login.html?reason=expired&next='+next);
-    }
-  })();
-  auth.onAuthStateChanged(async user=>{
-    if (!user){ location.replace('login.html?reason=guard'); return; }
-    const adm = await db.collection('admins').doc(user.uid).get();
-    if (!adm.exists || adm.data().enabled!==true){
-      await auth.signOut();
-      location.replace('login.html?reason=perm');
-      return;
-    }
-  });
-  document.getElementById('btnLogout').onclick = async ()=>{
-    await auth.signOut(); localStorage.removeItem('rb_auth_expires'); location.replace('login.html?reason=logout');
-  };
+  const db = firebase.firestore();
 
   // Helpers
   const $ = s => document.querySelector(s);
@@ -137,7 +122,6 @@
   function computeOrderTotal(o){ if(typeof o.total==='number') return o.total; const items=Array.isArray(o.items)?o.items:[]; return items.reduce((t,it)=>t+ (it.type==='burger'?unitWithExtras(it):(it.price||0))*(it.qty||0),0); }
 
   let monthChart, payChart, lastRows=[];
-
   function ensureMonthChart(labels, orders, revenue){
     const ctx=document.getElementById("monthChart").getContext("2d");
     if(monthChart) monthChart.destroy();
@@ -159,7 +143,8 @@
   }
 
   async function loadFinance(){
-    $("#kpiError").style.display="none"; $("#kpiError").textContent="";
+    const kpiErr = document.getElementById('kpiError');
+    kpiErr.style.display="none"; kpiErr.textContent="";
     try{
       const probe=await db.collection('orders').limit(1).get();
       let dateField=null;
@@ -167,7 +152,7 @@
       let q=db.collection('orders'); q=dateField? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
       const snap=await q.limit(2000).get();
 
-      const d = new Date($("#monthPicker").value + '-01T00:00:00');
+      const d = new Date(document.getElementById('monthPicker').value + '-01T00:00:00');
       const Y=d.getFullYear(), M=d.getMonth();
       const days=new Date(Y,M+1,0).getDate();
       const labels=Array.from({length:days},(_,i)=>`${i+1}`);
@@ -187,30 +172,16 @@
         const mp=(o.pago||'otro').toLowerCase();
         if (mp.includes('mercado')) payDist.mercado_pago++; else if (mp.includes('efectivo')) payDist.efectivo++; else payDist.otro++;
 
-        // Para exportar
-        lastRows.push({
-          id: doc.id,
-          orderNumber: o.orderNumber || '',
-          fecha: dt.toISOString(),
-          nombre: o.nombre || '',
-          pago: o.pago || '',
-          paymentStatus: o.paymentStatus || '',
-          estado: o.status || '',
-          total: tot
-        });
+        lastRows.push({ id:doc.id, orderNumber:o.orderNumber||'', fecha:dt.toISOString(), nombre:o.nombre||'', pago:o.pago||'', paymentStatus:o.paymentStatus||'', estado:o.status||'', total:tot });
       });
 
-      // KPIs
-      $("#kpiCount").textContent = count.toLocaleString("es-AR");
-      $("#kpiRevenue").textContent = money(revenue);
-      $("#kpiAvg").textContent = count ? money(revenue/count) : money(0);
+      document.getElementById('kpiCount').textContent = count.toLocaleString("es-AR");
+      document.getElementById('kpiRevenue').textContent = money(revenue);
+      document.getElementById('kpiAvg').textContent = count ? money(revenue/count) : money(0);
 
-      // Charts
       ensureMonthChart(labels, dayOrders, dayRevenue);
       ensurePayChart(['Mercado Pago','Efectivo','Otro'], [payDist.mercado_pago, payDist.efectivo, payDist.otro]);
-    }catch(e){
-      console.error(e); $("#kpiError").textContent="No se pudo cargar el resumen."; $("#kpiError").style.display="block";
-    }
+    }catch(e){ console.error(e); kpiErr.textContent="No se pudo cargar el resumen."; kpiErr.style.display="block"; }
   }
 
   function exportCSV(){
@@ -228,16 +199,22 @@
     const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const m = $("#monthPicker").value || 'mes';
+    const m = document.getElementById('monthPicker').value || 'mes';
     a.href = url; a.download = `finanzas_${m}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
     showToast('CSV exportado','success');
   }
 
-  $("#btnReload").addEventListener('click', loadFinance);
-  $("#monthPicker").addEventListener('change', loadFinance);
-  $("#btnExport").addEventListener('click', exportCSV);
+  document.getElementById('btnReload').addEventListener('click', loadFinance);
+  document.getElementById('monthPicker').addEventListener('change', loadFinance);
+  document.getElementById('btnExport').addEventListener('click', exportCSV);
+  document.getElementById('btnLogout').addEventListener('click', ()=>{
+    localStorage.removeItem('rb_auth_expires');
+    localStorage.removeItem('rb_auth_token');
+    localStorage.removeItem('rb_auth_user');
+    location.replace('login.html?reason=logout');
+  });
 
   document.addEventListener('DOMContentLoaded', loadFinance);
 </script>
