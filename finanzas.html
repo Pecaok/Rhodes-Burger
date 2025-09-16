@@ -57,7 +57,6 @@
   .row .qty{ text-align:right }
   .row .price{ text-align:right }
   .row .subtotal{ text-align:right; font-weight:700 }
-  .row .del{ text-align:center }
   .addline{margin-top:8px}
   .summary{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
   .total{font-weight:800;font-size:18px}
@@ -66,6 +65,13 @@
   .payBadge{font-weight:800;font-size:14px;padding:6px 12px;border-radius:999px;border:2px solid;line-height:1;white-space:nowrap;}
   .payBadge.paid{ background:#e8f8ef; color:#0b7a3a; border-color:#2ecc71; }
   .payBadge.unpaid{ background:#fff3e0; color:var(--warnText); border-color:var(--warn); box-shadow:0 0 0 4px rgba(255,183,77,.18); }
+
+  /* Celda producto: select + input alternativo */
+  .prodCell{display:flex;gap:6px;align-items:center}
+  .prodCell .name{display:none}
+  .prodCell.showName .name{display:block}
+  .prodCell.showName .prod{display:none}
+  .mini{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -104,6 +110,9 @@
     <div class="board-head" style="margin-bottom:8px">
       <strong>Agregar venta presencial</strong>
       <span class="badge">Se registra como pedido en /orders</span>
+      <div class="spacer"></div>
+      <button id="btnRefreshMenu" class="btn">Refrescar menú</button>
+      <span id="menuInfo" class="mini">—</span>
     </div>
 
     <div class="grid2">
@@ -121,7 +130,7 @@
         <button id="btnAddLine" class="btn addline">+ Agregar ítem</button>
 
         <div class="summary">
-          <div class="hint">Sugerencia: Enter/tab para moverte entre celdas • Doble click en “Precio” para copiar el anterior.</div>
+          <div class="hint">Elegí del menú o “Otro (especificar)”. Doble click en “Precio” copia el último precio usado.</div>
           <div class="total">Total: <span id="manualTotal">$ 0</span></div>
         </div>
       </div>
@@ -318,13 +327,18 @@
     location.replace('login.html?reason=logout');
   });
 
-  // ======= Venta Presencial =======
+  // ======= Venta Presencial + MENÚ =======
   const rowsHost = document.getElementById('rowsHost');
   const manualTotalEl = document.getElementById('manualTotal');
   const mPago = document.getElementById('mPago');
   const mPagado = document.getElementById('mPagado');
   const mPayBadge = document.getElementById('mPayBadge');
   const manualErr = document.getElementById('manualError');
+  const btnRefreshMenu = document.getElementById('btnRefreshMenu');
+  const menuInfo = document.getElementById('menuInfo');
+
+  // Catálogo en memoria
+  let MENU_BURGERS = []; // {id,name,price}
 
   function payBadgeUpdate(){
     const paid = mPagado.checked || mPago.value!=='efectivo';
@@ -335,21 +349,91 @@
   mPago.addEventListener('change', payBadgeUpdate);
   mPagado.addEventListener('change', payBadgeUpdate);
 
-  function addRow(pref={name:'', qty:1, price:0}){
+  // Intentamos obtener hamburguesas del menú de varias colecciones conocidas
+  async function tryFetchCollection(coll){
+    try{
+      const snap = await db.collection(coll).limit(200).get();
+      const arr=[];
+      snap.forEach(d=>{
+        const x=d.data()||{};
+        const type = (x.type||x.tipo||x.category||x.categoria||'').toString().toLowerCase();
+        const isBurger = ['burger','hamburguesa','hamburguesas'].some(t=> type.includes(t)) || (coll.toLowerCase().includes('burger'));
+        const name = x.name || x.title || x.nombre || '';
+        const price= x.price || x.precio || 0;
+        if (name && (isBurger || coll.toLowerCase().includes('burger'))) {
+          arr.push({ id:d.id, name, price:Number(price)||0 });
+        }
+      });
+      return arr;
+    }catch(_){ return []; }
+  }
+  async function loadMenuBurgers(){
+    menuInfo.textContent = 'Cargando menú...';
+    const found = new Map(); // key: name lower -> {name,price,id}
+    const pushUnique = (it)=>{
+      const k = it.name.trim().toLowerCase();
+      if(!k) return;
+      if(!found.has(k)) found.set(k, {id:it.id, name:it.name, price:it.price});
+      // si aparecen repetidos con distinto precio, quedate con el mayor (suele ser el actual)
+      else if (it.price > found.get(k).price) found.set(k, it);
+    };
+    const sources = [
+      ...await tryFetchCollection('menu'),
+      ...await tryFetchCollection('products'),
+      ...await tryFetchCollection('burgers'),
+      ...await tryFetchCollection('menu_burgers'),
+    ];
+    sources.forEach(pushUnique);
+    MENU_BURGERS = Array.from(found.values()).sort((a,b)=> a.name.localeCompare(b.name, 'es'));
+    menuInfo.textContent = MENU_BURGERS.length ? `Menú cargado: ${MENU_BURGERS.length} hamburguesas` : 'No se encontraron hamburguesas en Firestore (usá “Otro”).';
+
+    // Actualizar selects existentes
+    document.querySelectorAll('.prod').forEach(sel => fillSelectOptions(sel));
+  }
+
+  function fillSelectOptions(selectEl){
+    const cur = selectEl.value;
+    selectEl.innerHTML = '<option value="">Seleccionar...</option>' +
+      MENU_BURGERS.map(m => `<option value="${m.id}" data-price="${m.price}">${m.name} — ${money(m.price)}</option>`).join('') +
+      '<option value="__other">Otro (especificar)</option>';
+    // Restaurar selección si coincide ID
+    if (cur) {
+      const opt = Array.from(selectEl.options).find(o=>o.value===cur);
+      if (opt) selectEl.value = cur;
+    }
+  }
+
+  function addRow(pref={name:'', qty:1, price:0, id:''}){
     const row = document.createElement('div');
     row.className = 'row';
     row.innerHTML = `
-      <input class="name" type="text" placeholder="Producto" value="${pref.name||''}">
+      <div class="prodCell">
+        <select class="prod"></select>
+        <input class="name" type="text" placeholder="Producto" value="${pref.name||''}">
+      </div>
       <input class="qty" type="number" step="1" min="0" value="${pref.qty||1}">
       <input class="price" type="number" step="1" min="0" value="${pref.price||0}">
       <div class="subtotal">$ 0</div>
     `;
     rowsHost.appendChild(row);
 
-    const nameI = row.querySelector('.name');
-    const qtyI  = row.querySelector('.qty');
-    const priceI= row.querySelector('.price');
-    const subEl = row.querySelector('.subtotal');
+    const prodSel = row.querySelector('.prod');
+    const nameI   = row.querySelector('.name');
+    const qtyI    = row.querySelector('.qty');
+    const priceI  = row.querySelector('.price');
+    const subEl   = row.querySelector('.subtotal');
+    const cell    = row.querySelector('.prodCell');
+
+    fillSelectOptions(prodSel);
+
+    // Si viene con id (prefill), setearlo; si viene nombre custom, mostrar input
+    if (pref.id){
+      prodSel.value = pref.id;
+      cell.classList.remove('showName');
+    } else if (pref.name){
+      prodSel.value = '__other';
+      cell.classList.add('showName');
+    }
 
     function recalc(){
       const q = Math.max(0, parseInt(qtyI.value||'0',10));
@@ -358,9 +442,33 @@
       subEl.textContent = money(sub);
       updateTotal();
     }
-    [nameI, qtyI, priceI].forEach(i=> i.addEventListener('input', recalc));
-    priceI.addEventListener('dblclick',()=>{
-      // copiar último precio usado
+    [qtyI, priceI, nameI, prodSel].forEach(i=> i.addEventListener('input', recalc));
+
+    prodSel.addEventListener('change', ()=>{
+      const val = prodSel.value;
+      if (!val) return; // "Seleccionar..."
+
+      if (val === '__other'){
+        // Modo manual
+        cell.classList.add('showName');
+        if (!nameI.value.trim()) nameI.focus();
+        // no tocar precio
+      } else {
+        // Modo menú: ocultar input manual y setear precio sugerido
+        cell.classList.remove('showName');
+        const opt = prodSel.selectedOptions[0];
+        const price = Number(opt?.dataset?.price||0);
+        priceI.value = price>0 ? price : priceI.value;
+        // Nombre para guardar: texto de la opción antes del " — $"
+        const label = (opt?.textContent||'').split(' — ')[0];
+        nameI.value = label;
+        if (!qtyI.value || +qtyI.value===0) qtyI.value = 1;
+      }
+      recalc();
+    });
+
+    priceI.addEventListener('dblclick', ()=>{
+      // Copiar último precio usado
       const prev = Array.from(rowsHost.querySelectorAll('.price')).slice(0,-1).reverse().find(x=>+x.value>0);
       if(prev){ priceI.value = prev.value; priceI.dispatchEvent(new Event('input')); }
     });
@@ -371,10 +479,25 @@
   function getManualItems(){
     const items=[];
     rowsHost.querySelectorAll('.row').forEach(r=>{
-      const name = r.querySelector('.name').value.trim();
-      const qty  = Math.max(0, parseInt(r.querySelector('.qty').value||'0',10));
-      const price= Math.max(0, Math.round(parseFloat(r.querySelector('.price').value||'0')));
-      if (name && qty>0 && price>=0){
+      const prodSel = r.querySelector('.prod');
+      const nameI   = r.querySelector('.name');
+      const qtyI    = r.querySelector('.qty');
+      const priceI  = r.querySelector('.price');
+
+      const sel = prodSel.value;
+      let name = '';
+      if (sel && sel !== '__other'){
+        // tomar label de la opción (antes del " — ")
+        const label = (prodSel.selectedOptions[0]?.textContent||'').split(' — ')[0];
+        name = label || '';
+      } else {
+        name = nameI.value.trim();
+      }
+
+      const qty   = Math.max(0, parseInt(qtyI.value||'0',10));
+      const price = Math.max(0, Math.round(parseFloat(priceI.value||'0')));
+
+      if (name && qty>0){
         items.push({ type:'manual', id:'', name, qty, price });
       }
     });
@@ -404,8 +527,10 @@
   clearManualForm();
 
   document.getElementById('btnAddLine').addEventListener('click', ()=> addRow());
+  btnRefreshMenu.addEventListener('click', loadMenuBurgers);
 
-  document.getElementById('btnLimpiar').addEventListener('click', clearManualForm);
+  // Al abrir, cargar menú
+  loadMenuBurgers();
 
   function takeNextOrderNumber(tx){
     const ref = db.collection('config').doc('counters');
