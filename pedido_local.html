@@ -23,15 +23,19 @@
     .danger{border-color:#ffdddd;background:#fff5f5;color:#b00000}
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
+
+    /* KPI (sin gráfico) */
     .kpi{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:14px 16px;margin:0 0 18px 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
     .kbadge{min-width:160px;background:#f7f7f7;border:1px solid var(--ring);border-radius:14px;padding:10px 14px}
     .klabel{font-size:12px;color:var(--muted)}
     .kvalue{font-weight:800;font-size:20px}
-    .chartwrap{width:100%;margin-top:10px}
-    .chartbox{width:100%;height:260px}
+    input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
+    .err{color:#b00020;font-weight:600}
+
     .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
     .chipf{background:#f3f3f3;border:1px solid var(--ring);color:#333;border-radius:999px;padding:6px 10px;font-size:13px;cursor:pointer}
     .chipf.active{background:#2ecc71;color:#fff;border-color:#2ecc71}
+
     .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0;transition:filter .2s, opacity .2s}
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
     .order-title{font-weight:800}
@@ -54,9 +58,8 @@
     .item .sub{color:var(--muted);font-size:13px;margin-top:3px}
     .money{white-space:nowrap}
     .divider{height:1px;background:#efefef;margin:10px 0}
-    input[type="month"]{border:1px solid var(--ring);border-radius:10px;padding:8px 10px;outline:none}
+
     .stateBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-    .err{color:var(--danger);font-weight:600}
 
     /* Pago (mismo tamaño que .btn) */
     .payGroup{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
@@ -78,17 +81,14 @@
       if (!exp || now > exp) {
         localStorage.removeItem('rb_auth_token');
         localStorage.removeItem('rb_auth_expires');
-        localStorage.removeItem('rb_auth_v2');
-        localStorage.removeItem('rb_admin_ok');
         const next = encodeURIComponent(location.pathname + location.search);
         location.replace('login.html?reason=expired&next=' + next);
         return;
       }
-      const msLeft = exp - now;
       setTimeout(()=>{
         const next = encodeURIComponent(location.pathname + location.search);
         location.replace('login.html?reason=expired&next=' + next);
-      }, Math.min(msLeft, 2147483647));
+      }, Math.min(exp-now, 2147483647));
     })();
   </script>
 
@@ -102,6 +102,7 @@
   </header>
 
   <main class="container">
+    <!-- KPI sin gráfico -->
     <div class="kpi">
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         <strong>Resumen mensual</strong>
@@ -113,7 +114,6 @@
         <div class="kbadge"><div class="klabel">Pedidos</div><div class="kvalue" id="kpiCount">—</div></div>
         <div class="kbadge"><div class="klabel">Ingresos</div><div class="kvalue" id="kpiRevenue">—</div></div>
       </div>
-      <div class="chartwrap"><canvas id="monthChart" class="chartbox"></canvas></div>
       <div id="kpiError" class="err" style="display:none;margin-top:6px"></div>
     </div>
 
@@ -130,8 +130,7 @@
     <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
   </main>
 
-  <!-- Libs -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <!-- Libs (solo Firebase) -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
@@ -166,22 +165,11 @@
     function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
-        if (obj[k]==null) continue;
-        const v = obj[k];
+        const v = obj?.[k]; if (v==null) continue;
         try{
           if (v?.toDate) return v.toDate();
           if (typeof v === 'number') return new Date(v);
-          if (typeof v === 'string') {
-            const d = new Date(v);
-            if (!isNaN(d.getTime())) return d;
-            const m = v.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
-            if (m){
-              const day=+m[1], mon=+m[2]-1, yr=+m[3]<100?2000+(+m[3]):+m[3];
-              const hh=+m[4]||0, mm=+m[5]||0;
-              const d2=new Date(yr,mon,day,hh,mm,0,0);
-              if(!isNaN(d2.getTime())) return d2;
-            }
-          }
+          if (typeof v === 'string') { const d = new Date(v); if(!isNaN(d)) return d; }
         }catch(e){}
       }
       return null;
@@ -193,7 +181,7 @@
     }
     function displayOrderNumber(doc){
       const o = doc.data();
-      const candidates = [o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro, o.orderNo, o.seq, o.n, o.idPedido, o.pedidoNumber, o.pedido];
+      const candidates = [o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
       for (const c of candidates){
         if (c == null) continue;
         const n = (typeof c === "string") ? parseInt(c,10) : c;
@@ -213,7 +201,7 @@
       return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
     }
 
-    /* ===================== SONIDO (más fuerte + MP3 opcional) ===================== */
+    /* ===================== SONIDO (fuerte + MP3 opcional) ===================== */
     const SOUND_PATHS = ["sound.mp3","audio/sound.mp3","sounds/sound.mp3"];
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let soundVolume  = parseFloat(localStorage.getItem("rb_sound_volume")||"0.9");
@@ -271,21 +259,7 @@
       location.replace('login.html?reason=guard');
     };
 
-    /* ===================== KPI + CHART ===================== */
-    let monthChart;
-    function ensureChart(labels, orders, revenue){
-      const ctx = document.getElementById("monthChart").getContext("2d");
-      if(monthChart) monthChart.destroy();
-      monthChart = new Chart(ctx,{type:'bar',data:{labels,
-        datasets:[
-          {type:'bar',label:'Pedidos',data:orders,backgroundColor:'rgba(46,204,113,.35)',borderColor:'#2ecc71',borderWidth:1,yAxisID:'y'},
-          {type:'line',label:'Ingresos ($)',data:revenue,borderColor:'#2ecc71',backgroundColor:'rgba(46,204,113,.10)',borderWidth:2,tension:.25,yAxisID:'y2'}
-        ]},
-        options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-          scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
-      });
-    }
-
+    /* ===================== KPI (sin gráfico) ===================== */
     const monthKey = ()=> {
       const d = monthPicker && monthPicker.value
         ? new Date(monthPicker.value + '-01T00:00:00')
@@ -304,26 +278,26 @@
         if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
         const snap = await q.limit(1000).get();
 
-        const {y,m,days} = monthKey();
-        const labels = Array.from({length:days},(_,i)=>`${i+1}`);
-        const dayOrders = Array(days).fill(0);
-        const dayRevenue = Array(days).fill(0);
-        let count=0, revenue=0;
+        const {y,m} = (function(){
+          const d = monthPicker && monthPicker.value
+            ? new Date(monthPicker.value + '-01T00:00:00')
+            : new Date();
+          return {y:d.getFullYear(), m:d.getMonth()+1};
+        })();
 
+        let count=0, revenue=0;
         snap.forEach(doc=>{
           const data=doc.data();
           const dt = pickDocDate(data); if(!dt) return;
-          if (dt.getFullYear()!==y || (dt.getMonth()+1)!==m) return;
-          const d = dt.getDate()-1;
-          dayOrders[d] += 1;
-          const tot = computeOrderTotal(data);
-          dayRevenue[d] += tot;
-          count++; revenue += tot;
+          const mm = dt.getMonth()+1, yy = dt.getFullYear();
+          if (yy===y && mm===m){
+            count++;
+            revenue += computeOrderTotal(data);
+          }
         });
 
         $("#kpiCount").textContent = count.toLocaleString("es-AR");
         $("#kpiRevenue").textContent = money(revenue);
-        ensureChart(labels, dayOrders, dayRevenue);
       }catch(err){
         console.error(err);
         kpiErr.textContent = "No se pudo cargar el resumen mensual.";
@@ -332,10 +306,10 @@
     }
     $("#btnReloadKPI").onclick = loadKPI;
 
-    /* ===================== LISTADO + ESTADOS + PAGO ===================== */
+    /* ===================== LISTADO + ESTADOS ===================== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
-    let currentFilter="all";               // <-- única declaración
-    let lastSnap=null, initialLoaded=false;// <-- única declaración
+    let currentFilter="all";               // única declaración
+    let lastSnap=null, initialLoaded=false;// única declaración
 
     tabs.addEventListener("click",(e)=>{
       const el=e.target.closest("[data-f]"); if(!el) return;
@@ -378,7 +352,7 @@
     async function setPaymentStatus(id,next,groupEl,card){
       try{
         await db.collection("orders").doc(id).set({
-          paymentStatus: next, // 'paid' | 'unpaid'
+          paymentStatus: next,
           paymentHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, { merge:true });
