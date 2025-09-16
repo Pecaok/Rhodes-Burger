@@ -219,8 +219,10 @@
   const updateBellUI=()=>btnBell.classList.toggle("active", soundEnabled);
   updateBellUI();
   if ('Notification' in window) {
-    btnNotify.onclick = async ()=>{ const p = await Notification.requestPermission();
-      showToast(p==='granted' ? 'Notificaciones activadas' : 'Notificaciones bloqueadas', p==='granted'?'success':'info'); };
+    btnNotify.onclick = async ()=>{ 
+      const p = await Notification.requestPermission();
+      showToast(p==='granted' ? 'Notificaciones activadas' : 'Notificaciones bloqueadas', p==='granted'?'success':'info'); 
+    };
   } else { btnNotify.style.display='none'; }
   function getAudioCtx(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
   async function tryLoadBuffer(path){ const res=await fetch(path,{cache:"no-store"}); if(!res.ok) throw 0; const arr=await res.arrayBuffer(); return await getAudioCtx().decodeAudioData(arr); }
@@ -266,7 +268,7 @@
 
   // Listado + estados
   const tabs=$("#tabs"), ordersHost=$("#orders");
-  let currentFilter="all", lastSnap=null, initialLoaded=false;
+  let currentFilter="all", lastSnap=null;
 
   tabs.addEventListener("click",(e)=>{
     const el=e.target.closest("[data-f]"); if(!el) return;
@@ -296,7 +298,8 @@
         statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      showToast('Estado actualizado','success'); playBeep();
+      showToast('Estado actualizado','success');
+      // (sin sonido aquí)
     }catch(e){ console.error(e); showToast('No se pudo actualizar el estado','error'); }
   }
 
@@ -321,7 +324,8 @@
           badge.textContent = `Pago: efectivo — ${next==='paid'?'PAGADO':'PENDIENTE'}`;
         }
       }
-      showToast('Pago actualizado','success'); playBeep();
+      showToast('Pago actualizado','success');
+      // (sin sonido aquí)
     }catch(e){ console.error(e); showToast('No se pudo actualizar el pago','error'); }
   }
 
@@ -419,6 +423,11 @@
     });
   }
 
+  // ======= Notificar solo nuevos =======
+  let initialLoaded = false;          // ignoramos el primer snapshot
+  const knownIds = new Set();         // ids ya vistos para evitar duplicados
+  const NOTIFY_RECENT_MS = 30 * 60 * 1000; // opcional: 30 min de ventana
+
   // Suscripción
   (async function subscribeOrders(){
     try{
@@ -428,19 +437,59 @@
       let q = db.collection("orders");
       if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
       q.limit(100).onSnapshot(snap=>{
-        document.getElementById('ordersError').style.display="none"; document.getElementById('ordersError').textContent="";
+        // Primer snapshot: cargar sin notificar y marcar conocidos
+        if (!initialLoaded) {
+          snap.docs.forEach(d => knownIds.add(d.id));
+          initialLoaded = true;
+          document.getElementById('ordersError').style.display="none";
+          document.getElementById('ordersError').textContent="";
+          lastSnap=snap; renderList(snap);
+          return;
+        }
+
+        document.getElementById('ordersError').style.display="none";
+        document.getElementById('ordersError').textContent="";
         lastSnap=snap; renderList(snap);
-        snap.docChanges().forEach(ch=>{ if(ch.type==='added' && initialLoaded){ playBeep(); if ('Notification' in window && Notification.permission==='granted'){ new Notification('Nuevo pedido', { body: 'Entró un pedido nuevo', icon: '/images/icon-192.png' }); } showToast('Nuevo pedido recibido','info'); } });
-        initialLoaded=true;
+
+        // Notificar sólo "added" con id no visto
+        snap.docChanges().forEach(ch=>{
+          if (ch.type !== 'added') return;
+          const id = ch.doc.id;
+          if (knownIds.has(id)) return; // ya conocido
+          knownIds.add(id);
+
+          // Opcional: evitar notificar si es muy viejo
+          const data = ch.doc.data();
+          const dt = pickDocDate(data);
+          const isRecent = dt ? (Date.now() - dt.getTime() <= NOTIFY_RECENT_MS) : true;
+          if (!isRecent) return;
+
+          // Sonido
+          playBeep();
+
+          // Notificación de escritorio
+          if ('Notification' in window && Notification.permission==='granted'){
+            try{
+              new Notification('Nuevo pedido', {
+                body: (data?.nombre ? `${data.nombre} — ` : '') + 'Entró un pedido nuevo',
+                icon: '/images/icon-192.png'
+              });
+            }catch(_){}
+          }
+          // Toast
+          showToast('Nuevo pedido recibido','info');
+        });
       }, (err)=>{
         console.error(err);
-        document.getElementById('ordersError').textContent="No se pudo cargar la lista de pedidos.";
-        document.getElementById('ordersError').style.display="block";
+        const el = document.getElementById('ordersError');
+        el.textContent="No se pudo cargar la lista de pedidos.";
+        el.style.display="block";
       });
     }catch(err){
       console.error(err);
-      document.getElementById('ordersError').textContent="No se pudo inicializar la lista de pedidos.";
-      document.getElementById('ordersError').style.display="block";
+      const el = document.getElementById('ordersError');
+      el.textContent="No se pudo inicializar la lista de pedidos.";
+      el.style.display="block";
     }
   })();
 
