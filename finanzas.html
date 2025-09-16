@@ -29,8 +29,12 @@
     .row{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
     .card{background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:16px}
     h2{font-size:18px;margin:0 0 10px}
-    .chartbox{width:100%;height:360px} /* altura explícita */
+    .chartbox{width:100%;height:360px} /* reserva espacio para evitar saltos */
     .err{color:#b00020;font-weight:600;margin-top:8px}
+
+    /* Ancla para auto-scroll (compensa header sticky) */
+    #chartsTop{height:1px}
+    #chartsTop{scroll-margin-top:88px;} /* ~altura de la cabecera */
     @media (max-width:960px){
       .kpis{grid-template-columns:1fr}
       .row{grid-template-columns:1fr}
@@ -80,13 +84,16 @@
       <div class="kpi"><div class="label">Ticket promedio</div><div id="kpiAvg" class="value">—</div></div>
     </section>
 
+    <!-- ANCLA: acá queremos que queden visibles -->
+    <div id="chartsTop"></div>
+
     <section class="row">
-      <div class="card">
+      <div class="card" id="dailyCard">
         <h2>Evolución diaria</h2>
         <canvas id="dailyChart" class="chartbox"></canvas>
         <div id="errDaily" class="err" style="display:none"></div>
       </div>
-      <div class="card">
+      <div class="card" id="payCard">
         <h2>Distribución</h2>
         <div style="font-size:13px;color:#666;margin-bottom:6px">Medios de pago</div>
         <canvas id="payChart" class="chartbox"></canvas>
@@ -149,14 +156,10 @@
         data: {
           labels,
           datasets: [
-            {
-              type:'bar', label:'Pedidos', data:ordersArr,
-              backgroundColor:'rgba(46,204,113,.60)', borderColor:'#22b266', borderWidth:1.5, yAxisID:'y', order:1
-            },
-            {
-              type:'line', label:'Ingresos', data:revenueArr, yAxisID:'y2', order:2,
-              borderColor:'#1b6a3c', borderWidth:3, pointRadius:3, pointHoverRadius:5, fill:false, tension:.25
-            }
+            { type:'bar', label:'Pedidos', data:ordersArr,
+              backgroundColor:'rgba(46,204,113,.60)', borderColor:'#22b266', borderWidth:1.5, yAxisID:'y', order:1 },
+            { type:'line', label:'Ingresos', data:revenueArr, yAxisID:'y2', order:2,
+              borderColor:'#1b6a3c', borderWidth:3, pointRadius:3, pointHoverRadius:5, fill:false, tension:.25 }
           ]
         },
         options: {
@@ -185,7 +188,7 @@
       const ctx = document.getElementById('payChart').getContext('2d');
       if (charts.pay) charts.pay.destroy();
       charts.pay = new Chart(ctx, {
-        type: 'bar',                // <- fijo (no horizontalBar)
+        type: 'bar',
         data: {
           labels,
           datasets: [{
@@ -196,7 +199,7 @@
           }]
         },
         options: {
-          indexAxis:'y',            // <- horizontal
+          indexAxis:'y',
           responsive:true,
           maintainAspectRatio:false,
           plugins:{
@@ -209,6 +212,16 @@
           }
         }
       });
+    }
+
+    // === Auto-scroll si los charts no quedaron en pantalla ===
+    function ensureChartsVisible(){
+      const anchor = document.getElementById('chartsTop');
+      if (!anchor) return;
+      const r = anchor.getBoundingClientRect();
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      const visible = r.top >= 0 && r.top <= vh; // ancla cerca del viewport
+      if (!visible) anchor.scrollIntoView({behavior:'auto', block:'start'});
     }
 
     // ======= Carga de datos + render =======
@@ -271,7 +284,7 @@
         $("#kpiRevenue").textContent = money(totalRevenue);
         $("#kpiAvg").textContent = totalOrders ? money(totalRevenue/totalOrders) : money(0);
 
-        // Render
+        // Gráficos
         const hasDaily = dayOrders.some(v=>v>0) || dayRevenue.some(v=>v>0);
         if (hasDaily) drawDaily(labels, dayOrders, dayRevenue);
         else{
@@ -290,6 +303,9 @@
           $("#errPay").style.display = "block";
         }
 
+        // Asegurar que queden a la vista al entrar/actualizar
+        ensureChartsVisible();
+
       }catch(err){
         console.error(err);
         $("#errDaily").textContent = "No se pudieron cargar los datos.";
@@ -306,9 +322,8 @@
       location.replace('login.html?reason=logout');
     });
 
-    // Go!
+    // Cargar una sola vez al entrar
     document.addEventListener('DOMContentLoaded', loadFinance);
-    window.addEventListener('load', loadFinance);
   </script>
 </body>
 </html>
