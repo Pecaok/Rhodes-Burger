@@ -49,33 +49,40 @@
     .divider{height:1px;background:#efefef;margin:10px 0}
 
     .stateBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-    .stateBtns .btn{min-width:170px;justify-content:center} /* mismo ancho para todos */
+    .stateBtns .btn{min-width:170px;justify-content:center}
     .payRow{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
     .payRow .btn{min-width:170px;justify-content:center}
-    .highlightPending{box-shadow:0 0 0 3px rgba(255,193,7,.35)} /* resalta PENDIENTE */
+    .highlightPending{box-shadow:0 0 0 3px rgba(255,193,7,.35)}
     .err{color:#b00020;font-weight:600}
   </style>
 </head>
 <body>
-  <!-- Guardia de acceso con TTL de 20 horas -->
+  <!-- Guardia de acceso unificada (TTL 20h) -->
   <script>
     (function guard(){
-      const TTL_HOURS = 20;
+      const TTL_MS = 20*60*60*1000;
+      // soporte opcional para ?auth=1
       const qs = new URLSearchParams(location.search);
-      if (qs.get('auth') === '1') {
+      if (qs.get('auth')==='1') {
         try{
           const now = Date.now();
           localStorage.setItem('rb_admin_ok','true');
           localStorage.setItem('rb_admin_t', String(now));
           localStorage.setItem('rb_auth_v2','ok');
           sessionStorage.setItem('rb_auth_v2','ok');
-        }catch(e){}
-        try{ history.replaceState(null,'',location.pathname); }catch(e){}
+        }catch(_){}
+        try{ history.replaceState(null,'',location.pathname); }catch(_){}
       }
-      const ok   = (localStorage.getItem('rb_admin_ok')==='true') || (localStorage.getItem('rb_auth_v2')==='ok') || (sessionStorage.getItem('rb_auth_v2')==='ok');
-      const ts   = Number(localStorage.getItem('rb_admin_t')||0);
-      const live = (Date.now() - ts) < TTL_HOURS*60*60*1000;
-      if (!(ok && live)) location.replace('login.html?reason=guard');
+      const ok = localStorage.getItem('rb_admin_ok')==='true';
+      const ts = Number(localStorage.getItem('rb_admin_t')||0);
+      const live = (Date.now()-ts) < TTL_MS;
+      if (!(ok && live)){
+        const next = encodeURIComponent(location.pathname + location.search);
+        location.replace('login.html?reason=guard&next='+next);
+        return;
+      }
+      // renovar TTL al entrar (sesión deslizante)
+      try{ localStorage.setItem('rb_admin_t', String(Date.now())); }catch(_){}
     })();
   </script>
 
@@ -178,6 +185,7 @@
     $("#btnLogout").onclick = ()=>{
       localStorage.removeItem("rb_auth_v2");
       localStorage.removeItem("rb_admin_ok");
+      localStorage.removeItem("rb_admin_t");
       sessionStorage.removeItem("rb_auth_v2");
       location.replace("login.html?reason=logout");
     };
@@ -186,24 +194,20 @@
       try{
         const ctx = new (window.AudioContext||window.webkitAudioContext)();
         const o = ctx.createOscillator(); const g = ctx.createGain();
-        o.type = "square"; o.frequency.value = 1046; // más fuerte/alto
+        o.type = "square"; o.frequency.value = 1046;
         o.connect(g); g.connect(ctx.destination); o.start();
         g.gain.setValueAtTime(0.0001, ctx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + 0.03);
         g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
         o.stop(ctx.currentTime + 0.36);
       }catch(e){}
-      // Notificación del sistema solo en nuevos
       try{
-        if (Notification && Notification.permission === "granted") {
-          new Notification("Nuevo pedido recibido");
-        }
+        if (Notification && Notification.permission === "granted") new Notification("Nuevo pedido recibido");
       }catch(_){}
     }
-    // Pide permiso 1 vez (opcional)
     try{ if (Notification && Notification.permission === "default") Notification.requestPermission(); }catch(_){}
 
-    /* ===================== PRINT: datos del local + helpers ===================== */
+    /* ===================== PRINT ===================== */
     const STORE = {
       name: "Rhodes Burgers",
       address: "Av. San Martín 1620, Belén de Escobar",
@@ -426,7 +430,7 @@
       });
     }
 
-    // Suscripción: ordenar por fecha si existe; sino por id
+    // Suscripción
     (async function subscribeOrders(){
       try{
         const probe = await db.collection("orders").limit(1).get();
@@ -439,12 +443,12 @@
         if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
         q.limit(120).onSnapshot(snap=>{
           ordersErr.style.display="none"; ordersErr.textContent="";
-          // Sonar solo cuando entra un doc nuevo, ignorando la precarga
           if (initialLoaded){
-            snap.docChanges().forEach(ch=>{ if (ch.type==='added' && !seenIds.has(ch.doc.id)){ playBeep(); seenIds.add(ch.doc.id); } });
+            snap.docChanges().forEach(ch=>{
+              if (ch.type==='added' && !seenIds.has(ch.doc.id)){ playBeep(); seenIds.add(ch.doc.id); }
+            });
           }else{
-            snap.forEach(d=>seenIds.add(d.id));
-            initialLoaded = true;
+            snap.forEach(d=>seenIds.add(d.id)); initialLoaded = true;
           }
           lastSnap=snap; renderList(snap);
         }, (err)=>{
