@@ -10,7 +10,7 @@
       --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
       --radius:22px; --shadow:0 12px 34px rgba(0,0,0,.10); --ring:#eaeaea;
 
-      /* Colores por estado (alineados con finanzas) */
+      /* Colores por estado */
       --st-accepted:#FBC02D;
       --st-in_prep:#FB8C00;
       --st-ready:#00ACC1;
@@ -20,9 +20,9 @@
       --pay-pending:#FFA000;
       --pay-paid:#2ECC71;
 
-      /* Ajustes de impresión (ticket) */
+      /* Impresión ticket */
       --ticket-left-shift:-2mm;  /* más negativo => más a la izquierda */
-      --ticket-width:72mm;       /* 80mm roll ≈ 72mm útiles (en 58mm usá 48mm) */
+      --ticket-width:72mm;       /* 80mm roll ≈ 72mm útiles (58mm: 48mm) */
       --page-size:80mm;          /* 80mm o 58mm */
     }
     *{box-sizing:border-box}
@@ -56,19 +56,16 @@
     .divider{height:1px;background:#efefef;margin:10px 0}
     .err{color:#b00020;font-weight:600}
 
-    /* ===== Botones de estado coloreados ===== */
+    /* Botones de estado */
     .stateBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-    .state-btn{
-      border:none; border-radius:999px; padding:8px 12px; font-weight:700; cursor:pointer;
-      color:#fff; min-width:150px; text-align:center;
-    }
+    .state-btn{border:none;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer;color:#fff;min-width:150px;text-align:center}
     .state-accepted{ background:var(--st-accepted); color:#000; }
     .state-in_prep{ background:var(--st-in_prep); }
     .state-ready{ background:var(--st-ready); }
     .state-delivered{ background:var(--st-delivered); }
     .state-cancelled{ background:var(--st-cancelled); }
 
-    /* Píldoras de pago */
+    /* Pago */
     .pay-pill{display:inline-block;border-radius:999px;padding:8px 12px;font-weight:800;font-size:13px}
     .pay-paid{background:var(--pay-paid);color:#fff}
     .pay-pending{background:var(--pay-pending);color:#fff}
@@ -79,7 +76,7 @@
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
 
-    /* ===== Impresión: mover ticket a la izquierda ===== */
+    /* Impresión: mover ticket a la izquierda */
     @media print{
       @page{ size: var(--page-size) auto; margin: 2mm; }
       html,body{margin:0 !important; padding:0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;}
@@ -93,7 +90,7 @@
   </style>
 </head>
 <body>
-  <!-- Guardia de acceso (TTL 20h) con soporte ?auth=1 -->
+  <!-- Guardia (TTL 20h) con ?auth=1 -->
   <script>
     (function guard(){
       const TTL_MS = 20*60*60*1000;
@@ -337,27 +334,6 @@
       </div>`;
     }
 
-    function renderList(snap){
-      const docs = snap.docs.filter(d=>passFilter(d.data()));
-      idToDoc = new Map(snap.docs.map(d=>[d.id,d])); // para imprimir
-      ordersHost.innerHTML = docs.length
-        ? docs.map(renderOrder).join("")
-        : '<p class="muted">No hay pedidos.</p>';
-
-      document.querySelectorAll(".order").forEach(card=>{
-        const id=card.dataset.id;
-        card.querySelectorAll("[data-act]").forEach(btn=>{
-          btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act));
-        });
-        card.querySelectorAll("[data-pay]").forEach(btn=>{
-          const mode = btn.dataset.pay;
-          btn.addEventListener("click",()=> setPaymentStatus(id, mode==="paid"));
-        });
-        const pr = card.querySelector("[data-print]");
-        if(pr){ pr.addEventListener("click",()=> openPrintForDoc(idToDoc.get(id))); }
-      });
-    }
-
     // ====== PRINT ONLY THIS ORDER ======
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
@@ -366,30 +342,29 @@
       const dt = pickDocDate(o);
       const dateStr = dt ? dt.toLocaleDateString('es-AR')+' '+dt.toLocaleTimeString('es-AR') : '';
 
-      // Tomar variables CSS actuales
+      // Variables CSS actuales
       const root = getComputedStyle(document.documentElement);
       const LEFT  = (root.getPropertyValue('--ticket-left-shift')||'-2mm').trim();
       const WIDTH = (root.getPropertyValue('--ticket-width')||'72mm').trim();
       const PAGE  = (root.getPropertyValue('--page-size')||'80mm').trim();
 
-      // Construcción de líneas
       const items = Array.isArray(o.items) ? o.items : [];
       let linesHTML = '';
       items.forEach(it=>{
         if(it.type==='burger'){
-          const unit = unitWithExtras(it);
+          const unit = (it.price||0) + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0) + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0);
           const sub  = unit*(it.qty||0);
           const ex=[]; if(it.extras?.patty)ex.push(`+${it.extras.patty} med`); if(it.extras?.cheddar)ex.push(`+${it.extras.cheddar} cheddar`);
           linesHTML += `
-            <div class="row"><div>${it.qty||0}× ${it.name}</div><div class="r">${money(sub)}</div></div>
+            <div class="row"><div>${it.qty||0}× ${it.name}</div><div class="r">${(sub).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0})}</div></div>
             <div class="sub">Papas: ${friesName(it.fries)}${ex.length?` · ${ex.join(' · ')}`:''}${it.notes?` · ${it.notes}`:''}</div>`;
         }else{
           const sub=(it.price||0)*(it.qty||0);
-          linesHTML += `<div class="row"><div>${it.qty||0}× ${it.name}</div><div class="r">${money(sub)}</div></div>`;
+          linesHTML += `<div class="row"><div>${it.qty||0}× ${it.name}</div><div class="r">${(sub).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0})}</div></div>`;
         }
       });
 
-      const total = money(computeOrderTotal(o));
+      const total = (computeOrderTotal(o)).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
       const paidPill = (o.payment_status==='paid'||o.paid) ? 'PAGADO' : 'PENDIENTE';
 
       const html = `
@@ -428,7 +403,7 @@
     ${o.nombre? `<div><strong>Cliente:</strong> ${o.nombre}</div>`:''}
     ${o.telefono? `<div><strong>Tel:</strong> ${o.telefono}</div>`:''}
   </div>
-  <script>window.print(); window.onafterprint = () => window.close();</script>
+  <script>window.print(); window.onafterprint = () => window.close();<\/script>
 </body>
 </html>`;
 
@@ -439,7 +414,7 @@
 
     function renderList(snap){
       const docs = snap.docs.filter(d=>passFilter(d.data()));
-      idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
+      idToDoc = new Map(snap.docs.map(d=>[d.id,d])); // para imprimir
       ordersHost.innerHTML = docs.length
         ? docs.map(renderOrder).join("")
         : '<p class="muted">No hay pedidos.</p>';
@@ -458,7 +433,7 @@
       });
     }
 
-    // Suscripción robusta, y beep sólo en nuevos luego de la primera carga
+    // Suscripción + beep sólo en nuevos
     (async function subscribeOrders(){
       try{
         const probe = await db.collection("orders").limit(1).get();
