@@ -62,7 +62,6 @@
   <script>
     (function guard(){
       const TTL_MS = 20*60*60*1000;
-      // soporte opcional para ?auth=1
       const qs = new URLSearchParams(location.search);
       if (qs.get('auth')==='1') {
         try{
@@ -82,7 +81,6 @@
         location.replace('login.html?reason=guard&next='+next);
         return;
       }
-      // renovar TTL al entrar (sesión deslizante)
       try{ localStorage.setItem('rb_admin_t', String(Date.now())); }catch(_){}
     })();
   </script>
@@ -299,6 +297,7 @@
 
   // ================== CHARTS ==================
   let ordersChart, payChart, statusChart;
+
   function ensureOrdersChart(labels, orders, revenue){
     const ctx = document.getElementById("ordersChart").getContext("2d");
     if(ordersChart) ordersChart.destroy();
@@ -314,20 +313,52 @@
         scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
     });
   }
+
+  /* ===== Paletas para doughnuts ===== */
+  const PAY_COLOR_MAP = {
+    efectivo:       '#2ECC71',
+    mercado_pago:   '#1E88E5',
+    credito:        '#8E24AA',
+    debito:         '#43A047',
+    transferencia:  '#26A69A',
+    otro:           '#FFA000'
+  };
+  const STATUS_COLOR_MAP = {
+    accepted:         '#FBC02D',
+    pending_payment:  '#FFA000',
+    in_prep:          '#FB8C00',
+    ready:            '#00ACC1',
+    delivered:        '#2E7D32',
+    cancelled:        '#D32F2F'
+  };
+  const colorsFrom = (labels, map) => labels.map(l => map[l] || '#9E9E9E');
+
   function ensurePayChart(labels, vals){
     const ctx = document.getElementById("payChart").getContext("2d");
     if(payChart) payChart.destroy();
     payChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{data:vals}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}
+      data:{labels, datasets:[{
+        data: vals,
+        backgroundColor: colorsFrom(labels, PAY_COLOR_MAP),
+        borderColor: colorsFrom(labels, PAY_COLOR_MAP),
+        borderWidth: 2,
+        hoverOffset: 6
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
     });
   }
   function ensureStatusChart(labels, vals){
     const ctx = document.getElementById("statusChart").getContext("2d");
     if(statusChart) statusChart.destroy();
     statusChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{data:vals}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}
+      data:{labels, datasets:[{
+        data: vals,
+        backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP),
+        borderColor: colorsFrom(labels, STATUS_COLOR_MAP),
+        borderWidth: 2,
+        hoverOffset: 6
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
     });
   }
 
@@ -335,7 +366,6 @@
   async function loadKPI(){
     const err = $("#kpiError"); err.style.display='none'; err.textContent='';
     try{
-      // Traer hasta 1500 registros, ordenando por fecha si existe
       const probe = await db.collection('orders').limit(1).get();
       let dateField = null;
       if (!probe.empty){
@@ -352,8 +382,7 @@
       const dayRevenue = Array(days).fill(0);
       let count=0, revenue=0;
 
-      // distribución de pago y estado
-      const payCount = new Map(); // efectivo / mercado_pago / otros
+      const payCount = new Map();
       const statusCount = new Map();
 
       snap.forEach(doc=>{
@@ -366,8 +395,8 @@
         dayRevenue[d] += tot;
         count++; revenue += tot;
 
-        const p = (data.pago||'—'); payCount.set(p, (payCount.get(p)||0)+1);
-        const st= (data.status||'—'); statusCount.set(st, (statusCount.get(st)||0)+1);
+        const p = (data.pago||'otro'); payCount.set(p, (payCount.get(p)||0)+1);
+        const st= (data.status||'accepted'); statusCount.set(st, (statusCount.get(st)||0)+1);
       });
 
       $("#kpiCount").textContent = count.toLocaleString("es-AR");
@@ -375,11 +404,11 @@
       $("#kpiATV").textContent = count? money(revenue/count) : '—';
 
       ensureOrdersChart(labels, dayOrders, dayRevenue);
-      // medios de pago
+
       const pLabels = Array.from(payCount.keys());
       const pVals   = pLabels.map(k=>payCount.get(k));
       ensurePayChart(pLabels, pVals.length? pVals : [0]);
-      // estados
+
       const sLabels = Array.from(statusCount.keys());
       const sVals   = sLabels.map(k=>statusCount.get(k));
       ensureStatusChart(sLabels, sVals.length? sVals : [0]);
@@ -449,7 +478,6 @@
     const dsel = selDrink.value ? findDrink(selDrink.value) : null;
     if(dsel) tot += dsel.price;
 
-    // pintar preview
     preview.style.display = 'block';
     preview.innerHTML = `
       <div><strong>${qty}× ${burger.name}</strong></div>
@@ -473,7 +501,7 @@
     if(!burger){ formErr.textContent="Elegí una hamburguesa."; formErr.style.display='block'; return; }
     const friesEl = document.querySelector('input[name="fries"]:checked');
     if(!friesEl){ formErr.textContent="Elegí el tipo de papas (obligatorio)."; formErr.style.display='block'; return; }
-    calcPreview(); // actualizar por las dudas
+    calcPreview();
   };
 
   $("#btnSave").onclick = async ()=>{
@@ -498,7 +526,6 @@
       const paid = $("#chkPaid").checked;
       const notes= ($("#notes").value||"").trim();
 
-      // armo items
       const items = [{
         type:"burger",
         id: burger.id,
@@ -523,7 +550,7 @@
 
       const ref = db.collection("orders").doc();
       await ref.set({
-        orderNumber: null, // si tenés contador, podrías omitirlo o generarlo server-side
+        orderNumber: null,
         nombre: "Mostrador",
         telefono: "",
         entrega: "take_away",
@@ -535,13 +562,12 @@
         items,
         total,
         source: "manual",
-        createdAt: when // se guarda como Date; si preferís serverTimestamp, reemplazalo aquí
+        createdAt: when
       });
 
       formMsg.textContent = "Pedido guardado correctamente.";
       formMsg.style.display='block';
 
-      // reset parcial
       selBurger.value=""; selDrink.value="";
       document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false);
       qtyVal.textContent="1"; patVal.textContent="0"; cheVal.textContent="0";
