@@ -83,7 +83,6 @@
     @media print{
       @page{ size: var(--page-size) auto; margin: 2mm; }
       html,body{margin:0 !important; padding:0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;}
-      /* Intentamos cubrir distintos selectores posibles de ticket */
       .order, .ticket, #ticket, .print-area, #printArea{
         width: var(--ticket-width) !important;
         margin: 0 !important; padding: 0 !important;
@@ -165,7 +164,6 @@
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
 
-    // detectar fecha en doc
     function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
@@ -228,7 +226,7 @@
       try{
         const ctx = new (window.AudioContext||window.webkitAudioContext)();
         const o = ctx.createOscillator(); const g = ctx.createGain();
-        o.type = "square"; o.frequency.value = 880; // más notorio
+        o.type = "square"; o.frequency.value = 880;
         o.connect(g); g.connect(ctx.destination); o.start();
         g.gain.setValueAtTime(0.0001, ctx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + 0.02);
@@ -240,6 +238,7 @@
     /* ===================== LISTADO ===================== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
     let currentFilter="all", lastSnap=null, initialLoaded=false; const seenIds=new Set();
+    let idToDoc = new Map(); // para imprimir
 
     tabs.addEventListener("click",(e)=>{
       const el=e.target.closest("[data-f]"); if(!el) return;
@@ -312,6 +311,7 @@
         <div class="pay-actions">
           <button class="pay-btn" data-pay="paid">✓ Marcar PAGADO</button>
           <button class="pay-btn" data-pay="pending">⏳ Marcar PENDIENTE</button>
+          <button class="btn" data-print>🖨 Imprimir</button>
         </div>`;
 
       return `<div class="order ${isCancelled?'cancelled':''}" data-id="${doc.id}">
@@ -339,11 +339,11 @@
 
     function renderList(snap){
       const docs = snap.docs.filter(d=>passFilter(d.data()));
+      idToDoc = new Map(snap.docs.map(d=>[d.id,d])); // para imprimir
       ordersHost.innerHTML = docs.length
         ? docs.map(renderOrder).join("")
         : '<p class="muted">No hay pedidos.</p>';
 
-      // Listeners por tarjeta
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
         card.querySelectorAll("[data-act]").forEach(btn=>{
@@ -353,6 +353,108 @@
           const mode = btn.dataset.pay;
           btn.addEventListener("click",()=> setPaymentStatus(id, mode==="paid"));
         });
+        const pr = card.querySelector("[data-print]");
+        if(pr){ pr.addEventListener("click",()=> openPrintForDoc(idToDoc.get(id))); }
+      });
+    }
+
+    // ====== PRINT ONLY THIS ORDER ======
+    function openPrintForDoc(docSnap){
+      if(!docSnap) return;
+      const o = docSnap.data();
+      const orderNo = displayOrderNumber(docSnap);
+      const dt = pickDocDate(o);
+      const dateStr = dt ? dt.toLocaleDateString('es-AR')+' '+dt.toLocaleTimeString('es-AR') : '';
+
+      // Tomar variables CSS actuales
+      const root = getComputedStyle(document.documentElement);
+      const LEFT  = (root.getPropertyValue('--ticket-left-shift')||'-2mm').trim();
+      const WIDTH = (root.getPropertyValue('--ticket-width')||'72mm').trim();
+      const PAGE  = (root.getPropertyValue('--page-size')||'80mm').trim();
+
+      // Construcción de líneas
+      const items = Array.isArray(o.items) ? o.items : [];
+      let linesHTML = '';
+      items.forEach(it=>{
+        if(it.type==='burger'){
+          const unit = unitWithExtras(it);
+          const sub  = unit*(it.qty||0);
+          const ex=[]; if(it.extras?.patty)ex.push(`+${it.extras.patty} med`); if(it.extras?.cheddar)ex.push(`+${it.extras.cheddar} cheddar`);
+          linesHTML += `
+            <div class="row"><div>${it.qty||0}× ${it.name}</div><div class="r">${money(sub)}</div></div>
+            <div class="sub">Papas: ${friesName(it.fries)}${ex.length?` · ${ex.join(' · ')}`:''}${it.notes?` · ${it.notes}`:''}</div>`;
+        }else{
+          const sub=(it.price||0)*(it.qty||0);
+          linesHTML += `<div class="row"><div>${it.qty||0}× ${it.name}</div><div class="r">${money(sub)}</div></div>`;
+        }
+      });
+
+      const total = money(computeOrderTotal(o));
+      const paidPill = (o.payment_status==='paid'||o.paid) ? 'PAGADO' : 'PENDIENTE';
+
+      const html = `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ticket ${orderNo}</title>
+<style>
+  :root{ --ticket-left-shift:${LEFT}; --ticket-width:${WIDTH}; --page-size:${PAGE}; }
+  @page{ size: var(--page-size) auto; margin: 2mm; }
+  html,body{margin:0;padding:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#000;}
+  .ticket{ width: var(--ticket-width); transform: translateX(var(--ticket-left-shift)); position: relative; left: var(--ticket-left-shift); }
+  .c{ text-align:center; }
+  .row{ display:flex; justify-content:space-between; gap:8px; }
+  .sub{ color:#555; margin:2px 0 4px 0; }
+  hr{ border:none; border-top:1px dashed #000; margin:6px 0; }
+  .r{ text-align:right; }
+  .total{ font-weight:800; font-size:14px; }
+  .pill{ display:inline-block; padding:2px 6px; border-radius:999px; background:#000; color:#fff; font-weight:800; }
+</style>
+</head>
+<body>
+  <div class="ticket">
+    <div class="c">
+      <div style="font-weight:800;">Rhodes Burgers</div>
+      <div>${orderNo}</div>
+      <div style="font-size:11px">${dateStr}</div>
+    </div>
+    <hr>
+    ${linesHTML}
+    <hr>
+    <div class="row total"><div>Total</div><div>${total}</div></div>
+    <div class="row"><div>Pago</div><div>${o.pago||'—'} · <span class="pill">${paidPill}</span></div></div>
+    <div class="row"><div>Estado</div><div>${o.status||'—'}</div></div>
+    ${o.nombre? `<div><strong>Cliente:</strong> ${o.nombre}</div>`:''}
+    ${o.telefono? `<div><strong>Tel:</strong> ${o.telefono}</div>`:''}
+  </div>
+  <script>window.print(); window.onafterprint = () => window.close();</script>
+</body>
+</html>`;
+
+      const w = window.open('', '_blank', 'width=420,height=600');
+      w.document.open(); w.document.write(html); w.document.close();
+      try{ w.focus(); }catch(_){}
+    }
+
+    function renderList(snap){
+      const docs = snap.docs.filter(d=>passFilter(d.data()));
+      idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
+      ordersHost.innerHTML = docs.length
+        ? docs.map(renderOrder).join("")
+        : '<p class="muted">No hay pedidos.</p>';
+
+      document.querySelectorAll(".order").forEach(card=>{
+        const id=card.dataset.id;
+        card.querySelectorAll("[data-act]").forEach(btn=>{
+          btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act));
+        });
+        card.querySelectorAll("[data-pay]").forEach(btn=>{
+          const mode = btn.dataset.pay;
+          btn.addEventListener("click",()=> setPaymentStatus(id, mode==="paid"));
+        });
+        const pr = card.querySelector("[data-print]");
+        if(pr){ pr.addEventListener("click",()=> openPrintForDoc(idToDoc.get(id))); }
       });
     }
 
