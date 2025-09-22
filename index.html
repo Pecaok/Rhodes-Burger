@@ -24,7 +24,7 @@
     .brand img{width:40px;height:40px;border-radius:10px;background:#fff;object-fit:contain}
     .brand strong{font-weight:800}
 
-    /* Pill de estado en dos líneas */
+    /* Pill estado en dos líneas */
     .status-pill{
       display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
       min-width:140px;padding:10px 14px;border-radius:16px;font-weight:700;
@@ -45,6 +45,16 @@
     }
     .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
     .btn.ghost{border-color:#e7e7e7;color:#333}
+
+    /* Estado deshabilitado para cerrar pedidos */
+    .btn.disabled,
+    .btn[aria-disabled="true"]{
+      background:#f5f5f5 !important;
+      border-color:#e5e5e5 !important;
+      color:#9a9a9a !important;
+      cursor:not-allowed !important;
+      pointer-events:none !important;
+    }
 
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:34px;margin:14px 4px 18px}
@@ -87,7 +97,7 @@
     /* Ocultar cualquier resto de cola/espera si existiera */
     #queueInfo,#waitInfo,.queue-info,.wait-info,[data-queue],[data-wait]{display:none!important}
 
-    /* ======== MOBILE FIX ======== */
+    /* ======== MOBILE ======== */
     @media (max-width:600px){
       .topbar{padding:8px 10px;gap:8px;flex-wrap:wrap}
       .brand img{width:32px;height:32px}
@@ -116,7 +126,7 @@
         <strong>Rhodes Burgers</strong>
       </a>
 
-      <!-- Estado de apertura (en dos líneas) -->
+      <!-- Estado apertura -->
       <span id="statusPill" class="status-pill status-closed" aria-live="polite">
         <span class="status-main">Cerrado</span>
         <span class="status-sub">abrimos pronto</span>
@@ -152,7 +162,7 @@
       </div>
       <div class="cart-actions">
         <button class="btn ghost" id="btnVaciar">Vaciar</button>
-        <a class="btn primary" href="pedido_cliente.html">Ir a pagar</a>
+        <a class="btn primary" id="btnPagar" href="pedido_cliente.html">Ir a pagar</a>
       </div>
     </div>
   </aside>
@@ -222,7 +232,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 
   <script>
-    /* Horarios (mismos que contacto) */
+    /* Horarios */
     const HOURS = {
       0: [[19,0, 23,0]],              // Domingo
       1: [],                          // Lunes
@@ -244,6 +254,24 @@
           return `${lab} ${String(h1).padStart(2,'0')}:${String(m1).padStart(2,'0')}`; }
       } return null;
     }
+
+    /* Control de pedido habilitado/inhabilitado */
+    let orderable = false;
+    function setOrderable(v){
+      orderable = !!v;
+      // Deshabilitar/rehabilitar botones de productos
+      document.querySelectorAll('[data-add],[data-custom]').forEach(btn=>{
+        if(orderable){ btn.classList.remove('disabled'); btn.removeAttribute('aria-disabled'); }
+        else { btn.classList.add('disabled'); btn.setAttribute('aria-disabled','true'); }
+      });
+      // Deshabilitar Ir a pagar
+      const pagar = document.getElementById('btnPagar');
+      if(pagar){
+        if(orderable){ pagar.classList.remove('disabled'); pagar.removeAttribute('aria-disabled'); }
+        else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); }
+      }
+    }
+
     function renderStatus(){
       const pill=document.getElementById('statusPill');
       const main=pill.querySelector('.status-main');
@@ -255,11 +283,13 @@
         pill.classList.remove('status-closed'); pill.classList.add('status-open');
         main.textContent='Abierto';
         sub.textContent=`hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        setOrderable(true);
       }else{
         pill.classList.remove('status-open'); pill.classList.add('status-closed');
         const nx=nextOpen(now);
         main.textContent='Cerrado';
         sub.textContent=`abrimos ${nx?nx:'pronto'}`;
+        setOrderable(false);
       }
     }
     renderStatus(); setInterval(renderStatus,60*1000);
@@ -312,6 +342,12 @@
     }
 
     const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
+
+    function cantOrderAlert(){
+      const nx = nextOpen(new Date());
+      alert(`Estamos cerrados por ahora.\nPodés ver la carta y los precios, pero los pedidos abren ${nx?nx:''}.`);
+    }
+
     function renderCard(item,type){
       const card=document.createElement("div");
       card.className="card";
@@ -328,15 +364,25 @@
             </div>
           </div>
         </div>`;
-      if(type==="drink"){ card.querySelector("[data-add]").onclick=()=>addDrink(item); }
-      else{ card.querySelector("[data-add]").onclick=()=>openCustomize(item);
-            card.querySelector("[data-custom]").onclick=()=>openCustomize(item); }
+      // Clicks con guardia de horario
+      const addBtn = card.querySelector("[data-add]");
+      const customBtn = card.querySelector("[data-custom]");
+
+      if(type==="drink"){
+        addBtn.onclick=()=>{ if(!orderable) return cantOrderAlert(); addDrink(item); };
+      }else{
+        addBtn.onclick=()=>{ if(!orderable) return cantOrderAlert(); openCustomize(item); };
+        if(customBtn) customBtn.onclick=()=>{ if(!orderable) return cantOrderAlert(); openCustomize(item); };
+      }
       return card;
     }
+
     function mount(){
       gridBurgers.innerHTML=""; BURGERS.forEach(b=>gridBurgers.appendChild(renderCard(b,"burger")));
       gridDrinks.innerHTML="";  DRINKS.forEach(d=>gridDrinks.appendChild(renderCard(d,"drink")));
       renderCart();
+      // Aplicar el estado de orden actual a botones recién renderizados
+      setOrderable(orderable);
     }
 
     const drawer=$("#drawer"), cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
@@ -345,6 +391,14 @@
     document.getElementById("btnCart").onclick=openDrawer;
     document.getElementById("closeDrawer").onclick=closeDrawer;
     document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
+
+    // Bloquear ir a pagar si está cerrado
+    document.getElementById("btnPagar").addEventListener("click", (e)=>{
+      if(!orderable){
+        e.preventDefault();
+        cantOrderAlert();
+      }
+    });
 
     function renderCart(){
       cartItems.innerHTML="";
@@ -394,7 +448,7 @@
       bucket[item.id].qty+=1; saveCart(); renderCart();
     }
 
-    /* Modal */
+    /* ===== Modal ===== */
     const overlay=$("#overlay"),modTitle=$("#modTitle");
     const qtyVal=$("#qtyVal"),qtyInc=$("#qtyInc"),qtyDec=$("#qtyDec");
     const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar"),noExtras=$("#noExtras");
@@ -425,6 +479,7 @@
     }
 
     btnAdd.onclick=()=>{
+      if(!orderable){ cantOrderAlert(); return; }
       const friesEl=document.querySelector('input[name="fries"]:checked');
       if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
       const qty=+qtyVal.textContent||1;
@@ -443,6 +498,7 @@
       saveCart(); renderCart(); overlay.classList.remove("open");
     };
 
+    // Montar UI
     mount();
   </script>
 </body>
