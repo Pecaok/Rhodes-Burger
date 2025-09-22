@@ -21,9 +21,9 @@
       --pay-paid:#2ECC71;
 
       /* Impresión ticket */
-      --ticket-left-shift:-2mm;  /* más negativo => más a la izquierda */
-      --ticket-width:72mm;       /* 80mm roll ≈ 72mm útiles (58mm: 48mm) */
-      --page-size:80mm;          /* 80mm o 58mm */
+      --ticket-left-shift:-2mm;
+      --ticket-width:72mm;
+      --page-size:80mm;
     }
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
@@ -76,7 +76,7 @@
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
 
-    /* Impresión: mover ticket a la izquierda */
+    /* Impresión */
     @media print{
       @page{ size: var(--page-size) auto; margin: 2mm; }
       html,body{margin:0 !important; padding:0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;}
@@ -201,16 +201,68 @@
       return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
     }
 
-    /* ===================== AUDIO + SALIR ===================== */
+    /* ===================== AUDIO (fuerte x3) + SALIR ===================== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     const btnBell = $("#btnBell");
     const updateBellUI = ()=> btnBell.classList.toggle("active", soundEnabled);
     updateBellUI();
-    btnBell.onclick = ()=>{
+
+    // Contexto de audio reutilizable
+    let audioCtx = null, masterGain = null;
+    function initAudio(){
+      if (audioCtx) return audioCtx;
+      audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.9; // volumen general alto
+      masterGain.connect(audioCtx.destination);
+
+      // Intento de desbloquear en primer interacción
+      const unlock = () => {
+        if (audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+        window.removeEventListener('pointerdown', unlock);
+        window.removeEventListener('keydown', unlock);
+      };
+      window.addEventListener('pointerdown', unlock, {once:true});
+      window.addEventListener('keydown', unlock, {once:true});
+      return audioCtx;
+    }
+
+    // Alarma: 3 beeps fuertes seguidos
+    function playAlarm(reps=3){
+      if(!soundEnabled) return;
+      const ctx = initAudio();
+      if (!ctx) return;
+
+      let t = ctx.currentTime + 0.02; // pequeño offset
+      for (let i=0;i<reps;i++){
+        const osc = ctx.createOscillator();
+        const g   = ctx.createGain();
+        osc.type = "square";          // timbre potente
+        osc.frequency.value = 880;    // tono
+        osc.connect(g); g.connect(masterGain);
+
+        // envolvente: ataque rápido, sustain corto, release rápido
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.95, t + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+
+        osc.start(t);
+        osc.stop(t + 0.4);
+
+        t += 0.42; // separación entre beeps
+      }
+    }
+
+    btnBell.onclick = async ()=>{
       soundEnabled = !soundEnabled;
       localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled));
       updateBellUI();
+      try{
+        initAudio();
+        if (audioCtx?.state === 'suspended') await audioCtx.resume();
+      }catch(_){}
     };
+
     $("#btnLogout").onclick = ()=>{
       localStorage.removeItem("rb_auth_v2");
       localStorage.removeItem("rb_admin_ok");
@@ -218,19 +270,6 @@
       sessionStorage.removeItem("rb_auth_v2");
       location.replace("login.html?reason=logout&next=pedido_local.html");
     };
-    function playBeep(){
-      if(!soundEnabled) return;
-      try{
-        const ctx = new (window.AudioContext||window.webkitAudioContext)();
-        const o = ctx.createOscillator(); const g = ctx.createGain();
-        o.type = "square"; o.frequency.value = 880;
-        o.connect(g); g.connect(ctx.destination); o.start();
-        g.gain.setValueAtTime(0.0001, ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
-        o.stop(ctx.currentTime + 0.27);
-      }catch(e){}
-    }
 
     /* ===================== LISTADO ===================== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
@@ -342,7 +381,6 @@
       const dt = pickDocDate(o);
       const dateStr = dt ? dt.toLocaleDateString('es-AR')+' '+dt.toLocaleTimeString('es-AR') : '';
 
-      // Variables CSS actuales
       const root = getComputedStyle(document.documentElement);
       const LEFT  = (root.getPropertyValue('--ticket-left-shift')||'-2mm').trim();
       const WIDTH = (root.getPropertyValue('--ticket-width')||'72mm').trim();
@@ -406,7 +444,6 @@
   <script>window.print(); window.onafterprint = () => window.close();<\/script>
 </body>
 </html>`;
-
       const w = window.open('', '_blank', 'width=420,height=600');
       w.document.open(); w.document.write(html); w.document.close();
       try{ w.focus(); }catch(_){}
@@ -414,7 +451,7 @@
 
     function renderList(snap){
       const docs = snap.docs.filter(d=>passFilter(d.data()));
-      idToDoc = new Map(snap.docs.map(d=>[d.id,d])); // para imprimir
+      idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
       ordersHost.innerHTML = docs.length
         ? docs.map(renderOrder).join("")
         : '<p class="muted">No hay pedidos.</p>';
@@ -433,7 +470,7 @@
       });
     }
 
-    // Suscripción + beep sólo en nuevos
+    // Suscripción + alarma sólo en nuevos
     (async function subscribeOrders(){
       try{
         const probe = await db.collection("orders").limit(1).get();
@@ -448,7 +485,7 @@
             if(ch.type==='added'){
               const id=ch.doc.id;
               if(!initialLoaded && !seenIds.has(id)){ seenIds.add(id); }
-              else { playBeep(); }
+              else { playAlarm(3); }   // <<< ALARMA x3 FUERTE
             }
           });
           initialLoaded=true;
