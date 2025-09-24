@@ -20,10 +20,10 @@
       --pay-pending:#FFA000;
       --pay-paid:#2ECC71;
 
-      /* Impresión ticket */
-      --ticket-left-shift:-2mm;
-      --ticket-width:48mm;
-      --page-size:58mm;
+      /* Impresión ticket (58mm) */
+      --ticket-left-shift:-1mm;   /* si corta a la derecha, probá -2mm */
+      --ticket-width:48mm;        /* ancho útil típico en 58mm ≈ 48mm */
+      --page-size:58mm;           /* tamaño del rollo */
     }
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
@@ -48,7 +48,6 @@
     .muted{color:var(--muted)}
     .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
     .chip{background:#f3f3f3;border:1px solid var(--ring);color:#333;border-radius:999px;padding:6px 10px;font-size:13px}
-    .right-total{font-weight:800;font-size:18px;white-space:nowrap}
     .items{margin-top:10px}
     .item{margin:8px 0 6px 0}
     .item .sub{color:var(--muted);font-size:13px;margin-top:3px}
@@ -56,14 +55,35 @@
     .divider{height:1px;background:#efefef;margin:10px 0}
     .err{color:#b00020;font-weight:600}
 
-    /* Botones de estado */
+    /* Botones de estado (outline que se rellena al avanzar) */
     .stateBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-    .state-btn{border:none;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer;color:#fff;min-width:150px;text-align:center}
-    .state-accepted{ background:var(--st-accepted); color:#000; }
-    .state-in_prep{ background:var(--st-in_prep); }
-    .state-ready{ background:var(--st-ready); }
-    .state-delivered{ background:var(--st-delivered); }
-    .state-cancelled{ background:var(--st-cancelled); }
+    .state-btn{
+      border:2px solid var(--ring);
+      background:#fff;
+      color:#333;
+      border-radius:999px;
+      padding:8px 12px;
+      font-weight:700;
+      cursor:pointer;
+      min-width:150px;
+      text-align:center;
+      transition:background .15s,color .15s,border-color .15s;
+    }
+    .state-accepted  { border-color: var(--st-accepted);  color: var(--st-accepted); }
+    .state-in_prep   { border-color: var(--st-in_prep);   color: var(--st-in_prep); }
+    .state-ready     { border-color: var(--st-ready);     color: var(--st-ready); }
+    .state-delivered { border-color: var(--st-delivered); color: var(--st-delivered); }
+    .state-cancelled { border-color: var(--st-cancelled); color: var(--st-cancelled); }
+
+    .state-btn.filled.state-accepted  { background: var(--st-accepted);  color:#000; border-color: var(--st-accepted); }
+    .state-btn.filled.state-in_prep   { background: var(--st-in_prep);   color:#fff; border-color: var(--st-in_prep); }
+    .state-btn.filled.state-ready     { background: var(--st-ready);     color:#fff; border-color: var(--st-ready); }
+    .state-btn.filled.state-delivered { background: var(--st-delivered); color:#fff; border-color: var(--st-delivered); }
+    .state-btn.filled.state-cancelled { background: var(--st-cancelled); color:#fff; border-color: var(--st-cancelled); }
+
+    /* Columna derecha (total + pago debajo) */
+    .right-box{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+    .right-total{font-weight:800;font-size:18px;white-space:nowrap}
 
     /* Pago */
     .pay-pill{display:inline-block;border-radius:999px;padding:8px 12px;font-weight:800;font-size:13px}
@@ -76,7 +96,7 @@
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
 
-    /* Impresión */
+    /* Impresión 58mm */
     @media print{
       @page{ size: var(--page-size) auto; margin: 2mm; }
       html,body{margin:0 !important; padding:0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;}
@@ -90,7 +110,7 @@
   </style>
 </head>
 <body>
-  <!-- Guardia (TTL 20h) con ?auth=1 -->
+  <!-- Guardia (TTL 20h) con ?auth=1) -->
   <script>
     (function guard(){
       const TTL_MS = 20*60*60*1000;
@@ -207,7 +227,6 @@
     const updateBellUI = ()=> btnBell.classList.toggle("active", soundEnabled);
     updateBellUI();
 
-    // Contexto de audio reutilizable
     let audioCtx = null, masterGain = null;
     function initAudio(){
       if (audioCtx) return audioCtx;
@@ -215,8 +234,6 @@
       masterGain = audioCtx.createGain();
       masterGain.gain.value = 0.9; // volumen general alto
       masterGain.connect(audioCtx.destination);
-
-      // Intento de desbloquear en primer interacción
       const unlock = () => {
         if (audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
         window.removeEventListener('pointerdown', unlock);
@@ -226,33 +243,24 @@
       window.addEventListener('keydown', unlock, {once:true});
       return audioCtx;
     }
-
-    // Alarma: 3 beeps fuertes seguidos
     function playAlarm(reps=3){
       if(!soundEnabled) return;
       const ctx = initAudio();
       if (!ctx) return;
-
-      let t = ctx.currentTime + 0.02; // pequeño offset
+      let t = ctx.currentTime + 0.02;
       for (let i=0;i<reps;i++){
         const osc = ctx.createOscillator();
         const g   = ctx.createGain();
-        osc.type = "square";          // timbre potente
-        osc.frequency.value = 880;    // tono
+        osc.type = "square";
+        osc.frequency.value = 880;
         osc.connect(g); g.connect(masterGain);
-
-        // envolvente: ataque rápido, sustain corto, release rápido
         g.gain.setValueAtTime(0.0001, t);
         g.gain.exponentialRampToValueAtTime(0.95, t + 0.03);
         g.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
-
-        osc.start(t);
-        osc.stop(t + 0.4);
-
-        t += 0.42; // separación entre beeps
+        osc.start(t); osc.stop(t + 0.4);
+        t += 0.42;
       }
     }
-
     btnBell.onclick = async ()=>{
       soundEnabled = !soundEnabled;
       localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled));
@@ -262,7 +270,6 @@
         if (audioCtx?.state === 'suspended') await audioCtx.resume();
       }catch(_){}
     };
-
     $("#btnLogout").onclick = ()=>{
       localStorage.removeItem("rb_auth_v2");
       localStorage.removeItem("rb_admin_ok");
@@ -312,6 +319,10 @@
       const o=doc.data(); const dt=pickDocDate(o);
       const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
       const items = Array.isArray(o.items)?o.items:[];
+      const STAGES = ['accepted','in_prep','ready','delivered']; // orden de progreso
+      const st = o.status ?? 'accepted';
+      const curIdx = STAGES.indexOf(st);
+
       const lines = items.map(it=>{
         if(it.type==="burger"){
           const unit=unitWithExtras(it), sub=unit*(it.qty||0);
@@ -328,19 +339,20 @@
       }).join("");
 
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
-      const st=o.status??"accepted";
-      const isCancelled = st==="cancelled";
-      const payPill = (o.payment_status==="paid" || o.paid)
-        ? `<span class="pay-pill pay-paid">PAGADO</span>`
-        : `<span class="pay-pill pay-pending">PENDIENTE DE PAGO</span>`;
+
+      const filledClass = key => {
+        if (st === 'cancelled') return key==='cancelled' ? 'filled' : '';
+        const idx = STAGES.indexOf(key);
+        return (idx !== -1 && curIdx !== -1 && idx <= curIdx) ? 'filled' : '';
+      };
 
       const stateBtns = `
         <div class="stateBtns">
-          <button class="state-btn state-accepted" data-act="accepted">Recibido</button>
-          <button class="state-btn state-in_prep" data-act="in_prep">En preparación</button>
-          <button class="state-btn state-ready" data-act="ready">Listo para retirar</button>
-          <button class="state-btn state-delivered" data-act="delivered">Entregado</button>
-          <button class="state-btn state-cancelled" data-act="cancelled">Cancelar</button>
+          <button class="state-btn state-accepted  ${filledClass('accepted')}"  data-act="accepted">Recibido</button>
+          <button class="state-btn state-in_prep   ${filledClass('in_prep')}"   data-act="in_prep">En preparación</button>
+          <button class="state-btn state-ready     ${filledClass('ready')}"     data-act="ready">Listo para retirar</button>
+          <button class="state-btn state-delivered ${filledClass('delivered')}" data-act="delivered">Entregado</button>
+          <button class="state-btn state-cancelled ${filledClass('cancelled')}" data-act="cancelled">Cancelar</button>
         </div>`;
 
       const payBtns = `
@@ -350,7 +362,11 @@
           <button class="btn" data-print>🖨 Imprimir</button>
         </div>`;
 
-      return `<div class="order ${isCancelled?'cancelled':''}" data-id="${doc.id}">
+      const payPillRight = (o.payment_status==="paid" || o.paid)
+        ? `<span class="pay-pill pay-paid">PAGADO</span>`
+        : `<span class="pay-pill pay-pending">PENDIENTE DE PAGO</span>`;
+
+      return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
         <div class="order-head">
           <div>
             <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
@@ -361,12 +377,14 @@
               <span class="chip">Retiro: ${o.entrega||'—'}</span>
               ${telChip}
               <span class="chip">Pago: ${o.pago||'—'}</span>
-              ${payPill}
             </div>
             ${stateBtns}
             ${payBtns}
           </div>
-          <div class="right-total">${money(computeOrderTotal(o))}</div>
+          <div class="right-box">
+            <div class="right-total">${money(computeOrderTotal(o))}</div>
+            ${payPillRight}
+          </div>
         </div>
         <div class="divider"></div>
         <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
@@ -382,9 +400,9 @@
       const dateStr = dt ? dt.toLocaleDateString('es-AR')+' '+dt.toLocaleTimeString('es-AR') : '';
 
       const root = getComputedStyle(document.documentElement);
-      const LEFT  = (root.getPropertyValue('--ticket-left-shift')||'-2mm').trim();
-      const WIDTH = (root.getPropertyValue('--ticket-width')||'72mm').trim();
-      const PAGE  = (root.getPropertyValue('--page-size')||'80mm').trim();
+      const LEFT  = (root.getPropertyValue('--ticket-left-shift')||'-1mm').trim();
+      const WIDTH = (root.getPropertyValue('--ticket-width')||'48mm').trim();
+      const PAGE  = (root.getPropertyValue('--page-size')||'58mm').trim();
 
       const items = Array.isArray(o.items) ? o.items : [];
       let linesHTML = '';
@@ -414,14 +432,14 @@
 <style>
   :root{ --ticket-left-shift:${LEFT}; --ticket-width:${WIDTH}; --page-size:${PAGE}; }
   @page{ size: var(--page-size) auto; margin: 2mm; }
-  html,body{margin:0;padding:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#000;}
+  html,body{margin:0;padding:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#000;}
   .ticket{ width: var(--ticket-width); transform: translateX(var(--ticket-left-shift)); position: relative; left: var(--ticket-left-shift); }
   .c{ text-align:center; }
   .row{ display:flex; justify-content:space-between; gap:8px; }
   .sub{ color:#555; margin:2px 0 4px 0; }
   hr{ border:none; border-top:1px dashed #000; margin:6px 0; }
   .r{ text-align:right; }
-  .total{ font-weight:800; font-size:14px; }
+  .total{ font-weight:800; font-size:12px; }
   .pill{ display:inline-block; padding:2px 6px; border-radius:999px; background:#000; color:#fff; font-weight:800; }
 </style>
 </head>
@@ -430,7 +448,7 @@
     <div class="c">
       <div style="font-weight:800;">Rhodes Burgers</div>
       <div>${orderNo}</div>
-      <div style="font-size:11px">${dateStr}</div>
+      <div style="font-size:10px">${dateStr}</div>
     </div>
     <hr>
     ${linesHTML}
@@ -485,7 +503,7 @@
             if(ch.type==='added'){
               const id=ch.doc.id;
               if(!initialLoaded && !seenIds.has(id)){ seenIds.add(id); }
-              else { playAlarm(3); }   // <<< ALARMA x3 FUERTE
+              else { playAlarm(3); }   // ALARMA x3
             }
           });
           initialLoaded=true;
