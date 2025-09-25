@@ -108,20 +108,17 @@
     <h1>Resumen & Control</h1>
 
     <div class="grid">
-      <!-- Columna izquierda: KPIs + Gráficos -->
+      <!-- Columna izquierda -->
       <section class="card">
         <div class="row" style="justify-content:space-between">
           <div class="row">
             <strong>Resumen</strong>
 
-            <!-- Selector mensual -->
             <div class="inline">
               <div>
                 <label>Mes</label>
                 <input type="month" id="monthPicker" />
               </div>
-
-              <!-- Rango de fechas -->
               <div>
                 <label>Desde</label>
                 <input type="date" id="fromDate" />
@@ -182,7 +179,7 @@
         <div id="kpiError" class="err" style="display:none;margin-top:8px"></div>
       </section>
 
-      <!-- Columna derecha: Alta manual (sin cambios relevantes) -->
+      <!-- Columna derecha: Alta manual -->
       <aside class="card">
         <h3>Alta manual (presencial)</h3>
         <p class="muted" style="margin-top:-6px">Usá esto cuando el cliente compra en el local.</p>
@@ -461,7 +458,7 @@
 
       const {y,m,days} = monthKey();
       const labels = useRange
-        ? [] // no mostramos por día cuando es rango arbitrario (mantengo sólo charts de torta)
+        ? []
         : Array.from({length:days},(_,i)=>`${i+1}`);
       const dayOrders = useRange ? [] : Array(days).fill(0);
       const dayRevenue = useRange ? [] : Array(days).fill(0);
@@ -475,16 +472,14 @@
       // heatmap [7][24]
       const matrix = Array.from({length:7},()=> Array(24).fill(0));
 
-      const now = new Date();
       const inMonth = (d)=> d.getFullYear()===y && (d.getMonth()+1)===m;
 
-      const ordersForProjection = []; // sólo si es selección mensual
+      const ordersForProjection = [];
 
       snap.forEach(doc=>{
         const data=doc.data();
         const dt = pickDocDate(data); if(!dt) return;
 
-        // filtro por rango/mes
         if(useRange){
           if (from && dt<from) return;
           if (to   && dt>to)   return;
@@ -502,7 +497,6 @@
         const p = (data.pago||'otro'); payCount.set(p, (payCount.get(p)||0)+1);
         const st= (data.status||'accepted'); statusCount.set(st, (statusCount.get(st)||0)+1);
 
-        // barras si está en modo mensual
         if(!useRange){
           const dIdx = dt.getDate()-1;
           dayOrders[dIdx] += 1;
@@ -510,7 +504,6 @@
           ordersForProjection.push({dt, total:tot});
         }
 
-        // heatmap
         matrix[dt.getDay()][dt.getHours()] += 1;
       });
 
@@ -524,7 +517,6 @@
       if(!useRange){
         ensureOrdersChart(labels, dayOrders, dayRevenue);
       }else{
-        // en rango arbitrario, mostramos gráfico vacío para que no confunda (podrías poner un line simple por día de rango)
         ensureOrdersChart([], [], []);
       }
       const pLabels = Array.from(payCount.keys());
@@ -537,16 +529,16 @@
 
       renderHeatmap(matrix);
 
-      // Proyección (sólo si es vista mensual)
+      // Proyección (sólo mensual)
       const projBox = $("#projText");
       const alertBox = $("#pendingAlert");
       alertBox.innerHTML = '';
       if(!useRange){
         const {days} = monthKey();
-        // acumulado hasta hoy (en el mes mostrado)
-        const today = new Date(); const isSameYM = (today.getFullYear()===parseInt($("#monthPicker").value.split('-')[0]||0) &&
-                         (today.getMonth()+1)===parseInt($("#monthPicker").value.split('-')[1]||0));
-        const dayOfMonth = isSameYM ? today.getDate() : Math.max(...ordersForProjection.map(o=>o.dt.getDate()), 1);
+        const today = new Date();
+        const [yy,mm] = ($("#monthPicker").value||"").split('-').map(Number);
+        const isSameYM = (today.getFullYear()===yy && (today.getMonth()+1)===mm);
+        const dayOfMonth = isSameYM ? today.getDate() : Math.max(1, dayRevenue.findLastIndex ? dayRevenue.findLastIndex(v=>v>0)+1 : dayRevenue.length);
         const revToDate = dayRevenue.slice(0, dayOfMonth).reduce((a,b)=>a+b,0);
         const avg = dayOfMonth? (revToDate/dayOfMonth) : 0;
         const projected = avg * days;
@@ -577,7 +569,7 @@
   </script>
 
   <script>
-  // ====== Alta manual (igual que tu versión; sin tocar)
+  // ====== Alta manual
   const $q = s=>document.querySelector(s);
   const menuData = (()=>{ try{ return JSON.parse(document.getElementById('menu-data').textContent); }catch(_){ return {burgers:[],drinks:[]}; } })();
   const BURGERS = menuData.burgers||[];
@@ -601,8 +593,6 @@
     const iso = new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);
     try{ dtWhen.value = iso; }catch(_){}
   }
-  function findBurger(id){ return BURGERS.find(b=>b.id===id); }
-  function findDrink(id){ return DRINKS.find(d=>d.id===id); }
 
   if(qtyInc) qtyInc.onclick = ()=> qtyVal.textContent = String(Math.min(99,(+qtyVal.textContent||1)+1));
   if(qtyDec) qtyDec.onclick = ()=> qtyVal.textContent = String(Math.max(1,(+qtyVal.textContent||1)-1));
@@ -612,9 +602,12 @@
   if(cheDec) cheDec.onclick = ()=> { const v=+cheVal.textContent||0; if(v>0) cheVal.textContent = v-1; };
 
   function updateExtrasHints(){
-    if(pattiesInfo) pattiesInfo.textContent = `( + ${money(${EXTRA_PRICE_PATTY})} c/u, máx. +2 )`;
-    if(cheInfo)     cheInfo.textContent     = `( + ${money(${EXTRA_PRICE_CHEDDAR})} c/u, máx. +3 )`;
+    if(pattiesInfo) pattiesInfo.textContent = `( + ${money(EXTRA_PRICE_PATTY)} c/u, máx. +2 )`;
+    if(cheInfo)     cheInfo.textContent     = `( + ${money(EXTRA_PRICE_CHEDDAR)} c/u, máx. +3 )`;
   }
+
+  function findBurger(id){ return (menuData.burgers||[]).find(b=>b.id===id); }
+  function findDrink(id){ return (menuData.drinks||[]).find(d=>d.id===id); }
 
   function calcPreview(){
     const burger = findBurger(selBurger.value);
@@ -626,10 +619,10 @@
     const ex = {
       patty:+patVal.textContent||0,
       cheddar:+cheVal.textContent||0,
-      EXTRA_PRICE_PATTY:${EXTRA_PRICE_PATTY},
-      EXTRA_PRICE_CHEDDAR:${EXTRA_PRICE_CHEDDAR}
+      EXTRA_PRICE_PATTY: EXTRA_PRICE_PATTY,
+      EXTRA_PRICE_CHEDDAR: EXTRA_PRICE_CHEDDAR
     };
-    const unit = burger.price + ex.patty*${EXTRA_PRICE_PATTY} + ex.cheddar*${EXTRA_PRICE_CHEDDAR};
+    const unit = burger.price + ex.patty*EXTRA_PRICE_PATTY + ex.cheddar*EXTRA_PRICE_CHEDDAR;
     let tot = unit*qty;
 
     const dsel = selDrink.value ? findDrink(selDrink.value) : null;
@@ -673,8 +666,8 @@
       const extras = {
         patty:+patVal.textContent||0,
         cheddar:+cheVal.textContent||0,
-        EXTRA_PRICE_PATTY:${EXTRA_PRICE_PATTY},
-        EXTRA_PRICE_CHEDDAR:${EXTRA_PRICE_CHEDDAR}
+        EXTRA_PRICE_PATTY: EXTRA_PRICE_PATTY,
+        EXTRA_PRICE_CHEDDAR: EXTRA_PRICE_CHEDDAR
       };
       const drink = selDrink.value ? findDrink(selDrink.value) : null;
 
@@ -688,7 +681,12 @@
       }];
       if(drink){ items.push({ type:"drink", id: drink.id, name: drink.name, qty: 1, price: drink.price }); }
 
-      const total = items.reduce((t,it)=> t + (it.type==="burger" ? (it.price + extras.patty*${EXTRA_PRICE_PATTY} + extras.cheddar*${EXTRA_PRICE_CHEDDAR})*qty : it.price), 0);
+      const total = items.reduce((t,it)=>
+        t + (it.type==="burger"
+              ? (it.price + extras.patty*EXTRA_PRICE_PATTY + extras.cheddar*EXTRA_PRICE_CHEDDAR)*qty
+              : it.price),
+        0
+      );
 
       const ref = db.collection("orders").doc();
       await ref.set({
@@ -715,7 +713,7 @@
 
   // START
   document.addEventListener('DOMContentLoaded', ()=>{
-    mountSelects(); setNow(); calcPreview(); loadKPI();
+    mountSelects(); setNow(); updateExtrasHints(); calcPreview(); loadKPI();
   });
   </script>
 </body>
