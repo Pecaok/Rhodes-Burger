@@ -157,7 +157,7 @@
 
         <!-- Heatmap -->
         <div class="card" style="margin-top:12px">
-          <strong>Heatmap de demanda (día × hora)</strong>
+          <strong>Heatmap de demanda (día del mes × hora)</strong>
           <div id="heatmap" class="heatmap" style="margin-top:8px"></div>
           <div class="hm-legend">
             <span class="muted">Bajo</span>
@@ -374,6 +374,33 @@
     try{ $("#monthPicker").value = `${d.getFullYear()}-${m}`; }catch(_){}
   })();
 
+  // ==== Heatmap helpers (día del mes × hora) ====
+  function colorFor(val, max){
+    if(max<=0) return '#e8f5e9';
+    const r = val/max;
+    if (r < 0.25) return '#e8f5e9';
+    if (r < 0.50) return '#a5d6a7';
+    if (r < 0.75) return '#66bb6a';
+    return '#2e7d32';
+  }
+  function renderHeatmapMonth(matrix, dayLabels){
+    const host = document.getElementById("heatmap");
+    host.innerHTML = '';
+    // header
+    host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head"></div>`);
+    for(let h=0; h<24; h++) host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head">${h}</div>`);
+    // body
+    let max=0; matrix.forEach(row=> row.forEach(v=>{ if(v>max) max=v; }));
+    for(let d=0; d<matrix.length; d++){
+      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-day">${dayLabels[d]}</div>`);
+      for(let h=0; h<24; h++){
+        const v = matrix[d][h];
+        const bg = colorFor(v, max);
+        host.insertAdjacentHTML('beforeend', `<div class="hm-cell" title="${v||0} pedidos" style="background:${bg}">${v? v : ''}</div>`);
+      }
+    }
+  }
+
   // CHARTS
   let ordersChart, payChart, statusChart;
   function ensureOrdersChart(labels, orders, revenue){
@@ -411,34 +438,7 @@
     });
   }
 
-  // HEATMAP helper
-  function colorFor(val, max){
-    if(max<=0) return '#e8f5e9';
-    const r = val/max; // 0..1
-    if (r < 0.25) return '#e8f5e9';
-    if (r < 0.50) return '#a5d6a7';
-    if (r < 0.75) return '#66bb6a';
-    return '#2e7d32';
-  }
-  function renderHeatmap(matrix){
-    const days = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-    const host = $("#heatmap");
-    host.innerHTML = '';
-    // header
-    host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head"></div>`);
-    for(let h=0;h<24;h++){ host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head">${h}</div>`); }
-    // rows
-    let max=0; matrix.forEach(row=> row.forEach(v=>{ if(v>max) max=v; }));
-    for(let d=0; d<7; d++){
-      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-day">${days[d]}</div>`);
-      for(let h=0; h<24; h++){
-        const v = matrix[d][h];
-        host.insertAdjacentHTML('beforeend', `<div class="hm-cell" title="${v} pedidos" style="background:${colorFor(v,max)}">${v? v : ''}</div>`);
-      }
-    }
-  }
-
-  // LOAD KPI + filtros + proyección
+  // LOAD KPI + filtros + proyección + heatmap mensual
   async function loadKPI(){
     const err = $("#kpiError"); err.style.display='none'; err.textContent='';
     try{
@@ -456,25 +456,23 @@
       const {from,to} = dateRange();
       const useRange = !!(from || to);
 
-      const {y,m,days} = monthKey();
-      const labels = useRange
-        ? []
-        : Array.from({length:days},(_,i)=>`${i+1}`);
+      const mk = monthKey();
+      const {y,m,days} = mk;
+      const labels = useRange ? [] : Array.from({length:days},(_,i)=>`${i+1}`);
       const dayOrders = useRange ? [] : Array(days).fill(0);
       const dayRevenue = useRange ? [] : Array(days).fill(0);
 
+      // Heatmap mensual (día del mes × hora)
+      const hmMatrix = Array.from({length: days}, () => Array(24).fill(0));
+      const hmLabels = Array.from({length: days}, (_,i) => String(i+1).padStart(2,'0'));
+
       let count=0, revenue=0, cogsTotal=0;
-      let paidTotal=0, pendingTotal=0;
+      let pendingTotal=0;
 
       const payCount = new Map();
       const statusCount = new Map();
 
-      // heatmap [7][24]
-      const matrix = Array.from({length:7},()=> Array(24).fill(0));
-
       const inMonth = (d)=> d.getFullYear()===y && (d.getMonth()+1)===m;
-
-      const ordersForProjection = [];
 
       snap.forEach(doc=>{
         const data=doc.data();
@@ -492,7 +490,7 @@
         count++; revenue += tot; cogsTotal += cogs;
 
         const paid = (data.payment_status==='paid') || !!data.paid;
-        if (paid) paidTotal += tot; else pendingTotal += tot;
+        if (!paid) pendingTotal += tot;
 
         const p = (data.pago||'otro'); payCount.set(p, (payCount.get(p)||0)+1);
         const st= (data.status||'accepted'); statusCount.set(st, (statusCount.get(st)||0)+1);
@@ -501,10 +499,8 @@
           const dIdx = dt.getDate()-1;
           dayOrders[dIdx] += 1;
           dayRevenue[dIdx] += tot;
-          ordersForProjection.push({dt, total:tot});
+          if (dIdx>=0 && dIdx<days) hmMatrix[dIdx][dt.getHours()] += 1;
         }
-
-        matrix[dt.getDay()][dt.getHours()] += 1;
       });
 
       // KPIs
@@ -514,11 +510,9 @@
       $("#kpiMargin").textContent = money(revenue - cogsTotal);
 
       // Charts
-      if(!useRange){
-        ensureOrdersChart(labels, dayOrders, dayRevenue);
-      }else{
-        ensureOrdersChart([], [], []);
-      }
+      if(!useRange){ ensureOrdersChart(labels, dayOrders, dayRevenue); }
+      else{ ensureOrdersChart([], [], []); }
+
       const pLabels = Array.from(payCount.keys());
       const pVals   = pLabels.map(k=>payCount.get(k));
       ensurePayChart(pLabels, pVals.length? pVals : [0]);
@@ -527,14 +521,14 @@
       const sVals   = sLabels.map(k=>statusCount.get(k));
       ensureStatusChart(sLabels, sVals.length? sVals : [0]);
 
-      renderHeatmap(matrix);
+      // Heatmap mensual
+      renderHeatmapMonth(hmMatrix, hmLabels);
 
       // Proyección (sólo mensual)
       const projBox = $("#projText");
       const alertBox = $("#pendingAlert");
       alertBox.innerHTML = '';
       if(!useRange){
-        const {days} = monthKey();
         const today = new Date();
         const [yy,mm] = ($("#monthPicker").value||"").split('-').map(Number);
         const isSameYM = (today.getFullYear()===yy && (today.getMonth()+1)===mm);
