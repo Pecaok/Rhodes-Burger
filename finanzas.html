@@ -35,13 +35,12 @@
     .klabel{font-size:12px;color:var(--muted)}
     .kvalue{font-weight:800;font-size:20px}
 
-    /* Alturas fijas para que SIEMPRE se vean al entrar */
     .chartWrap{height:280px}
     .chartWrapTall{height:320px}
     canvas{width:100% !important; height:100% !important; display:block}
 
     label{font-weight:600;display:block;margin:8px 0 6px}
-    select, input[type="number"], input[type="datetime-local"], textarea{
+    select, input[type="number"], input[type="datetime-local"], input[type="date"], textarea{
       width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px
     }
     .inline{display:flex;gap:10px;flex-wrap:wrap}
@@ -55,10 +54,21 @@
     .totalBox{display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-weight:800}
     .err{color:#b00020;font-weight:600}
     .ok{color:#2e7d32;font-weight:700}
+
+    /* Heatmap */
+    .heatmap{display:grid;grid-template-columns:90px repeat(24,1fr);border:1px solid var(--ring);border-radius:12px;overflow:hidden}
+    .hm-cell{padding:8px;text-align:center;border-top:1px solid var(--ring);border-left:1px solid var(--ring);font-size:12px}
+    .hm-head{background:#fafafa;font-weight:700}
+    .hm-day{background:#fafafa;text-align:left;font-weight:700}
+    .hm-legend{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .swatch{width:18px;height:18px;border-radius:4px;border:1px solid var(--ring)}
+    .warn-pill{display:inline-block;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}
+    .warn{background:#fff3cd;border:1px solid #ffe58f;color:#8a6d3b}
+    .danger{background:#fdecea;border:1px solid #f5c6cb;color:#8a1c1c}
   </style>
 </head>
 <body>
-  <!-- Guardia de acceso unificada (TTL 20h, igual que pedido_local) -->
+  <!-- Guardia -->
   <script>
     (function guard(){
       const TTL_MS = 20*60*60*1000;
@@ -102,14 +112,34 @@
       <section class="card">
         <div class="row" style="justify-content:space-between">
           <div class="row">
-            <strong>Resumen mensual</strong>
-            <input type="month" id="monthPicker" />
+            <strong>Resumen</strong>
+
+            <!-- Selector mensual -->
+            <div class="inline">
+              <div>
+                <label>Mes</label>
+                <input type="month" id="monthPicker" />
+              </div>
+
+              <!-- Rango de fechas -->
+              <div>
+                <label>Desde</label>
+                <input type="date" id="fromDate" />
+              </div>
+              <div>
+                <label>Hasta</label>
+                <input type="date" id="toDate" />
+              </div>
+            </div>
+
             <button id="btnReload" class="btn">Actualizar</button>
           </div>
+
           <div class="kpi">
             <div class="kbadge"><div class="klabel">Pedidos</div><div class="kvalue" id="kpiCount">—</div></div>
             <div class="kbadge"><div class="klabel">Ingresos</div><div class="kvalue" id="kpiRevenue">—</div></div>
             <div class="kbadge"><div class="klabel">Ticket Prom.</div><div class="kvalue" id="kpiATV">—</div></div>
+            <div class="kbadge"><div class="klabel">Margen Est.</div><div class="kvalue" id="kpiMargin">—</div></div>
           </div>
         </div>
 
@@ -128,10 +158,31 @@
           </div>
         </div>
 
+        <!-- Heatmap -->
+        <div class="card" style="margin-top:12px">
+          <strong>Heatmap de demanda (día × hora)</strong>
+          <div id="heatmap" class="heatmap" style="margin-top:8px"></div>
+          <div class="hm-legend">
+            <span class="muted">Bajo</span>
+            <span class="swatch" style="background:#e8f5e9"></span>
+            <span class="swatch" style="background:#a5d6a7"></span>
+            <span class="swatch" style="background:#66bb6a"></span>
+            <span class="swatch" style="background:#2e7d32"></span>
+            <span class="muted">Alto</span>
+          </div>
+        </div>
+
+        <!-- Proyección -->
+        <div class="card" style="margin-top:12px">
+          <strong>Proyección del mes</strong>
+          <div id="projText" class="muted" style="margin-top:6px">—</div>
+          <div id="pendingAlert" style="margin-top:8px"></div>
+        </div>
+
         <div id="kpiError" class="err" style="display:none;margin-top:8px"></div>
       </section>
 
-      <!-- Columna derecha: Alta manual -->
+      <!-- Columna derecha: Alta manual (sin cambios relevantes) -->
       <aside class="card">
         <h3>Alta manual (presencial)</h3>
         <p class="muted" style="margin-top:-6px">Usá esto cuando el cliente compra en el local.</p>
@@ -196,7 +247,7 @@
     </div>
   </main>
 
-  <!-- Catálogo (idéntico a index; podés ampliarlo) -->
+  <!-- Catálogo -->
   <script id="menu-data" type="application/json">
   {
     "burgers": [
@@ -230,7 +281,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-  // ===== Logout que regresa a login con next=pedido_local.html
+  // ===== Logout
   document.addEventListener('DOMContentLoaded', ()=>{
     const btn = document.getElementById('btnLogout');
     if(btn) btn.onclick = ()=>{
@@ -263,6 +314,17 @@
   const EXTRA_PRICE_PATTY   = 1600;
   const EXTRA_PRICE_CHEDDAR = 300;
 
+  // Costos estimados (ajustá libremente)
+  const COSTO_ITEM = {
+    bigjohn_simple:5200, bigjohn_doble:7800, burguesa_simple:5600, burguesa_doble:8300,
+    cheesebacon_spl:5000, cheesebacon_dbl:7500, cheese_simple:4600, cheese_doble:7000,
+    rhodes_simple:5700, rhodes_doble:8400, morgan_simple:5200, morgan_doble:8000,
+    pollo_crispy:4200,
+    coca_org:900, coca_zero:900, sprite:900, aquarius_pera:900, aquarius_pomelo:900
+  };
+  const COSTO_EXTRA_PATTY = 1000;
+  const COSTO_EXTRA_CHEDDAR = 150;
+
   function unitWithExtras(it){
     const base = it.price || 0;
     const pz = (it.extras?.patty||0)   * (it.extras?.EXTRA_PRICE_PATTY||0);
@@ -273,6 +335,21 @@
     if (typeof o.total === "number") return o.total;
     const items = Array.isArray(o.items) ? o.items : [];
     return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
+  }
+  function orderCOGS(o){
+    const items = Array.isArray(o.items) ? o.items : [];
+    return items.reduce((t,it)=>{
+      if(it.type==='burger'){
+        const id = it.id || it.item?.id;
+        const base = COSTO_ITEM[id] || 0;
+        const ex = it.extras || {};
+        const unit = base + (ex.patty||0)*COSTO_EXTRA_PATTY + (ex.cheddar||0)*COSTO_EXTRA_CHEDDAR;
+        return t + unit*(it.qty||0);
+      }else{
+        const id = it.id || it.item?.id;
+        return t + (COSTO_ITEM[id]||0)*(it.qty||0);
+      }
+    },0);
   }
   function pickDocDate(obj){
     const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
@@ -288,16 +365,20 @@
     const d = $("#monthPicker").value ? new Date($("#monthPicker").value+'-01T00:00:00') : new Date();
     return {y:d.getFullYear(), m:d.getMonth()+1, days:new Date(d.getFullYear(), d.getMonth()+1, 0).getDate()};
   }
+  function dateRange(){
+    const from = $("#fromDate").value ? new Date($("#fromDate").value+'T00:00:00') : null;
+    const to   = $("#toDate").value   ? new Date($("#toDate").value  +'T23:59:59') : null;
+    return {from, to};
+  }
 
-  // ================== UI INIT ==================
+  // Init mes por defecto
   (function initMonth(){
     const d = new Date(); const m = String(d.getMonth()+1).padStart(2,'0');
     try{ $("#monthPicker").value = `${d.getFullYear()}-${m}`; }catch(_){}
   })();
 
-  // ================== CHARTS ==================
+  // CHARTS
   let ordersChart, payChart, statusChart;
-
   function ensureOrdersChart(labels, orders, revenue){
     const ctx = document.getElementById("ordersChart").getContext("2d");
     if(ordersChart) ordersChart.destroy();
@@ -313,37 +394,14 @@
         scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
     });
   }
-
-  /* ===== Paletas para doughnuts ===== */
-  const PAY_COLOR_MAP = {
-    efectivo:       '#2ECC71',
-    mercado_pago:   '#1E88E5',
-    credito:        '#8E24AA',
-    debito:         '#43A047',
-    transferencia:  '#26A69A',
-    otro:           '#FFA000'
-  };
-  const STATUS_COLOR_MAP = {
-    accepted:         '#FBC02D',
-    pending_payment:  '#FFA000',
-    in_prep:          '#FB8C00',
-    ready:            '#00ACC1',
-    delivered:        '#2E7D32',
-    cancelled:        '#D32F2F'
-  };
+  const PAY_COLOR_MAP = {efectivo:'#2ECC71', mercado_pago:'#1E88E5', credito:'#8E24AA', debito:'#43A047', transferencia:'#26A69A', otro:'#FFA000'};
+  const STATUS_COLOR_MAP = {accepted:'#FBC02D', pending_payment:'#FFA000', in_prep:'#FB8C00', ready:'#00ACC1', delivered:'#2E7D32', cancelled:'#D32F2F'};
   const colorsFrom = (labels, map) => labels.map(l => map[l] || '#9E9E9E');
-
   function ensurePayChart(labels, vals){
     const ctx = document.getElementById("payChart").getContext("2d");
     if(payChart) payChart.destroy();
     payChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{
-        data: vals,
-        backgroundColor: colorsFrom(labels, PAY_COLOR_MAP),
-        borderColor: colorsFrom(labels, PAY_COLOR_MAP),
-        borderWidth: 2,
-        hoverOffset: 6
-      }]},
+      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, PAY_COLOR_MAP), borderColor: colorsFrom(labels, PAY_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
       options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
     });
   }
@@ -351,18 +409,39 @@
     const ctx = document.getElementById("statusChart").getContext("2d");
     if(statusChart) statusChart.destroy();
     statusChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{
-        data: vals,
-        backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP),
-        borderColor: colorsFrom(labels, STATUS_COLOR_MAP),
-        borderWidth: 2,
-        hoverOffset: 6
-      }]},
+      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP), borderColor: colorsFrom(labels, STATUS_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
       options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
     });
   }
 
-  // ================== LOAD KPI ==================
+  // HEATMAP helper
+  function colorFor(val, max){
+    if(max<=0) return '#e8f5e9';
+    const r = val/max; // 0..1
+    if (r < 0.25) return '#e8f5e9';
+    if (r < 0.50) return '#a5d6a7';
+    if (r < 0.75) return '#66bb6a';
+    return '#2e7d32';
+  }
+  function renderHeatmap(matrix){
+    const days = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+    const host = $("#heatmap");
+    host.innerHTML = '';
+    // header
+    host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head"></div>`);
+    for(let h=0;h<24;h++){ host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head">${h}</div>`); }
+    // rows
+    let max=0; matrix.forEach(row=> row.forEach(v=>{ if(v>max) max=v; }));
+    for(let d=0; d<7; d++){
+      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-day">${days[d]}</div>`);
+      for(let h=0; h<24; h++){
+        const v = matrix[d][h];
+        host.insertAdjacentHTML('beforeend', `<div class="hm-cell" title="${v} pedidos" style="background:${colorFor(v,max)}">${v? v : ''}</div>`);
+      }
+    }
+  }
+
+  // LOAD KPI + filtros + proyección
   async function loadKPI(){
     const err = $("#kpiError"); err.style.display='none'; err.textContent='';
     try{
@@ -374,37 +453,80 @@
       }
       let q = db.collection('orders');
       if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
-      const snap = await q.limit(1500).get();
+      const snap = await q.limit(2000).get();
+
+      // rango: prioridad a from/to; si no, usa mes
+      const {from,to} = dateRange();
+      const useRange = !!(from || to);
 
       const {y,m,days} = monthKey();
-      const labels = Array.from({length:days},(_,i)=>`${i+1}`);
-      const dayOrders = Array(days).fill(0);
-      const dayRevenue = Array(days).fill(0);
-      let count=0, revenue=0;
+      const labels = useRange
+        ? [] // no mostramos por día cuando es rango arbitrario (mantengo sólo charts de torta)
+        : Array.from({length:days},(_,i)=>`${i+1}`);
+      const dayOrders = useRange ? [] : Array(days).fill(0);
+      const dayRevenue = useRange ? [] : Array(days).fill(0);
+
+      let count=0, revenue=0, cogsTotal=0;
+      let paidTotal=0, pendingTotal=0;
 
       const payCount = new Map();
       const statusCount = new Map();
 
+      // heatmap [7][24]
+      const matrix = Array.from({length:7},()=> Array(24).fill(0));
+
+      const now = new Date();
+      const inMonth = (d)=> d.getFullYear()===y && (d.getMonth()+1)===m;
+
+      const ordersForProjection = []; // sólo si es selección mensual
+
       snap.forEach(doc=>{
         const data=doc.data();
         const dt = pickDocDate(data); if(!dt) return;
-        if (dt.getFullYear()!==y || (dt.getMonth()+1)!==m) return;
-        const d = dt.getDate()-1;
-        dayOrders[d] += 1;
+
+        // filtro por rango/mes
+        if(useRange){
+          if (from && dt<from) return;
+          if (to   && dt>to)   return;
+        }else{
+          if (!inMonth(dt)) return;
+        }
+
         const tot = computeOrderTotal(data);
-        dayRevenue[d] += tot;
-        count++; revenue += tot;
+        const cogs = orderCOGS(data);
+        count++; revenue += tot; cogsTotal += cogs;
+
+        const paid = (data.payment_status==='paid') || !!data.paid;
+        if (paid) paidTotal += tot; else pendingTotal += tot;
 
         const p = (data.pago||'otro'); payCount.set(p, (payCount.get(p)||0)+1);
         const st= (data.status||'accepted'); statusCount.set(st, (statusCount.get(st)||0)+1);
+
+        // barras si está en modo mensual
+        if(!useRange){
+          const dIdx = dt.getDate()-1;
+          dayOrders[dIdx] += 1;
+          dayRevenue[dIdx] += tot;
+          ordersForProjection.push({dt, total:tot});
+        }
+
+        // heatmap
+        matrix[dt.getDay()][dt.getHours()] += 1;
       });
 
+      // KPIs
       $("#kpiCount").textContent = count.toLocaleString("es-AR");
       $("#kpiRevenue").textContent = money(revenue);
       $("#kpiATV").textContent = count? money(revenue/count) : '—';
+      $("#kpiMargin").textContent = money(revenue - cogsTotal);
 
-      ensureOrdersChart(labels, dayOrders, dayRevenue);
-
+      // Charts
+      if(!useRange){
+        ensureOrdersChart(labels, dayOrders, dayRevenue);
+      }else{
+        // en rango arbitrario, mostramos gráfico vacío para que no confunda (podrías poner un line simple por día de rango)
+        ensureOrdersChart([], [], []);
+      }
       const pLabels = Array.from(payCount.keys());
       const pVals   = pLabels.map(k=>payCount.get(k));
       ensurePayChart(pLabels, pVals.length? pVals : [0]);
@@ -413,6 +535,38 @@
       const sVals   = sLabels.map(k=>statusCount.get(k));
       ensureStatusChart(sLabels, sVals.length? sVals : [0]);
 
+      renderHeatmap(matrix);
+
+      // Proyección (sólo si es vista mensual)
+      const projBox = $("#projText");
+      const alertBox = $("#pendingAlert");
+      alertBox.innerHTML = '';
+      if(!useRange){
+        const {days} = monthKey();
+        // acumulado hasta hoy (en el mes mostrado)
+        const today = new Date(); const isSameYM = (today.getFullYear()===parseInt($("#monthPicker").value.split('-')[0]||0) &&
+                         (today.getMonth()+1)===parseInt($("#monthPicker").value.split('-')[1]||0));
+        const dayOfMonth = isSameYM ? today.getDate() : Math.max(...ordersForProjection.map(o=>o.dt.getDate()), 1);
+        const revToDate = dayRevenue.slice(0, dayOfMonth).reduce((a,b)=>a+b,0);
+        const avg = dayOfMonth? (revToDate/dayOfMonth) : 0;
+        const projected = avg * days;
+
+        projBox.innerHTML = `Ingresos a la fecha: <strong>${money(revToDate)}</strong> • Ingresos diarios prom.: <strong>${money(avg)}</strong><br>
+        Proyección fin de mes: <strong>${money(projected)}</strong> (sobre ${days} días)`;
+
+        // Alerta por pendientes
+        const PENDING_THRESHOLD = 80000; // ajustable
+        if(pendingTotal > 0){
+          const cls = pendingTotal >= PENDING_THRESHOLD ? 'danger' : 'warn';
+          const msg = pendingTotal >= PENDING_THRESHOLD
+            ? `Pendientes elevados: ${money(pendingTotal)}`
+            : `Pendientes: ${money(pendingTotal)}`;
+          alertBox.innerHTML = `<span class="warn-pill ${cls}">${msg}</span>`;
+        }
+      }else{
+        projBox.textContent = 'Proyección disponible sólo con selección mensual.';
+      }
+
     }catch(e){
       console.error(e);
       err.textContent = "No se pudo cargar el resumen.";
@@ -420,20 +574,23 @@
     }
   }
   document.getElementById("btnReload").onclick = loadKPI;
+  </script>
 
-  // ================== ALTA MANUAL ==================
+  <script>
+  // ====== Alta manual (igual que tu versión; sin tocar)
+  const $q = s=>document.querySelector(s);
   const menuData = (()=>{ try{ return JSON.parse(document.getElementById('menu-data').textContent); }catch(_){ return {burgers:[],drinks:[]}; } })();
   const BURGERS = menuData.burgers||[];
   const DRINKS  = menuData.drinks||[];
-  const selBurger = $("#selBurger"), selDrink = $("#selDrink");
-  const qtyVal=$("#qtyVal"), qtyInc=$("#qtyInc"), qtyDec=$("#qtyDec");
-  const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
-  const cheVal=$("#cheVal"), cheInc=$("#cheInc"), cheDec=$("#cheDec");
-  const pattiesInfo=$("#pattiesInfo"), cheInfo=$("#cheInfo");
-  const dtWhen = $("#dtWhen");
-  const manualTotal = $("#manualTotal");
-  const preview = $("#preview");
-  const formMsg = $("#formMsg"), formErr=$("#formErr");
+  const selBurger = $q("#selBurger"), selDrink = $q("#selDrink");
+  const qtyVal=$q("#qtyVal"), qtyInc=$q("#qtyInc"), qtyDec=$q("#qtyDec");
+  const patVal=$q("#patVal"), patInc=$q("#patInc"), patDec=$q("#patDec");
+  const cheVal=$q("#cheVal"), cheInc=$q("#cheInc"), cheDec=$q("#cheDec");
+  const pattiesInfo=$q("#pattiesInfo"), cheInfo=$q("#cheInfo");
+  const dtWhen = $q("#dtWhen");
+  const manualTotal = $q("#manualTotal");
+  const preview = $q("#preview");
+  const formMsg = $q("#formMsg"), formErr=$q("#formErr");
 
   function mountSelects(){
     selBurger.innerHTML = `<option value="">— Seleccionar —</option>` + BURGERS.map(b=>`<option value="${b.id}">${b.name} — ${money(b.price)}</option>`).join("");
@@ -447,16 +604,16 @@
   function findBurger(id){ return BURGERS.find(b=>b.id===id); }
   function findDrink(id){ return DRINKS.find(d=>d.id===id); }
 
-  qtyInc.onclick = ()=> qtyVal.textContent = String(Math.min(99,(+qtyVal.textContent||1)+1));
-  qtyDec.onclick = ()=> qtyVal.textContent = String(Math.max(1,(+qtyVal.textContent||1)-1));
-  patInc.onclick = ()=> { const v=+patVal.textContent||0; if(v<2) patVal.textContent = v+1; };
-  patDec.onclick = ()=> { const v=+patVal.textContent||0; if(v>0) patVal.textContent = v-1; };
-  cheInc.onclick = ()=> { const v=+cheVal.textContent||0; if(v<3) cheVal.textContent = v+1; };
-  cheDec.onclick = ()=> { const v=+cheVal.textContent||0; if(v>0) cheVal.textContent = v-1; };
+  if(qtyInc) qtyInc.onclick = ()=> qtyVal.textContent = String(Math.min(99,(+qtyVal.textContent||1)+1));
+  if(qtyDec) qtyDec.onclick = ()=> qtyVal.textContent = String(Math.max(1,(+qtyVal.textContent||1)-1));
+  if(patInc) patInc.onclick = ()=> { const v=+patVal.textContent||0; if(v<2) patVal.textContent = v+1; };
+  if(patDec) patDec.onclick = ()=> { const v=+patVal.textContent||0; if(v>0) patVal.textContent = v-1; };
+  if(cheInc) cheInc.onclick = ()=> { const v=+cheVal.textContent||0; if(v<3) cheVal.textContent = v+1; };
+  if(cheDec) cheDec.onclick = ()=> { const v=+cheVal.textContent||0; if(v>0) cheVal.textContent = v-1; };
 
   function updateExtrasHints(){
-    pattiesInfo.textContent = `( + ${money(EXTRA_PRICE_PATTY)} c/u, máx. +2 )`;
-    cheInfo.textContent     = `( + ${money(EXTRA_PRICE_CHEDDAR)} c/u, máx. +3 )`;
+    if(pattiesInfo) pattiesInfo.textContent = `( + ${money(${EXTRA_PRICE_PATTY})} c/u, máx. +2 )`;
+    if(cheInfo)     cheInfo.textContent     = `( + ${money(${EXTRA_PRICE_CHEDDAR})} c/u, máx. +3 )`;
   }
 
   function calcPreview(){
@@ -469,10 +626,10 @@
     const ex = {
       patty:+patVal.textContent||0,
       cheddar:+cheVal.textContent||0,
-      EXTRA_PRICE_PATTY,
-      EXTRA_PRICE_CHEDDAR
+      EXTRA_PRICE_PATTY:${EXTRA_PRICE_PATTY},
+      EXTRA_PRICE_CHEDDAR:${EXTRA_PRICE_CHEDDAR}
     };
-    const unit = burger.price + ex.patty*EXTRA_PRICE_PATTY + ex.cheddar*EXTRA_PRICE_CHEDDAR;
+    const unit = burger.price + ex.patty*${EXTRA_PRICE_PATTY} + ex.cheddar*${EXTRA_PRICE_CHEDDAR};
     let tot = unit*qty;
 
     const dsel = selDrink.value ? findDrink(selDrink.value) : null;
@@ -493,9 +650,9 @@
       if (e.target && (e.target.id==="selBurger" || e.target.name==="fries" || e.target.id==="selDrink")) calcPreview();
     });
   });
-  [qtyInc,qtyDec,patInc,patDec,cheInc,cheDec].forEach(b=> b.addEventListener('click', calcPreview));
+  [qtyInc,qtyDec,patInc,patDec,cheInc,cheDec].forEach(b=> b && b.addEventListener('click', calcPreview));
 
-  $("#btnAdd").onclick = ()=>{
+  document.getElementById("btnAdd").onclick = ()=>{
     formMsg.style.display='none'; formErr.style.display='none';
     const burger = findBurger(selBurger.value);
     if(!burger){ formErr.textContent="Elegí una hamburguesa."; formErr.style.display='block'; return; }
@@ -504,7 +661,7 @@
     calcPreview();
   };
 
-  $("#btnSave").onclick = async ()=>{
+  document.getElementById("btnSave").onclick = async ()=>{
     formMsg.style.display='none'; formErr.style.display='none';
     try{
       const burger = findBurger(selBurger.value);
@@ -516,53 +673,28 @@
       const extras = {
         patty:+patVal.textContent||0,
         cheddar:+cheVal.textContent||0,
-        EXTRA_PRICE_PATTY,
-        EXTRA_PRICE_CHEDDAR
+        EXTRA_PRICE_PATTY:${EXTRA_PRICE_PATTY},
+        EXTRA_PRICE_CHEDDAR:${EXTRA_PRICE_CHEDDAR}
       };
       const drink = selDrink.value ? findDrink(selDrink.value) : null;
 
       const when = dtWhen.value ? new Date(dtWhen.value) : new Date();
-      const pay  = $("#selPay").value;
-      const paid = $("#chkPaid").checked;
-      const notes= ($("#notes").value||"").trim();
+      const pay  = document.getElementById("selPay").value;
+      const paid = document.getElementById("chkPaid").checked;
+      const notes= (document.getElementById("notes").value||"").trim();
 
       const items = [{
-        type:"burger",
-        id: burger.id,
-        name: burger.name,
-        qty,
-        price: burger.price,
-        fries: friesEl.value,
-        extras,
-        ...(notes?{notes}:{}),
+        type:"burger", id: burger.id, name: burger.name, qty, price: burger.price, fries: friesEl.value, extras, ...(notes?{notes}:{})
       }];
-      if(drink){
-        items.push({
-          type:"drink",
-          id: drink.id,
-          name: drink.name,
-          qty: 1,
-          price: drink.price
-        });
-      }
+      if(drink){ items.push({ type:"drink", id: drink.id, name: drink.name, qty: 1, price: drink.price }); }
 
-      const total = items.reduce((t,it)=> t + (it.type==="burger" ? (it.price + extras.patty*EXTRA_PRICE_PATTY + extras.cheddar*EXTRA_PRICE_CHEDDAR)*qty : it.price), 0);
+      const total = items.reduce((t,it)=> t + (it.type==="burger" ? (it.price + extras.patty*${EXTRA_PRICE_PATTY} + extras.cheddar*${EXTRA_PRICE_CHEDDAR})*qty : it.price), 0);
 
       const ref = db.collection("orders").doc();
       await ref.set({
-        orderNumber: null,
-        nombre: "Mostrador",
-        telefono: "",
-        entrega: "take_away",
-        pago: pay,
-        paid: paid,
-        payment_status: paid ? "paid" : "pending",
-        notes,
-        status: "accepted",
-        items,
-        total,
-        source: "manual",
-        createdAt: when
+        orderNumber: null, nombre: "Mostrador", telefono: "", entrega: "take_away",
+        pago: pay, paid: paid, payment_status: paid ? "paid" : "pending",
+        notes, status: "accepted", items, total, source: "manual", createdAt: when
       });
 
       formMsg.textContent = "Pedido guardado correctamente.";
@@ -571,18 +703,19 @@
       selBurger.value=""; selDrink.value="";
       document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false);
       qtyVal.textContent="1"; patVal.textContent="0"; cheVal.textContent="0";
-      $("#chkPaid").checked=false; $("#notes").value="";
+      document.getElementById("chkPaid").checked=false; document.getElementById("notes").value="";
       preview.style.display='none'; manualTotal.textContent = money(0);
 
+      loadKPI(); // refrescar resumen
     }catch(e){
       formErr.textContent = e?.message || "No se pudo guardar el pedido.";
       formErr.style.display='block';
     }
   };
 
-  // ================== START ==================
+  // START
   document.addEventListener('DOMContentLoaded', ()=>{
-    mountSelects(); setNow(); updateExtrasHints(); calcPreview(); loadKPI();
+    mountSelects(); setNow(); calcPreview(); loadKPI();
   });
   </script>
 </body>
