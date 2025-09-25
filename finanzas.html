@@ -55,8 +55,13 @@
     .err{color:#b00020;font-weight:600}
     .ok{color:#2e7d32;font-weight:700}
 
-    /* Heatmap */
-    .heatmap{display:grid;grid-template-columns:90px repeat(24,1fr);border:1px solid var(--ring);border-radius:12px;overflow:hidden}
+    /* Heatmap (grid dinámico: 1 col fija + N días del mes) */
+    .heatmap{
+      display:grid;
+      border:1px solid var(--ring);
+      border-radius:12px;
+      overflow:hidden
+    }
     .hm-cell{padding:8px;text-align:center;border-top:1px solid var(--ring);border-left:1px solid var(--ring);font-size:12px}
     .hm-head{background:#fafafa;font-weight:700}
     .hm-day{background:#fafafa;text-align:left;font-weight:700}
@@ -68,7 +73,6 @@
   </style>
 </head>
 <body>
-  <!-- Guardia -->
   <script>
     (function guard(){
       const TTL_MS = 20*60*60*1000;
@@ -108,12 +112,10 @@
     <h1>Resumen & Control</h1>
 
     <div class="grid">
-      <!-- Columna izquierda -->
       <section class="card">
         <div class="row" style="justify-content:space-between">
           <div class="row">
             <strong>Resumen</strong>
-
             <div class="inline">
               <div>
                 <label>Mes</label>
@@ -128,7 +130,6 @@
                 <input type="date" id="toDate" />
               </div>
             </div>
-
             <button id="btnReload" class="btn">Actualizar</button>
           </div>
 
@@ -157,7 +158,7 @@
 
         <!-- Heatmap -->
         <div class="card" style="margin-top:12px">
-          <strong>Heatmap de demanda (día del mes × hora)</strong>
+          <strong>Heatmap de demanda (semana × día del mes)</strong>
           <div id="heatmap" class="heatmap" style="margin-top:8px"></div>
           <div class="hm-legend">
             <span class="muted">Bajo</span>
@@ -179,7 +180,7 @@
         <div id="kpiError" class="err" style="display:none;margin-top:8px"></div>
       </section>
 
-      <!-- Columna derecha: Alta manual -->
+      <!-- Alta manual -->
       <aside class="card">
         <h3>Alta manual (presencial)</h3>
         <p class="muted" style="margin-top:-6px">Usá esto cuando el cliente compra en el local.</p>
@@ -278,7 +279,6 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-  // ===== Logout
   document.addEventListener('DOMContentLoaded', ()=>{
     const btn = document.getElementById('btnLogout');
     if(btn) btn.onclick = ()=>{
@@ -292,7 +292,7 @@
   </script>
 
   <script>
-  // ================= FIREBASE =================
+  // Firebase
   const firebaseConfig = {
     apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
     authDomain: "rhodes-burguers.firebaseapp.com",
@@ -304,14 +304,13 @@
   try{ firebase.initializeApp(firebaseConfig); }catch(e){}
   const db = firebase.firestore();
 
-  // ================= HELPERS =================
+  // Helpers
   const $ = s=>document.querySelector(s);
   const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
   const friesName = f => f==="con_sazon" ? "Con sazón" : "Sin sazonar";
   const EXTRA_PRICE_PATTY   = 1600;
   const EXTRA_PRICE_CHEDDAR = 300;
 
-  // Costos estimados (ajustá libremente)
   const COSTO_ITEM = {
     bigjohn_simple:5200, bigjohn_doble:7800, burguesa_simple:5600, burguesa_doble:8300,
     cheesebacon_spl:5000, cheesebacon_dbl:7500, cheese_simple:4600, cheese_doble:7000,
@@ -367,14 +366,12 @@
     const to   = $("#toDate").value   ? new Date($("#toDate").value  +'T23:59:59') : null;
     return {from, to};
   }
-
-  // Init mes por defecto
   (function initMonth(){
     const d = new Date(); const m = String(d.getMonth()+1).padStart(2,'0');
     try{ $("#monthPicker").value = `${d.getFullYear()}-${m}`; }catch(_){}
   })();
 
-  // ==== Heatmap helpers (día del mes × hora) ====
+  // Heatmap utils (semanal × días del mes)
   function colorFor(val, max){
     if(max<=0) return '#e8f5e9';
     const r = val/max;
@@ -383,25 +380,34 @@
     if (r < 0.75) return '#66bb6a';
     return '#2e7d32';
   }
-  function renderHeatmapMonth(matrix, dayLabels){
+  function renderHeatmapWeekByDay(matrix, colLabels){
     const host = document.getElementById("heatmap");
     host.innerHTML = '';
-    // header
+    // grid: 1 columna fija (etiquetas) + N columnas para días del mes
+    host.style.gridTemplateColumns = `90px repeat(${colLabels.length}, 1fr)`;
+
+    // Header
     host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head"></div>`);
-    for(let h=0; h<24; h++) host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head">${h}</div>`);
-    // body
+    for(let c=0;c<colLabels.length;c++){
+      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head">${colLabels[c]}</div>`);
+    }
+
+    const weekNames = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+
+    // máximo para escala
     let max=0; matrix.forEach(row=> row.forEach(v=>{ if(v>max) max=v; }));
-    for(let d=0; d<matrix.length; d++){
-      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-day">${dayLabels[d]}</div>`);
-      for(let h=0; h<24; h++){
-        const v = matrix[d][h];
+
+    for(let r=0;r<7;r++){
+      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-day">${weekNames[r]}</div>`);
+      for(let c=0;c<colLabels.length;c++){
+        const v = matrix[r][c] || 0;
         const bg = colorFor(v, max);
-        host.insertAdjacentHTML('beforeend', `<div class="hm-cell" title="${v||0} pedidos" style="background:${bg}">${v? v : ''}</div>`);
+        host.insertAdjacentHTML('beforeend', `<div class="hm-cell" title="${v} pedidos" style="background:${bg}">${v? v : ''}</div>`);
       }
     }
   }
 
-  // CHARTS
+  // Charts
   let ordersChart, payChart, statusChart;
   function ensureOrdersChart(labels, orders, revenue){
     const ctx = document.getElementById("ordersChart").getContext("2d");
@@ -438,7 +444,7 @@
     });
   }
 
-  // LOAD KPI + filtros + proyección + heatmap mensual
+  // KPI + Proyección + Heatmap (semana × día del mes)
   async function loadKPI(){
     const err = $("#kpiError"); err.style.display='none'; err.textContent='';
     try{
@@ -452,7 +458,6 @@
       if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
       const snap = await q.limit(2000).get();
 
-      // rango: prioridad a from/to; si no, usa mes
       const {from,to} = dateRange();
       const useRange = !!(from || to);
 
@@ -462,13 +467,11 @@
       const dayOrders = useRange ? [] : Array(days).fill(0);
       const dayRevenue = useRange ? [] : Array(days).fill(0);
 
-      // Heatmap mensual (día del mes × hora)
-      const hmMatrix = Array.from({length: days}, () => Array(24).fill(0));
-      const hmLabels = Array.from({length: days}, (_,i) => String(i+1).padStart(2,'0'));
+      // Heatmap: 7 filas (Dom..Sáb) × días del mes (columnas)
+      const hmMatrix = Array.from({length:7}, ()=> Array(days).fill(0));
+      const hmLabels = Array.from({length:days}, (_,i)=> String(i+1).padStart(2,'0'));
 
-      let count=0, revenue=0, cogsTotal=0;
-      let pendingTotal=0;
-
+      let count=0, revenue=0, cogsTotal=0, pendingTotal=0;
       const payCount = new Map();
       const statusCount = new Map();
 
@@ -496,10 +499,11 @@
         const st= (data.status||'accepted'); statusCount.set(st, (statusCount.get(st)||0)+1);
 
         if(!useRange){
-          const dIdx = dt.getDate()-1;
-          dayOrders[dIdx] += 1;
-          dayRevenue[dIdx] += tot;
-          if (dIdx>=0 && dIdx<days) hmMatrix[dIdx][dt.getHours()] += 1;
+          const dayIdx = dt.getDate()-1;                 // columna
+          const weekRow= dt.getDay();                    // fila (0=Dom)
+          dayOrders[dayIdx]  += 1;
+          dayRevenue[dayIdx] += tot;
+          if(dayIdx>=0 && dayIdx<days) hmMatrix[weekRow][dayIdx] += 1;
         }
       });
 
@@ -521,10 +525,10 @@
       const sVals   = sLabels.map(k=>statusCount.get(k));
       ensureStatusChart(sLabels, sVals.length? sVals : [0]);
 
-      // Heatmap mensual
-      renderHeatmapMonth(hmMatrix, hmLabels);
+      // Heatmap semanal × días del mes
+      renderHeatmapWeekByDay(hmMatrix, hmLabels);
 
-      // Proyección (sólo mensual)
+      // Proyección (mensual)
       const projBox = $("#projText");
       const alertBox = $("#pendingAlert");
       alertBox.innerHTML = '';
@@ -540,8 +544,7 @@
         projBox.innerHTML = `Ingresos a la fecha: <strong>${money(revToDate)}</strong> • Ingresos diarios prom.: <strong>${money(avg)}</strong><br>
         Proyección fin de mes: <strong>${money(projected)}</strong> (sobre ${days} días)`;
 
-        // Alerta por pendientes
-        const PENDING_THRESHOLD = 80000; // ajustable
+        const PENDING_THRESHOLD = 80000;
         if(pendingTotal > 0){
           const cls = pendingTotal >= PENDING_THRESHOLD ? 'danger' : 'warn';
           const msg = pendingTotal >= PENDING_THRESHOLD
@@ -563,7 +566,7 @@
   </script>
 
   <script>
-  // ====== Alta manual
+  // Alta manual (igual que antes)
   const $q = s=>document.querySelector(s);
   const menuData = (()=>{ try{ return JSON.parse(document.getElementById('menu-data').textContent); }catch(_){ return {burgers:[],drinks:[]}; } })();
   const BURGERS = menuData.burgers||[];
@@ -698,14 +701,13 @@
       document.getElementById("chkPaid").checked=false; document.getElementById("notes").value="";
       preview.style.display='none'; manualTotal.textContent = money(0);
 
-      loadKPI(); // refrescar resumen
+      loadKPI();
     }catch(e){
       formErr.textContent = e?.message || "No se pudo guardar el pedido.";
       formErr.style.display='block';
     }
   };
 
-  // START
   document.addEventListener('DOMContentLoaded', ()=>{
     mountSelects(); setNow(); updateExtrasHints(); calcPreview(); loadKPI();
   });
