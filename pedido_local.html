@@ -10,29 +10,23 @@
       --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
       --radius:22px; --shadow:0 12px 34px rgba(0,0,0,.10); --ring:#eaeaea;
 
-      /* Tipografía unificada */
+      /* Tipografía (NO se toca) */
       --font: Inter, system-ui, "Segoe UI", Roboto, Arial, "Helvetica Neue", "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
 
       /* Estados */
-      --st-accepted:#FBC02D;
-      --st-in_prep:#FB8C00;
-      --st-ready:#00ACC1;
-      --st-delivered:#2E7D32;
-      --st-cancelled:#D32F2F;
+      --st-accepted:#FBC02D; --st-in_prep:#FB8C00; --st-ready:#00ACC1;
+      --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
+      --pay-pending:#FFA000; --pay-paid:#2ECC71;
 
-      --pay-pending:#FFA000;
-      --pay-paid:#2ECC71;
-
-      /* Ticket 58mm */
-      --ticket-left-shift:-2mm;   /* mover un pelín a la izq */
-      --ticket-width:48mm;        /* útil real en rollo 58mm */
-      --page-size:58mm;
+      /* Ticket 58mm – segura para casi todas las impresoras */
+      --page-size:58mm;          /* tamaño físico del rollo */
+      --ticket-width:44mm;       /* ancho ÚTIL (antes 48mm) */
+      --ticket-padding:1mm;      /* acolchado para que no “toque” los bordes */
+      --ticket-offset:0mm;       /* nudge horizontal (si ves corte a un lado, usa -1mm / +1mm) */
+      --ticket-scale:0.96;       /* escala fina (0.92–1.00) para impresoras “celosas” */
     }
     *{box-sizing:border-box}
-    html,body{
-      margin:0;background:var(--bg);color:var(--text);
-      font-family:var(--font); -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
-    }
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
     header{position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .topbar{max-width:1100px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
     .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700}
@@ -63,12 +57,9 @@
     .divider{height:1px;background:#efefef;margin:10px 0}
     .err{color:#b00020;font-weight:600}
 
-    /* Botones de estado: outline y progreso */
+    /* Botones de estado */
     .stateBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-    .state-btn{
-      border:2px solid #dcdcdc;background:#fff;color:#333;
-      border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;min-width:160px;text-align:center
-    }
+    .state-btn{border:2px solid #dcdcdc;background:#fff;color:#333;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;min-width:160px;text-align:center}
     .state-btn.on{color:#fff;border-color:var(--primary);background:var(--primary)}
     .state-accepted.on{background:var(--st-accepted);border-color:var(--st-accepted);color:#000}
     .state-in_prep.on{background:var(--st-in_prep);border-color:var(--st-in_prep);color:#fff}
@@ -76,31 +67,24 @@
     .state-delivered.on{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-cancelled.on{background:var(--st-cancelled);border-color:var(--st-cancelled);color:#fff}
 
-    /* Pago debajo del total */
     .pay-line{margin-top:6px}
     .pay-pill{display:inline-block;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}
     .pay-paid{background:var(--pay-paid);color:#fff}
     .pay-pending{background:var(--pay-pending);color:#fff}
-
-    /* Cancelado tachado */
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
 
-    /* Impresión de la PÁGINA (por si alguien hace Ctrl+P acá) */
+    /* Si alguien imprime la lista */
     @media print{
-      @page{ size: A4 portrait; margin: 12mm; } /* impresión general de la lista */
-      html,body{
-        margin:0 !important; padding:0 !important;
-        -webkit-print-color-adjust: exact; print-color-adjust: exact;
-        font-family:var(--font);
-      }
-      header, .tabs, .stateBtns, .pay-line .btn, .danger, #btnBell, .btn[title="Ver finanzas"]{ display:none !important; }
-      .order{ break-inside:avoid; box-shadow:none; border:1px solid #eee }
+      @page{ size: A4 portrait; margin: 12mm; }
+      html,body{margin:0 !important;padding:0 !important;print-color-adjust:exact;-webkit-print-color-adjust:exact;font-family:var(--font)}
+      header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"]{display:none !important}
+      .order{break-inside:avoid;box-shadow:none;border:1px solid #eee}
     }
   </style>
 </head>
 <body>
-  <!-- Guardia (TTL 20h) con ?auth=1 -->
+  <!-- Guardia -->
   <script>
     (function guard(){
       const TTL_MS = 20*60*60*1000;
@@ -172,10 +156,7 @@
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
 
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
-    const STATE_LABEL = {
-      accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar',
-      delivered:'Entregado', cancelled:'Cancelar'
-    };
+    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
     const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
 
     function pickDocDate(obj){
@@ -195,10 +176,7 @@
     }
     function displayOrderNumber(doc){
       const o = doc.data();
-      const candidates = [
-        o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro,
-        o.orderNo, o.seq, o.n, o.idPedido, o.pedidoNumber, o.pedido
-      ];
+      const candidates = [o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
       for (const c of candidates){
         if (c == null) continue;
         const n = (typeof c === "string") ? parseInt(c,10) : c;
@@ -229,9 +207,7 @@
       updateBellUI();
     };
     $("#btnLogout").onclick = ()=>{
-      localStorage.removeItem("rb_auth_v2");
-      localStorage.removeItem("rb_admin_ok");
-      localStorage.removeItem("rb_admin_t");
+      localStorage.removeItem("rb_auth_v2"); localStorage.removeItem("rb_admin_ok"); localStorage.removeItem("rb_admin_t");
       sessionStorage.removeItem("rb_auth_v2");
       location.replace("login.html?reason=logout&next=pedido_local.html");
     };
@@ -316,8 +292,6 @@
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
       const st=o.status??"accepted";
       const isCancelled = st==="cancelled";
-
-      /* Progreso: rellenar hasta el estado actual */
       const curIdx = Math.max(STATE_SEQ.indexOf(st), 0);
 
       const stateBtns = `
@@ -361,15 +335,15 @@
       </div>`;
     }
 
-    // ====== PRINT (58mm optimizada, MISMA TIPOGRAFÍA) ======
+    // ====== PRINT 58mm centrada y con “safe area” ======
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
       const o = docSnap.data();
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
       const orderNo = (()=>{
-        const cands=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
-        for(const c of cands){ if(c==null) continue; const n=typeof c==="string"?parseInt(c,10):c; if(Number.isFinite(n)) return `#${n}`;}
+        const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+        for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
         return `#${docSnap.id.slice(-5).toUpperCase()}`;
       })();
 
@@ -380,11 +354,7 @@
       })();
       const dateStr = dt ? dt.toLocaleDateString('es-AR')+' '+dt.toLocaleTimeString('es-AR') : '';
 
-      const norm = (s, map) => {
-        if(!s) return '—'; s=String(s).toLowerCase();
-        for(const k in map){ if(s.includes(k)) return map[k]; }
-        return s.replace(/[_-]/g,' ').replace(/\b\w/g,m=>m.toUpperCase());
-      };
+      const norm = (s, map) => { if(!s) return '—'; s=String(s).toLowerCase(); for(const k in map){ if(s.includes(k)) return map[k]; } return s.replace(/[_-]/g,' ').replace(/\b\w/g,m=>m.toUpperCase()); };
       const nicePay    = norm(o.pago || o.payment_method, {mercado:'Mercado Pago', efect:'Efectivo', trans:'Transferencia'});
       const niceEntrega= norm(o.entrega, {take:'Retira', pick:'Retira', deliv:'Delivery'});
       const paidPill   = (o.payment_status==='paid' || o.paid) ? 'PAGADO' : 'PENDIENTE';
@@ -418,44 +388,48 @@
         },0);
       })();
 
-      const root = getComputedStyle(document.documentElement);
-      const LEFT  = (root.getPropertyValue('--ticket-left-shift')||'-2mm').trim();
-      const WIDTH = (root.getPropertyValue('--ticket-width')||'48mm').trim();
-      const PAGE  = (root.getPropertyValue('--page-size')||'58mm').trim();
-      const FONT  = (root.getPropertyValue('--font')||'Inter, system-ui, "Segoe UI", Roboto, Arial, sans-serif').trim() || 'system-ui, Arial, sans-serif';
+      const cs = getComputedStyle(document.documentElement);
+      const PAGE  = (cs.getPropertyValue('--page-size')||'58mm').trim();
+      const WIDTH = (cs.getPropertyValue('--ticket-width')||'44mm').trim();
+      const PAD   = (cs.getPropertyValue('--ticket-padding')||'1mm').trim();
+      const SCALE = (cs.getPropertyValue('--ticket-scale')||'0.96').trim();
+      const OFFSET= (cs.getPropertyValue('--ticket-offset')||'0mm').trim();
+      const FONT  = (cs.getPropertyValue('--font')||'system-ui, Arial, sans-serif').trim();
 
       const html = `
 <!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Ticket ${orderNo}</title>
+<html><head><meta charset="utf-8"><title>Ticket ${orderNo}</title>
 <style>
-  :root{ --ticket-left-shift:${LEFT}; --ticket-width:${WIDTH}; --page-size:${PAGE}; --font:${FONT}; }
-  @page{ size: var(--page-size) auto; margin: 2mm; }
+  :root{
+    --page-size:${PAGE}; --ticket-width:${WIDTH}; --ticket-padding:${PAD};
+    --ticket-scale:${SCALE}; --ticket-offset:${OFFSET}; --font:${FONT};
+  }
+  @page{ size: var(--page-size) auto; margin: 0; } /* SIN márgenes del navegador */
   html,body{margin:0;padding:0;color:#000;}
   body{
-    font-family: var(--font);
-    font-size:12px; line-height:1.35;
+    font-family: var(--font); font-size:12px; line-height:1.35;
     -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+    width: var(--page-size); margin: 0 auto; /* centra la “página” del rollo */
   }
   .ticket{
     width: var(--ticket-width);
-    transform: translateX(var(--ticket-left-shift));
-    /* IMPORTANTE: no duplicar con left:, solo usamos translateX para evitar cortes */
+    padding: 0 var(--ticket-padding);
+    margin: 0 auto;                 /* CENTRADO absoluto */
+    transform: translateX(var(--ticket-offset)) scale(var(--ticket-scale));
+    transform-origin: top center;   /* evitar cortes laterales */
   }
   .c{text-align:center}
-  .row{ display:flex; justify-content:space-between; gap:8px; }
-  .sub{ margin:2px 0 4px 0; font-size:11px; white-space:pre-wrap; word-break:break-word; }
-  .r{text-align:right; white-space:nowrap}
-  .hr{ border-top:1px dashed #000; margin:6px 0; }
-  .lg{ font-weight:800; }
-  .kv{ display:flex; justify-content:space-between; gap:8px; }
-  .pill{ display:inline-block; padding:2px 6px; border:1px solid #000; border-radius:999px; font-weight:800; }
-  .foot{ margin-top:8px; font-size:11px; text-align:center }
+  .row{display:flex;justify-content:space-between;gap:8px}
+  .sub{margin:2px 0 4px 0;font-size:11px;white-space:pre-wrap;word-break:break-word}
+  .r{text-align:right;white-space:nowrap}
+  .hr{border-top:1px dashed #000;margin:6px 0}
+  .lg{font-weight:800}
+  .kv{display:flex;justify-content:space-between;gap:8px}
+  .pill{display:inline-block;padding:2px 6px;border:1px solid #000;border-radius:999px;font-weight:800}
+  .foot{margin-top:8px;font-size:11px;text-align:center}
   @media print{
-    html,body{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .ticket{ break-inside:avoid; }
+    html,body{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+    .ticket{break-inside:avoid}
   }
 </style>
 </head>
@@ -477,9 +451,8 @@
     ${o.status? `<div class="kv"><div>Estado</div><div>${o.status}</div></div>`:''}
     <div class="foot">¡Gracias por tu compra!</div>
   </div>
-  <script>window.print(); window.onafterprint = () => window.close();<\/script>
-</body>
-</html>`;
+  <script>window.print(); window.onafterprint=()=>window.close();<\/script>
+</body></html>`;
 
       const w = window.open('', '_blank', 'width=420,height=600');
       w.document.open(); w.document.write(html); w.document.close();
@@ -489,53 +462,42 @@
     function renderList(snap){
       const docs = snap.docs.filter(d=>passFilter(d.data()));
       idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
-      ordersHost.innerHTML = docs.length
+      document.getElementById("orders").innerHTML = docs.length
         ? docs.map(renderOrder).join("")
         : '<p class="muted">No hay pedidos.</p>';
 
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
-        card.querySelectorAll("[data-act]").forEach(btn=>{
-          btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act));
-        });
+        card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
         const payBtn = card.querySelector("[data-pay]");
-        if(payBtn){ payBtn.addEventListener("click",()=> setPaymentStatus(id, payBtn.dataset.pay==="paid")); }
+        if(payBtn) payBtn.addEventListener("click",()=> setPaymentStatus(id, payBtn.dataset.pay==="paid"));
         const pr = card.querySelector("[data-print]");
-        if(pr){ pr.addEventListener("click",()=> openPrintForDoc(idToDoc.get(id))); }
+        if(pr) pr.addEventListener("click",()=> openPrintForDoc(idToDoc.get(id)));
       });
     }
 
-    // Suscripción + beep triple sólo en nuevos
     (async function subscribeOrders(){
       try{
         const probe = await db.collection("orders").limit(1).get();
         let dateField = null;
         if (!probe.empty) dateField = chooseDateField(probe.docs[0].data());
         let q = db.collection("orders");
-        if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
+        q = dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
         q.limit(100).onSnapshot(snap=>{
-          $("#ordersError").style.display="none"; $("#ordersError").textContent="";
-          lastSnap=snap; renderList(snap);
-          snap.docChanges().forEach(ch=>{
-            if(ch.type==='added'){
-              const id=ch.doc.id;
-              if(!initialLoaded && !seenIds.has(id)){ seenIds.add(id); }
-              else { playBeepTriple(); }
-            }
-          });
-          initialLoaded=true;
+          document.getElementById("ordersError").style.display="none";
+          document.getElementById("ordersError").textContent="";
+          renderList(snap);
         }, (err)=>{
           console.error(err);
-          $("#ordersError").textContent="No se pudo cargar la lista de pedidos.";
-          $("#ordersError").style.display="block";
+          const el=document.getElementById("ordersError");
+          el.textContent="No se pudo cargar la lista de pedidos."; el.style.display="block";
         });
       }catch(err){
         console.error(err);
-        $("#ordersError").textContent="No se pudo inicializar la lista de pedidos.";
-        $("#ordersError").style.display="block";
+        const el=document.getElementById("ordersError");
+        el.textContent="No se pudo inicializar la lista de pedidos."; el.style.display="block";
       }
     })();
-
   });
   </script>
 </body>
