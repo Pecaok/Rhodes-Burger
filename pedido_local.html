@@ -19,7 +19,7 @@
       --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
       --pay-pending:#FFA000; --pay-paid:#2ECC71;
 
-      --page-size:58mm; /* no afecta al ticket emergente */
+      --page-size:58mm;
     }
     *{box-sizing:border-box}
     html,body{
@@ -73,7 +73,6 @@
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
 
-    /* imprimir la LISTA (no el ticket) */
     @media print{
       @page{ size: A4 portrait; margin: 12mm; }
       header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"]{display:none !important}
@@ -154,7 +153,7 @@
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
 
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
-       const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
+    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
     const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
 
     function pickDocDate(obj){
@@ -194,40 +193,13 @@
       return items.reduce((t,it)=> t + (it.type==="burger" ? unitWithExtras(it) : (it.price||0)) * (it.qty||0), 0);
     }
 
-    /* ===================== AUDIO + SALIR ===================== */
+    /* ===================== UI ===================== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     const btnBell = $("#btnBell");
     const updateBellUI = ()=> btnBell.classList.toggle("active", soundEnabled);
     updateBellUI();
-    btnBell.onclick = ()=>{
-      soundEnabled = !soundEnabled;
-      localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled));
-      updateBellUI();
-    };
-    $("#btnLogout").onclick = ()=>{
-      localStorage.removeItem("rb_auth_v2"); localStorage.removeItem("rb_admin_ok"); localStorage.removeItem("rb_admin_t");
-      sessionStorage.removeItem("rb_auth_v2");
-      location.replace("login.html?reason=logout&next=pedido_local.html");
-    };
-
-    function beepOnce(ctx, duration=0.28, freq=880, gain=0.7){
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type="square"; o.frequency.value=freq;
-      o.connect(g); g.connect(ctx.destination);
-      g.gain.setValueAtTime(0.0001, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(gain, ctx.currentTime + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
-      o.start(); o.stop(ctx.currentTime + duration + 0.02);
-    }
-    function playBeepTriple(){
-      if(!soundEnabled) return;
-      try{
-        const ctx = new (window.AudioContext||window.webkitAudioContext)();
-        beepOnce(ctx,0.28,900,0.8);
-        setTimeout(()=>beepOnce(ctx,0.28,900,0.8), 350);
-        setTimeout(()=>beepOnce(ctx,0.28,900,0.8), 700);
-      }catch(e){}
-    }
+    btnBell.onclick = ()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); };
+    $("#btnLogout").onclick = ()=>{ localStorage.removeItem("rb_auth_v2"); localStorage.removeItem("rb_admin_ok"); localStorage.removeItem("rb_admin_t"); sessionStorage.removeItem("rb_auth_v2"); location.replace("login.html?reason=logout&next=pedido_local.html"); };
 
     /* ===================== LISTADO ===================== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
@@ -331,7 +303,7 @@
       </div>`;
     }
 
-    /* ===================== PRINT etiqueta 58mm — ancho máximo, sin cortes ===================== */
+    /* ===================== PRINT 58mm — Rhodes Burgers, TODO en negrita + tamaño ↑ ===================== */
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
       const o = docSnap.data();
@@ -350,12 +322,6 @@
       })();
       const dateStr = dt.toLocaleDateString('es-AR');
       const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
-
-      const norm = (s, map) => { if(!s) return ''; s=String(s).toLowerCase(); for(const k in map){ if(s.includes(k)) return map[k]; } return s.replace(/[_-]/g,' ').replace(/\b\w/g,m=>m.toUpperCase()); };
-      const platform  = norm(o.platform||o.source||'PedidosYa', {pedidos:'PedidosYa', uber:'Uber Eats', rappi:'Rappi'});
-      const brand     = 'Rhodes Burgers';
-      const payMethod = norm(o.pago||o.payment_method||'–', {mercado:'Mercado Pago', efect:'Efectivo', trans:'Transferencia', card:'Tarjeta'});
-      const isPaid    = (o.payment_status==='paid'||o.paid||o.prepago||o.prepaid);
 
       const items = Array.isArray(o.items)?o.items:[];
       const linesHTML = items.map(it=>{
@@ -393,18 +359,21 @@
 <html><head><meta charset="utf-8"><title>Ticket ${orderDisplay}</title>
 <style>
   :root{
-    /* Márgenes mínimos + ancho útil típico de 58mm (~48mm) */
-    --safe-total-mm: 6mm;     /* ≈3mm por lado */
-    --ticket-max-mm: 48mm;
-    --pad-left-mm:  1mm;
-    --pad-right-mm: 1mm;
+    /* Perfil seguro para que NO corte a la derecha */
+    --safe-total-mm: 20mm;   /* ≈10mm por lado */
+    --ticket-max-mm: 41mm;   /* ancho útil conservador para 58mm */
+    --pad-left-mm:  1.8mm;
+    --pad-right-mm: 3.8mm;   /* aire extra a la derecha (precios) */
     --font: ${FONT};
   }
   @page{ size: 58mm auto; margin: 0; }
   html,body{margin:0;padding:0;color:#000;}
   *{-webkit-print-color-adjust:exact; print-color-adjust:exact; -webkit-text-size-adjust:100%;}
   body{
-    font-family: var(--font); font-size:12px; line-height:1.37;
+    font-family: var(--font);
+    font-size:13.5px;         /* ↑ tamaño de letra */
+    line-height:1.35;
+    font-weight:800;          /* TODO en negrita */
     -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
     width: 58mm; margin: 0 auto;
   }
@@ -415,44 +384,36 @@
     padding-left: var(--pad-left-mm);
     padding-right: var(--pad-right-mm);
     box-sizing: border-box;
-    /* NO cortar palabras: solo quiebra en espacios */
-    word-break: keep-all;
-    overflow-wrap: break-word; /* permite quebrar en espacios/guiones si hace falta */
+    word-break: keep-all;       /* no parte palabras */
+    overflow-wrap: break-word;  /* quiebra en espacios/guiones */
     white-space:normal;
   }
 
-  .brand{ text-align:center; margin-top:2mm; color:#000 }
-  .brand .top{ font-weight:800; font-size:14px; }
-  .brand .sub{ font-size:10px; }
-  .orderNo{ text-align:center; font-weight:800; font-size:14px; margin:1mm 0; color:#000 }
+  /* Encabezado: SOLO “Rhodes Burgers” */
+  .brand{ text-align:center; margin-top:2mm; }
+  .brand .top{ font-size:16px; }
+  .orderNo{ text-align:center; font-size:15px; margin:1mm 0 }
   .hr{ border-top:1px solid #000; margin:6px 0 }
 
-  .lbl{ font-size:10.5px; color:#000; font-weight:700; text-transform:uppercase; letter-spacing:.2px; }
-  .blk{ margin:3px 0 2mm 0; color:#000 }
+  .lbl{ font-size:12px; text-transform:uppercase; letter-spacing:.2px; }
+  .blk{ margin:3px 0 2mm 0; }
 
-  .row{ display:flex; justify-content:space-between; gap:8px; color:#000 }
+  .row{ display:flex; justify-content:space-between; gap:8px; padding-right:2mm; }
   .row .l{ min-width:0; word-break:keep-all; }
   .row .r{ white-space:nowrap; }
-  .sub{ margin:0 0 2px 0; font-size:10.8px; color:#000; white-space:pre-wrap }
+  .sub{ margin:0 0 2px 0; font-size:12px; white-space:pre-wrap }
 
-  .subtotal{ margin-top:2mm; color:#000 }
-  .total{ font-weight:900; font-size:16px; margin:1mm 0; color:#000 }
+  .subtotal{ margin-top:2mm }
+  .total{ font-size:17px; margin:1mm 0; }
 
-  /* Sello solo si es prepago */
-  .badge{ margin:2mm 0; text-align:center; font-weight:900; font-size:16px;
-          border:2px solid #000; border-radius:6px; padding:2px 6px; display:inline-block; color:#000 }
-
-  .foot{ margin:3mm 0 2mm 0; font-size:10px; text-align:center; color:#000 }
+  .foot{ margin:3mm 0 2mm 0; font-size:11px; text-align:center; }
   @media print{ .ticket{ break-inside:avoid; } }
 </style>
 </head>
 <body>
   <div class="page">
     <div class="ticket">
-      <div class="brand">
-        <div class="top">${platform}</div>
-        <div class="sub">${brand}</div>
-      </div>
+      <div class="brand"><div class="top">Rhodes Burgers</div></div>
 
       <div class="orderNo">${orderDisplay}</div>
 
@@ -460,7 +421,7 @@
 
       ${o.nombre ? `<div class="blk"><div class="lbl">Cliente</div><div>${o.nombre}</div></div>`:''}
       ${(o.direccion||o.address) ? `<div class="blk"><div class="lbl">Dirección / Notas</div><div>${(o.direccion||o.address)||''}</div></div>`:''}
-      ${payMethod? `<div class="blk"><div class="lbl">Medio de pago</div><div>${payMethod}</div></div>`:''}
+      ${(o.pago||o.payment_method) ? `<div class="blk"><div class="lbl">Medio de pago</div><div>${o.pago||o.payment_method}</div></div>`:''}
 
       <div class="hr"></div>
 
@@ -470,8 +431,6 @@
 
       <div class="row subtotal"><div class="l lbl">Subtotal</div><div class="r">${money(total)}</div></div>
       <div class="row total"><div class="l">Total</div><div class="r">${money(total)}</div></div>
-
-      ${isPaid ? `<div class="badge">PREPAGO</div>` : ``}
 
       <div class="foot">${dateStr} — ${timeStr}</div>
     </div>
