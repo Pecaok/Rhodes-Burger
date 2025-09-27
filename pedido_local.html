@@ -18,12 +18,8 @@
       --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
       --pay-pending:#FFA000; --pay-paid:#2ECC71;
 
-      /* Ticket 58mm – segura para casi todas las impresoras */
-      --page-size:58mm;          /* tamaño físico del rollo */
-      --ticket-width:44mm;       /* ancho ÚTIL (antes 48mm) */
-      --ticket-padding:1mm;      /* acolchado para que no “toque” los bordes */
-      --ticket-offset:0mm;       /* nudge horizontal (si ves corte a un lado, usa -1mm / +1mm) */
-      --ticket-scale:0.96;       /* escala fina (0.92–1.00) para impresoras “celosas” */
+      /* 58mm */
+      --page-size:58mm;
     }
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
@@ -57,7 +53,6 @@
     .divider{height:1px;background:#efefef;margin:10px 0}
     .err{color:#b00020;font-weight:600}
 
-    /* Botones de estado */
     .stateBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
     .state-btn{border:2px solid #dcdcdc;background:#fff;color:#333;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;min-width:160px;text-align:center}
     .state-btn.on{color:#fff;border-color:var(--primary);background:var(--primary)}
@@ -71,10 +66,11 @@
     .pay-pill{display:inline-block;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}
     .pay-paid{background:var(--pay-paid);color:#fff}
     .pay-pending{background:var(--pay-pending);color:#fff}
+
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
 
-    /* Si alguien imprime la lista */
+    /* Si imprimen la lista */
     @media print{
       @page{ size: A4 portrait; margin: 12mm; }
       html,body{margin:0 !important;padding:0 !important;print-color-adjust:exact;-webkit-print-color-adjust:exact;font-family:var(--font)}
@@ -156,7 +152,10 @@
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
 
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
-    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
+    const STATE_LABEL = {
+      accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar',
+      delivered:'Entregado', cancelled:'Cancelar'
+    };
     const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
 
     function pickDocDate(obj){
@@ -176,7 +175,10 @@
     }
     function displayOrderNumber(doc){
       const o = doc.data();
-      const candidates = [o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+      const candidates = [
+        o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro,
+        o.orderNo, o.seq, o.n, o.idPedido, o.pedidoNumber, o.pedido
+      ];
       for (const c of candidates){
         if (c == null) continue;
         const n = (typeof c === "string") ? parseInt(c,10) : c;
@@ -207,7 +209,9 @@
       updateBellUI();
     };
     $("#btnLogout").onclick = ()=>{
-      localStorage.removeItem("rb_auth_v2"); localStorage.removeItem("rb_admin_ok"); localStorage.removeItem("rb_admin_t");
+      localStorage.removeItem("rb_auth_v2");
+      localStorage.removeItem("rb_admin_ok");
+      localStorage.removeItem("rb_admin_t");
       sessionStorage.removeItem("rb_auth_v2");
       location.replace("login.html?reason=logout&next=pedido_local.html");
     };
@@ -233,8 +237,7 @@
 
     /* ===================== LISTADO ===================== */
     const tabs = $("#tabs"); const ordersHost = $("#orders");
-    let currentFilter="all", lastSnap=null, initialLoaded=false; const seenIds=new Set();
-    let idToDoc = new Map();
+    let currentFilter="all", lastSnap=null; let idToDoc = new Map();
 
     tabs.addEventListener("click",(e)=>{
       const el=e.target.closest("[data-f]"); if(!el) return;
@@ -291,7 +294,6 @@
 
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
       const st=o.status??"accepted";
-      const isCancelled = st==="cancelled";
       const curIdx = Math.max(STATE_SEQ.indexOf(st), 0);
 
       const stateBtns = `
@@ -312,7 +314,7 @@
           <button class="btn" data-print>🖨 Imprimir</button>
         </div>`;
 
-      return `<div class="order ${isCancelled?'cancelled':''}" data-id="${doc.id}">
+      return `<div class="order" data-id="${doc.id}">
         <div class="order-head">
           <div>
             <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
@@ -335,7 +337,7 @@
       </div>`;
     }
 
-    // ====== PRINT 58mm centrada y con “safe area” ======
+    /* ---------- PRINT 58mm ultra-seguro (42mm) ---------- */
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
       const o = docSnap.data();
@@ -390,10 +392,6 @@
 
       const cs = getComputedStyle(document.documentElement);
       const PAGE  = (cs.getPropertyValue('--page-size')||'58mm').trim();
-      const WIDTH = (cs.getPropertyValue('--ticket-width')||'44mm').trim();
-      const PAD   = (cs.getPropertyValue('--ticket-padding')||'1mm').trim();
-      const SCALE = (cs.getPropertyValue('--ticket-scale')||'0.96').trim();
-      const OFFSET= (cs.getPropertyValue('--ticket-offset')||'0mm').trim();
       const FONT  = (cs.getPropertyValue('--font')||'system-ui, Arial, sans-serif').trim();
 
       const html = `
@@ -401,36 +399,37 @@
 <html><head><meta charset="utf-8"><title>Ticket ${orderNo}</title>
 <style>
   :root{
-    --page-size:${PAGE}; --ticket-width:${WIDTH}; --ticket-padding:${PAD};
-    --ticket-scale:${SCALE}; --ticket-offset:${OFFSET}; --font:${FONT};
+    --page:${PAGE};
+    --ticket-max:42mm;        /* ancho útil MUY seguro */
+    --ticket-pad:1.5mm;       /* aire interno */
+    --font:${FONT};
   }
-  @page{ size: var(--page-size) auto; margin: 0; } /* SIN márgenes del navegador */
+  @page{ size: var(--page) auto; margin: 0; } /* sin márgenes del navegador */
   html,body{margin:0;padding:0;color:#000;}
   body{
     font-family: var(--font); font-size:12px; line-height:1.35;
     -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
-    width: var(--page-size); margin: 0 auto; /* centra la “página” del rollo */
+    width: var(--page); margin: 0 auto;
+    print-color-adjust:exact; -webkit-print-color-adjust:exact;
   }
+  /* El ticket ocupa el menor entre 42mm y (ancho del rollo - 12mm de zona segura total) */
   .ticket{
-    width: var(--ticket-width);
-    padding: 0 var(--ticket-padding);
-    margin: 0 auto;                 /* CENTRADO absoluto */
-    transform: translateX(var(--ticket-offset)) scale(var(--ticket-scale));
-    transform-origin: top center;   /* evitar cortes laterales */
+    width: min(var(--ticket-max), calc(var(--page) - 12mm));
+    margin: 0 auto;
+    padding: 0 var(--ticket-pad);
+    box-sizing: border-box;
+    overflow-wrap:anywhere; word-break:break-word; white-space:normal;
   }
   .c{text-align:center}
   .row{display:flex;justify-content:space-between;gap:8px}
-  .sub{margin:2px 0 4px 0;font-size:11px;white-space:pre-wrap;word-break:break-word}
+  .sub{margin:2px 0 4px 0;font-size:11px;white-space:pre-wrap}
   .r{text-align:right;white-space:nowrap}
   .hr{border-top:1px dashed #000;margin:6px 0}
   .lg{font-weight:800}
   .kv{display:flex;justify-content:space-between;gap:8px}
   .pill{display:inline-block;padding:2px 6px;border:1px solid #000;border-radius:999px;font-weight:800}
   .foot{margin-top:8px;font-size:11px;text-align:center}
-  @media print{
-    html,body{print-color-adjust:exact;-webkit-print-color-adjust:exact}
-    .ticket{break-inside:avoid}
-  }
+  @media print{ .ticket{break-inside:avoid} }
 </style>
 </head>
 <body>
@@ -486,7 +485,7 @@
         q.limit(100).onSnapshot(snap=>{
           document.getElementById("ordersError").style.display="none";
           document.getElementById("ordersError").textContent="";
-          renderList(snap);
+          lastSnap=snap; renderList(snap);
         }, (err)=>{
           console.error(err);
           const el=document.getElementById("ordersError");
