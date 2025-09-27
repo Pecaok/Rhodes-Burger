@@ -10,7 +10,7 @@
       --primary:#2ecc71; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
       --radius:22px; --shadow:0 12px 34px rgba(0,0,0,.10); --ring:#eaeaea;
 
-      /* Tipografía (NO se toca) */
+      /* Tipografía (no se toca) */
       --font: Inter, system-ui, "Segoe UI", Roboto, Arial, "Helvetica Neue", "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
 
       /* Estados */
@@ -18,11 +18,15 @@
       --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
       --pay-pending:#FFA000; --pay-paid:#2ECC71;
 
-      /* 58mm */
+      /* (sólo para impresión de ESTA página, no del ticket) */
       --page-size:58mm;
     }
     *{box-sizing:border-box}
-    html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
+    html,body{
+      margin:0;background:var(--bg);color:var(--text);
+      font-family:var(--font);
+      -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+    }
     header{position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .topbar{max-width:1100px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
     .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700}
@@ -70,17 +74,16 @@
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
 
-    /* Si imprimen la lista */
+    /* Si imprimen la LISTA en esta página */
     @media print{
       @page{ size: A4 portrait; margin: 12mm; }
-      html,body{margin:0 !important;padding:0 !important;print-color-adjust:exact;-webkit-print-color-adjust:exact;font-family:var(--font)}
       header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"]{display:none !important}
       .order{break-inside:avoid;box-shadow:none;border:1px solid #eee}
     }
   </style>
 </head>
 <body>
-  <!-- Guardia -->
+  <!-- Guardia (TTL 20h) con ?auth=1) -->
   <script>
     (function guard(){
       const TTL_MS = 20*60*60*1000;
@@ -152,10 +155,7 @@
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
 
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
-    const STATE_LABEL = {
-      accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar',
-      delivered:'Entregado', cancelled:'Cancelar'
-    };
+    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
     const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
 
     function pickDocDate(obj){
@@ -175,10 +175,7 @@
     }
     function displayOrderNumber(doc){
       const o = doc.data();
-      const candidates = [
-        o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro,
-        o.orderNo, o.seq, o.n, o.idPedido, o.pedidoNumber, o.pedido
-      ];
+      const candidates = [o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
       for (const c of candidates){
         if (c == null) continue;
         const n = (typeof c === "string") ? parseInt(c,10) : c;
@@ -209,9 +206,7 @@
       updateBellUI();
     };
     $("#btnLogout").onclick = ()=>{
-      localStorage.removeItem("rb_auth_v2");
-      localStorage.removeItem("rb_admin_ok");
-      localStorage.removeItem("rb_admin_t");
+      localStorage.removeItem("rb_auth_v2"); localStorage.removeItem("rb_admin_ok"); localStorage.removeItem("rb_admin_t");
       sessionStorage.removeItem("rb_auth_v2");
       location.replace("login.html?reason=logout&next=pedido_local.html");
     };
@@ -337,7 +332,7 @@
       </div>`;
     }
 
-    /* ---------- PRINT 58mm ultra-seguro (42mm) ---------- */
+    /* ===================== PRINT auto-fit (58mm, 80mm, etc.) ===================== */
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
       const o = docSnap.data();
@@ -390,65 +385,74 @@
         },0);
       })();
 
-      const cs = getComputedStyle(document.documentElement);
-      const PAGE  = (cs.getPropertyValue('--page-size')||'58mm').trim();
-      const FONT  = (cs.getPropertyValue('--font')||'system-ui, Arial, sans-serif').trim();
+      // Tipografía desde :root (no se toca)
+      const cs   = getComputedStyle(document.documentElement);
+      const FONT = (cs.getPropertyValue('--font')||'system-ui, Arial, sans-serif').trim();
 
       const html = `
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Ticket ${orderNo}</title>
 <style>
   :root{
-    --page:${PAGE};
-    --ticket-max:40mm;        /* ancho útil MUY seguro */
-    --ticket-pad:1.5mm;       /* aire interno */
-    --font:${FONT};
+    /* Máximo seguro para cubrir 58mm y 80mm (se usa junto con 100%-safe) */
+    --ticket-max-mm: 72mm;      /* si el rollo es 80mm, ocupará hasta ~68mm útiles */
+    --safe-total-mm: 14mm;      /* zona segura total (≈7mm por lado) */
+    --side-pad-mm:   1.5mm;     /* padding interno del ticket */
+    --font: ${FONT};
   }
-  @page{ size: var(--page) auto; margin: 0; } /* sin márgenes del navegador */
+  @page{ size: auto; margin: 0; } /* el driver define el ancho real; sin margen del navegador */
   html,body{margin:0;padding:0;color:#000;}
   body{
     font-family: var(--font); font-size:12px; line-height:1.35;
     -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
-    width: var(--page); margin: 0 auto;
+    width: 100%; margin: 0 auto;
     print-color-adjust:exact; -webkit-print-color-adjust:exact;
   }
-  /* El ticket ocupa el menor entre 42mm y (ancho del rollo - 12mm de zona segura total) */
+  .page{ width:100%; display:flex; justify-content:center; }
+
+  /* Ticket = min(ancho máximo en mm, 100% - zona segura). Sin transforms. */
   .ticket{
-    width: min(var(--ticket-max), calc(var(--page) - 12mm));
+    width: min(var(--ticket-max-mm), calc(100% - var(--safe-total-mm)));
     margin: 0 auto;
-    padding: 0 var(--ticket-pad);
+    padding: 0 var(--side-pad-mm);
     box-sizing: border-box;
     overflow-wrap:anywhere; word-break:break-word; white-space:normal;
   }
+
   .c{text-align:center}
   .row{display:flex;justify-content:space-between;gap:8px}
+  .row > div:first-child{min-width:0}
   .sub{margin:2px 0 4px 0;font-size:11px;white-space:pre-wrap}
   .r{text-align:right;white-space:nowrap}
   .hr{border-top:1px dashed #000;margin:6px 0}
   .lg{font-weight:800}
   .kv{display:flex;justify-content:space-between;gap:8px}
+  .kv > div:first-child{white-space:nowrap}   /* evita “Pag o”, “Ent rega”, etc. */
   .pill{display:inline-block;padding:2px 6px;border:1px solid #000;border-radius:999px;font-weight:800}
   .foot{margin-top:8px;font-size:11px;text-align:center}
+
   @media print{ .ticket{break-inside:avoid} }
 </style>
 </head>
 <body>
-  <div class="ticket">
-    <div class="c">
-      <div class="lg">Rhodes Burgers</div>
-      <div>${orderNo}</div>
-      <div style="font-size:11px">${dateStr}</div>
+  <div class="page">
+    <div class="ticket">
+      <div class="c">
+        <div class="lg">Rhodes Burgers</div>
+        <div>${orderNo}</div>
+        <div style="font-size:11px">${dateStr}</div>
+      </div>
+      <div class="hr"></div>
+      ${linesHTML || '<div class="sub">Sin ítems.</div>'}
+      <div class="hr"></div>
+      <div class="row lg"><div>Total</div><div>${money(total)}</div></div>
+      <div class="kv"><div>Pago</div><div>${nicePay} · <span class="pill">${paidPill}</span></div></div>
+      <div class="kv"><div>Entrega</div><div>${niceEntrega}</div></div>
+      ${o.nombre? `<div class="kv"><div>Cliente</div><div>${o.nombre}</div></div>`:''}
+      ${o.telefono? `<div class="kv"><div>Tel</div><div>${o.telefono}</div></div>`:''}
+      ${o.status? `<div class="kv"><div>Estado</div><div>${o.status}</div></div>`:''}
+      <div class="foot">¡Gracias por tu compra!</div>
     </div>
-    <div class="hr"></div>
-    ${linesHTML || '<div class="sub">Sin ítems.</div>'}
-    <div class="hr"></div>
-    <div class="row lg"><div>Total</div><div>${money(total)}</div></div>
-    <div class="kv"><div>Pago</div><div>${nicePay} · <span class="pill">${paidPill}</span></div></div>
-    <div class="kv"><div>Entrega</div><div>${niceEntrega}</div></div>
-    ${o.nombre? `<div class="kv"><div>Cliente</div><div>${o.nombre}</div></div>`:''}
-    ${o.telefono? `<div class="kv"><div>Tel</div><div>${o.telefono}</div></div>`:''}
-    ${o.status? `<div class="kv"><div>Estado</div><div>${o.status}</div></div>`:''}
-    <div class="foot">¡Gracias por tu compra!</div>
   </div>
   <script>window.print(); window.onafterprint=()=>window.close();<\/script>
 </body></html>`;
