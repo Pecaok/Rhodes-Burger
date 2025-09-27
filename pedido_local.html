@@ -66,7 +66,7 @@
   </style>
 </head>
 <body>
-  <!-- Guardia simple -->
+  <!-- Guardia -->
   <script>
     (function guard(){
       const TTL_MS=20*60*60*1000;
@@ -132,7 +132,7 @@
     /* ===== Helpers ===== */
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazón" : "");
+    const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "");
 
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
     const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
@@ -159,10 +159,25 @@
       for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
       return `#${doc.id.slice(-5).toUpperCase()}`;
     }
-    const unitWithExtras = it => (it.price||0)+(it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)+(it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0);
-    const computeOrderTotal = o => (typeof o.total==="number") ? o.total : (Array.isArray(o.items)?o.items:[]).reduce((t,it)=> t + (it.type==="burger"?unitWithExtras(it):(it.price||0))*(it.qty||0), 0);
 
-    /* ===== UI general ===== */
+    const unitWithExtras = it =>
+      (it.price||0)
+      + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)
+      + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0);
+
+    const computeOrderTotal = o => {
+      if (typeof o.total === "number") return o.total;
+      const items = Array.isArray(o.items)?o.items:[];
+      return items.reduce((t,it)=>{
+        const qty = it.qty||1;
+        const base = (it.price||0);
+        const ext  = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)
+                    +(it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0);
+        return t + (base+ext)*qty;
+      },0);
+    };
+
+    /* ===== UI ===== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     const btnBell=$("#btnBell");
     const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
@@ -178,6 +193,7 @@
       el.classList.add("active");
       if(lastSnap) renderList(lastSnap);
     });
+
     const passFilter=o=> currentFilter==="all" ? true :
       (currentFilter==="new" ? ((o.status??"accepted")==="accepted"||(o.status??"accepted")==="pending_payment")
                              : (o.status??"")===currentFilter);
@@ -207,23 +223,23 @@
       const items=Array.isArray(o.items)?o.items:[];
       const lines=items.map(it=>{
         if(it.type==="burger"){
-          const unit=unitWithExtras(it), sub=unit*(it.qty||0);
-          const ex=[]; if(it.extras?.patty)ex.push(`+${it.extras.patty} med`); if(it.extras?.cheddar)ex.push(`+${it.extras.cheddar} cheddar`);
+          const qty=it.qty||1; const unit=unitWithExtras(it); const sub=unit*qty;
+          const ex=[]; if(it.extras?.patty)ex.push(`+${it.extras.patty} med`);
+          if(it.extras?.cheddar)ex.push(`+${it.extras.cheddar} cheddar`);
           const notes=it.notes?` · Notas: ${it.notes}`:"";
-          return `<div class="item"><div>• <strong>${it.qty||0}× ${it.name}</strong></div>
+          return `<div class="item"><div>• <strong>${qty}× ${it.name}</strong></div>
           <div class="sub">Papas: ${friesName(it.fries)}${ex.length?` · ${ex.join(" · ")}`:""}${notes}
-          <div>Unit: <span class="money">${money(unit)}</span> — Subtotal: <span class="money">${money(sub)}</span></div></div></div>`;
+          <div>Subtotal: <span class="money">${money(sub)}</span></div></div></div>`;
         } else {
-          const sub=(it.price||0)*(it.qty||0);
-          return `<div class="item"><div>• <strong>${it.qty||0}× ${it.name}</strong></div>
-          <div class="sub">Unit: <span class="money">${money(it.price||0)}</span> — Subtotal: <span class="money">${money(sub)}</span></div></div>`;
+          const qty=it.qty||1; const sub=(it.price||0)*qty;
+          return `<div class="item"><div>• <strong>${qty}× ${it.name}</strong></div>
+          <div class="sub">Subtotal: <span class="money">${money(sub)}</span></div></div>`;
         }
       }).join("");
 
       const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
       const st=o.status??"accepted";
       const curIdx=Math.max(STATE_SEQ.indexOf(st),0);
-
       const stateBtns=`<div class="stateBtns">
         ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
       </div>`;
@@ -259,7 +275,7 @@
       </div>`;
     }
 
-    /* ====== IMPRESIÓN 58mm (como antes): producto en una línea, extras en líneas aparte SIN precio ====== */
+    /* ====== IMPRESIÓN 58mm: nombre completo, papas correcto, extras/nota como ítems SIN precio ====== */
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
       const o = docSnap.data();
@@ -271,37 +287,36 @@
         return `#${docSnap.id.slice(-5).toUpperCase()}`;
       })();
 
-      const dt=(()=>{
+      const pickDate=(()=>{
         const k=['createdAt','created_at','timestamp','date','fecha','time'];
         for(const kk of k){ const v=o[kk]; if(v?.toDate) return v.toDate(); if(typeof v==='number') return new Date(v); if(typeof v==='string'){const d=new Date(v); if(!isNaN(d)) return d;} }
         return new Date();
       })();
-      const dateStr = dt.toLocaleDateString('es-AR');
-      const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
+      const dateStr = pickDate.toLocaleDateString('es-AR');
+      const timeStr = pickDate.toLocaleTimeString('es-AR',{hour12:false});
 
       const items = Array.isArray(o.items)?o.items:[];
       const linesHTML = items.map(it=>{
         const qty = it.qty||1;
         const name = (it.name||'').toString();
-        const unit = (it.price||0);
-        const sub  = unit*qty;
+        const base = (it.price||0);
+        const ext  = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)
+                    +(it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0);
+        const lineTotal = (base+ext)*qty;   // mostramos el ítem con extras incluidos
 
-        const extraLines=[];
-        if(it.fries) extraLines.push(`Papas: ${friesName(it.fries)}`);
-        if(it.extras?.cheddar) extraLines.push(`${it.extras.cheddar} × Cheddar`);
-        if(it.extras?.patty)   extraLines.push(`${it.extras.patty} × Medallón extra`);
-        if(it.notes)           extraLines.push(`Nota: ${it.notes}`);
+        const bullets=[];
+        if(it.fries) bullets.push(`Papas: ${friesName(it.fries)}`);
+        if(it.extras?.cheddar) bullets.push(`${it.extras.cheddar} × Cheddar`);
+        if(it.extras?.patty)   bullets.push(`${it.extras.patty} × Medallón extra`);
+        if(it.notes)           bullets.push(`Nota: ${it.notes}`);
 
         return `
-          <div class="row"><div class="l">${qty} × ${name}</div><div class="r">${money(sub)}</div></div>
-          ${extraLines.map(e=>`<div class="sub">• ${e}</div>`).join('')}
+          <div class="row"><div class="l">${qty} × ${name}</div><div class="r">${money(lineTotal)}</div></div>
+          ${bullets.map(t=>`<div class="sub ex">• ${t}</div>`).join('')}
         `;
       }).join('') || '<div class="sub">Sin ítems.</div>';
 
-      const total = (()=>{
-        if(typeof o.total==='number') return o.total;
-        return items.reduce((t,it)=> (t + (it.price||0)*(it.qty||1)),0);
-      })();
+      const total = computeOrderTotal(o);
 
       const html = `
 <!doctype html>
@@ -311,35 +326,38 @@
   html,body{margin:0;padding:0;color:#000;}
   *{-webkit-print-color-adjust:exact; print-color-adjust:exact; -webkit-text-size-adjust:100%;}
   body{
-    font-family: system-ui, Arial, sans-serif;
+    font-family: Arial, sans-serif;
     font-size:13px;
-    font-weight:800;
-    line-height:1.4;  /* suficiente para que no se pisen letras */
+    font-weight:bold;
+    line-height:1.42;
   }
-  .ticket{ width:48mm; margin:0 auto; padding:2mm; box-sizing:border-box; }
-  .brand{ text-align:center; margin-bottom:2mm; }
+  .ticket{ width:48mm; margin:0 auto; padding:2mm 3mm 2mm 2mm; box-sizing:border-box; }
+  .c{text-align:center}
+  .brand{ margin-bottom:2mm; }
   .brand .top{ font-size:15px; }
   .orderNo{ text-align:center; font-size:14px; margin:1mm 0 }
   .hr{ border-top:1px solid #000; margin:4px 0 }
   .lbl{ font-size:11px; text-transform:uppercase; }
   .blk{ margin:2px 0 2mm 0; }
 
-  .row{ display:flex; justify-content:space-between; gap:8px; }
-  .row .l{ flex:1 1 auto; min-width:0; white-space:normal; }   /* NO vertical */
-  .row .r{ flex:0 0 auto; text-align:right; min-width:22mm; padding-left:3mm; white-space:nowrap; }
+  .row{ display:flex; justify-content:space-between; gap:4px; }
+  .row .l{ flex:1 1 auto; min-width:0; white-space:nowrap; }     /* nombre en una sola línea */
+  .row .r{ flex:0 0 auto; text-align:right; min-width:16mm; padding-left:1.5mm; white-space:nowrap; }
 
-  .sub{ font-size:11px; margin:1px 0 0 2mm; white-space:normal; }
+  .sub{ font-size:11px; margin:1px 0 0 2mm; }
+  .sub.ex{ white-space:nowrap; }  /* Papas Con/Sin sazón no se corta */
+
   .subtotal{ margin-top:2mm; }
   .subtotal .l{ font-size:11.5px; }
   .total{ font-size:16px; margin-top:3mm; }
   .total .l{ font-size:13.5px; }
-  .foot{ margin-top:3mm; text-align:center; font-size:10px; }
+  .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:normal; }
 </style>
 </head>
 <body>
   <div class="ticket">
-    <div class="brand"><div class="top">Rhodes Burgers</div></div>
-    <div class="orderNo">${orderDisplay}</div>
+    <div class="brand c"><div class="top">Rhodes Burgers</div></div>
+    <div class="orderNo c">${orderDisplay}</div>
 
     <div class="hr"></div>
 
@@ -347,10 +365,9 @@
     ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">Medio de pago</div><div>${o.pago||o.payment_method}</div></div>`:''}
 
     <div class="hr"></div>
-
     ${linesHTML}
-
     <div class="hr"></div>
+
     <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${money(total)}</div></div>
     <div class="row total"><div class="l">TOTAL</div><div class="r">${money(total)}</div></div>
 
@@ -364,13 +381,11 @@
       try{ w.focus(); }catch(_){}
     }
 
-    /* ===== Listado + click handlers ===== */
+    /* ===== Listado ===== */
     function renderList(snap){
       const docs=snap.docs.filter(d=>passFilter(d.data()));
       idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
-      document.getElementById("orders").innerHTML = docs.length
-        ? docs.map(renderOrder).join("")
-        : '<p class="muted">No hay pedidos.</p>';
+      $("#orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
 
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
@@ -382,6 +397,7 @@
       });
     }
 
+    /* ===== Suscripción ===== */
     (async function subscribeOrders(){
       try{
         const probe=await db.collection("orders").limit(1).get();
@@ -390,16 +406,17 @@
         let q=db.collection("orders");
         q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
         q.limit(100).onSnapshot(snap=>{
-          $("#ordersError").style.display="none";
-          $("#ordersError").textContent="";
+          $("#ordersError").style.display="none"; $("#ordersError").textContent="";
           lastSnap=snap; renderList(snap);
         }, err=>{
           console.error(err);
-          const el=$("#ordersError"); el.textContent="No se pudo cargar la lista de pedidos."; el.style.display="block";
+          $("#ordersError").textContent="No se pudo cargar la lista de pedidos.";
+          $("#ordersError").style.display="block";
         });
       }catch(err){
         console.error(err);
-        const el=$("#ordersError"); el.textContent="No se pudo inicializar la lista de pedidos."; el.style.display="block";
+        $("#ordersError").textContent="No se pudo inicializar la lista de pedidos.";
+        $("#ordersError").style.display="block";
       }
     })();
   });
