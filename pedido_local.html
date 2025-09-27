@@ -18,11 +18,15 @@
       --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
       --pay-pending:#FFA000; --pay-paid:#2ECC71;
 
-      /* para impresión de la LISTA (no del ticket) */
+      /* sólo para impresión de la LISTA (no del ticket) */
       --page-size:58mm;
     }
     *{box-sizing:border-box}
-    html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
+    html,body{
+      margin:0;background:var(--bg);color:var(--text);
+      font-family:var(--font);
+      -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+    }
     header{position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .topbar{max-width:1100px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
     .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700}
@@ -328,13 +332,13 @@
       </div>`;
     }
 
-    /* ===================== PRINT etiqueta 58mm (auto-ajustable) ===================== */
+    /* ===================== PRINT etiqueta 58mm ultra-segura ===================== */
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
       const o = docSnap.data();
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-      // Nro de pedido visible (#750)
+      // Nro de pedido visible
       const orderDisplay = (()=> {
         const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
         for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
@@ -350,23 +354,15 @@
       const dateStr = dt.toLocaleDateString('es-AR');
       const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
-      // Normalizadores
       const norm = (s, map) => { if(!s) return ''; s=String(s).toLowerCase(); for(const k in map){ if(s.includes(k)) return map[k]; } return s.replace(/[_-]/g,' ').replace(/\b\w/g,m=>m.toUpperCase()); };
-
-      const platform    = norm(o.platform||o.source||'PedidosYa', {pedidos:'PedidosYa', uber:'Uber Eats', rappi:'Rappi', merc:'Mercado Pago'});
+      const platform    = norm(o.platform||o.source||'PedidosYa', {pedidos:'PedidosYa', uber:'Uber Eats', rappi:'Rappi'});
       const brand       = 'Rhodes Burgers';
-      const nroOrden    = (o.extOrderId || o.external_id || o.pedidosya_id || '').toString();
-      const courierName = (o.courier||o.repartidor||o.driver_name||'').toString().trim();
-      const courierETA  = (o.courier_eta||o.eta||'').toString().trim();
-      const custName    = (o.nombre||o.customer_name||'').toString();
-      const address     = (o.direccion||o.address||o.notes_address||o.address_notes||'').toString();
       const payMethod   = norm(o.pago||o.payment_method||'–', {mercado:'Mercado Pago', efect:'Efectivo', trans:'Transferencia', card:'Tarjeta'});
       const isPaid      = (o.payment_status==='paid'||o.paid||o.prepago||o.prepaid);
-      const payBadge    = isPaid ? 'PREPAGO' : 'PAGO EN DESTINO';
 
       // Ítems
       const items = Array.isArray(o.items)?o.items:[];
-      const mapLine = it=>{
+      const linesHTML = items.map(it=>{
         const qty = it.qty||it.quantity||1;
         const name = (it.name||'').toString();
         const unit = (it.type==='burger')
@@ -386,10 +382,8 @@
           </div>
           ${descExtra||note ? `<div class="sub">${[descExtra, note].filter(Boolean).join('')}</div>`:''}
         `;
-      };
-      const linesHTML = items.map(mapLine).join('') || '<div class="sub">Sin ítems.</div>';
+      }).join('') || '<div class="sub">Sin ítems.</div>';
 
-      // Total
       const total = (()=>{
         if(typeof o.total==='number') return o.total;
         return items.reduce((t,it)=>{
@@ -400,7 +394,7 @@
         },0);
       })();
 
-      // Tipografía desde :root (no se toca)
+      // fuente desde :root (no se toca)
       const cs   = getComputedStyle(document.documentElement);
       const FONT = (cs.getPropertyValue('--font')||'system-ui, Arial, sans-serif').trim();
 
@@ -409,53 +403,47 @@
 <html><head><meta charset="utf-8"><title>Ticket ${orderDisplay}</title>
 <style>
   :root{
-    /* 58mm real con zona segura; también funciona en 80mm */
-    --safe-total-mm: 12mm;   /* 6mm por lado de seguridad para no cortar */
-    --max-mm: 72mm;          /* si la impresora es 80mm, ocupa hasta ~68–72mm */
-    --pad-mm: 1.6mm;         /* padding interno */
+    /* MÁS seguridad para evitar cortes en 58mm */
+    --safe-total-mm: 18mm;  /* ≈9mm por lado */
+    --ticket-max-mm: 42mm;  /* ancho útil conservador */
+    --pad-left-mm:  1.6mm;
+    --pad-right-mm: 3mm;    /* aire extra a la derecha para los precios */
     --font: ${FONT};
   }
-  @page{ size: 58mm auto; margin: 0; }     /* ancho fijo 58mm; alto libre */
+  @page{ size: 58mm auto; margin: 0; }
   html,body{margin:0;padding:0;color:#000;}
+  *{-webkit-print-color-adjust:exact; print-color-adjust:exact; -webkit-text-size-adjust:100%;}
   body{
     font-family: var(--font); font-size:12px; line-height:1.35;
     -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
-    width: 58mm; margin: 0 auto; print-color-adjust:exact; -webkit-print-color-adjust:exact;
+    width: 58mm; margin: 0 auto;
   }
   .page{ width:100%; display:flex; justify-content:center; }
   .ticket{
-    width: min(var(--max-mm), calc(100% - var(--safe-total-mm)));
-    padding: 0 var(--pad-mm);
+    width: min(var(--ticket-max-mm), calc(100% - var(--safe-total-mm)));
+    margin: 0 auto;
+    padding-left: var(--pad-left-mm);
+    padding-right: var(--pad-right-mm);
     box-sizing: border-box;
     overflow-wrap:anywhere; word-break:break-word; white-space:normal;
   }
 
-  /* ===== Estilo etiqueta (como la foto) ===== */
+  /* Estilos etiqueta */
   .brand{ text-align:center; margin-top:2mm; }
   .brand .top{ font-weight:800; font-size:14px; }
   .brand .sub{ font-size:10px; color:#333 }
-  .code{ text-align:center; margin-top:1mm; font-size:11px; color:#333 }
   .orderNo{ text-align:center; font-weight:800; font-size:14px; margin:1mm 0 }
-  .band{ background:#000; color:#fff; text-align:center; padding:3px 0; border-radius:2px; font-weight:800; }
-  .eta{ text-align:center; font-size:12px; margin:1mm 0 }
-
   .hr{ border-top:1px solid #000; opacity:.35; margin:6px 0 }
   .lbl{ font-size:10px; color:#444; text-transform:uppercase; letter-spacing:.3px; }
   .blk{ margin:3px 0 2mm 0; }
 
-  .row{ display:flex; justify-content:space-between; gap:8px; }
-  .row .l{ min-width:0 }          /* permite envolver el nombre sin empujar el precio */
+  .row{ display:flex; justify-content:space-between; gap:8px; padding-right:2mm; } /* aire extra en precios */
+  .row .l{ min-width:0 }
   .sub{ margin:0 0 2px 0; font-size:10.5px; color:#333; white-space:pre-wrap }
-
   .subtotal{ margin-top:2mm }
   .total{ font-weight:900; font-size:16px; margin:1mm 0; }
-  .badge{
-    margin:2mm 0; text-align:center; font-weight:900; font-size:16px;
-    border:2px solid #000; border-radius:6px; padding:2px 6px; display:inline-block;
-  }
-
+  .badge{ margin:2mm 0; text-align:center; font-weight:900; font-size:16px; border:2px solid #000; border-radius:6px; padding:2px 6px; display:inline-block; }
   .foot{ margin:3mm 0 2mm 0; font-size:10px; text-align:center; color:#333 }
-
   @media print{ .ticket{ break-inside:avoid; } }
 </style>
 </head>
@@ -467,17 +455,12 @@
         <div class="sub">${brand}</div>
       </div>
 
-      ${nroOrden ? `<div class="code lbl">Nro. Orden:<br><span style="font-size:12px;color:#000">${nroOrden}</span></div>` : ''}
-
       <div class="orderNo">${orderDisplay}</div>
-
-      ${courierName ? `<div class="band">${courierName.toUpperCase()}</div>` : ''}
-      ${courierETA  ? `<div class="eta">${courierETA}</div>` : ''}
 
       <div class="hr"></div>
 
-      ${custName ? `<div class="blk"><div class="lbl">Cliente</div><div>${custName}</div></div>`:''}
-      ${address  ? `<div class="blk"><div class="lbl">Dirección / Notas</div><div>${address}</div></div>`:''}
+      ${o.nombre ? `<div class="blk"><div class="lbl">Cliente</div><div>${o.nombre}</div></div>`:''}
+      ${(o.direccion||o.address) ? `<div class="blk"><div class="lbl">Dirección / Notas</div><div>${(o.direccion||o.address)||''}</div></div>`:''}
       ${payMethod? `<div class="blk"><div class="lbl">Medio de pago</div><div>${payMethod}</div></div>`:''}
 
       <div class="hr"></div>
@@ -530,7 +513,7 @@
         q.limit(100).onSnapshot(snap=>{
           document.getElementById("ordersError").style.display="none";
           document.getElementById("ordersError").textContent="";
-          lastSnap=snap; renderList(snap);
+          renderList(snap);
         }, (err)=>{
           console.error(err);
           const el=document.getElementById("ordersError");
