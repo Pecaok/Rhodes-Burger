@@ -14,7 +14,6 @@
       --st-accepted:#FBC02D; --st-in_prep:#FB8C00; --st-ready:#00ACC1;
       --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
       --pay-pending:#FFA000; --pay-paid:#2ECC71;
-      --page-size:58mm;
     }
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);
@@ -260,7 +259,7 @@
       </div>`;
     }
 
-    /* ===================== PRINT 58mm — Rhodes Burgers — todo en negrita + labels más chicos ===================== */
+    /* ===================== PRINT 58mm — Rhodes Burgers — sin superposición ===================== */
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
       const o = docSnap.data();
@@ -280,6 +279,7 @@
       const dateStr = dt.toLocaleDateString('es-AR');
       const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
+      /* ===== Items: precio DEBAJO del detalle ===== */
       const items = Array.isArray(o.items)?o.items:[];
       const linesHTML = items.map(it=>{
         const qty = it.qty||it.quantity||1;
@@ -293,8 +293,10 @@
         const note = it.notes ? ` · ${it.notes}` : '';
         const extrasLine = [fries, ...ex].filter(Boolean).join(' · ');
         return `
-          <div class="row"><div class="l">${qty} ${name}</div><div class="r">${money(sub)}</div></div>
+          <div class="row name"><div class="l">${qty} ${name}</div></div>
           ${extrasLine||note ? `<div class="sub">${[extrasLine, note].filter(Boolean).join('')}</div>`:''}
+          <div class="row price"><div class="l"></div><div class="r">${money(sub)}</div></div>
+          <div class="sep"></div>
         `;
       }).join('') || '<div class="sub">Sin ítems.</div>';
 
@@ -316,10 +318,10 @@
 <html><head><meta charset="utf-8"><title>Ticket ${orderDisplay}</title>
 <style>
   :root{
-    --safe-total-mm: 20mm;
-    --ticket-max-mm: 41mm;
+    --safe-total-mm: 20mm;     /* borde seguro */
+    --ticket-max-mm: 41mm;     /* ancho útil conservador */
     --pad-left-mm:  1.8mm;
-    --pad-right-mm: 3.8mm;
+    --pad-right-mm: 3.8mm;     /* aire a la derecha */
     --font: ${FONT};
   }
   @page{ size: 58mm auto; margin: 0; }
@@ -328,8 +330,9 @@
   body{
     font-family: var(--font);
     font-size:13.5px;
-    line-height:1.35;
-    font-weight:800;      /* todo en negrita */
+    line-height:1.45;          /* ↑ para evitar “pisadas” */
+    letter-spacing:.1px;
+    font-weight:800;           /* todo en negrita */
     -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
     width:58mm;margin:0 auto;
   }
@@ -351,9 +354,8 @@
   .hr{border-top:1px solid #000;margin:6px 0}
 
   .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.2px}
-  .blk{margin:3px 0 2mm 0}
+  .blk{margin:3px 0 2.2mm 0}
 
-  /* Filas: prevenir cortes y superposición */
   .row{
     display:flex;
     align-items:baseline;
@@ -361,25 +363,17 @@
     gap:6px;
     padding-right:2mm;
   }
-  .row .l{
-    flex:1 1 auto;
-    min-width:0;
-    white-space:nowrap;
-    word-break:normal;
-  }
-  .row .r{
-    flex:0 0 auto;
-    white-space:nowrap;
-    text-align:right;
-  }
+  .row .l{flex:1 1 auto;min-width:0;white-space:nowrap;word-break:normal}
+  .row .r{flex:0 0 auto;white-space:nowrap;text-align:right}
+  .sub{margin:.6mm 0 0 0;font-size:12px;white-space:pre-wrap}
+  .sep{border-top:1px dashed #000;opacity:.5;margin:2mm 0} /* separador entre ítems */
+
   /* Labels más chicos para dejar aire al precio */
-  .subtotal .l{ font-size:11.5px; }  /* antes 12px */
-  .total   .l{ font-size:14px; }     /* antes 16px */
+  .subtotal .l{ font-size:11.5px; }
+  .total   .l{ font-size:14px; }
 
-  .sub{margin:0 0 2px 0;font-size:12px;white-space:pre-wrap}
-
-  .subtotal{margin-top:2mm}
-  .total{font-size:17px;margin:1mm 0}
+  .subtotal{margin-top:2.4mm}
+  .total{font-size:17px;margin:2.2mm 0 1mm 0} /* ↑ separación respecto al subtotal */
 
   .foot{margin:3mm 0 2mm 0;font-size:11px;text-align:center}
   @media print{ .ticket{break-inside:avoid} }
@@ -417,8 +411,10 @@
       try{ w.focus(); }catch(_){}
     }
 
+    /* ===== Render & subscribe ===== */
     function renderList(snap){
-      const docs=snap.docs.filter(d=>passFilter(d.data()));
+      const docs=snap.docs.filter(d=> (()=>{
+        const o=d.data(); return true; })());
       idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
       document.getElementById("orders").innerHTML = docs.length
         ? docs.map(renderOrder).join("")
@@ -438,7 +434,7 @@
       try{
         const probe=await db.collection("orders").limit(1).get();
         let dateField=null;
-        if(!probe.empty) dateField=chooseDateField(probe.docs[0].data());
+        if(!probe.empty) dateField=(function choose(o){const k=['createdAt','created_at','timestamp','date','fecha','time'];for(const kk of k){if(o&&o[kk]!=null)return kk;}return null;})(probe.docs[0].data());
         let q=db.collection("orders");
         q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
         q.limit(100).onSnapshot(snap=>{
