@@ -7,10 +7,10 @@
   <link rel="icon" href="images/logo.png" />
   <style>
     :root{
-      --primary:#2ecc71; --text:#111; --muted:#111; --bg:#f6f6f6; --card:#fff;
+      --primary:#2ecc71; --text:#111; --muted:#444; --bg:#f6f6f6; --card:#fff;
       --radius:22px; --shadow:0 12px 34px rgba(0,0,0,.10); --ring:#eaeaea;
 
-      /* Tipografía única (NO se toca) */
+      /* Tipografía única */
       --font: Inter, system-ui, "Segoe UI", Roboto, Arial, "Helvetica Neue",
               "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
 
@@ -19,7 +19,7 @@
       --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
       --pay-pending:#FFA000; --pay-paid:#2ECC71;
 
-      --page-size:58mm;
+      --page-size:58mm; /* no afecta al ticket emergente */
     }
     *{box-sizing:border-box}
     html,body{
@@ -44,7 +44,7 @@
     .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
     .order-title{font-weight:800}
-    .muted{color:#444}
+    .muted{color:var(--muted)}
     .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
     .chip{background:#f3f3f3;border:1px solid var(--ring);color:#111;border-radius:999px;padding:6px 10px;font-size:13px}
     .right-total{font-weight:800;font-size:18px;white-space:nowrap}
@@ -73,6 +73,7 @@
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
 
+    /* imprimir la LISTA (no el ticket) */
     @media print{
       @page{ size: A4 portrait; margin: 12mm; }
       header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"]{display:none !important}
@@ -153,7 +154,7 @@
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "—");
 
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
-    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
+       const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
     const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
 
     function pickDocDate(obj){
@@ -330,7 +331,7 @@
       </div>`;
     }
 
-    /* ===================== PRINT etiqueta 58mm (legible + sin cortes) ===================== */
+    /* ===================== PRINT etiqueta 58mm — ancho máximo, sin cortes ===================== */
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
       const o = docSnap.data();
@@ -351,10 +352,10 @@
       const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
       const norm = (s, map) => { if(!s) return ''; s=String(s).toLowerCase(); for(const k in map){ if(s.includes(k)) return map[k]; } return s.replace(/[_-]/g,' ').replace(/\b\w/g,m=>m.toUpperCase()); };
-      const platform    = norm(o.platform||o.source||'PedidosYa', {pedidos:'PedidosYa', uber:'Uber Eats', rappi:'Rappi'});
-      const brand       = 'Rhodes Burgers';
-      const payMethod   = norm(o.pago||o.payment_method||'–', {mercado:'Mercado Pago', efect:'Efectivo', trans:'Transferencia', card:'Tarjeta'});
-      const isPaid      = (o.payment_status==='paid'||o.paid||o.prepago||o.prepaid);
+      const platform  = norm(o.platform||o.source||'PedidosYa', {pedidos:'PedidosYa', uber:'Uber Eats', rappi:'Rappi'});
+      const brand     = 'Rhodes Burgers';
+      const payMethod = norm(o.pago||o.payment_method||'–', {mercado:'Mercado Pago', efect:'Efectivo', trans:'Transferencia', card:'Tarjeta'});
+      const isPaid    = (o.payment_status==='paid'||o.paid||o.prepago||o.prepaid);
 
       const items = Array.isArray(o.items)?o.items:[];
       const linesHTML = items.map(it=>{
@@ -365,17 +366,12 @@
           : (it.price||0);
         const sub  = unit*qty;
         const fries = it.fries ? (it.fries==='con_sazon'?'SAZONADAS':'SIN SAZÓN') : '';
-        const extraTxt = [];
-        if (it.extras?.patty)   extraTxt.push(`+${it.extras.patty} med`);
-        if (it.extras?.cheddar) extraTxt.push(`+${it.extras.cheddar} cheddar`);
+        const ex=[]; if(it.extras?.patty)ex.push(`+${it.extras.patty} med`); if(it.extras?.cheddar)ex.push(`+${it.extras.cheddar} cheddar`);
         const note = it.notes ? ` · ${it.notes}` : '';
-        const descExtra = [fries, ...extraTxt].filter(Boolean).join(' · ');
+        const extrasLine = [fries, ...ex].filter(Boolean).join(' · ');
         return `
-          <div class="row">
-            <div class="l">${qty} ${name}</div>
-            <div class="r">${money(sub)}</div>
-          </div>
-          ${descExtra||note ? `<div class="sub">${[descExtra, note].filter(Boolean).join('')}</div>`:''}
+          <div class="row"><div class="l">${qty} ${name}</div><div class="r">${money(sub)}</div></div>
+          ${extrasLine||note ? `<div class="sub">${[extrasLine, note].filter(Boolean).join('')}</div>`:''}
         `;
       }).join('') || '<div class="sub">Sin ítems.</div>';
 
@@ -397,10 +393,11 @@
 <html><head><meta charset="utf-8"><title>Ticket ${orderDisplay}</title>
 <style>
   :root{
-    --safe-total-mm: 20mm;   /* zona segura total grande (≈10mm por lado) */
-    --ticket-max-mm: 41mm;   /* ancho útil muy conservador para 58mm */
-    --pad-left-mm:  1.8mm;
-    --pad-right-mm: 3.6mm;   /* aire extra a la derecha (precios) */
+    /* Márgenes mínimos + ancho útil típico de 58mm (~48mm) */
+    --safe-total-mm: 6mm;     /* ≈3mm por lado */
+    --ticket-max-mm: 48mm;
+    --pad-left-mm:  1mm;
+    --pad-right-mm: 1mm;
     --font: ${FONT};
   }
   @page{ size: 58mm auto; margin: 0; }
@@ -418,10 +415,12 @@
     padding-left: var(--pad-left-mm);
     padding-right: var(--pad-right-mm);
     box-sizing: border-box;
-    overflow-wrap:anywhere; word-break:break-word; white-space:normal;
+    /* NO cortar palabras: solo quiebra en espacios */
+    word-break: keep-all;
+    overflow-wrap: break-word; /* permite quebrar en espacios/guiones si hace falta */
+    white-space:normal;
   }
 
-  /* Estilo etiqueta, todo negro y legible */
   .brand{ text-align:center; margin-top:2mm; color:#000 }
   .brand .top{ font-weight:800; font-size:14px; }
   .brand .sub{ font-size:10px; }
@@ -431,18 +430,19 @@
   .lbl{ font-size:10.5px; color:#000; font-weight:700; text-transform:uppercase; letter-spacing:.2px; }
   .blk{ margin:3px 0 2mm 0; color:#000 }
 
-  .row{ display:flex; justify-content:space-between; gap:8px; padding-right:2.4mm; color:#000 }
-  .row .l{ min-width:0 }
+  .row{ display:flex; justify-content:space-between; gap:8px; color:#000 }
+  .row .l{ min-width:0; word-break:keep-all; }
+  .row .r{ white-space:nowrap; }
   .sub{ margin:0 0 2px 0; font-size:10.8px; color:#000; white-space:pre-wrap }
 
   .subtotal{ margin-top:2mm; color:#000 }
   .total{ font-weight:900; font-size:16px; margin:1mm 0; color:#000 }
 
+  /* Sello solo si es prepago */
   .badge{ margin:2mm 0; text-align:center; font-weight:900; font-size:16px;
           border:2px solid #000; border-radius:6px; padding:2px 6px; display:inline-block; color:#000 }
 
   .foot{ margin:3mm 0 2mm 0; font-size:10px; text-align:center; color:#000 }
-
   @media print{ .ticket{ break-inside:avoid; } }
 </style>
 </head>
