@@ -9,15 +9,12 @@
     :root{
       --primary:#2ecc71; --text:#111; --muted:#444; --bg:#f6f6f6; --card:#fff;
       --ring:#eaeaea; --shadow:0 12px 34px rgba(0,0,0,.10);
-      --font: Inter, system-ui, "Segoe UI", Roboto, Arial, "Helvetica Neue",
-              "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
-      --st-accepted:#FBC02D; --st-in_prep:#FB8C00; --st-ready:#00ACC1;
-      --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
+      --font: Inter, system-ui, "Segoe UI", Roboto, Arial, "Helvetica Neue", "Noto Sans", sans-serif;
+      --st-accepted:#FBC02D; --st-in_prep:#FB8C00; --st-ready:#00ACC1; --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
       --pay-pending:#FFA000; --pay-paid:#2ECC71;
     }
     *{box-sizing:border-box}
-    html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);
-      -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
     header{position:sticky;top:0;z-index:10;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .topbar{max-width:1100px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
     .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700}
@@ -96,6 +93,7 @@
 
   <script>
   window.addEventListener('DOMContentLoaded', () => {
+    /* ================= FIREBASE ================= */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -107,6 +105,7 @@
     try{ firebase.initializeApp(firebaseConfig); }catch(e){}
     const db = firebase.firestore();
 
+    /* ================= HELPERS ================= */
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "");
@@ -149,12 +148,54 @@
       },0);
     };
 
-    /* ===== UI básica ===== */
+    /* ================= SONIDO (con desbloqueo por gesto) ================= */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
+    let audioCtx = null;
+    let audioReady = false;
+
+    function getAudioCtx(){
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    }
+    async function ensureAudioReady(){
+      try{
+        const ctx = getAudioCtx();
+        if (ctx.state === 'suspended') { await ctx.resume(); }
+        audioReady = (ctx.state === 'running');
+      }catch(e){ audioReady = false; }
+      return audioReady;
+    }
+    function beepOnce(ctx, duration=0.28, freq=880, gain=0.7){
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type="square"; o.frequency.value=freq;
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(gain, ctx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+      o.start(); o.stop(ctx.currentTime + duration + 0.02);
+    }
+    async function playBeepTriple(){
+      if(!soundEnabled) return;
+      const ok = await ensureAudioReady();
+      if(!ok) return;
+      const ctx = getAudioCtx();
+      try{
+        beepOnce(ctx,0.28,900,0.8);
+        setTimeout(()=>beepOnce(ctx,0.28,900,0.8), 350);
+        setTimeout(()=>beepOnce(ctx,0.28,900,0.8), 700);
+      }catch(e){}
+    }
+    // Desbloquear audio al primer gesto del usuario
+    ['click','touchstart','keydown'].forEach(evt=>{
+      window.addEventListener(evt, ()=>{ if(!audioReady) ensureAudioReady(); }, { once:false, passive:true });
+    });
+
     const btnBell=$("#btnBell");
     const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
     updateBellUI();
-    btnBell.onclick=()=>{soundEnabled=!soundEnabled;localStorage.setItem("rb_bell_enabled",JSON.stringify(soundEnabled));updateBellUI();};
+    btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
+
+    /* ================= OTRAS ACCIONES ================= */
     $("#btnLogout").onclick=()=>{localStorage.clear();location.replace("login.html?reason=logout&next=pedido_local.html");};
 
     const tabs=$("#tabs"); let currentFilter="all", lastSnap=null, idToDoc=new Map();
@@ -243,9 +284,8 @@
       </div>`;
     }
 
-    /* ====== IMPRESIÓN 58mm — Extras con monto AL LADO ====== */
-    function openPrintForDoc(docSnap){
-      if(!docSnap) return;
+    /* ==================== TICKET HTML (layout acordado) ==================== */
+    function buildTicketHTML(docSnap){
       const o = docSnap.data();
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
@@ -286,11 +326,9 @@
           <div class="row name"><div class="l">${qty} × ${name}</div></div>
           ${it.fries ? `<div class="sub">• Papas: ${friesStr(it.fries)}</div>` : ''}
           <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
-
           ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>`:''}
           ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>`:''}
-          ${it.notes ? `<div class="sub">• OBSERVACIONES: ${it.notes}</div>` : ''}
-
+          ${it.notes ? `<div class="sub">• Nota: ${it.notes}</div>` : ''}
           <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
           <div class="sep"></div>
         `;
@@ -307,7 +345,7 @@
         },0);
       })();
 
-      const html = `
+      return `
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Ticket ${orderDisplay}</title>
 <style>
@@ -332,7 +370,7 @@
   .row.amount.final{ margin-top:3px; }
 
   .sub{ font-size:11px; margin:1px 0 0 2mm; }
-  .sub.ex{ white-space:nowrap; } /* extras en una sola línea con su monto */
+  .sub.ex{ white-space:nowrap; }
   .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
 
   .subtotal{ margin-top:2mm; }
@@ -361,15 +399,39 @@
 
     <div class="foot">${dateStr} — ${timeStr}</div>
   </div>
-  <script>window.print(); window.onafterprint=()=>window.close();<\/script>
+  <script>
+    window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); });
+  <\/script>
 </body>
 </html>`;
-      const w = window.open('', '_blank', 'width=420,height=600');
-      w.document.open(); w.document.write(html); w.document.close();
-      try{ w.focus(); }catch(_){}
     }
 
-    /* ===== Listado y acciones ===== */
+    // Imprimir en iframe oculto (sin popups) — solo manual con botón
+    function printInIframe(docSnap){
+      const html = buildTicketHTML(docSnap);
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.setAttribute('aria-hidden','true');
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow.document;
+      doc.open(); doc.write(html); doc.close();
+
+      const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
+      iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150);
+      setTimeout(cleanup, 15000);
+    }
+
+    function trySilentPrint(docSnap){ printInIframe(docSnap); }
+
+    /* ================= SUSCRIPCIÓN (SIN auto-impresión) + BEEP ================= */
+    let initialLoaded = false;
+
     function renderList(snap){
       const docs=snap.docs.filter(d=>passFilter(d.data()));
       idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
@@ -381,7 +443,7 @@
         const payBtn=card.querySelector("[data-pay]");
         if(payBtn) payBtn.addEventListener("click",()=>setPaymentStatus(id,payBtn.dataset.pay==="paid"));
         const pr=card.querySelector("[data-print]");
-        if(pr) pr.addEventListener("click",()=>openPrintForDoc(idToDoc.get(id)));
+        if(pr) pr.addEventListener("click",()=> trySilentPrint(idToDoc.get(id)));
       });
     }
 
@@ -394,7 +456,15 @@
         q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
         q.limit(100).onSnapshot(snap=>{
           $("#ordersError").style.display="none"; $("#ordersError").textContent="";
-          lastSnap=snap; renderList(snap);
+          renderList(snap);
+
+          // Solo sonar en pedidos nuevos (después de la primera carga). NO imprime automáticamente.
+          snap.docChanges().forEach(ch=>{
+            if(ch.type==='added' && initialLoaded){
+              playBeepTriple();
+            }
+          });
+          initialLoaded = true;
         }, err=>{
           console.error(err);
           $("#ordersError").textContent="No se pudo cargar la lista de pedidos.";
