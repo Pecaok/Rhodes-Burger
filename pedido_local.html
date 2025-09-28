@@ -148,68 +148,37 @@
       },0);
     };
 
-    /* ================= SONIDO (con desbloqueo por gesto) ================= */
+    /* ================= SONIDO ================= */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
-    let audioCtx = null;
-    let audioReady = false;
-
-    function getAudioCtx(){
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      return audioCtx;
-    }
-    async function ensureAudioReady(){
-      try{
-        const ctx = getAudioCtx();
-        if (ctx.state === 'suspended') { await ctx.resume(); }
-        audioReady = (ctx.state === 'running');
-      }catch(e){ audioReady = false; }
-      return audioReady;
-    }
-    function beepOnce(ctx, duration=0.28, freq=880, gain=0.7){
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type="square"; o.frequency.value=freq;
-      o.connect(g); g.connect(ctx.destination);
-      g.gain.setValueAtTime(0.0001, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(gain, ctx.currentTime + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
-      o.start(); o.stop(ctx.currentTime + duration + 0.02);
-    }
-    async function playBeepTriple(){
-      if(!soundEnabled) return;
-      const ok = await ensureAudioReady();
-      if(!ok) return;
-      const ctx = getAudioCtx();
-      try{
-        beepOnce(ctx,0.28,900,0.8);
-        setTimeout(()=>beepOnce(ctx,0.28,900,0.8), 350);
-        setTimeout(()=>beepOnce(ctx,0.28,900,0.8), 700);
-      }catch(e){}
-    }
-    // Desbloquear audio al primer gesto del usuario
-    ['click','touchstart','keydown'].forEach(evt=>{
-      window.addEventListener(evt, ()=>{ if(!audioReady) ensureAudioReady(); }, { once:false, passive:true });
-    });
+    let audioCtx = null, audioReady = false;
+    function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
+    async function ensureAudioReady(){ try{ const ctx=getAudioCtx(); if(ctx.state==='suspended') await ctx.resume(); audioReady=(ctx.state==='running'); }catch(e){ audioReady=false; } return audioReady; }
+    function beepOnce(ctx, d=0.28, f=880, g=0.7){ const o=ctx.createOscillator(), ga=ctx.createGain(); o.type="square"; o.frequency.value=f; o.connect(ga); ga.connect(ctx.destination); ga.gain.setValueAtTime(0.0001, ctx.currentTime); ga.gain.exponentialRampToValueAtTime(g, ctx.currentTime+0.02); ga.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+d); o.start(); o.stop(ctx.currentTime+d+0.02); }
+    async function playBeepTriple(){ if(!soundEnabled) return; const ok=await ensureAudioReady(); if(!ok) return; const ctx=getAudioCtx(); beepOnce(ctx,0.28,900,0.8); setTimeout(()=>beepOnce(ctx,0.28,900,0.8),350); setTimeout(()=>beepOnce(ctx,0.28,900,0.8),700); }
+    ['click','touchstart','keydown'].forEach(evt=> window.addEventListener(evt, ()=>{ if(!audioReady) ensureAudioReady(); }, {passive:true}));
 
     const btnBell=$("#btnBell");
     const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
     updateBellUI();
     btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
 
-    /* ================= OTRAS ACCIONES ================= */
+    /* ================= ESTADO UI ================= */
     $("#btnLogout").onclick=()=>{localStorage.clear();location.replace("login.html?reason=logout&next=pedido_local.html");};
 
     const tabs=$("#tabs"); let currentFilter="all", lastSnap=null, idToDoc=new Map();
+
     tabs.addEventListener("click",(e)=>{
       const el=e.target.closest("[data-f]"); if(!el) return;
-      currentFilter=el.dataset.f;
+      currentFilter = el.dataset.f;
       tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
       el.classList.add("active");
-      if(lastSnap) renderList(lastSnap);
+      if (lastSnap) renderList(lastSnap);   // <-- re-render con el snapshot cacheado
     });
 
     const passFilter=o=> currentFilter==="all" ? true :
-      (currentFilter==="new" ? ((o.status??"accepted")==="accepted"||(o.status??"accepted")==="pending_payment")
-                             : (o.status??"")===currentFilter);
+      (currentFilter==="new"
+        ? ((o.status??"accepted")==="accepted" || (o.status??"accepted")==="pending_payment")
+        : (o.status??"")===currentFilter);
 
     async function setOrderStatus(id,next){
       try{
@@ -284,7 +253,7 @@
       </div>`;
     }
 
-    /* ==================== TICKET HTML (layout acordado) ==================== */
+    /* ==================== TICKET HTML (impresión manual) ==================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
@@ -406,7 +375,7 @@
 </html>`;
     }
 
-    // Imprimir en iframe oculto (sin popups) — solo manual con botón
+    // Imprimir en iframe oculto (botón manual)
     function printInIframe(docSnap){
       const html = buildTicketHTML(docSnap);
       const iframe = document.createElement('iframe');
@@ -435,7 +404,7 @@
     function renderList(snap){
       const docs=snap.docs.filter(d=>passFilter(d.data()));
       idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
-      $("#orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
+      document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
 
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
@@ -455,10 +424,13 @@
         let q=db.collection("orders");
         q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
         q.limit(100).onSnapshot(snap=>{
-          $("#ordersError").style.display="none"; $("#ordersError").textContent="";
+          // cachear snapshot para filtros
+          lastSnap = snap;                                 // <-- FIX principal
+          document.getElementById("ordersError").style.display="none";
+          document.getElementById("ordersError").textContent="";
           renderList(snap);
 
-          // Solo sonar en pedidos nuevos (después de la primera carga). NO imprime automáticamente.
+          // Beep sólo en pedidos nuevos después de la primera carga
           snap.docChanges().forEach(ch=>{
             if(ch.type==='added' && initialLoaded){
               playBeepTriple();
@@ -467,13 +439,13 @@
           initialLoaded = true;
         }, err=>{
           console.error(err);
-          $("#ordersError").textContent="No se pudo cargar la lista de pedidos.";
-          $("#ordersError").style.display="block";
+          document.getElementById("ordersError").textContent="No se pudo cargar la lista de pedidos.";
+          document.getElementById("ordersError").style.display="block";
         });
       }catch(err){
         console.error(err);
-        $("#ordersError").textContent="No se pudo inicializar la lista de pedidos.";
-        $("#ordersError").style.display="block";
+        document.getElementById("ordersError").textContent="No se pudo inicializar la lista de pedidos.";
+        document.getElementById("ordersError").style.display="block";
       }
     })();
   });
