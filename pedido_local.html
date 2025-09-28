@@ -243,7 +243,7 @@
       </div>`;
     }
 
-    /* ====== IMPRESIÓN 58mm — Extras con monto AL LADO ====== */
+    /* ================= IMPRESIÓN 58mm (igual al formato acordado) ================= */
     function openPrintForDoc(docSnap){
       if(!docSnap) return;
       const o = docSnap.data();
@@ -289,7 +289,7 @@
 
           ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>`:''}
           ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>`:''}
-          ${it.notes ? `<div class="sub">• OBSERVACIONES: ${it.notes}</div>` : ''}
+          ${it.notes ? `<div class="sub">• Nota: ${it.notes}</div>` : ''}
 
           <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
           <div class="sep"></div>
@@ -332,7 +332,7 @@
   .row.amount.final{ margin-top:3px; }
 
   .sub{ font-size:11px; margin:1px 0 0 2mm; }
-  .sub.ex{ white-space:nowrap; } /* extras en una sola línea con su monto */
+  .sub.ex{ white-space:nowrap; }
   .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
 
   .subtotal{ margin-top:2mm; }
@@ -364,12 +364,16 @@
   <script>window.print(); window.onafterprint=()=>window.close();<\/script>
 </body>
 </html>`;
+      // abrir y mandar a imprimir
       const w = window.open('', '_blank', 'width=420,height=600');
       w.document.open(); w.document.write(html); w.document.close();
       try{ w.focus(); }catch(_){}
     }
 
-    /* ===== Listado y acciones ===== */
+    /* ================= Suscripción + Impresión Automática ================= */
+    let initialLoaded = false;
+    const printedIds = new Set();
+
     function renderList(snap){
       const docs=snap.docs.filter(d=>passFilter(d.data()));
       idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
@@ -394,7 +398,22 @@
         q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
         q.limit(100).onSnapshot(snap=>{
           $("#ordersError").style.display="none"; $("#ordersError").textContent="";
-          lastSnap=snap; renderList(snap);
+          renderList(snap);
+
+          // IMPRESIÓN AUTOMÁTICA: imprimir sólo pedidos nuevos después de la primera carga
+          snap.docChanges().forEach(ch=>{
+            if(ch.type==='added'){
+              const id = ch.doc.id;
+              if (initialLoaded && !printedIds.has(id)) {
+                printedIds.add(id);
+                openPrintForDoc(ch.doc);
+              } else {
+                // Marcar los que ya estaban para no reimprimir
+                printedIds.add(id);
+              }
+            }
+          });
+          initialLoaded = true;
         }, err=>{
           console.error(err);
           $("#ordersError").textContent="No se pudo cargar la lista de pedidos.";
