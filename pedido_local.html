@@ -23,20 +23,18 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600}
     .btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
     .danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
-
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
 
-    .jornada{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
-    .jornada .pill{background:#f3f3f3;border:1px solid var(--ring);border-radius:999px;padding:6px 10px;font-size:13px}
-    .jornada input[type="date"]{border:1px solid var(--ring);border-radius:10px;padding:6px 8px}
-    .jornada .btn-sm{padding:6px 10px;font-size:13px}
+    .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+    .badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ring);border-radius:999px;padding:6px 10px;background:#fff;font-weight:700}
+    .muted{color:var(--muted)}
+    input[type="date"]{padding:6px 10px;border:1px solid var(--ring);border-radius:10px;background:#fff}
 
-    .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 6px}
+    .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
     .chipf{background:#f3f3f3;border:1px solid var(--ring);color:#111;border-radius:999px;padding:6px 10px;font-size:13px;cursor:pointer}
     .chipf.active{background:var(--primary);color:#fff;border-color:var(--primary)}
 
-    .muted{color:var(--muted)}
     .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
     .order-title{font-weight:800}
@@ -48,7 +46,6 @@
     .item .sub{color:#111;font-size:13px;margin-top:3px}
     .divider{height:1px;background:#efefef;margin:10px 0}
     .err{color:#b00020;font-weight:600}
-
     .stateBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
     .state-btn{border:2px solid #dcdcdc;background:#fff;color:#111;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;min-width:160px;text-align:center}
     .state-btn.on{color:#fff;border-color:var(--primary);background:var(--primary)}
@@ -65,7 +62,7 @@
 
     @media print{
       @page{size:A4 portrait;margin:12mm}
-      header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"],.jornada{display:none!important}
+      header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"],.toolbar{display:none!important}
       .order{break-inside:avoid;box-shadow:none;border:1px solid #eee}
     }
   </style>
@@ -85,22 +82,20 @@
     <h1>Últimos pedidos</h1>
 
     <!-- Jornada 19→19 -->
-    <div class="jornada">
-      <span class="pill">Jornada</span>
-      <button id="btnPrev" class="btn btn-sm" title="Anterior">◀</button>
-      <input type="date" id="dayPicker">
-      <button id="btnNext" class="btn btn-sm" title="Siguiente">▶</button>
-      <button id="btnGo" class="btn btn-sm">Ir</button>
-      <button id="btnToday" class="btn btn-sm">Hoy</button>
-      <span class="pill" id="rangeLabel">—</span>
+    <div class="toolbar">
+      <span class="badge">Jornada&nbsp;<input id="dayPicker" type="date"></span>
+      <button id="btnPrev" class="btn" title="Día anterior">◀</button>
+      <button id="btnNext" class="btn" title="Día siguiente">▶</button>
+      <button id="btnToday" class="btn">Hoy</button>
+      <span id="rangeLabel" class="badge muted">—</span>
     </div>
 
+    <!-- Filtros -->
     <div class="tabs" id="tabs">
       <span class="chipf active" data-f="all">Todos</span>
       <span class="chipf" data-f="new">Nuevos</span>
-      <span class="chipf" data-f="in_prep">En preparación</span>
-      <span class="chipf" data-f="delivered">Entregados</span>
-      <span class="chipf" data-f="cancelled_day">Cancelados</span>
+      <span class="chipf" data-f="inprep_group">En preparación</span>
+      <span class="chipf" data-f="cancelled">Cancelados</span>
       <span class="chipf" data-f="cancelled_hist">Cancelados (histórico)</span>
     </div>
 
@@ -113,55 +108,338 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-  window.addEventListener('DOMContentLoaded', () => {
-    /* ================= FIREBASE ================= */
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-      authDomain: "rhodes-burguers.firebaseapp.com",
-      projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-    };
-    try{ firebase.initializeApp(firebaseConfig); }catch(e){}
-    const db = firebase.firestore();
+  // ================== CONFIG & LOGIN ==================
+  const firebaseConfig = {
+    apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+    authDomain: "rhodes-burguers.firebaseapp.com",
+    projectId: "rhodes-burguers",
+    storageBucket: "rhodes-burguers.firebasestorage.app",
+    messagingSenderId: "951646688091",
+    appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+  };
+  try{ firebase.initializeApp(firebaseConfig); }catch(e){}
+  const db = firebase.firestore();
 
-    /* ================= HELPERS ================= */
-    const $ = s => document.querySelector(s);
-    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "");
+  const $ = s => document.querySelector(s);
 
-    // Estados
-    const STATE_SEQ   = ['accepted','in_prep','ready','delivered','cancelled'];
-    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
-    const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
+  $("#btnLogout").onclick=()=>{
+    localStorage.clear();
+    sessionStorage.clear();
+    location.replace("login.html?reason=logout&next=pedido_local.html");
+  };
 
-    // Fecha de documento (auto-detección)
-    function pickDocDate(obj){
-      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
-      for(const k of cand){
-        const v=obj[k];
-        if(v?.toDate) return v.toDate();
-        if(typeof v==='number') return new Date(v);
-        if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d; }
+  // ================== AUDIO (beep) ==================
+  let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
+  let audioCtx = null, audioReady = false;
+  function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
+  async function ensureAudioReady(){ try{ const ctx=getAudioCtx(); if(ctx.state==='suspended') await ctx.resume(); audioReady=(ctx.state==='running'); }catch(e){ audioReady=false; } return audioReady; }
+  function beepOnce(ctx, d=0.28, f=880, g=0.7){ const o=ctx.createOscillator(), ga=ctx.createGain(); o.type="square"; o.frequency.value=f; o.connect(ga); ga.connect(ctx.destination); ga.gain.setValueAtTime(0.0001, ctx.currentTime); ga.gain.exponentialRampToValueAtTime(g, ctx.currentTime+0.02); ga.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+d); o.start(); o.stop(ctx.currentTime+d+0.02); }
+  async function playBeepTriple(){ if(!soundEnabled) return; const ok=await ensureAudioReady(); if(!ok) return; const ctx=getAudioCtx(); beepOnce(ctx,0.28,900,0.8); setTimeout(()=>beepOnce(ctx,0.28,900,0.8),350); setTimeout(()=>beepOnce(ctx,0.28,900,0.8),700); }
+  ['click','touchstart','keydown'].forEach(evt=> window.addEventListener(evt, ()=>{ if(!audioReady) ensureAudioReady(); }, {passive:true}));
+  const btnBell=$("#btnBell");
+  const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
+  updateBellUI();
+  btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
+
+  // ================== FECHA (jornada 19→19) ==================
+  const dayPicker = $("#dayPicker");
+  const rangeLabel = $("#rangeLabel");
+  const J_START_H = 19; // 19:00
+
+  function yyyy_mm_dd(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+  function startOfJornada(d){
+    // si la hora < 19, pertenece a la jornada que empezó el día anterior a las 19
+    const base = new Date(d);
+    const sameDayStart = new Date(base.getFullYear(), base.getMonth(), base.getDate(), J_START_H, 0, 0, 0);
+    if (base < sameDayStart) sameDayStart.setDate(sameDayStart.getDate()-1);
+    return sameDayStart;
+  }
+  function rangeForDay(d){
+    const start = startOfJornada(d);
+    const end = new Date(start); end.setDate(end.getDate()+1); // +24h
+    return {start,end};
+  }
+  function month19RangeFromAny(d){
+    // desde 19:00 del día 1 hasta 19:00 del día 1 del mes siguiente
+    const y = d.getFullYear(), m = d.getMonth();
+    const start = new Date(y,m,1,J_START_H,0,0,0);
+    const end = new Date(y,m+1,1,J_START_H,0,0,0);
+    return {start,end};
+  }
+
+  // Estado actual de filtros
+  const tabs=$("#tabs");
+  let currentFilter="all";
+  tabs.addEventListener("click",(e)=>{
+    const el=e.target.closest("[data-f]"); if(!el) return;
+    currentFilter = el.dataset.f;
+    tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+    el.classList.add("active");
+    refreshQuery(); // re-suscribir
+  });
+
+  // Picker & navegación
+  (function initDay(){
+    const today = new Date();
+    try{ dayPicker.value = yyyy_mm_dd(today); }catch(_){}
+    $("#btnToday").onclick = ()=>{ dayPicker.value = yyyy_mm_dd(new Date()); refreshQuery(); };
+    $("#btnPrev").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()-1); dayPicker.value = yyyy_mm_dd(d); refreshQuery(); };
+    $("#btnNext").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()+1); dayPicker.value = yyyy_mm_dd(d); refreshQuery(); };
+    dayPicker.addEventListener("change", refreshQuery);
+  })();
+
+  // ================== RENDER ORDENES ==================
+  const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
+  const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
+  const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
+  const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "");
+  const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+
+  function pickDocDate(obj){
+    const cand=['createdAt','created_at','timestamp','date','fecha','time'];
+    for(const k of cand){
+      const v=obj[k];
+      if(v?.toDate) return v.toDate();
+      if(typeof v==='number') return new Date(v);
+      if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d; }
+    }
+    return null;
+  }
+  function chooseDateField(obj){
+    const cand=['createdAt','created_at','timestamp','date','fecha','time'];
+    for(const k of cand){ if(obj && obj[k]!=null) return k; }
+    return null;
+  }
+  function displayOrderNumber(doc){
+    const o=doc.data();
+    const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+    for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
+    return `#${doc.id.slice(-5).toUpperCase()}`;
+  }
+  const computeOrderTotal = o => {
+    if (typeof o.total === "number") return o.total;
+    const items = Array.isArray(o.items)?o.items:[];
+    return items.reduce((t,it)=>{
+      const qty = it.qty||1;
+      const base = (it.price||0)*qty;
+      const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty;
+      const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
+      return t + base + patty + cheddar;
+    },0);
+  };
+
+  function renderOrder(doc){
+    const o=doc.data(); const dt=pickDocDate(o);
+    const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
+    const items=Array.isArray(o.items)?o.items:[];
+    const lines=items.map(it=>{
+      const qty=it.qty||1;
+      const subtotal=(it.price||0)*qty
+        + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
+        + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
+      return `<div class="item">
+        <div>• <strong>${qty}× ${it.name||''}</strong></div>
+        <div class="sub">Papas: ${friesName(it.fries)}${it.notes?` · Nota: ${it.notes}`:''}</div>
+        <div class="sub">Subtotal: ${money(subtotal)}</div>
+      </div>`;
+    }).join("");
+
+    const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
+    const st=o.status??"accepted";
+    const curIdx=Math.max(STATE_SEQ.indexOf(st),0);
+    const stateBtns=`<div class="stateBtns">
+      ${STATE_SEQ.map((key,idx)=>`<button class="state-btn state-${key} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
+    </div>`;
+
+    const paymentPaid=(o.payment_status==='paid'||o.paid);
+    const payLine=`<div class="pay-line">
+      <span class="chip">Pago: ${o.pago||'—'}</span>
+      <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}</span>
+      <button class="btn" data-pay="${paymentPaid?'pending':'paid'}" style="margin-left:6px">${paymentPaid?'⏳ Marcar PENDIENTE':'✓ Marcar PAGADO'}</button>
+      <button class="btn" data-print>🖨 Imprimir</button>
+    </div>`;
+
+    return `<div class="order" data-id="${doc.id}">
+      <div class="order-head">
+        <div>
+          <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
+          <div class="muted">${dtText}</div>
+          <div class="chips">
+            <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
+            <span class="chip">Estado: ${st}</span>
+            <span class="chip">Retiro: ${o.entrega||'—'}</span>
+            ${telChip}
+          </div>
+          ${stateBtns}
+        </div>
+        <div>
+          <div class="right-total">${money(computeOrderTotal(o))}</div>
+          ${payLine}
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
+    </div>`;
+  }
+
+  // ================== ACCIONES ==================
+  async function setOrderStatus(id,next){
+    try{
+      await db.collection("orders").doc(id).update({
+        status: next,
+        statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()})
+      });
+    }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
+  }
+  async function setPaymentStatus(id, paid){
+    try{
+      await db.collection("orders").doc(id).update({
+        paid: !!paid,
+        payment_status: paid ? "paid" : "pending_payment",
+        statusHistory: firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()})
+      });
+    }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
+  }
+
+  // ================== SUSCRIPCIÓN ==================
+  let unsub = null;               // <<< FIX: declarada antes de usarse
+  let lastSnap=null, idToDoc=new Map();
+  let initialLoaded=false;
+
+  function updateRangeLabel(start,end){
+    const fmt = new Intl.DateTimeFormat('es-AR',{dateStyle:'medium', timeStyle:'short'});
+    $("#rangeLabel").textContent = `Mostrando: ${fmt.format(start)} → ${fmt.format(end)}`;
+  }
+
+  function passFilterLocal(o){
+    if(currentFilter==="all") return true;
+    if(currentFilter==="new"){
+      const s = (o.status??"accepted");
+      return (s==="accepted" || s==="pending_payment");
+    }
+    if(currentFilter==="inprep_group"){
+      const s = (o.status||"");
+      return (s==="in_prep" || s==="ready" || s==="delivered");
+    }
+    if(currentFilter==="cancelled"){
+      return (o.status==="cancelled");
+    }
+    if(currentFilter==="cancelled_hist"){
+      return (o.status==="cancelled");
+    }
+    return true;
+  }
+
+  function renderList(snap){
+    const docs=snap.docs.filter(d=>passFilterLocal(d.data()));
+    idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
+    $("#orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
+
+    document.querySelectorAll(".order").forEach(card=>{
+      const id=card.dataset.id;
+      card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
+      const payBtn=card.querySelector("[data-pay]");
+      if(payBtn) payBtn.addEventListener("click",()=>setPaymentStatus(id,payBtn.dataset.pay==="paid"));
+      const pr=card.querySelector("[data-print]");
+      if(pr) pr.addEventListener("click",()=> printInIframe(idToDoc.get(id)));
+    });
+  }
+
+  function refreshQuery(){
+    // cancelar listener previo si existe
+    if (typeof unsub === "function") { try{unsub();}catch(_){ } }
+    initialLoaded=false;
+
+    const picked = new Date($("#dayPicker").value+'T12:00:00'); // medio día para evitar TZ edge
+    let range;
+
+    if(currentFilter==="cancelled_hist"){
+      // mes histórico (19→19)
+      range = month19RangeFromAny(picked);
+    }else{
+      // jornada diaria (19→19)
+      range = rangeForDay(picked);
+    }
+
+    updateRangeLabel(range.start, range.end);
+
+    // Query: por rango de fecha y orderBy createdAt (single-field)
+    // Si no existe el campo, caemos al orderBy por documentId (sin filtro de rango).
+    (async ()=>{
+      const probe = await db.collection("orders").limit(1).get();
+      let dateField = null;
+      if (!probe.empty){ dateField = chooseDateField(probe.docs[0].data()); }
+
+      let q = db.collection("orders");
+      if(dateField){
+        q = q.where(dateField, ">=", range.start).where(dateField, "<", range.end).orderBy(dateField, "desc");
+      }else{
+        q = q.orderBy(firebase.firestore.FieldPath.documentId());
       }
-      return null;
-    }
-    function chooseDateField(obj){
-      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
-      for(const k of cand){ if(obj && obj[k]!=null) return k; }
-      return null;
-    }
-    function displayOrderNumber(doc){
-      const o=doc.data();
+
+      unsub = q.limit(200).onSnapshot(snap=>{
+        $("#ordersError").style.display="none";
+        $("#ordersError").textContent="";
+        lastSnap = snap;
+        renderList(snap);
+
+        // Beep en pedidos nuevos después de la primera carga
+        snap.docChanges().forEach(ch=>{
+          if(ch.type==='added' && initialLoaded){
+            playBeepTriple();
+          }
+        });
+        initialLoaded = true;
+      }, err=>{
+        console.error(err);
+        $("#ordersError").textContent="No se pudo cargar la lista de pedidos.";
+        $("#ordersError").style.display="block";
+      });
+    })();
+  }
+
+  // ==================== TICKET (impresión) ====================
+  function buildTicketHTML(docSnap){
+    const o = docSnap.data();
+    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const orderDisplay = (()=> {
       const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
       for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
-      return `#${doc.id.slice(-5).toUpperCase()}`;
-    }
+      return `#${docSnap.id.slice(-5).toUpperCase()}`;
+    })();
+    const dt=(()=>{ const k=['createdAt','created_at','timestamp','date','fecha','time'];
+      for(const kk of k){ const v=o[kk]; if(v?.toDate) return v.toDate(); if(typeof v==='number') return new Date(v); if(typeof v==='string'){const d=new Date(v); if(!isNaN(d)) return d;} }
+      return new Date();})();
+    const dateStr = dt.toLocaleDateString('es-AR');
+    const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
+    const items = Array.isArray(o.items)?o.items:[];
+    const friesStr = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "");
 
-    const computeOrderTotal = o => {
-      if (typeof o.total === "number") return o.total;
-      const items = Array.isArray(o.items)?o.items:[];
+    const linesHTML = items.map(it=>{
+      const qty = it.qty||1;
+      const base = (it.price||0);
+      const pattyCount = it.extras?.patty||0;
+      const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||0;
+      const pattySum   = qty * pattyCount * pattyUnit;
+      const cheddarCount = it.extras?.cheddar||0;
+      const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||0;
+      const cheddarSum   = qty * cheddarCount * cheddarUnit;
+      const baseSubtotal = base * qty;
+      const lineTotal    = baseSubtotal + pattySum + cheddarSum;
+      return `
+        <div class="row name"><div class="l">${qty} × ${it.name||''}</div></div>
+        ${it.fries ? `<div class="sub">• Papas: ${friesStr(it.fries)}</div>` : ''}
+        <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
+        ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>`:''}
+        ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>`:''}
+        ${it.notes ? `<div class="sub">• Nota: ${it.notes}</div>` : ''}
+        <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
+        <div class="sep"></div>
+      `;
+    }).join('') || '<div class="sub">Sin ítems.</div>';
+
+    const total = (()=>{
+      if(typeof o.total==='number') return o.total;
       return items.reduce((t,it)=>{
         const qty = it.qty||1;
         const base = (it.price||0)*qty;
@@ -169,199 +447,9 @@
         const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
         return t + base + patty + cheddar;
       },0);
-    };
-
-    /* ================= SONIDO ================= */
-    let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
-    let audioCtx = null, audioReady = false;
-    function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
-    async function ensureAudioReady(){ try{ const ctx=getAudioCtx(); if(ctx.state==='suspended') await ctx.resume(); audioReady=(ctx.state==='running'); }catch(e){ audioReady=false; } return audioReady; }
-    function beepOnce(ctx, d=0.28, f=880, g=0.7){ const o=ctx.createOscillator(), ga=ctx.createGain(); o.type="square"; o.frequency.value=f; o.connect(ga); ga.connect(ctx.destination); ga.gain.setValueAtTime(0.0001, ctx.currentTime); ga.gain.exponentialRampToValueAtTime(g, ctx.currentTime+0.02); ga.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+d); o.start(); o.stop(ctx.currentTime+d+0.02); }
-    async function playBeepTriple(){ if(!soundEnabled) return; const ok=await ensureAudioReady(); if(!ok) return; const ctx=getAudioCtx(); beepOnce(ctx,0.28,900,0.8); setTimeout(()=>beepOnce(ctx,0.28,900,0.8),350); setTimeout(()=>beepOnce(ctx,0.28,900,0.8),700); }
-    ['click','touchstart','keydown'].forEach(evt=> window.addEventListener(evt, ()=>{ if(!audioReady) ensureAudioReady(); }, {passive:true}));
-
-    const btnBell=$("#btnBell");
-    const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
-    updateBellUI();
-    btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
-
-    /* ================= SESIÓN ================= */
-    $("#btnLogout").onclick=()=>{localStorage.clear();location.replace("login.html?reason=logout&next=pedido_local.html");};
-
-    /* ================= JORNADA 19→19 ================= */
-    const dayPicker = $("#dayPicker");
-    const rangeLabel = $("#rangeLabel");
-    function toISODate(d){ return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); }
-    function dayStart19(d){ const a=new Date(d); a.setHours(19,0,0,0); return a; }
-    function nextDay(d){ const n=new Date(d); n.setDate(n.getDate()+1); return n; }
-
-    // inicial: hoy
-    (function initDay(){
-      const today = new Date();
-      dayPicker.value = toISODate(today);
-      updateRangeLabel();
     })();
 
-    function selectedRange(){
-      const d = new Date(dayPicker.value+'T00:00:00');
-      const start = dayStart19(d);
-      const end   = dayStart19(nextDay(d));
-      return {start,end};
-    }
-    function updateRangeLabel(){
-      const {start,end} = selectedRange();
-      const fmt = new Intl.DateTimeFormat('es-AR',{dateStyle:'medium', timeStyle:'short'});
-      rangeLabel.textContent = `Mostrando: ${fmt.format(start)} → ${fmt.format(end)}`;
-      // refrescar lista si ya hay suscripción
-      if (unsub) { unsub(); subscribeOrders(); }
-    }
-
-    $("#btnToday").onclick = ()=>{ dayPicker.value = toISODate(new Date()); updateRangeLabel(); };
-    $("#btnGo").onclick    = updateRangeLabel;
-    $("#btnPrev").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()-1); dayPicker.value=toISODate(d); updateRangeLabel(); };
-    $("#btnNext").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()+1); dayPicker.value=toISODate(d); updateRangeLabel(); };
-
-    /* ================= TABS / FILTROS ================= */
-    const tabs=$("#tabs"); let currentFilter="all";
-    tabs.addEventListener("click",(e)=>{
-      const el=e.target.closest("[data-f]"); if(!el) return;
-      currentFilter = el.dataset.f;
-      tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
-      el.classList.add("active");
-      if (unsub) { unsub(); subscribeOrders(); }
-    });
-
-    // Lógica del filtro (cliente) adicional
-    const isPrepLike = s => (s==='in_prep' || s==='ready' || s==='delivered');
-    const passFilter = o => {
-      const st = o.status ?? "accepted";
-      if (currentFilter === "all") return true;
-      if (currentFilter === "new") return (st==="accepted" || st==="pending_payment");
-      if (currentFilter === "in_prep") return isPrepLike(st);           // incluye in_prep + ready + delivered
-      if (currentFilter === "delivered") return st === "delivered";
-      if (currentFilter === "cancelled_day" || currentFilter === "cancelled_hist") return st === "cancelled";
-      return true;
-    };
-
-    /* ================= RENDER ================= */
-    function renderOrder(doc){
-      const o=doc.data(); const dt=pickDocDate(o);
-      const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
-      const items=Array.isArray(o.items)?o.items:[];
-      const lines=items.map(it=>{
-        const qty=it.qty||1;
-        const subtotal=(it.price||0)*qty
-          + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
-          + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
-        return `<div class="item">
-          <div>• <strong>${qty}× ${it.name||''}</strong></div>
-          <div class="sub">Papas: ${friesName(it.fries)}${it.notes?` · Nota: ${it.notes}`:''}</div>
-          <div class="sub">Subtotal: ${money(subtotal)}</div>
-        </div>`;
-      }).join("");
-
-      const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
-      const st=o.status??"accepted";
-      const curIdx=Math.max(STATE_SEQ.indexOf(st),0);
-
-      const btnStateClass=st=>`state-btn state-${st}`;
-      const stateBtns=`<div class="stateBtns">
-        ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
-      </div>`;
-
-      const paymentPaid=(o.payment_status==='paid'||o.paid);
-      const payLine=`<div class="pay-line">
-        <span class="chip">Pago: ${o.pago||'—'}</span>
-        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}</span>
-        <button class="btn" data-pay="${paymentPaid?'pending':'paid'}" style="margin-left:6px">${paymentPaid?'⏳ Marcar PENDIENTE':'✓ Marcar PAGADO'}</button>
-        <button class="btn" data-print>🖨 Imprimir</button>
-      </div>`;
-
-      return `<div class="order" data-id="${doc.id}">
-        <div class="order-head">
-          <div>
-            <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
-            <div class="muted">${dtText}</div>
-            <div class="chips">
-              <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
-              <span class="chip">Estado: ${st}</span>
-              <span class="chip">Retiro: ${o.entrega||'—'}</span>
-              ${telChip}
-            </div>
-            ${stateBtns}
-          </div>
-          <div>
-            <div class="right-total">${money(computeOrderTotal(o))}</div>
-            ${payLine}
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
-      </div>`;
-    }
-
-    /* ================= IMPRESIÓN ================= */
-    function buildTicketHTML(docSnap){
-      const o = docSnap.data();
-      const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-
-      const orderDisplay = (()=> {
-        const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
-        for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
-        return `#${docSnap.id.slice(-5).toUpperCase()}`;
-      })();
-
-      const dt=(()=>{
-        const k=['createdAt','created_at','timestamp','date','fecha','time'];
-        for(const kk of k){ const v=o[kk]; if(v?.toDate) return v.toDate(); if(typeof v==='number') return new Date(v); if(typeof v==='string'){const d=new Date(v); if(!isNaN(d)) return d;} }
-        return new Date();
-      })();
-      const dateStr = dt.toLocaleDateString('es-AR');
-      const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
-
-      const items = Array.isArray(o.items)?o.items:[];
-      const friesStr = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "");
-
-      const linesHTML = items.map(it=>{
-        const qty = it.qty||1;
-        const name = (it.name||'').toString();
-        const base = (it.price||0);
-
-        const pattyCount = it.extras?.patty||0;
-        const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||0;
-        const pattySum   = qty * pattyCount * pattyUnit;
-
-        const cheddarCount = it.extras?.cheddar||0;
-        const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||0;
-        const cheddarSum   = qty * cheddarCount * cheddarUnit;
-
-        const baseSubtotal = base * qty;
-        const lineTotal    = baseSubtotal + pattySum + cheddarSum;
-
-        return `
-          <div class="row name"><div class="l">${qty} × ${name}</div></div>
-          ${it.fries ? `<div class="sub">• Papas: ${friesStr(it.fries)}</div>` : ''}
-          <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
-          ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>`:''}
-          ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>`:''}
-          ${it.notes ? `<div class="sub">• Nota: ${it.notes}</div>` : ''}
-          <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
-          <div class="sep"></div>
-        `;
-      }).join('') || '<div class="sub">Sin ítems.</div>';
-
-      const total = (()=>{
-        if(typeof o.total==='number') return o.total;
-        return items.reduce((t,it)=>{
-          const qty = it.qty||1;
-          const base = (it.price||0)*qty;
-          const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty;
-          const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
-          return t + base + patty + cheddar;
-        },0);
-      })();
-
-      return `
+    return `
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Ticket ${orderDisplay}</title>
 <style>
@@ -376,23 +464,17 @@
   .hr{ border-top:1px solid #000; margin:4px 0 }
   .lbl{ font-size:11px; text-transform:uppercase; }
   .blk{ margin:2px 0 2mm 0; }
-
   .row{ display:flex; justify-content:space-between; gap:4px; }
   .row .l{ flex:1 1 auto; min-width:0; }
   .row .r{ flex:0 0 auto; text-align:right; min-width:18mm; padding-left:1.5mm; white-space:nowrap; }
-
   .row.name .r{ display:none; }
   .row.amount .l{ display:block; }
   .row.amount.final{ margin-top:3px; }
-
   .sub{ font-size:11px; margin:1px 0 0 2mm; }
   .sub.ex{ white-space:nowrap; }
   .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
-
   .subtotal{ margin-top:2mm; }
-  .subtotal .l{ font-size:11.5px; }
   .total{ font-size:16px; margin-top:3mm; }
-  .total .l{ font-size:13.5px; }
   .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
 </style>
 </head>
@@ -400,147 +482,34 @@
   <div class="ticket">
     <div class="c brand">Rhodes Burgers</div>
     <div class="orderNo c">${orderDisplay}</div>
-
     <div class="hr"></div>
-
     ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${o.nombre}</div></div>`:''}
     ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${(o.pago||o.payment_method)||''}</div></div>`:''}
-
     <div class="hr"></div>
     ${linesHTML}
     <div class="hr"></div>
-
-    <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${money(total)}</div></div>
     <div class="row total"><div class="l">TOTAL</div><div class="r">${money(total)}</div></div>
-
     <div class="foot">${dateStr} — ${timeStr}</div>
   </div>
-  <script>
-    window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); });
-  <\/script>
+  <script>window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); });<\/script>
 </body>
 </html>`;
-    }
-    function printInIframe(docSnap){
-      const html = buildTicketHTML(docSnap);
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
-      iframe.setAttribute('aria-hidden','true');
-      document.body.appendChild(iframe);
-      const doc = iframe.contentWindow.document;
-      doc.open(); doc.write(html); doc.close();
-      const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
-      iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150);
-      setTimeout(cleanup, 15000);
-    }
-    function trySilentPrint(docSnap){ printInIframe(docSnap); }
+  }
+  function printInIframe(docSnap){
+    const html = buildTicketHTML(docSnap);
+    const iframe = document.createElement('iframe');
+    Object.assign(iframe.style,{position:'fixed',right:'0',bottom:'0',width:'0',height:'0',border:'0'});
+    iframe.setAttribute('aria-hidden','true');
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+    const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
+    iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150);
+    setTimeout(cleanup, 15000);
+  }
 
-    /* ================= SUSCRIPCIÓN FIRESTORE ================= */
-    let unsub = null;
-
-    function renderList(snap){
-      const docs = snap.docs
-        .filter(d=>passFilter(d.data()))
-        .sort((a,b)=>{
-          const da = pickDocDate(a.data());
-          const db = pickDocDate(b.data());
-          return (db?.getTime()||0) - (da?.getTime()||0);
-        });
-
-      document.getElementById("orders").innerHTML =
-        docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
-
-      // bind botones de cada card
-      const idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
-      document.querySelectorAll(".order").forEach(card=>{
-        const id=card.dataset.id;
-        card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
-        const payBtn=card.querySelector("[data-pay]");
-        if(payBtn) payBtn.addEventListener("click",()=>setPaymentStatus(id,payBtn.dataset.pay==="paid"));
-        const pr=card.querySelector("[data-print]");
-        if(pr) pr.addEventListener("click",()=> trySilentPrint(idToDoc.get(id)));
-      });
-    }
-
-    async function setOrderStatus(id,next){
-      try{
-        await db.collection("orders").doc(id).update({
-          status: next,
-          statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()})
-        });
-      }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
-    }
-    async function setPaymentStatus(id, paid){
-      try{
-        await db.collection("orders").doc(id).update({
-          paid: !!paid,
-          payment_status: paid ? "paid" : "pending_payment",
-          statusHistory: firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()})
-        });
-      }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
-    }
-
-    function subscribeOrders(){
-      const ordersEl = document.getElementById("orders");
-      ordersEl.innerHTML = '<p class="muted">Cargando…</p>';
-
-      // probe para saber el campo de fecha
-      db.collection("orders").limit(1).get().then(probe=>{
-        let dateField=null;
-        if(!probe.empty) dateField = chooseDateField(probe.docs[0].data());
-
-        const {start,end} = selectedRange();
-        let q = db.collection("orders");
-
-        if (currentFilter === 'cancelled_hist') {
-          // Histórico cancelados (sin rango) — requiere índice compuesto: status + <fecha>
-          q = q.where('status','==','cancelled');
-          if (dateField) q = q.orderBy(dateField,'desc');
-          else q = q.orderBy(firebase.firestore.FieldPath.documentId());
-        } else {
-          // Jornada 19→19 con rango por fecha
-          if (dateField) {
-            q = q.where(dateField, '>=', start)
-                 .where(dateField, '<', end)
-                 .orderBy(dateField,'desc');
-          } else {
-            // fallback por id si no hay fecha detectable
-            q = q.orderBy(firebase.firestore.FieldPath.documentId());
-          }
-
-          // Para Cancelados de la jornada, acotamos por estado
-          if (currentFilter === 'cancelled_day') {
-            q = q.where('status','==','cancelled');
-          }
-        }
-
-        if (unsub) { try{unsub();}catch(_){} }
-        unsub = q.limit(200).onSnapshot(snap=>{
-          document.getElementById("ordersError").style.display="none";
-          document.getElementById("ordersError").textContent="";
-          renderList(snap);
-        }, err=>{
-          console.error(err);
-          const box=document.getElementById("ordersError");
-          box.textContent="No se pudo cargar la lista de pedidos.";
-          box.style.display="block";
-        });
-      }).catch(err=>{
-        console.error(err);
-        const box=document.getElementById("ordersError");
-        box.textContent="No se pudo inicializar la lista de pedidos.";
-        box.style.display="block";
-      });
-    }
-
-    // Primera suscripción
-    subscribeOrders();
-  });
+  // ================== ARRANQUE ==================
+  refreshQuery();
   </script>
 </body>
 </html>
