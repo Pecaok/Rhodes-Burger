@@ -57,7 +57,7 @@
     .order.cancelled .order-title{text-decoration:line-through}
     @media print{
       @page{size:A4 portrait;margin:12mm}
-      header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"]{display:none!important}
+      header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"],#svcBar{display:none!important}
       .order{break-inside:avoid;box-shadow:none;border:1px solid #eee}
     }
   </style>
@@ -76,12 +76,22 @@
   <main class="container">
     <h1>Últimos pedidos</h1>
 
-    <!-- Filtros: Nuevos, En preparación (incluye ready + delivered), Cancelados, Todos -->
+    <!-- Barra de jornada 19:00→19:00 -->
+    <div id="svcBar" class="row" style="gap:10px;align-items:center;margin-top:-6px">
+      <label class="muted" for="svcDate" style="font-weight:700">Jornada</label>
+      <input id="svcDate" type="date" />
+      <button id="svcGo" class="btn">Ir</button>
+      <button id="svcToday" class="btn">Hoy</button>
+      <span class="muted" id="svcHint"></span>
+    </div>
+
+    <!-- Filtros -->
     <div class="tabs" id="tabs">
-      <span class="chipf active" data-f="new">Nuevos</span>
+      <span class="chipf active" data-f="all">Todos</span>
+      <span class="chipf" data-f="new">Nuevos</span>
       <span class="chipf" data-f="in_prep">En preparación</span>
-      <span class="chipf" data-f="cancelled">Cancelados</span>
-      <span class="chipf" data-f="all">Todos</span>
+      <span class="chipf" data-f="delivered">Entregados</span>
+      <span class="chipf" data-f="cancelled">Cancelados (histórico)</span>
     </div>
 
     <div id="orders"></div>
@@ -149,6 +159,30 @@
       },0);
     };
 
+    /* ====== Jornada 19:00 → 19:00 ====== */
+    function getServiceWindowFromBase(dayBase){
+      const start = new Date(dayBase);
+      start.setHours(19,0,0,0);
+      const end = new Date(start); end.setDate(end.getDate()+1);
+      return { start, end };
+    }
+    function getLocalISODate(d=new Date()){
+      const k = new Date(d.getTime() - d.getTimezoneOffset()*60000);
+      return k.toISOString().slice(0,10);
+    }
+    function parseDateInput(val){
+      if(!val) return null;
+      const [Y,M,D] = val.split('-').map(Number);
+      if(!Y||!M||!D) return null;
+      const d = new Date(); d.setFullYear(Y, M-1, D); d.setHours(0,0,0,0);
+      return d;
+    }
+    function renderServiceHint(start,end){
+      const fmt = (d)=> d.toLocaleString('es-AR',{dateStyle:'medium', timeStyle:'short'});
+      const el = document.getElementById('svcHint');
+      if(el) el.textContent = `Mostrando: ${fmt(start)} → ${fmt(end)}`;
+    }
+
     /* ================= SONIDO ================= */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let audioCtx = null, audioReady = false;
@@ -166,36 +200,34 @@
     /* ================= ESTADO UI ================= */
     $("#btnLogout").onclick=()=>{localStorage.clear();location.replace("login.html?reason=logout&next=pedido_local.html");};
 
-    const tabs=$("#tabs");
-    let currentFilter="new", lastSnap=null, idToDoc=new Map();
+    const tabs=$("#tabs"); let currentFilter="all", lastSnap=null, idToDoc=new Map();
+
+    // Filtro de estados (el recorte por fecha lo hace Firestore en la query)
+    const passFilter = o => {
+      const s = o.status ?? "accepted";
+      if (currentFilter === "new") {
+        return s === "accepted" || s === "pending_payment";
+      }
+      if (currentFilter === "in_prep") {
+        return s === "in_prep" || s === "ready" || s === "delivered";
+      }
+      if (currentFilter === "delivered") {
+        return s === "delivered";
+      }
+      if (currentFilter === "cancelled") {
+        return s === "cancelled";
+      }
+      return true; // all
+    };
 
     tabs.addEventListener("click",(e)=>{
       const el=e.target.closest("[data-f]"); if(!el) return;
       currentFilter = el.dataset.f;
       tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
       el.classList.add("active");
-      if (lastSnap) renderList(lastSnap);
+      // re-suscribir con filtro nuevo
+      subscribeOrders();
     });
-
-    // Filtros:
-    // - new: accepted + pending_payment
-    // - in_prep: in_prep + ready + delivered
-    // - cancelled: cancelled
-    // - all: todos
-    const passFilter=o=>{
-      const status = o.status ?? "accepted";
-      if(currentFilter==="new"){
-        return status==="accepted" || status==="pending_payment";
-      }
-      if(currentFilter==="in_prep"){
-        return status==="in_prep" || status==="ready" || status==="delivered";
-      }
-      if(currentFilter==="cancelled"){
-        return status==="cancelled";
-      }
-      // 'all'
-      return true;
-    };
 
     async function setOrderStatus(id,next){
       try{
@@ -247,7 +279,7 @@
         <button class="btn" data-print>🖨 Imprimir</button>
       </div>`;
 
-      return `<div class="order" data-id="${doc.id}">
+      return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
         <div class="order-head">
           <div>
             <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
@@ -275,7 +307,7 @@
       const o = docSnap.data();
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-      const orderDisplay = (()=>{
+      const orderDisplay = (()=> {
         const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
         for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
         return `#${docSnap.id.slice(-5).toUpperCase()}`;
@@ -415,9 +447,8 @@
 
     function trySilentPrint(docSnap){ printInIframe(docSnap); }
 
-    /* ================= SUSCRIPCIÓN (SIN auto-impresión) + BEEP ================= */
+    /* ================= RENDER & SUSCRIPCIÓN ================= */
     let initialLoaded = false;
-
     function renderList(snap){
       const docs=snap.docs.filter(d=>passFilter(d.data()));
       idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
@@ -433,21 +464,49 @@
       });
     }
 
-    (async function subscribeOrders(){
+    let unsub = null;
+
+    async function subscribeOrders(){
       try{
         const probe=await db.collection("orders").limit(1).get();
         let dateField=null;
         if(!probe.empty) dateField = chooseDateField(probe.docs[0].data());
+
+        // Base de jornada
+        const baseInput = document.getElementById('svcDate');
+        const base = parseDateInput(baseInput && baseInput.value) || new Date();
+        const { start, end } = getServiceWindowFromBase(base);
+        renderServiceHint(start,end);
+
+        // Construir query
         let q=db.collection("orders");
-        q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
-        q.limit(100).onSnapshot(snap=>{
-          // cachear snapshot para filtros
+
+        if (currentFilter === "cancelled") {
+          // Histórico cancelados (sin recorte por jornada)
+          if (dateField) q = q.orderBy(dateField,'desc');
+          else q = q.orderBy(firebase.firestore.FieldPath.documentId());
+          q = q.where('status','==','cancelled');
+        } else {
+          // Recorte de jornada 19→19
+          if (dateField) {
+            q = q.where(dateField, '>=', start)
+                 .where(dateField, '<', end)
+                 .orderBy(dateField,'desc');
+          } else {
+            q = q.orderBy(firebase.firestore.FieldPath.documentId());
+          }
+          // Opcional: podés acotar por estado en la query para reducir tráfico
+          // (dejamos el filtro en memoria para mantenerlo simple)
+        }
+
+        // Reemplazar listener
+        if (typeof unsub === 'function') { try{ unsub(); }catch(_){} }
+        unsub = q.limit(200).onSnapshot(snap=>{
           lastSnap = snap;
           document.getElementById("ordersError").style.display="none";
           document.getElementById("ordersError").textContent="";
           renderList(snap);
 
-          // Beep sólo en pedidos nuevos después de la primera carga
           snap.docChanges().forEach(ch=>{
             if(ch.type==='added' && initialLoaded){
               playBeepTriple();
@@ -464,7 +523,24 @@
         document.getElementById("ordersError").textContent="No se pudo inicializar la lista de pedidos.";
         document.getElementById("ordersError").style.display="block";
       }
+    }
+
+    // Jornada: setear hoy por defecto
+    (function initSvcDate(){
+      const el = document.getElementById('svcDate');
+      if (el) el.value = getLocalISODate(new Date());
     })();
+
+    // Botones jornada
+    document.getElementById('svcGo')?.addEventListener('click', ()=> subscribeOrders());
+    document.getElementById('svcToday')?.addEventListener('click', ()=>{
+      const el = document.getElementById('svcDate');
+      if (el) el.value = getLocalISODate(new Date());
+      subscribeOrders();
+    });
+
+    // Primera carga
+    subscribeOrders();
   });
   </script>
 </body>
