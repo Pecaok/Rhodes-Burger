@@ -8,7 +8,7 @@
   <style>
     :root{
       /* Paleta general */
-      --primary:#645E52;
+      --primary:#625A45;
       --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
       --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.08); --ring:#eaeaea;
     }
@@ -33,7 +33,7 @@
     }
     .status-pill .status-main{font-weight:800}
     .status-pill .status-sub{font-weight:600}
-    .status-open{ background:#ECE7DD; border-color:#DCD4C3; color:#645E52;}
+    .status-open{ background:#ECE7DD; border-color:#DCD4C3; color:#625A45;}
     .status-closed{ background:#f7f7f7; border-color:#eaeaea; color:#444;}
 
     .spacer{flex:1}
@@ -233,29 +233,45 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 
+  <!-- Horarios: Lunes/Martes como estaban; Mié–Dom 19:00–24:00 -->
   <script>
-    /* ===== Horarios de ejemplo ===== */
+    /* Estructura HOURS: 0=Dom ... 6=Sáb
+       En tu snippet original, Lunes(1) y Martes(2) estaban vacíos (cerrado).
+       Mantenemos eso y abrimos 19:00–24:00 el resto. */
     const HOURS = {
-      0: [[19,0, 00,00]], 1: [], 2: [],
-      3: [[19,0, 00,00]],
-      4: [[19,0, 00,00]],
-      5: [[19,0, 00,00]],
-      6: [[19,0, 00,00]]
+      0: [[19,0, 24,0]], // Domingo 19–24
+      1: [],             // Lunes (igual que antes)
+      2: [],             // Martes (igual que antes)
+      3: [[19,0, 24,0]], // Miércoles 19–24
+      4: [[19,0, 24,0]], // Jueves 19–24
+      5: [[19,0, 24,0]], // Viernes 19–24
+      6: [[19,0, 24,0]]  // Sábado 19–24
     };
+
     function isOpenNow(d=new Date()){
-      const day=d.getDay(); const blocks=HOURS[day]||[]; const cur=d.getHours()*60+d.getMinutes();
-      for(const [h1,m1,h2,m2] of blocks){ const a=h1*60+m1,b=h2*60+m2; if(cur>=a&&cur<=b) return {open:true,until:[h2,m2]}; }
+      // Calcula en hora local del navegador
+      const curMin = d.getHours()*60 + d.getMinutes();
+      const blocks = HOURS[d.getDay()] || [];
+      for(const [h1,m1,h2,m2] of blocks){
+        const a = h1*60+m1, b = h2*60+m2;
+        if(curMin >= a && curMin < b) return {open:true, until:[h2,m2]};
+      }
       return {open:false};
     }
     function nextOpen(d=new Date()){
       for(let i=0;i<8;i++){
-        const t=new Date(d.getTime()+i*24*60*60*1000), day=t.getDay(), blocks=HOURS[day]||[];
-        if(blocks.length){ const [h1,m1]=blocks[0]; const lab=i===0?'hoy':(i===1?'mañana':t.toLocaleDateString('es-AR',{weekday:'long'}));
-          return `${lab} ${String(h1).padStart(2,'0')}:${String(m1).padStart(2,'0')}`; }
-      } return null;
+        const t = new Date(d.getTime() + i*24*60*60*1000);
+        const blocks = HOURS[t.getDay()] || [];
+        if(blocks.length){
+          const [h1,m1] = blocks[0];
+          const lab = i===0 ? 'hoy' : (i===1 ? 'mañana' : t.toLocaleDateString('es-AR',{weekday:'long'}));
+          return `${lab} ${String(h1).padStart(2,'0')}:${String(m1).padStart(2,'0')}`;
+        }
+      }
+      return null;
     }
 
-    let orderable = true; // demo
+    let orderable = true; // control para bloquear pedidos fuera de horario
     function setOrderable(v){
       orderable = !!v;
       document.querySelectorAll('[data-add],[data-custom]').forEach(btn=>{
@@ -272,11 +288,24 @@
       const pill=document.getElementById('statusPill');
       const main=pill.querySelector('.status-main');
       const sub=pill.querySelector('.status-sub');
-      const now=new Date(); const st=isOpenNow(now);
-      if(st.open){ const [h,m]=st.until; pill.classList.remove('status-closed'); pill.classList.add('status-open'); main.textContent='Abierto'; sub.textContent=`hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; setOrderable(true); }
-      else { pill.classList.remove('status-open'); pill.classList.add('status-closed'); const nx=nextOpen(now); main.textContent='Cerrado'; sub.textContent=`abrimos ${nx?nx:'pronto'}`; setOrderable(false); }
+      const now=new Date();
+      const st=isOpenNow(now);
+      if(st.open){
+        const [h,m]=st.until;
+        pill.classList.remove('status-closed'); pill.classList.add('status-open');
+        main.textContent='Abierto';
+        sub.textContent=`hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        setOrderable(true);
+      }else{
+        pill.classList.remove('status-open'); pill.classList.add('status-closed');
+        const nx = nextOpen(now);
+        main.textContent='Cerrado';
+        sub.textContent=`abrimos ${nx?nx:'pronto'}`;
+        setOrderable(false);
+      }
     }
-    renderStatus(); setInterval(renderStatus,60*1000);
+    renderStatus();
+    setInterval(renderStatus, 60*1000);
   </script>
 
   <script>
@@ -301,8 +330,8 @@
       { id:"cheese_triple", name:"Cheeseburger Triple", price:15500, img:"images/Cheeseburger Triple.jpg", kind:"double", desc:"Triple medallón con doble cheddar en pan brioche. Incluye papas fritas." },
 
       { id:"rhodes_simple", name:"Rhodes Simple", price:11900, img:"images/Rhodes Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy en pan brioche. Incluye papas fritas." },
-      { id:"rhodes_doble",  name:"Rhodes Doble",  price:14900, img:"images/Rhodes Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy en pan brioche. Incluye papas fritas." },
-      { id:"rhodes_triple", name:"Rhodes Triple", price:17900, img:"images/Rhodes Triple.jpg", kind:"double", desc:"Triple medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy en pan brioche. Incluye papas fritas." },
+      { id:"rhodes_doble",  name:"Rhodes Doble",  price:14900, img:"images/Rhodes Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas fritas." },
+      { id:"rhodes_triple", name:"Rhodes Triple", price:17900, img:"images/Rhodes Triple.jpg", kind:"double", desc:"Triple medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas fritas." },
 
       { id:"morgan_simple", name:"Morgan Simple", price:10900, img:"images/Morgan Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, bacon, salsa barbacoa y cebolla crispy. Incluye papas fritas." },
       { id:"morgan_doble",  name:"Morgan Doble",  price:14500, img:"images/Morgan Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, salsa barbacoa y cebolla crispy. Incluye papas fritas." },
@@ -478,7 +507,7 @@
     function openCustomize(item){
       currentItem=item; modTitle.textContent="Personalizar: "+item.name;
       qtyVal.textContent="1"; notes.value=""; patVal.textContent="0"; cheVal.textContent="0"; resetFries();
-      // Habilitamos extras para: double, chicken (como venía) y los "triple" que los marcamos como "double" para permitir extras
+      // Extras: "double" permite patty+cheddar; "chicken" sólo cheddar; otros sin extras
       if(item.kind==="double"){ rowPatties.style.display="flex"; rowCheddar.style.display="flex"; noExtras.style.display="none"; }
       else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; noExtras.style.display="none"; }
       else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; noExtras.style.display="block"; }
