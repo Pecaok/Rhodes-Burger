@@ -11,7 +11,7 @@
       --ring:#eaeaea; --shadow:0 12px 34px rgba(0,0,0,.10);
       --font: Inter, system-ui, "Segoe UI", Roboto, Arial, "Helvetica Neue", "Noto Sans", sans-serif;
       --st-accepted:#FBC02D; --st-in_prep:#FB8C00; --st-ready:#00ACC1; --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
-      --pay-pending:#FFA000; --pay-paid:#625A45; /* antes #2ECC71 */
+      --pay-pending:#FFA000; --pay-paid:#625A45;
     }
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
@@ -27,7 +27,7 @@
     h1{font-size:28px;margin:10px 0 18px}
     .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
     .chipf{background:#f3f3f3;border:1px solid var(--ring);color:#111;border-radius:999px;padding:6px 10px;font-size:13px;cursor:pointer}
-    .chipf.active{background:var(--primary);color:#fff;border-color:var(--primary)} /* antes #2ecc71 */
+    .chipf.active{background:var(--primary);color:#fff;border-color:var(--primary)}
     .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
     .order-title{font-weight:800}
@@ -75,14 +75,14 @@
 
   <main class="container">
     <h1>Últimos pedidos</h1>
+
+    <!-- Filtros reducidos -->
     <div class="tabs" id="tabs">
-      <span class="chipf active" data-f="all">Todos</span>
-      <span class="chipf" data-f="new">Nuevos</span>
+      <span class="chipf active" data-f="new">Nuevos</span>
       <span class="chipf" data-f="in_prep">En preparación</span>
-      <span class="chipf" data-f="ready">Listos</span>
-      <span class="chipf" data-f="delivered">Entregados</span>
       <span class="chipf" data-f="cancelled">Cancelados</span>
     </div>
+
     <div id="orders"></div>
     <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
   </main>
@@ -165,7 +165,9 @@
     /* ================= ESTADO UI ================= */
     $("#btnLogout").onclick=()=>{localStorage.clear();location.replace("login.html?reason=logout&next=pedido_local.html");};
 
-    const tabs=$("#tabs"); let currentFilter="all", lastSnap=null, idToDoc=new Map();
+    const tabs=$("#tabs");
+    // Nuevo set de filtros: 'new' (default), 'in_prep', 'cancelled'
+    let currentFilter="new", lastSnap=null, idToDoc=new Map();
 
     tabs.addEventListener("click",(e)=>{
       const el=e.target.closest("[data-f]"); if(!el) return;
@@ -175,10 +177,20 @@
       if (lastSnap) renderList(lastSnap);
     });
 
-    const passFilter=o=> currentFilter==="all" ? true :
-      (currentFilter==="new"
-        ? ((o.status??"accepted")==="accepted" || (o.status??"accepted")==="pending_payment")
-        : (o.status??"")===currentFilter);
+    // Lógica de filtros reducida
+    const passFilter=o=>{
+      const status = o.status ?? "accepted";
+      if(currentFilter==="new"){
+        return status==="accepted" || status==="pending_payment";
+      }
+      if(currentFilter==="in_prep"){
+        return status==="in_prep";
+      }
+      if(currentFilter==="cancelled"){
+        return status==="cancelled";
+      }
+      return true;
+    };
 
     async function setOrderStatus(id,next){
       try{
@@ -258,7 +270,7 @@
       const o = docSnap.data();
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-      const orderDisplay = (()=> {
+      const orderDisplay = (()=>{
         const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
         for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
         return `#${docSnap.id.slice(-5).toUpperCase()}`;
