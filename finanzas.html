@@ -25,7 +25,7 @@
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
 
-    .grid{display:grid;grid-template-columns:1fr;gap:18px} /* ← sin columna de alta manual */
+    .grid{display:grid;grid-template-columns:1fr;gap:18px}
     .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
     .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
     .kpi{display:flex;gap:12px;flex-wrap:wrap}
@@ -38,11 +38,12 @@
     canvas{width:100% !important; height:100% !important; display:block}
 
     label{font-weight:600;display:block;margin:8px 0 6px}
-    select, input[type="number"], input[type="datetime-local"], input[type="date"], textarea{
+    select, input[type="number"], input[type="datetime-local"], input[type="date"], input[type="month"], textarea{
       width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px
     }
     .inline{display:flex;gap:10px;flex-wrap:wrap}
     .muted{color:var(--muted)}
+    .badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ring);border-radius:999px;padding:6px 10px;background:#fff;font-weight:700}
 
     /* Heatmap */
     .heatmap{
@@ -59,6 +60,11 @@
     .warn-pill{display:inline-block;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}
     .warn{background:#fff3cd;border:1px solid #ffe58f;color:#8a6d3b}
     .danger{background:#fdecea;border:1px solid #f5c6cb;color:#8a1c1c}
+
+    /* Tabla hamburguesas por mes */
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid #eee;text-align:left}
+    th{font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.02em}
   </style>
 </head>
 <body>
@@ -167,8 +173,26 @@
         </div>
 
         <div id="kpiError" class="err" style="display:none;margin-top:8px"></div>
+
+        <!-- ============== NUEVO: HAMBURGUESAS POR MES ============== -->
+        <div class="card" style="margin-top:12px">
+          <strong>Hamburguesas por mes</strong>
+          <div class="inline" style="margin:8px 0">
+            <label class="badge">Mes <input type="month" id="burgMonth" /></label>
+            <button id="bmPrev" class="btn" title="Mes anterior">◀</button>
+            <button id="bmNext" class="btn" title="Mes siguiente">▶</button>
+            <button id="bmGo" class="btn">Ver</button>
+            <span id="bmRange" class="badge muted">—</span>
+          </div>
+          <div id="bmErr" class="err" style="display:none;margin-bottom:6px"></div>
+          <table>
+            <thead><tr><th>Hamburguesa</th><th>Cantidad</th></tr></thead>
+            <tbody id="bmBody"><tr><td class="muted" colspan="2">Sin datos…</td></tr></tbody>
+            <tfoot><tr><th>Total hamburguesas</th><th id="bmTotal">0</th></tr></tfoot>
+          </table>
+        </div>
+        <!-- ============== /HAMBURGUESAS POR MES ============== -->
       </section>
-      <!-- (Se eliminó el aside de Alta manual) -->
     </div>
   </main>
 
@@ -228,7 +252,10 @@
   }
   (function initMonth(){
     const d = new Date(); const m = String(d.getMonth()+1).padStart(2,'0');
-    try{ $("#monthPicker").value = `${d.getFullYear()}-${m}`; }catch(_){}
+    try{
+      $("#monthPicker").value = `${d.getFullYear()}-${m}`;
+      $("#burgMonth").value   = `${d.getFullYear()}-${m}`;
+    }catch(_){}
   })();
 
   // Heatmap utils
@@ -327,7 +354,7 @@
       const hmMatrix = Array.from({length:7}, ()=> Array(days).fill(0));
       const hmLabels = Array.from({length:days}, (_,i)=> String(i+1).padStart(2,'0'));
 
-      let count=0, revenue=0, cogsTotal=0, pendingTotal=0;
+      let count=0, revenue=0, pendingTotal=0;
       const payCount = new Map();
       const statusCount = new Map();
 
@@ -365,7 +392,7 @@
       $("#kpiCount").textContent = count.toLocaleString("es-AR");
       $("#kpiRevenue").textContent = money(revenue);
       $("#kpiATV").textContent = count? money(revenue/count) : '—';
-      $("#kpiMargin").textContent = '—'; // margen estimado removido si no hay COGS calculado aquí
+      $("#kpiMargin").textContent = '—';
 
       if(!useRange){ ensureOrdersChart(labels, dayOrders, dayRevenue); }
       else{ ensureOrdersChart([], [], []); }
@@ -416,5 +443,89 @@
   document.getElementById("btnReload").onclick = loadKPI;
   document.addEventListener('DOMContentLoaded', loadKPI);
   </script>
+
+  <!-- ============== LÓGICA HAMBURGUESAS POR MES ============== -->
+  <script>
+    function monthRange(monthStr){
+      // 1º del mes 00:00:00  →  1º del siguiente mes 00:00:00 (exclusivo)
+      const [y,m] = monthStr.split('-').map(Number);
+      const start = new Date(y, m-1, 1, 0, 0, 0, 0);
+      const end   = new Date(y, m,   1, 0, 0, 0, 0);
+      return {start, end};
+    }
+    function addMonths(ym, delta){
+      const [y,m] = ym.split('-').map(Number);
+      const d = new Date(y, m-1+delta, 1);
+      const ym2 = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      return ym2;
+    }
+
+    async function loadBurgersByMonth(){
+      const err = $("#bmErr"); err.style.display='none'; err.textContent='';
+      const tbody = $("#bmBody"); const totalEl = $("#bmTotal"); const range = $("#bmRange");
+      tbody.innerHTML = `<tr><td colspan="2" class="muted">Cargando…</td></tr>`;
+      totalEl.textContent = '0';
+
+      try{
+        const probe = await db.collection('orders').limit(1).get();
+        if (probe.empty){ tbody.innerHTML = `<tr><td colspan="2" class="muted">Sin datos.</td></tr>`; return; }
+        let dateField = null;
+        const sample = probe.docs[0].data();
+        for (const k of ['createdAt','created_at','timestamp','date','fecha','time']){ if (sample[k]!=null){ dateField=k; break; } }
+        if(!dateField){ dateField = 'createdAt'; } // fallback
+
+        const ym = $("#burgMonth").value || (new Date().toISOString().slice(0,7));
+        const {start,end} = monthRange(ym);
+        range.textContent = `${start.toLocaleDateString('es-AR')} → ${end.toLocaleDateString('es-AR')}`;
+
+        let q = db.collection('orders')
+          .where(dateField, '>=', start)
+          .where(dateField, '<',  end)
+          .orderBy(dateField, 'asc');
+
+        const snap = await q.get();
+
+        const counter = new Map();
+        let total = 0;
+
+        snap.forEach(doc=>{
+          const o = doc.data();
+          const items = Array.isArray(o.items)? o.items : [];
+          items.forEach(it=>{
+            if((it.type||'').toLowerCase() !== 'burger') return;
+            const qty = Number(it.qty)||1;
+            const name = (it.name || it.item?.name || 'Hamburguesa');
+            counter.set(name, (counter.get(name)||0)+qty);
+            total += qty;
+          });
+        });
+
+        const rows = Array.from(counter.entries())
+          .sort((a,b)=> b[1]-a[1])
+          .map(([name,cnt])=> `<tr><td>${name}</td><td>${cnt}</td></tr>`)
+          .join('');
+
+        tbody.innerHTML = rows || `<tr><td colspan="2" class="muted">No hubo hamburguesas en este mes.</td></tr>`;
+        totalEl.textContent = String(total);
+      }catch(e){
+        console.error(e);
+        err.textContent = "No se pudo cargar las hamburguesas del mes.";
+        err.style.display = 'block';
+        tbody.innerHTML = `<tr><td colspan="2" class="muted">Error al cargar.</td></tr>`;
+      }
+    }
+
+    // Controles mes anterior / siguiente / ver
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const m = $("#burgMonth");
+      if(!m.value){ const d=new Date(); m.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+      $("#bmPrev").onclick = ()=>{ m.value = addMonths(m.value, -1); loadBurgersByMonth(); };
+      $("#bmNext").onclick = ()=>{ m.value = addMonths(m.value, +1); loadBurgersByMonth(); };
+      $("#bmGo").onclick   = loadBurgersByMonth;
+      m.addEventListener('change', loadBurgersByMonth);
+      loadBurgersByMonth();
+    });
+  </script>
+  <!-- ============== /LÓGICA HAMBURGUESAS POR MES ============== -->
 </body>
 </html>
