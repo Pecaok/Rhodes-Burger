@@ -23,7 +23,6 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600}
     .btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
     .danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
-
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
 
@@ -109,7 +108,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-  /* ================== CONFIG & LOGIN ================== */
+  // ================== CONFIG & LOGIN ==================
   const firebaseConfig = {
     apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
     authDomain: "rhodes-burguers.firebaseapp.com",
@@ -129,7 +128,7 @@
     location.replace("login.html?reason=logout&next=pedido_local.html");
   };
 
-  /* ================== AUDIO ================== */
+  // ================== AUDIO (beep) ==================
   let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
   let audioCtx = null, audioReady = false;
   function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
@@ -142,7 +141,7 @@
   updateBellUI();
   btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
 
-  /* ================== FECHA (jornada 19→19) ================== */
+  // ================== FECHA (jornada 19→19) ==================
   const dayPicker = $("#dayPicker");
   const rangeLabel = $("#rangeLabel");
   const J_START_H = 19;
@@ -166,27 +165,7 @@
     return {start,end};
   }
 
-  /* ================== ESTADO UI ================== */
-  const tabs=$("#tabs");
-  let currentFilter="all";
-  tabs.addEventListener("click",(e)=>{
-    const el=e.target.closest("[data-f]"); if(!el) return;
-    currentFilter = el.dataset.f;
-    tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
-    el.classList.add("active");
-    refreshQuery();
-  });
-
-  (function initDay(){
-    const today = new Date();
-    try{ dayPicker.value = yyyy_mm_dd(today); }catch(_){}
-    $("#btnToday").onclick = ()=>{ dayPicker.value = yyyy_mm_dd(new Date()); refreshQuery(); };
-    $("#btnPrev").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()-1); dayPicker.value = yyyy_mm_dd(d); refreshQuery(); };
-    $("#btnNext").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()+1); dayPicker.value = yyyy_mm_dd(d); refreshQuery(); };
-    dayPicker.addEventListener("change", refreshQuery);
-  })();
-
-  /* ================== RENDER ORDENES ================== */
+  // ================== RENDER & HELPERS ==================
   const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
   const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
   const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
@@ -194,9 +173,9 @@
   const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
   function pickDocDate(obj){
-    const cand=['createdAt','date','fecha','timestamp','created_at','time'];
+    const cand=['createdAt','created_at','timestamp','date','fecha','time'];
     for(const k of cand){
-      const v=obj?.[k];
+      const v=obj[k];
       if(v?.toDate) return v.toDate();
       if(typeof v==='number') return new Date(v);
       if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d; }
@@ -225,7 +204,6 @@
     const o=doc.data(); const dt=pickDocDate(o);
     const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
     const items=Array.isArray(o.items)?o.items:[];
-
     const lines=items.map(it=>{
       const qty=it.qty||1;
       const subtotal=(it.price||0)*qty
@@ -276,7 +254,7 @@
     </div>`;
   }
 
-  /* ================== ACCIONES ================== */
+  // ================== ACCIONES ==================
   async function setOrderStatus(id,next){
     try{
       await db.collection("orders").doc(id).update({
@@ -295,10 +273,20 @@
     }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
   }
 
-  /* ================== SUSCRIPCIÓN SIN ÍNDICES COMPUESTOS ================== */
-  let unsubs = [];
-  let unionMap = new Map();
+  // ================== SUSCRIPCIÓN ==================
+  let unsub = null;
+  let lastSnap=null, idToDoc=new Map();
   let initialLoaded=false;
+  let currentFilter="all";
+
+  const tabs=$("#tabs");
+  tabs.addEventListener("click",(e)=>{
+    const el=e.target.closest("[data-f]"); if(!el) return;
+    currentFilter = el.dataset.f;
+    tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+    el.classList.add("active");
+    renderList(lastSnap); // sólo re-filtrar en memoria
+  });
 
   function updateRangeLabel(start,end){
     const fmt = new Intl.DateTimeFormat('es-AR',{dateStyle:'medium', timeStyle:'short'});
@@ -321,20 +309,22 @@
     return true;
   }
 
-  function renderFromMap(range){
-    const docs = Array.from(unionMap.values())
-      .filter(d=>{
-        const dt = pickDocDate(d.data());
-        return dt && dt>=range.start && dt<range.end;
-      })
-      .filter(d=>passFilterLocal(d.data()))
-      .sort((a,b)=>{
-        const da=pickDocDate(a.data())?.getTime()||0;
-        const db=pickDocDate(b.data())?.getTime()||0;
-        return db-da;
-      });
+  function renderList(snap){
+    if(!snap){ $("#orders").innerHTML='<p class="muted">No hay pedidos.</p>'; return; }
 
-    document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
+    // Determinar rango actual
+    const picked = new Date($("#dayPicker").value+'T12:00:00');
+    const range = (currentFilter==="cancelled_hist") ? month19RangeFromAny(picked) : rangeForDay(picked);
+
+    const docsInRange = snap.docs.filter(d=>{
+      const dt = pickDocDate(d.data());
+      return dt && dt >= range.start && dt < range.end;
+    });
+
+    const docs = docsInRange.filter(d=>passFilterLocal(d.data()));
+
+    idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
+    $("#orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
 
     document.querySelectorAll(".order").forEach(card=>{
       const id=card.dataset.id;
@@ -342,49 +332,51 @@
       const payBtn=card.querySelector("[data-pay]");
       if(payBtn) payBtn.addEventListener("click",()=>setPaymentStatus(id,payBtn.dataset.pay==="paid"));
       const pr=card.querySelector("[data-print]");
-      if(pr) pr.addEventListener("click",()=> printInIframe(unionMap.get(id)));
+      if(pr) pr.addEventListener("click",()=> printInIframe(idToDoc.get(id)));
     });
-  }
 
-  function listenForField(field, range){
-    try{
-      const unsub = db.collection("orders")
-        .orderBy(field, "desc")
-        .limit(500)
-        .onSnapshot(snap=>{
-          document.getElementById("ordersError").style.display="none";
-          document.getElementById("ordersError").textContent="";
-          snap.docs.forEach(d=> unionMap.set(d.id, d));
-          renderFromMap(range);
-          if(initialLoaded){
-            snap.docChanges().forEach(ch=>{ if(ch.type==='added'){ playBeepTriple(); }});
-          }
-          initialLoaded = true;
-        }, err=>{
-          // Si muchos docs no tienen el campo, Firestore puede lanzar errors menores; los ignoramos.
-          console.warn(`[listener ${field}]`, err?.message||err);
-        });
-      unsubs.push(unsub);
-    }catch(err){
-      console.warn(`[listener ${field}]`, err?.message||err);
-    }
+    updateRangeLabel(range.start, range.end);
   }
 
   function refreshQuery(){
-    unsubs.forEach(u=>{ try{u()}catch(e){} }); unsubs=[];
-    unionMap = new Map();
+    if (typeof unsub === "function") { try{unsub();}catch(_){ } }
     initialLoaded=false;
 
-    const picked = new Date($("#dayPicker").value+'T12:00:00');
-    const range = (currentFilter==="cancelled_hist") ? month19RangeFromAny(picked) : rangeForDay(picked);
-    updateRangeLabel(range.start, range.end);
+    // Traemos los últimos 500 por fecha si existe; si no, por ID.
+    (async ()=>{
+      const probe = await db.collection("orders").limit(1).get();
+      const probeData = probe.empty ? null : probe.docs[0].data();
+      const hasCreated = probeData && (probeData.createdAt!=null || probeData.created_at!=null || probeData.timestamp!=null || probeData.date!=null || probeData.fecha!=null || probeData.time!=null);
 
-    // Escuchamos por múltiples campos de fecha (sin where)
-    const FIELDS = ['createdAt','date','fecha','timestamp','created_at','time'];
-    FIELDS.forEach(f=> listenForField(f, range));
+      let q = db.collection("orders");
+      if(hasCreated){
+        // ordenar por un solo campo de fecha si existe en “algún” doc (no filtramos por rango aquí)
+        q = q.orderBy("createdAt","desc").limit(500);
+      }else{
+        q = q.orderBy(firebase.firestore.FieldPath.documentId()).limit(500);
+      }
+
+      unsub = q.onSnapshot(snap=>{
+        $("#ordersError").style.display="none";
+        $("#ordersError").textContent="";
+        lastSnap = snap;
+        renderList(snap);
+
+        snap.docChanges().forEach(ch=>{
+          if(ch.type==='added' && initialLoaded){
+            playBeepTriple();
+          }
+        });
+        initialLoaded = true;
+      }, err=>{
+        console.error(err);
+        $("#ordersError").textContent="No se pudo cargar la lista de pedidos.";
+        $("#ordersError").style.display="block";
+      });
+    })();
   }
 
-  /* ==================== TICKET ==================== */
+  // ==================== TICKET (impresión) ====================
   function buildTicketHTML(docSnap){
     const o = docSnap.data();
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
@@ -393,10 +385,11 @@
       for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
       return `#${docSnap.id.slice(-5).toUpperCase()}`;
     })();
-    const dt = pickDocDate(o) || new Date();
+    const dt=(()=>{ const k=['createdAt','created_at','timestamp','date','fecha','time'];
+      for(const kk of k){ const v=o[kk]; if(v?.toDate) return v.toDate(); if(typeof v==='number') return new Date(v); if(typeof v==='string'){const d=new Date(v); if(!isNaN(d)) return d;} }
+      return new Date();})();
     const dateStr = dt.toLocaleDateString('es-AR');
     const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
-
     const items = Array.isArray(o.items)?o.items:[];
     const friesStr = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "");
 
@@ -492,7 +485,16 @@
     setTimeout(cleanup, 15000);
   }
 
-  /* ================== ARRANQUE ================== */
+  // ================== INICIO ==================
+  (function initDay(){
+    const today = new Date();
+    try{ dayPicker.value = yyyy_mm_dd(today); }catch(_){}
+    $("#btnToday").onclick = ()=>{ dayPicker.value = yyyy_mm_dd(new Date()); renderList(lastSnap); };
+    $("#btnPrev").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()-1); dayPicker.value = yyyy_mm_dd(d); renderList(lastSnap); };
+    $("#btnNext").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()+1); dayPicker.value = yyyy_mm_dd(d); renderList(lastSnap); };
+    dayPicker.addEventListener("change", ()=>renderList(lastSnap));
+  })();
+
   refreshQuery();
   </script>
 </body>
