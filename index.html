@@ -101,6 +101,17 @@
     #btnCart:hover{ filter:brightness(.98); }
     #btnCart #cartBubble{ color:#333 !important; }
 
+    /* Modal Checkout */
+    .form label{font-weight:700;display:block;margin:6px 0 4px}
+    .form input,.form select,.form textarea{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
+    .form .row{gap:10px}
+    .right{display:flex;gap:10px;justify-content:flex-end}
+    .ok-chip{display:inline-block;margin-top:8px;font-weight:800}
+    .ok-chip a{color:#111}
+    .ok-chip .small{font-weight:600;color:#666}
+    .ok{color:#2e7d32}
+    .warn{color:#fb8c00}
+
     @media (max-width:600px){
       .topbar{padding:8px 10px;gap:8px;flex-wrap:wrap}
       .brand img{width:32px;height:32px}
@@ -230,141 +241,78 @@
     </div>
   </div>
 
- <!-- Horarios + Override remoto (config/store) -->
-<script>
-  /* ======= HORARIOS BASE (si no hay override) =======
-     0=Dom … 6=Sáb
-     Lunes, Mié, Jue, Vie, Sáb y Dom: 19–24. Martes cerrado. */
-  const HOURS = {
-    0:[[19,0,24,0]], 1:[[19,0,24,0]], 2:[], 3:[[19,0,24,0]],
-    4:[[19,0,24,0]], 5:[[19,0,24,0]], 6:[[19,0,24,0]]
-  };
+  <!-- Modal Checkout -->
+  <div class="overlay" id="overlayCheckout">
+    <div class="modal">
+      <h3>Finalizar pedido</h3>
+      <div class="form">
+        <label for="chNombre">Nombre*</label>
+        <input id="chNombre" placeholder="Tu nombre">
 
-  function isOpenNow(d=new Date()){
-    const curMin = d.getHours()*60 + d.getMinutes();
-    const blocks = HOURS[d.getDay()] || [];
-    for(const [h1,m1,h2,m2] of blocks){
-      const a=h1*60+m1, b=h2*60+m2;
-      if(curMin>=a && curMin<b) return {open:true, until:[h2,m2]};
-    }
-    return {open:false};
-  }
-  function nextOpen(d=new Date()){
-    for(let i=0;i<8;i++){
-      const t=new Date(d.getTime()+i*86400000);
-      const blocks=HOURS[t.getDay()]||[];
-      if(blocks.length){
-        const [h1,m1]=blocks[0];
-        const lab=i===0?'hoy':(i===1?'mañana':t.toLocaleDateString('es-AR',{weekday:'long'}));
-        return `${lab} ${String(h1).padStart(2,'0')}:${String(m1).padStart(2,'0')}`;
-      }
-    }
-    return null;
-  }
+        <label for="chTelefono">Teléfono (opcional)</label>
+        <input id="chTelefono" placeholder="11 2345-6789">
 
-  // =========== OVERRIDE REMOTO ===========
-  // Espera flags de Firestore: config/store { forceOpen, forceClosed, forceMessage }
-  let storeOverride = {forceOpen:false, forceClosed:false, forceMessage:null};
+        <div class="row">
+          <div style="flex:1">
+            <label for="chPago">Medio de pago*</label>
+            <select id="chPago">
+              <option value="mercado_pago">mercado_pago</option>
+              <option value="efectivo">efectivo</option>
+              <option value="debito">debito</option>
+              <option value="credito">credito</option>
+              <option value="transferencia">transferencia</option>
+            </select>
+          </div>
+          <div style="flex:1">
+            <label for="chEntrega">Entrega</label>
+            <select id="chEntrega">
+              <option value="retira">retira</option>
+              <option value="delivery">delivery</option>
+            </select>
+          </div>
+        </div>
 
-  // setOrderable ya existe más abajo en tu archivo; si no, mantené esta versión
-  let orderable = true;
-  function setOrderable(v){
-    orderable = !!v;
-    document.querySelectorAll('[data-add],[data-custom]').forEach(btn=>{
-      if(orderable){ btn.classList.remove('disabled'); btn.removeAttribute('aria-disabled'); }
-      else { btn.classList.add('disabled'); btn.setAttribute('aria-disabled','true'); }
-    });
-    const pagar = document.getElementById('btnPagar');
-    if(pagar){
-      if(orderable){ pagar.classList.remove('disabled'); pagar.removeAttribute('aria-disabled'); }
-      else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); }
-    }
-  }
+        <label for="chNota">Comentario</label>
+        <textarea id="chNota" rows="3" placeholder="Aclaraciones opcionales"></textarea>
+      </div>
 
-  function renderStatus(){
-    const pill = document.getElementById('statusPill');
-    const main = pill.querySelector('.status-main');
-    const sub  = pill.querySelector('.status-sub');
+      <div class="right">
+        <button class="btn ghost" id="btnChkCancel">Cancelar</button>
+        <button class="btn primary" id="btnChkConfirm">Confirmar pedido</button>
+      </div>
+    </div>
+  </div>
 
-    const now  = new Date();
-    const base = isOpenNow(now);
-
-    // lógica efectiva: cerrado forzado > abierto forzado > horario
-    let open, subtitle;
-    if(storeOverride.forceClosed){
-      open = false;
-      subtitle = storeOverride.forceMessage || 'cerrado por el momento';
-    }else if(storeOverride.forceOpen){
-      open = true;
-      if(base.open && base.until){
-        const [h,m] = base.until;
-        subtitle = storeOverride.forceMessage || `hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-      }else{
-        subtitle = storeOverride.forceMessage || 'abierto (fuera de horario)';
-      }
-    }else{
-      open = base.open;
-      subtitle = open && base.until
-        ? `hasta ${String(base.until[0]).padStart(2,'0')}:${String(base.until[1]).padStart(2,'0')}`
-        : `abrimos ${nextOpen(now) || 'pronto'}`;
-    }
-
-    if(open){
-      pill.classList.remove('status-closed'); pill.classList.add('status-open');
-      main.textContent = 'Abierto';
-      sub.textContent  = subtitle;
-      setOrderable(true);
-    }else{
-      pill.classList.remove('status-open'); pill.classList.add('status-closed');
-      main.textContent = 'Cerrado';
-      sub.textContent  = subtitle;
-      setOrderable(false);
-    }
-  }
-  // =========== BOOT: enganchar Firestore y escuchar cambios ===========
-  // Requiere que ya tengas firebase inicializado y `db = firebase.firestore();`
-  (function bootStoreOverride(){
-    try{
-      // escuchar tiempo real
-      firebase.firestore()
-        .collection('config').doc('store')
-        .onSnapshot(snap=>{
-          if(snap.exists){
-            const d = snap.data()||{};
-            storeOverride.forceOpen   = !!d.forceOpen;
-            storeOverride.forceClosed = !!d.forceClosed;
-            storeOverride.forceMessage= d.forceMessage || null;
-          }else{
-            storeOverride = {forceOpen:false, forceClosed:false, forceMessage:null};
-          }
-          renderStatus();
-        }, err=>{
-          // si falla la suscripción, al menos renderiza por horario
-          console.warn('override listener error:', err);
-          storeOverride = {forceOpen:false, forceClosed:false, forceMessage:null};
-          renderStatus();
-        });
-    }catch(e){
-      console.warn('No se pudo conectar a config/store:', e);
-      renderStatus();
-    }
-  })();
-
-  // Render inicial por si la suscripción demora
-  renderStatus();
-  // También podés mantener el refresco cada minuto para el caso “modo normal”
-  setInterval(renderStatus, 60*1000);
-
-  // En los lugares donde avisas “cerrado”, usá este helper para mostrar el motivo
-  function cantOrderAlert(){
-    const nx = nextOpen(new Date());
-    const msg = storeOverride.forceClosed
-      ? (storeOverride.forceMessage || 'Estamos cerrados en este momento.')
-      : `Estamos cerrados por ahora.\nPodés ver la carta y los precios, pero los pedidos abren ${nx?nx:''}.`;
-    alert(msg);
-  }
-</script>
+  <!-- Firebase (App/Auth) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script>
+    // ===== Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.firebasestorage.app",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
+    try{ firebase.initializeApp(firebaseConfig); }catch(_){}
+    const db = firebase.firestore();
+  </script>
+
+  <!-- Horarios + Override remoto (config/store) -->
+  <script>
+    /* Estructura HOURS: 0=Dom ... 6=Sáb  */
+    const HOURS = {
+      0: [[19,0, 24,0]], // Domingo
+      1: [[19,0, 24,0]], // Lunes
+      2: [],             // Martes
+      3: [[19,0, 24,0]], // Miércoles
+      4: [[19,0, 24,0]], // Jueves
+      5: [[19,0, 24,0]], // Viernes
+      6: [[19,0, 24,0]]  // Sábado
+    };
+
     function isOpenNow(d=new Date()){
       const curMin = d.getHours()*60 + d.getMinutes();
       const blocks = HOURS[d.getDay()] || [];
@@ -386,6 +334,10 @@
       }
       return null;
     }
+
+    // ===== Override remoto (config/store)
+    let storeOverride = {forceOpen:false, forceClosed:false, forceMessage:null};
+
     let orderable = true;
     function setOrderable(v){
       orderable = !!v;
@@ -399,28 +351,80 @@
         else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); }
       }
     }
+
     function renderStatus(){
       const pill=document.getElementById('statusPill');
       const main=pill.querySelector('.status-main');
       const sub=pill.querySelector('.status-sub');
       const now=new Date();
-      const st=isOpenNow(now);
-      if(st.open){
-        const [h,m]=st.until;
+      const base=isOpenNow(now);
+
+      let open, subtitle;
+      if(storeOverride.forceClosed){
+        open=false;
+        subtitle = storeOverride.forceMessage || 'cerrado por el momento';
+      }else if(storeOverride.forceOpen){
+        open=true;
+        if(base.open && base.until){
+          const [h,m]=base.until;
+          subtitle = storeOverride.forceMessage || `hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        }else{
+          subtitle = storeOverride.forceMessage || 'abierto (fuera de horario)';
+        }
+      }else{
+        open=base.open;
+        subtitle = open && base.until
+          ? `hasta ${String(base.until[0]).padStart(2,'0')}:${String(base.until[1]).padStart(2,'0')}`
+          : `abrimos ${nextOpen(now) || 'pronto'}`;
+      }
+
+      if(open){
         pill.classList.remove('status-closed'); pill.classList.add('status-open');
         main.textContent='Abierto';
-        sub.textContent=`hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        sub.textContent=subtitle;
         setOrderable(true);
       }else{
         pill.classList.remove('status-open'); pill.classList.add('status-closed');
-        const nx = nextOpen(now);
         main.textContent='Cerrado';
-        sub.textContent=`abrimos ${nx?nx:'pronto'}`;
+        sub.textContent=subtitle;
         setOrderable(false);
       }
     }
+
+    (function bootStoreOverride(){
+      try{
+        db.collection('config').doc('store')
+          .onSnapshot(snap=>{
+            if(snap.exists){
+              const d=snap.data()||{};
+              storeOverride.forceOpen   = !!d.forceOpen;
+              storeOverride.forceClosed = !!d.forceClosed;
+              storeOverride.forceMessage= d.forceMessage || null;
+            }else{
+              storeOverride = {forceOpen:false, forceClosed:false, forceMessage:null};
+            }
+            renderStatus();
+          }, err=>{
+            console.warn('override listener error:', err);
+            storeOverride = {forceOpen:false, forceClosed:false, forceMessage:null};
+            renderStatus();
+          });
+      }catch(e){
+        console.warn('No se pudo conectar a config/store:', e);
+        renderStatus();
+      }
+    })();
+
     renderStatus();
     setInterval(renderStatus, 60*1000);
+
+    function cantOrderAlert(){
+      const nx = nextOpen(new Date());
+      const msg = storeOverride.forceClosed
+        ? (storeOverride.forceMessage || 'Estamos cerrados en este momento.')
+        : `Estamos cerrados por ahora.\nPodés ver la carta y los precios, pero los pedidos abren ${nx?nx:''}.`;
+      alert(msg);
+    }
   </script>
 
   <script>
@@ -464,8 +468,8 @@
       let t=0;
       for(const obj of Object.values(cart.burger)){
         const base=(obj.item?.price||0);
-        const ep=(obj.extras?.patty||0)*2400;
-        const ec=(obj.extras?.cheddar||0)*300;
+        const ep=(obj.extras?.patty||0)*(obj.extras?.EXTRA_PRICE_PATTY??EXTRA_PRICE_PATTY);
+        const ec=(obj.extras?.cheddar||0)*(obj.extras?.EXTRA_PRICE_CHEDDAR??EXTRA_PRICE_CHEDDAR);
         t+=(base+ep+ec)*(obj.qty||0);
       }
       for(const d of Object.values(cart.drink)) t+=(d.item?.price||0)*(d.qty||0);
@@ -473,11 +477,6 @@
     }
 
     const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
-
-    function cantOrderAlert(){
-      const nx = nextOpen(new Date());
-      alert(`Estamos cerrados por ahora.\nPodés ver la carta y los precios, pero los pedidos abren ${nx?nx:''}.`);
-    }
 
     function renderCard(item,type){
       const card=document.createElement("div");
@@ -520,19 +519,20 @@
     document.getElementById("closeDrawer").onclick=closeDrawer;
     document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
 
-    // ✅ Ir a pagar ⇒ navegar a pedido_cliente.html
+    // Abrir modal de checkout
+    const ovCheckout = document.getElementById('overlayCheckout');
     document.getElementById("btnPagar").onclick = ()=>{
       if(!orderable) return cantOrderAlert();
       if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
-      // el carrito queda en localStorage (CART_KEY), pedido_cliente lo lee
-      window.location.href = "pedido_cliente.html";
+      ovCheckout.classList.add('open');
     };
+    document.getElementById("btnChkCancel").onclick = ()=> ovCheckout.classList.remove('open');
 
     function renderCart(){
       cartItems.innerHTML="";
       for(const obj of Object.values(cart.burger)){
         const extras=[]; if(obj.extras){ if(obj.extras.patty) extras.push(`+${obj.extras.patty} medallón(es)`); if(obj.extras.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`); }
-        const unit=obj.item.price+(obj.extras?.patty||0)*2400+(obj.extras?.cheddar||0)*300;
+        const unit=obj.item.price+(obj.extras?.patty||0)*(obj.extras?.EXTRA_PRICE_PATTY??1600)+(obj.extras?.cheddar||0)*(obj.extras?.EXTRA_PRICE_CHEDDAR??300);
         cartItems.innerHTML+=`
           <div class="item">
             <div>
@@ -609,14 +609,14 @@
       const friesEl=document.querySelector('input[name="fries"]:checked');
       if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
       const qty=+qtyVal.textContent||1;
-      const extras={patty:0,cheddar:0};
+      const extras={patty:0,cheddar:0,EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR};
       if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
       else if(currentItem.kind==="chicken"){ extras.patty=0; extras.cheddar=+cheVal.textContent||0; }
       const txt=notes.value.trim();
       const bucket=cart.burger||(cart.burger={}); const prev=bucket[currentItem.id];
       if(prev){
         prev.qty+=qty;
-        prev.extras={patty:Math.max(prev.extras?.patty||0,extras.patty),cheddar:Math.max(prev.extras?.cheddar||0,extras.cheddar)};
+        prev.extras={patty:Math.max(prev.extras?.patty||0,extras.patty),cheddar:Math.max(prev.extras?.cheddar||0,extras.cheddar),EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR};
         prev.fries=friesEl.value; if(txt) prev.notes=txt;
       }else{
         bucket[currentItem.id]={qty,item:currentItem,fries:friesEl.value,extras,...(txt?{notes:txt}:{})};
@@ -626,6 +626,115 @@
 
     // Montar UI
     mount();
+  </script>
+
+  <!-- === FIREBASE (Crear Pedido con contador global) === -->
+  <script>
+    // ===== Contador GLOBAL (no se reinicia nunca)
+    function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
+    async function nextOrderNumber(){
+      return await db.runTransaction(async tx=>{
+        const ref = globalCounterRef();
+        const snap = await tx.get(ref);
+        const cur = snap.exists ? (Number(snap.data().seq)||0) : 0;
+        const nxt = cur + 1;
+        tx.set(ref, { seq: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+        return nxt;
+      });
+    }
+
+    // ===== Transformar carrito → ítems del pedido
+    function cartToItems(){
+      const items=[];
+      for(const obj of Object.values(cart.burger||{})){
+        items.push({
+          name: obj.item.name,
+          price: obj.item.price,
+          qty: obj.qty,
+          fries: obj.fries||'',
+          extras: {
+            patty: obj.extras?.patty||0,
+            cheddar: obj.extras?.cheddar||0,
+            EXTRA_PRICE_PATTY: obj.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY,
+            EXTRA_PRICE_CHEDDAR: obj.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR
+          },
+          notes: obj.notes||""
+        });
+      }
+      for(const obj of Object.values(cart.drink||{})){
+        items.push({
+          name: obj.item.name,
+          price: obj.item.price,
+          qty: obj.qty,
+          extras:{}, fries:'', notes:''
+        });
+      }
+      return items;
+    }
+
+    // ===== Modal checkout (Confirmar pedido)
+    const btnChkConfirm = document.getElementById('btnChkConfirm');
+    btnChkConfirm.onclick = async ()=>{
+      if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
+      const nombre = document.getElementById('chNombre').value.trim();
+      if(!nombre){ alert('Ingresá tu nombre'); return; }
+      const telefono = document.getElementById('chTelefono').value.trim();
+      const pago = document.getElementById('chPago').value;
+      const entrega = document.getElementById('chEntrega').value;
+      const comentario = document.getElementById('chNota').value.trim();
+
+      try{
+        // 1) Número global
+        const orderNumber = await nextOrderNumber();
+
+        // 2) Armar pedido
+        const items = cartToItems();
+        const total = calcTotal();
+
+        const pedido = {
+          _from:'web',
+          nombre,
+          telefono,
+          pago,
+          entrega,
+          comment: comentario,
+          items,
+          total,
+          orderNumber,
+          number: orderNumber,
+          status:'accepted',
+          payment_status: pago==='efectivo' ? 'pending_payment' : 'paid',
+          source:'web',
+          createdAt: new Date()
+        };
+
+        // 3) Guardar
+        const ref = await db.collection('orders').add(pedido);
+
+        // 4) Publico opcional (seguimiento)
+        const pubId = ref.id.slice(0,22);
+        await db.collection('order_public').doc(pubId).set({
+          orderId: ref.id,
+          orderNumber,
+          status:'accepted',
+          entrega,
+          pago,
+          nombre,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, {merge:true});
+
+        // 5) Limpiar carrito y UI
+        cart={burger:{},drink:{}}; saveCart(); renderCart();
+        document.getElementById('overlayCheckout').classList.remove('open');
+        document.getElementById('placeResult').innerHTML =
+          `<div class="ok-chip ok">¡Listo! Tu pedido es <strong>#${orderNumber}</strong> <span class="small">(guardado)</span></div>`;
+
+      }catch(err){
+        console.error(err);
+        alert('No se pudo crear el pedido. Probá de nuevo.');
+      }
+    };
   </script>
 </body>
 </html>
