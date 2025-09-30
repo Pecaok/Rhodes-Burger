@@ -204,7 +204,30 @@
         cancelled:'cancelled'
       })[s] || s || 'accepted';
     }
-    function updateStatusUI(pubStatus, updatedAt, pago, entrega, paidFlag){
+
+    // ===== Estado de UI que fusiona datos públicos + privados =====
+    const UI = {
+      orderNumber: null,
+      pago: null,
+      entrega: null
+    };
+    function setNum(n){
+      if(!n) return;
+      UI.orderNumber = n;
+      $("#num").textContent = "#"+n;
+    }
+    function setPago(v){
+      if(!v) return;
+      UI.pago = v;
+      $("#pay").textContent = (v==='efectivo'?'Efectivo':v);
+    }
+    function setEntrega(v){
+      if(!v) return;
+      UI.entrega = v;
+      $("#deliv").textContent = (v==='take_away'?'Take Away':v);
+    }
+
+    function updateStatusUI(pubStatus, updatedAt, paidFlag){
       var infoEl = document.getElementById("info");
       if(infoEl) infoEl.textContent = "";
 
@@ -215,8 +238,6 @@
       fillSteps(pubStatus);
 
       if(updatedAt) $("#time").textContent = fmt(updatedAt);
-      if(pago) $("#pay").textContent = pago === 'efectivo' ? 'Efectivo' : (pago || '—');
-      if(entrega) $("#deliv").textContent = entrega === 'take_away' ? 'Take Away' : (entrega || '—');
 
       var el = $("#payPill");
       if(el){
@@ -224,6 +245,7 @@
         el.className = "pay-pill " + (paidFlag ? "pay-paid" : "pay-pending");
       }
     }
+
     function renderItems(order){
       var cont = $("#items");
       cont.innerHTML = "";
@@ -261,6 +283,18 @@
       $("#resTotal").textContent = money(total || order.total || 0);
     }
 
+    // Saca un número de pedido desde el doc privado si no existe en el público
+    function extractOrderNumberFromPrivate(d, id){
+      const fields = [d.orderNumber,d.number,d.numero,d.num,d.nro,d.seq,d.orderNo,d.pedidoNumber,d.pedido];
+      for(const v of fields){
+        if(v==null) continue;
+        const n = typeof v==="string" ? parseInt(v,10) : v;
+        if(Number.isFinite(n)) return n;
+      }
+      // fallback a hash del id (últimos 5)
+      return null;
+    }
+
     var orderId = qs("id");
     var token   = qs("t");
 
@@ -272,16 +306,19 @@
           return;
         }
         var d = snap.data();
+
         $("#greet").textContent = d && d.nombre ? `, ${d.nombre}` : "";
-        $("#num").textContent = "#" + (d.orderNumber || "—");
 
+        // 🔢 Número, pago, entrega (solo setean si traen valor)
+        if (d.orderNumber) setNum(d.orderNumber);
+        if (d.pago)        setPago(d.pago);
+        if (d.entrega)     setEntrega(d.entrega);
+
+        // paid/status
         var paidFlag = (d.payment_status === 'paid') || !!d.paid;
-
         updateStatusUI(
           d.status,
           d.updatedAt || d.createdAt,
-          d.pago,
-          d.entrega,
           paidFlag
         );
       }, function(err){
@@ -296,21 +333,29 @@
       privateUnsub = db.collection("orders").doc(orderId).onSnapshot(function(doc){
         if(!doc.exists){ return; }
         var d = doc.data();
+
+        // Si el token no coincide, ocultamos detalle
         if(d.trackToken && token && d.trackToken !== token){
           $("#items").innerHTML = '<div class="small error">Por seguridad no mostramos el detalle porque el token no coincide.</div>';
           $("#resTotal").textContent = money(0);
           return;
         }
+
+        // Detalle de ítems
         renderItems(d);
 
+        // Completar METADATOS si faltaban en público
+        const maybeNum = extractOrderNumberFromPrivate(d, doc.id);
+        if (maybeNum && !UI.orderNumber) setNum(maybeNum);
+        if (d.pago && !UI.pago) setPago(d.pago);
+        if (d.entrega && !UI.entrega) setEntrega(d.entrega);
+
+        // Estado/pago
         var pub = toPublic(d.status || 'accepted');
         var paidFlag = (d.payment_status === 'paid') || !!d.paid;
-
         updateStatusUI(
           pub,
           d.updatedAt || d.createdAt,
-          d.pago,
-          d.entrega,
           paidFlag
         );
       }, function(err){
@@ -323,6 +368,7 @@
         $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
         return;
       }
+      // Si viene sólo id, tratamos de descubrir el token para que también escuche el público
       if(!token && orderId){
         try{
           var snap = await db.collection("orders").doc(orderId).get();
@@ -332,7 +378,8 @@
           }
         }catch(e){}
       }
-      if(token){ attachPublicListener(); }
+
+      if(token) attachPublicListener();
       attachPrivateListener();
     })();
   </script>
