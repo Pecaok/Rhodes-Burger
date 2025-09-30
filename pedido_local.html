@@ -23,6 +23,7 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600}
     .btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
     .danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
+
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
 
@@ -46,7 +47,6 @@
     .item .sub{color:#111;font-size:13px;margin-top:3px}
     .divider{height:1px;background:#efefef;margin:10px 0}
     .err{color:#b00020;font-weight:600}
-
     .stateBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
     .state-btn{border:2px solid #dcdcdc;background:#fff;color:#111;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;min-width:160px;text-align:center}
     .state-btn.on{color:#fff;border-color:var(--primary);background:var(--primary)}
@@ -109,7 +109,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-  /*************** CONFIG & LOGIN ***************/
+  /* ================== CONFIG & LOGIN ================== */
   const firebaseConfig = {
     apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
     authDomain: "rhodes-burguers.firebaseapp.com",
@@ -123,9 +123,13 @@
 
   const $ = s => document.querySelector(s);
 
-  $("#btnLogout").onclick=()=>{localStorage.clear();sessionStorage.clear();location.replace("login.html?reason=logout&next=pedido_local.html");};
+  $("#btnLogout").onclick=()=>{
+    localStorage.clear();
+    sessionStorage.clear();
+    location.replace("login.html?reason=logout&next=pedido_local.html");
+  };
 
-  /*************** AUDIO (beep) ***************/
+  /* ================== AUDIO (beep) ================== */
   let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
   let audioCtx = null, audioReady = false;
   function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
@@ -138,7 +142,7 @@
   updateBellUI();
   btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
 
-  /*************** FECHA (jornada 19→19) ***************/
+  /* ================== FECHA (jornada 19→19) ================== */
   const dayPicker = $("#dayPicker");
   const rangeLabel = $("#rangeLabel");
   const J_START_H = 19; // 19:00
@@ -162,6 +166,17 @@
     return {start,end};
   }
 
+  /* ================== ESTADO UI ================== */
+  const tabs=$("#tabs");
+  let currentFilter="all";
+  tabs.addEventListener("click",(e)=>{
+    const el=e.target.closest("[data-f]"); if(!el) return;
+    currentFilter = el.dataset.f;
+    tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+    el.classList.add("active");
+    refreshQuery();
+  });
+
   (function initDay(){
     const today = new Date();
     try{ dayPicker.value = yyyy_mm_dd(today); }catch(_){}
@@ -171,12 +186,7 @@
     dayPicker.addEventListener("change", refreshQuery);
   })();
 
-  function updateRangeLabel(start,end){
-    const fmt = new Intl.DateTimeFormat('es-AR',{dateStyle:'medium', timeStyle:'short'});
-    rangeLabel.textContent = `Mostrando: ${fmt.format(start)} → ${fmt.format(end)}`;
-  }
-
-  /*************** HELPERS DE ORDEN ***************/
+  /* ================== RENDER ORDENES ================== */
   const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
   const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
   const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
@@ -184,15 +194,13 @@
   const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
   function pickDocDate(obj){
-    // Timestamp Firestore en varios nombres
-    for(const k of ['createdAt','created_at','timestamp','date','fecha','time']){
-      const v=obj[k];
+    const cand=['createdAt','date','fecha','timestamp','created_at','time'];
+    for(const k of cand){
+      const v=obj?.[k];
       if(v?.toDate) return v.toDate();
+      if(typeof v==='number') return new Date(v);
       if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d; }
-      if(typeof v==='number' && (k==='timestamp')) return new Date(v);
     }
-    // Campo numérico (mostrador)
-    if(typeof obj.createdAtMs==='number') return new Date(obj.createdAtMs);
     return null;
   }
   function displayOrderNumber(doc){
@@ -217,6 +225,7 @@
     const o=doc.data(); const dt=pickDocDate(o);
     const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
     const items=Array.isArray(o.items)?o.items:[];
+
     const lines=items.map(it=>{
       const qty=it.qty||1;
       const subtotal=(it.price||0)*qty
@@ -267,7 +276,7 @@
     </div>`;
   }
 
-  /*************** ACCIONES ***************/
+  /* ================== ACCIONES ================== */
   async function setOrderStatus(id,next){
     try{
       await db.collection("orders").doc(id).update({
@@ -286,15 +295,15 @@
     }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
   }
 
-  /*************** SUSCRIPCIÓN (DOBLE QUERY) ***************/
-  const tabs=$("#tabs"); let currentFilter="all";
-  tabs.addEventListener("click",(e)=>{
-    const el=e.target.closest("[data-f]"); if(!el) return;
-    currentFilter = el.dataset.f;
-    tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
-    el.classList.add("active");
-    refreshQuery();
-  });
+  /* ================== SUSCRIPCIÓN MULTI-CAMPO ================== */
+  let unsubs = [];                 // guardamos TODOS los listeners para poder limpiarlos
+  let unionMap = new Map();        // id -> docSnap
+  let initialLoaded=false;
+
+  function updateRangeLabel(start,end){
+    const fmt = new Intl.DateTimeFormat('es-AR',{dateStyle:'medium', timeStyle:'short'});
+    $("#rangeLabel").textContent = `Mostrando: ${fmt.format(start)} → ${fmt.format(end)}`;
+  }
 
   function passFilterLocal(o){
     if(currentFilter==="all") return true;
@@ -306,108 +315,106 @@
       const s = (o.status||"");
       return (s==="in_prep" || s==="ready" || s==="delivered");
     }
-    if(currentFilter==="cancelled"){
-      return (o.status==="cancelled");
-    }
-    if(currentFilter==="cancelled_hist"){
+    if(currentFilter==="cancelled" || currentFilter==="cancelled_hist"){
       return (o.status==="cancelled");
     }
     return true;
   }
 
-  let unsubs = [];                 // múltiples listeners
-  let initialLoaded=false;
-  let combinedMap = new Map();     // id -> docSnap
-  let knownIds = new Set();        // para beep
-  let lastRange = null;
-
-  function clearListeners(){
-    unsubs.forEach(fn=>{try{fn&&fn();}catch(_){}}); unsubs=[];
-  }
-
-  function renderCombined(){
-    const docs = Array.from(combinedMap.values())
-      .filter(s=>passFilterLocal(s.data()))
+  function renderFromMap(range){
+    // Convertir a array, ordenar por fecha y filtrar por rango+filtros
+    const docs = Array.from(unionMap.values())
+      .filter(d=>{
+        const dt = pickDocDate(d.data());
+        if(!dt) return false;
+        return dt>=range.start && dt<range.end;
+      })
+      .filter(d=>passFilterLocal(d.data()))
       .sort((a,b)=>{
         const da=pickDocDate(a.data())?.getTime()||0;
         const db=pickDocDate(b.data())?.getTime()||0;
         return db-da;
       });
-    document.getElementById("orders").innerHTML =
-      docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
 
-    const idToDoc = new Map(docs.map(d=>[d.id,d]));
+    document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
+
+    // bind actions
     document.querySelectorAll(".order").forEach(card=>{
       const id=card.dataset.id;
       card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
       const payBtn=card.querySelector("[data-pay]");
       if(payBtn) payBtn.addEventListener("click",()=>setPaymentStatus(id,payBtn.dataset.pay==="paid"));
       const pr=card.querySelector("[data-print]");
-      if(pr) pr.addEventListener("click",()=> printInIframe(idToDoc.get(id)));
+      if(pr) pr.addEventListener("click",()=> printInIframe(unionMap.get(id)));
     });
   }
 
-  function listenRangeByField(field, start, end){
-    // Convierte rango según el tipo de campo
-    let s = start, e = end;
-    if(field==='createdAtMs' || field==='timestamp'){ s = start.getTime(); e = end.getTime(); }
-    const q = db.collection('orders')
-      .where(field, '>=', s)
-      .where(field, '<',  e)
-      .orderBy(field, 'desc')
-      .limit(200);
+  function listenForField(field, range){
+    try{
+      let q = db.collection("orders").where(field, ">=", range.start).where(field, "<", range.end).orderBy(field, "desc");
+      const unsub = q.onSnapshot(snap=>{
+        document.getElementById("ordersError").style.display="none";
+        document.getElementById("ordersError").textContent="";
 
-    const unsub = q.onSnapshot(snap=>{
-      // Beep sólo por nuevos ids respecto del conjunto conocido
-      snap.docChanges().forEach(ch=>{
-        if(ch.type==='added' && initialLoaded && !knownIds.has(ch.doc.id)) playBeepTriple();
-        knownIds.add(ch.doc.id);
+        // mergear
+        snap.docs.forEach(d=> unionMap.set(d.id, d));
+        renderFromMap(range);
+
+        // beep en added (sólo si ya cargamos algo alguna vez)
+        if(initialLoaded){
+          snap.docChanges().forEach(ch=>{
+            if(ch.type==='added'){ playBeepTriple(); }
+          });
+        }
+        initialLoaded = true;
+      }, err=>{
+        console.warn("Listener falló para campo", field, err?.message||err);
       });
-      // Fusionar
-      snap.docs.forEach(d=> combinedMap.set(d.id,d));
-      renderCombined();
-      initialLoaded = true;
-    }, err=>{
-      console.error(err);
-      const box = document.getElementById("ordersError");
-      box.textContent="No se pudo cargar la lista de pedidos.";
-      box.style.display="block";
-    });
-    unsubs.push(unsub);
+      unsubs.push(unsub);
+    }catch(err){
+      console.warn("No se pudo crear listener para", field, err?.message||err);
+    }
   }
 
   function refreshQuery(){
-    clearListeners();
-    combinedMap.clear();
-    const picked = new Date(document.getElementById("dayPicker").value+'T12:00:00');
-    const range = (currentFilter==="cancelled_hist") ? month19RangeFromAny(picked) : rangeForDay(picked);
-    lastRange = range;
-    updateRangeLabel(range.start, range.end);
+    // limpiar listeners previos
+    unsubs.forEach(u=>{ try{u()}catch(e){} });
+    unsubs = [];
+    unionMap = new Map();
     initialLoaded=false;
-    knownIds = new Set();
 
-    // Siempre escuchamos ambas variantes; si una no existe, simplemente no traerá docs
-    listenRangeByField('createdAt',  range.start, range.end);   // Timestamp
-    listenRangeByField('created_at', range.start, range.end);   // Timestamp (otra app)
-    listenRangeByField('fecha',      range.start, range.end);   // por si acaso
-    listenRangeByField('date',       range.start, range.end);   // por si acaso
-    listenRangeByField('time',       range.start, range.end);   // por si acaso
-    listenRangeByField('timestamp',  range.start, range.end);   // numérico
-    listenRangeByField('createdAtMs',range.start, range.end);   // numérico (mostrador)
+    const picked = new Date($("#dayPicker").value+'T12:00:00');
+    const range = (currentFilter==="cancelled_hist") ? month19RangeFromAny(picked) : rangeForDay(picked);
+    updateRangeLabel(range.start, range.end);
+
+    // Escuchar por múltiples campos de fecha
+    const FIELDS = ['createdAt','date','fecha','timestamp','time']; // soportamos todas las variantes
+    FIELDS.forEach(f=> listenForField(f, range));
+
+    // Fallback: si nada llega (por ej. docs con null hasta que resolve serverTimestamp),
+    // hacemos además un listener general (ordenado por id) y filtramos a mano:
+    try{
+      const unsubAny = db.collection("orders")
+        .orderBy(firebase.firestore.FieldPath.documentId(), "desc")
+        .limit(200)
+        .onSnapshot(snap=>{
+          snap.docs.forEach(d=> unionMap.set(d.id, d));
+          renderFromMap(range);
+        }, err=> console.warn("Listener por docId falló", err?.message||err));
+      unsubs.push(unsubAny);
+    }catch(e){}
   }
 
-  /*************** TICKET IMPRESIÓN ***************/
+  /* ==================== TICKET (impresión) ==================== */
   function buildTicketHTML(docSnap){
     const o = docSnap.data();
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-
     const orderDisplay = (()=> {
       const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
       for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
       return `#${docSnap.id.slice(-5).toUpperCase()}`;
     })();
-
-    const dt=pickDocDate(o)||new Date();
+    const dt = pickDocDate(o) || new Date();
     const dateStr = dt.toLocaleDateString('es-AR');
     const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
@@ -425,7 +432,6 @@
       const cheddarSum   = qty * cheddarCount * cheddarUnit;
       const baseSubtotal = base * qty;
       const lineTotal    = baseSubtotal + pattySum + cheddarSum;
-
       return `
         <div class="row name"><div class="l">${qty} × ${it.name||''}</div></div>
         ${it.fries ? `<div class="sub">• Papas: ${friesStr(it.fries)}</div>` : ''}
@@ -494,7 +500,6 @@
 </body>
 </html>`;
   }
-
   function printInIframe(docSnap){
     const html = buildTicketHTML(docSnap);
     const iframe = document.createElement('iframe');
@@ -508,7 +513,7 @@
     setTimeout(cleanup, 15000);
   }
 
-  /*************** INICIO ***************/
+  /* ================== ARRANQUE ================== */
   refreshQuery();
   </script>
 </body>
