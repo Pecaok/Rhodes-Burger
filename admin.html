@@ -39,7 +39,7 @@
     .btn.bad{background:#fff1f1;border-color:#ffd7d7}
     .btn:disabled{opacity:.55;cursor:not-allowed}
 
-    input[type="text"],input[type="number"],input[type="datetime-local"],select,textarea{
+    input[type="text"],textarea{
       padding:10px;border:1.5px solid var(--ring);border-radius:12px;background:#fff;width:100%;
     }
     textarea{min-height:90px}
@@ -53,7 +53,6 @@
     .code{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-weight:800}
     .tag{display:inline-block;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:800}
     .tag.green{background:#e8f5e9;color:#2e7d32}
-    .tag.orange{background:#fff3e0;color:#ef6c00}
     .tag.gray{background:#f3f3f3;color:#333}
   </style>
 </head>
@@ -175,11 +174,16 @@
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
     try{ firebase.initializeApp(firebaseConfig); }catch(e){}
+
+    // 🔧 FIX transporte: long-polling antes de crear `db`
+    firebase.firestore().settings({
+      experimentalForceLongPolling: true,
+      useFetchStreams: false
+    });
     const db = firebase.firestore();
 
     // ===== Catálogo (ids deben coincidir con index/mostrador) =====
     const CATALOG = [
-      // Hamburguesas
       { id:"bigjohn_simple", name:"Big John Simple", category:"hamburguesas" },
       { id:"bigjohn_doble",  name:"Big John Doble",  category:"hamburguesas" },
       { id:"burguesa_simple",name:"Burguesa Simple", category:"hamburguesas" },
@@ -217,7 +221,6 @@
       if(!snap.exists){
         await ref.set({ name:p.name, category:p.category, available:true, createdAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
       }else{
-        // asegurar fields mínimos
         const d = snap.data();
         if(typeof d.available !== 'boolean' || !d.name || !d.category){
           await ref.set({ name:p.name, category:p.category, available: d.available ?? true }, {merge:true});
@@ -253,22 +256,19 @@
         invList.appendChild(el);
       });
 
-      // actions
       invList.querySelectorAll('button[data-id]').forEach(btn=>{
         btn.addEventListener('click', async ()=>{
           const id = btn.dataset.id;
           const next = btn.dataset.next === '1';
           btn.disabled = true;
           await toggleProduct(id, next);
-          await loadInventory(); // recargar
+          await loadInventory();
         });
       });
     }
 
     async function loadInventory(){
-      // asegurar docs
       await Promise.all(CATALOG.map(ensureProductDoc));
-      // leer estados
       const snaps = await Promise.all(CATALOG.map(p => db.collection('products').doc(p.id).get()));
       const map = new Map();
       snaps.forEach((s,i)=> map.set(CATALOG[i].id, !!(s.data()?.available ?? true)) );
@@ -312,7 +312,6 @@
       const maxUses = Number($('#cpMaxUses').value||0);
       const note = ($('#cpNote').value||'').trim();
 
-      // fechas (opc)
       const from = $('#cpFrom').value ? new Date($('#cpFrom').value) : null;
       const to   = $('#cpTo').value   ? new Date($('#cpTo').value)   : null;
 
