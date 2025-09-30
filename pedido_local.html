@@ -144,10 +144,11 @@
   // ================== FECHA (jornada 19→19) ==================
   const dayPicker = $("#dayPicker");
   const rangeLabel = $("#rangeLabel");
-  const J_START_H = 19;
+  const J_START_H = 19; // 19:00
 
   function yyyy_mm_dd(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
   function startOfJornada(d){
+    // si la hora < 19, pertenece a la jornada que empezó el día anterior a las 19
     const base = new Date(d);
     const sameDayStart = new Date(base.getFullYear(), base.getMonth(), base.getDate(), J_START_H, 0, 0, 0);
     if (base < sameDayStart) sameDayStart.setDate(sameDayStart.getDate()-1);
@@ -155,17 +156,39 @@
   }
   function rangeForDay(d){
     const start = startOfJornada(d);
-    const end = new Date(start); end.setDate(end.getDate()+1);
+    const end = new Date(start); end.setDate(end.getDate()+1); // +24h
     return {start,end};
   }
   function month19RangeFromAny(d){
+    // desde 19:00 del día 1 hasta 19:00 del día 1 del mes siguiente
     const y = d.getFullYear(), m = d.getMonth();
     const start = new Date(y,m,1,J_START_H,0,0,0);
     const end = new Date(y,m+1,1,J_START_H,0,0,0);
     return {start,end};
   }
 
-  // ================== RENDER & HELPERS ==================
+  // Estado actual de filtros
+  const tabs=$("#tabs");
+  let currentFilter="all";
+  tabs.addEventListener("click",(e)=>{
+    const el=e.target.closest("[data-f]"); if(!el) return;
+    currentFilter = el.dataset.f;
+    tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+    el.classList.add("active");
+    refreshQuery(); // re-suscribir
+  });
+
+  // Picker & navegación
+  (function initDay(){
+    const today = new Date();
+    try{ dayPicker.value = yyyy_mm_dd(today); }catch(_){}
+    $("#btnToday").onclick = ()=>{ dayPicker.value = yyyy_mm_dd(new Date()); refreshQuery(); };
+    $("#btnPrev").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()-1); dayPicker.value = yyyy_mm_dd(d); refreshQuery(); };
+    $("#btnNext").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()+1); dayPicker.value = yyyy_mm_dd(d); refreshQuery(); };
+    dayPicker.addEventListener("change", refreshQuery);
+  })();
+
+  // ================== RENDER ORDENES ==================
   const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
   const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
   const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
@@ -180,6 +203,11 @@
       if(typeof v==='number') return new Date(v);
       if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d; }
     }
+    return null;
+  }
+  function chooseDateField(obj){
+    const cand=['createdAt','created_at','timestamp','date','fecha','time'];
+    for(const k of cand){ if(obj && obj[k]!=null) return k; }
     return null;
   }
   function displayOrderNumber(doc){
@@ -274,19 +302,9 @@
   }
 
   // ================== SUSCRIPCIÓN ==================
-  let unsub = null;
+  let unsub = null;               // <<< FIX: declarada antes de usarse
   let lastSnap=null, idToDoc=new Map();
   let initialLoaded=false;
-  let currentFilter="all";
-
-  const tabs=$("#tabs");
-  tabs.addEventListener("click",(e)=>{
-    const el=e.target.closest("[data-f]"); if(!el) return;
-    currentFilter = el.dataset.f;
-    tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
-    el.classList.add("active");
-    renderList(lastSnap); // sólo re-filtrar en memoria
-  });
 
   function updateRangeLabel(start,end){
     const fmt = new Intl.DateTimeFormat('es-AR',{dateStyle:'medium', timeStyle:'short'});
@@ -303,26 +321,17 @@
       const s = (o.status||"");
       return (s==="in_prep" || s==="ready" || s==="delivered");
     }
-    if(currentFilter==="cancelled" || currentFilter==="cancelled_hist"){
+    if(currentFilter==="cancelled"){
+      return (o.status==="cancelled");
+    }
+    if(currentFilter==="cancelled_hist"){
       return (o.status==="cancelled");
     }
     return true;
   }
 
   function renderList(snap){
-    if(!snap){ $("#orders").innerHTML='<p class="muted">No hay pedidos.</p>'; return; }
-
-    // Determinar rango actual
-    const picked = new Date($("#dayPicker").value+'T12:00:00');
-    const range = (currentFilter==="cancelled_hist") ? month19RangeFromAny(picked) : rangeForDay(picked);
-
-    const docsInRange = snap.docs.filter(d=>{
-      const dt = pickDocDate(d.data());
-      return dt && dt >= range.start && dt < range.end;
-    });
-
-    const docs = docsInRange.filter(d=>passFilterLocal(d.data()));
-
+    const docs=snap.docs.filter(d=>passFilterLocal(d.data()));
     idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
     $("#orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
 
@@ -334,34 +343,47 @@
       const pr=card.querySelector("[data-print]");
       if(pr) pr.addEventListener("click",()=> printInIframe(idToDoc.get(id)));
     });
-
-    updateRangeLabel(range.start, range.end);
   }
 
   function refreshQuery(){
+    // cancelar listener previo si existe
     if (typeof unsub === "function") { try{unsub();}catch(_){ } }
     initialLoaded=false;
 
-    // Traemos los últimos 500 por fecha si existe; si no, por ID.
+    const picked = new Date($("#dayPicker").value+'T12:00:00'); // medio día para evitar TZ edge
+    let range;
+
+    if(currentFilter==="cancelled_hist"){
+      // mes histórico (19→19)
+      range = month19RangeFromAny(picked);
+    }else{
+      // jornada diaria (19→19)
+      range = rangeForDay(picked);
+    }
+
+    updateRangeLabel(range.start, range.end);
+
+    // Query: por rango de fecha y orderBy createdAt (single-field)
+    // Si no existe el campo, caemos al orderBy por documentId (sin filtro de rango).
     (async ()=>{
       const probe = await db.collection("orders").limit(1).get();
-      const probeData = probe.empty ? null : probe.docs[0].data();
-      const hasCreated = probeData && (probeData.createdAt!=null || probeData.created_at!=null || probeData.timestamp!=null || probeData.date!=null || probeData.fecha!=null || probeData.time!=null);
+      let dateField = null;
+      if (!probe.empty){ dateField = chooseDateField(probe.docs[0].data()); }
 
       let q = db.collection("orders");
-      if(hasCreated){
-        // ordenar por un solo campo de fecha si existe en “algún” doc (no filtramos por rango aquí)
-        q = q.orderBy("createdAt","desc").limit(500);
+      if(dateField){
+        q = q.where(dateField, ">=", range.start).where(dateField, "<", range.end).orderBy(dateField, "desc");
       }else{
-        q = q.orderBy(firebase.firestore.FieldPath.documentId()).limit(500);
+        q = q.orderBy(firebase.firestore.FieldPath.documentId());
       }
 
-      unsub = q.onSnapshot(snap=>{
+      unsub = q.limit(200).onSnapshot(snap=>{
         $("#ordersError").style.display="none";
         $("#ordersError").textContent="";
         lastSnap = snap;
         renderList(snap);
 
+        // Beep en pedidos nuevos después de la primera carga
         snap.docChanges().forEach(ch=>{
           if(ch.type==='added' && initialLoaded){
             playBeepTriple();
@@ -451,6 +473,7 @@
   .sub{ font-size:11px; margin:1px 0 0 2mm; }
   .sub.ex{ white-space:nowrap; }
   .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
+  .subtotal{ margin-top:2mm; }
   .total{ font-size:16px; margin-top:3mm; }
   .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
 </style>
@@ -485,16 +508,7 @@
     setTimeout(cleanup, 15000);
   }
 
-  // ================== INICIO ==================
-  (function initDay(){
-    const today = new Date();
-    try{ dayPicker.value = yyyy_mm_dd(today); }catch(_){}
-    $("#btnToday").onclick = ()=>{ dayPicker.value = yyyy_mm_dd(new Date()); renderList(lastSnap); };
-    $("#btnPrev").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()-1); dayPicker.value = yyyy_mm_dd(d); renderList(lastSnap); };
-    $("#btnNext").onclick  = ()=>{ const d=new Date(dayPicker.value); d.setDate(d.getDate()+1); dayPicker.value = yyyy_mm_dd(d); renderList(lastSnap); };
-    dayPicker.addEventListener("change", ()=>renderList(lastSnap));
-  })();
-
+  // ================== ARRANQUE ==================
   refreshQuery();
   </script>
 </body>
