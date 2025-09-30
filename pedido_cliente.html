@@ -38,6 +38,7 @@
     .actions .btn{flex:1}
     .statusHint{font-size:13px;color:var(--muted);margin-top:10px}
 
+    /* Watermark de logo */
     html, body { min-height: 100%; }
     body { position: relative; }
     body::before{
@@ -119,7 +120,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-    // Tu config
+    // Config
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -161,7 +162,6 @@
     const resumen = $("#resumen"), resTotal = $("#resTotal");
     function renderResumen(){
       resumen.innerHTML = "";
-      // burgers
       for(const k in cart.burger){
         const obj = cart.burger[k];
         const extras = [];
@@ -179,7 +179,6 @@
           </div>
         `);
       }
-      // drinks
       for(const k in cart.drink){
         const obj = cart.drink[k];
         const line = ((obj.item && obj.item.price)||0) * (obj.qty||0);
@@ -194,7 +193,7 @@
     }
     renderResumen();
 
-    // ------- Helpers de armado -------
+    // ------- Helpers -------
     function selectedPago(){
       const el = document.querySelector('input[name="pago"]:checked');
       return el ? el.value : "";
@@ -252,14 +251,13 @@
       lines.push(`Total: ${money(order.total)}`);
       if(order.comment) lines.push(`Notas del pedido: ${order.comment}`);
 
-      // Link de seguimiento
       const base = location.origin;
-      const trackUrl = `${base}/pedido_cliente.html?id=${encodeURIComponent(order._id)}&code=${encodeURIComponent(order.orderCode)}`;
+      const trackUrl = `${base}/gracias.html?id=${encodeURIComponent(order._id)}&code=${encodeURIComponent(order.orderCode)}`;
       lines.push(`Seguimiento: ${trackUrl}`);
       return encodeURIComponent(lines.join("\n"));
     }
     function openWhatsApp(order){
-      const PHONE_NUMBER = "5491170596483"; // ← cambiá por el de tu local
+      const PHONE_NUMBER = "5491170596483"; // ← cambiá por el del local
       const txt = buildWhatsappText(order);
       const url = `https://wa.me/${PHONE_NUMBER}?text=${txt}`;
       window.open(url, "_blank");
@@ -268,15 +266,13 @@
       try { localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{}})); } catch(e){}
     }
 
-    // ------- Confirmar (crear en /orders solamente) -------
+    // ------- Confirmar (crear en /orders) -------
     document.getElementById("btnConfirmar").addEventListener("click", async ()=>{
-      // Validaciones mínimas
       const nombre = $("#inpNombre").value.trim();
       if(!nombre){ alert("Ingresá tu nombre."); return; }
       const pago = selectedPago();
       if(!pago){ alert("Elegí un medio de pago."); return; }
 
-      // Armar orden local
       const orderCode = genOrderCode();
       const order = {
         customer:{ name:nombre, phone: $("#inpTelefono").value.trim() || null },
@@ -292,18 +288,17 @@
       };
 
       try{
-        // Guardar en /orders (SIN transacciones ni /config)
         const ref = await addDoc(collection(db,'orders'), order);
 
-        // completar datos para WhatsApp
         const enriched = {...order, _id: ref.id};
-
-        // Abrir WhatsApp + redirigir a seguimiento
-        openWhatsApp(enriched);
+        openWhatsApp(enriched);                   // WhatsApp ✅
         clearCart();
+
         localStorage.setItem('lastOrderId', ref.id);
         localStorage.setItem('lastOrderCode', orderCode);
-        window.location.href = `pedido_cliente.html?id=${encodeURIComponent(ref.id)}&code=${encodeURIComponent(orderCode)}`;
+
+        // Redirigir a la página de tracking
+        window.location.href = `gracias.html?id=${encodeURIComponent(ref.id)}&code=${encodeURIComponent(orderCode)}`;
       }catch(err){
         console.error(err);
         alert("No pudimos crear el pedido. Revisá las Reglas de Firestore o la configuración.");
