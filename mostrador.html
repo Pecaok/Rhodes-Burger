@@ -175,22 +175,24 @@
   const money = n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
   const FALLBACK_IMG="images/logo.png";
 
-  // ===== Contador GLOBAL =====
+  // ===== Contador GLOBAL (sin transacción; compatible con reglas públicas) =====
   function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
   async function nextOrderNumber(){
-    return await db.runTransaction(async tx=>{
-      const ref = globalCounterRef();
-      const snap = await tx.get(ref);
-      const cur = snap.exists ? (Number(snap.data().seq)||0) : 0;
-      const nxt = cur + 1;
-      tx.set(ref, { seq: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-      return nxt;
-    });
+    const ref = globalCounterRef();
+    // Crea/actualiza el doc y aumenta en 1 de forma atómica
+    await ref.set({
+      seq: firebase.firestore.FieldValue.increment(1),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge:true });
+    // Lee el valor actualizado
+    const snap = await ref.get();
+    const seq = Number(snap.data()?.seq || 1);
+    return seq;
   }
 
-  // ===== Menú (ejemplo; usa tus precios) =====
+  // ===== Menú =====
   const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
-  const BURGERS=[ /* ... mismos IDs que index ... */ 
+  const BURGERS=[
     { id:"bigjohn_simple", name:"Big John Simple", price:10900, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
     { id:"bigjohn_doble",  name:"Big John Doble",  price:13900, img:"images/Big John Doble.jpg",  kind:"double", desc:"Doble medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
     { id:"burguesa_simple", name:"Burguesa Simple", price:11900, img:"images/Burguesa Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
@@ -375,7 +377,7 @@
     overlay.classList.remove("open"); renderCart();
   };
 
-  // ===== Pagar (carga directa en orders, contado como pagado) =====
+  // ===== Pagar (escribe en orders + order_public) =====
   document.getElementById("btnPagar").onclick = async ()=>{
     try{
       const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
@@ -386,8 +388,13 @@
       const pago = $("#selPago").value;
       const comentario = ($("#inpComentario").value||"").trim();
 
-      const items=[]; for(const o of Object.values(cart.burger)){ items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,fries:o.fries,notes:o.notes||'',extras:{patty:o.extras?.patty||0,cheddar:o.extras?.cheddar||0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR}}); }
-      for(const o of Object.values(cart.drink)){ items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,extras:{},fries:'',notes:''}); }
+      const items=[];
+      for(const o of Object.values(cart.burger)){
+        items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,fries:o.fries,notes:o.notes||'',extras:{patty:o.extras?.patty||0,cheddar:o.extras?.cheddar||0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR}});
+      }
+      for(const o of Object.values(cart.drink)){
+        items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,extras:{},fries:'',notes:''});
+      }
 
       const total = calcTotal();
       const orderNumber = await nextOrderNumber();
@@ -395,7 +402,8 @@
       const payload = {
         orderNumber, number: orderNumber, nombre, telefono, pago, comment: comentario,
         items, total, status:"accepted", payment_status:"paid",
-        source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        source:"mostrador",
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
       const ref = await db.collection("orders").add(payload);
 
