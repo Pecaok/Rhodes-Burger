@@ -87,12 +87,11 @@
     <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
   </main>
 
-  <!-- Firebase modular -->
+  <!-- Firebase modular (v10) -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
-      getFirestore, collection, query, orderBy, limit, onSnapshot,
-      updateDoc, doc, getDocs, documentId
+      getFirestore, collection, onSnapshot, updateDoc, doc
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     /* ================= FIREBASE ================= */
@@ -125,11 +124,6 @@
       }
       return null;
     }
-    function chooseDateField(obj){
-      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
-      for(const k of cand){ if(obj && obj[k]!=null) return k; }
-      return null;
-    }
     function displayOrderNumber(o, id){
       const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
       for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
@@ -152,7 +146,6 @@
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"false"); // APAGADO por defecto
     let audioCtx = null;
     const getAudioCtx = ()=> (audioCtx ??= new (window.AudioContext||window.webkitAudioContext)());
-
     function beepOnce(ctx, d=0.28, f=880, g=0.7){
       const o=ctx.createOscillator(), ga=ctx.createGain();
       o.type="square"; o.frequency.value=f; o.connect(ga); ga.connect(ctx.destination);
@@ -338,7 +331,6 @@
   .sub{ font-size:11px; margin:1px 0 0 2mm; }
   .sub.ex{ white-space:nowrap; }
   .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
-  .subtotal{ margin-top:2mm; }
   .total{ font-size:16px; margin-top:3mm; }
   .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
 </style>
@@ -391,71 +383,54 @@
     }
 
     function renderList(docs){
+      const passFilter = (o)=>{
+        const s = o.status ?? "accepted";
+        if(currentFilter==="new"){ return s==="accepted" || s==="pending_payment"; }
+        if(currentFilter==="in_prep"){ return s==="in_prep" || s==="ready" || s==="delivered"; }
+        if(currentFilter==="cancelled"){ return s==="cancelled"; }
+        return true;
+      };
       const shown=docs.filter(d=>passFilter(d.data()));
       idToDoc=new Map(docs.map(d=>[d.id,d]));
       $("#orders").innerHTML = shown.length ? shown.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
       hookCardActions();
     }
 
-    /* ============== SUSCRIPCIÓN ROBUSTA ============== */
+    /* ============== SUSCRIPCIÓN SIN ÍNDICES ============== */
     let initialLoaded=false;
+    function subscribeOrdersNoIndex(){
+      const coll = collection(db, 'orders');
+      onSnapshot(coll, (snap) => {
+        // Ordenar en el cliente por fecha si existe, sino por id desc
+        lastDocs = snap.docs.slice().sort((a,b)=>{
+          const da = pickDocDate(a.data());
+          const dbb = pickDocDate(b.data());
+          if (dbb && da) return dbb - da;
+          if (dbb && !da) return -1;
+          if (!dbb && da) return 1;
+          return String(b.id).localeCompare(String(a.id));
+        });
 
-    async function subscribeOrders(){
-      try{
-        // Sondéo rápido para detectar campo de fecha y construir query preferida
-        const probe = await getDocs(query(collection(db,'orders'), limit(1)));
-        let dateField = null;
-        if(!probe.empty){ dateField = chooseDateField(probe.docs[0].data()); }
+        renderList(lastDocs);
 
-        let q;
-        if(dateField){
-          try{
-            // intento preferido: ordenar por fecha
-            q = query(collection(db,'orders'), orderBy(dateField,'desc'), limit(100));
-            onSnapshot(q, snapHandler, errHandler);
-          }catch(e){
-            // si orderBy falla en construcción (raro), voy al fallback
-            fallback();
-          }
-        }else{
-          fallback();
-        }
+        snap.docChanges().forEach(ch=>{
+          if (ch.type === 'added' && initialLoaded) playBeepTriple();
+        });
+        initialLoaded = true;
 
-        function fallback(){
-          // Fallback: sin orderBy (evita 400 por índice). El orden lo maneja el cliente.
-          onSnapshot(collection(db,'orders'), snapHandler, errHandler);
-        }
-
-        function snapHandler(snap){
-          $("#ordersError").style.display="none"; $("#ordersError").textContent="";
-          lastDocs = snap.docs.slice().sort((a,b)=>{
-            // ordenar en cliente por fecha si existe, sino por id desc
-            const da = pickDocDate(a.data()); const dbb = pickDocDate(b.data());
-            if(dbb && da) return dbb - da;
-            if(dbb && !da) return -1;
-            if(!dbb && da) return 1;
-            return String(b.id).localeCompare(String(a.id));
-          });
-          renderList(lastDocs);
-
-          snap.docChanges().forEach(ch=>{
-            if(ch.type==='added' && initialLoaded){ playBeepTriple(); }
-          });
-          initialLoaded = true;
-        }
-        function errHandler(err){
-          console.error(err);
-          $("#ordersError").textContent = (err?.message || "No se pudo cargar la lista de pedidos (ver consola).");
-          $("#ordersError").style.display = "block";
-        }
-      }catch(err){
+        const errEl = document.getElementById('ordersError');
+        errEl.style.display = 'none';
+        errEl.textContent = '';
+      }, (err) => {
         console.error(err);
-        $("#ordersError").textContent="No se pudo inicializar la lista de pedidos.";
-        $("#ordersError").style.display="block";
-      }
+        const errEl = document.getElementById('ordersError');
+        errEl.textContent = 'No se pudo cargar la lista de pedidos (ver consola).';
+        errEl.style.display = 'block';
+      });
     }
 
-    subscribeOrders();
+    // Boot
+    subscribeOrdersNoIndex();
   </script>
 </body>
 </html>
