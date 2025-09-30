@@ -174,26 +174,21 @@
   const money = n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
   const FALLBACK_IMG="images/logo.png";
 
-  // Contador de pedidos (por día calendario). Si preferís jornada 19→19, avisá y lo cambio.
-  function yyyymmddLocal(d=new Date()){
-    const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
-    return `${y}${m}${day}`;
-  }
-  async function getNextOrderNumber(db){
-    const key = yyyymmddLocal();               // p.ej 20250929
-    const ref = db.collection('counters').doc(`orders_${key}`);
-    let next=1;
-    await db.runTransaction(async tx=>{
-      const snap=await tx.get(ref);
-      const cur=(snap.exists && Number(snap.data().seq))||0;
-      next=cur+1;
-      tx.set(ref,{seq:next,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+  // ===== CONTADOR GLOBAL (compartido con index) =====
+  function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
+  async function nextOrderNumber(){
+    return await db.runTransaction(async tx=>{
+      const ref = globalCounterRef();
+      const snap = await tx.get(ref);
+      const cur = snap.exists ? (Number(snap.data().seq)||0) : 0;
+      const nxt = cur + 1;
+      tx.set(ref, { seq: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      return nxt;
     });
-    return next;
   }
 
   // ===== Datos menú =====
-  const EXTRA_PRICE_PATTY=1600, EXTRA_PRICE_CHEDDAR=300;
+  const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
 
   const BURGERS=[
     { id:"bigjohn_simple", name:"Big John Simple", price:10900, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
@@ -354,17 +349,19 @@
   btnAdd.onclick=()=>{
     const friesEl=document.querySelector('input[name="fries"]:checked');
     if(!friesEl){ alert("Elegí el tipo de papas."); return; }
-    const extras={patty:0,cheddar:0};
+    const extras={patty:0,cheddar:0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR};
     if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
     else if(currentItem.kind==="chicken"){ extras.cheddar=+cheVal.textContent||0; }
     const bucket=cart.burger; const prev=bucket[currentItem.id];
     if(prev){
       prev.qty+=1;
       prev.extras={ patty:Math.max(prev.extras?.patty||0, extras.patty),
-                    cheddar:Math.max(prev.extras?.cheddar||0, extras.cheddar) };
+                    cheddar:Math.max(prev.extras?.cheddar||0, extras.cheddar),
+                    EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR };
       prev.fries=friesEl.value; if(notes.value.trim()) prev.notes=notes.value.trim();
     }else{
-      bucket[currentItem.id]={qty:1,item:currentItem,fries:friesEl.value,extras, ...(notes.value.trim()?{notes:notes.value.trim()}:{})};
+      bucket[currentItem.id]={qty:1,item:currentItem,fries:friesEl.value,extras,
+                              ...(notes.value.trim()?{notes:notes.value.trim()}:{})};
     }
     overlay.classList.remove("open"); renderCart();
   };
@@ -373,11 +370,14 @@
   $("#btnPagar").onclick = async ()=>{
     try{
       // Validaciones
-      if(!Object.keys(cart.burger).length && !Object.keys(cart.drink).length){
-        alert("Agregá al menos un producto."); return;
-      }
-      const nombre = ($("#inpNombre").value||"Cliente").trim();
-      if(!nombre){ alert("Ingresá el nombre."); return; }
+      const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
+      if(!hasItems){ alert("Agregá al menos un producto."); return; }
+      const nombreRaw = ($("#inpNombre").value||"").trim();
+      if(!nombreRaw){ alert("Ingresá el nombre."); return; }
+      const nombre = `${nombreRaw} (mostrador)`; // ← etiqueta pedida
+      const telefono = ($("#inpTel").value||"").trim();
+      const pago = $("#selPago").value;
+      const comentario = ($("#inpComentario").value||"").trim();
 
       // Armo items lineales
       const items=[];
@@ -386,32 +386,47 @@
           id:o.item.id, name:o.item.name, price:o.item.price, qty:o.qty,
           fries:o.fries, notes:o.notes||'',
           extras:{ patty:o.extras?.patty||0, cheddar:o.extras?.cheddar||0,
-                   EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR }
+                   EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR }
         });
       }
       for(const o of Object.values(cart.drink)){
-        items.push({ id:o.item.id, name:o.item.name, price:o.item.price, qty:o.qty });
+        items.push({ id:o.item.id, name:o.item.name, price:o.item.price, qty:o.qty, extras:{}, fries:'', notes:'' });
       }
 
       // Total
       const total = calcTotal();
 
-      // Número de pedido del día (transacción)
-      const orderNumber = await getNextOrderNumber(db);
+      // Número de pedido GLOBAL (transacción)
+      const orderNumber = await nextOrderNumber();
 
-      // Guardar pedido
+      // Guardar pedido (mismos campos que index para compatibilidad con pedido_local)
       const payload = {
         orderNumber,
-        nombre: `${nombre} (mostrador)`,
-        telefono: ($("#inpTel").value||"").trim(),
-        pago: $("#selPago").value,
+        number: orderNumber,
+        nombre,
+        telefono,
+        pago,
+        comment: comentario,
         items, total,
         status:"accepted",
-        payment_status:"paid",  // mostrador cobrado
+        payment_status:"paid",    // mostrador ya cobrado
         source:"mostrador",
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
-      await db.collection("orders").add(payload);
+      const ref = await db.collection("orders").add(payload);
+
+      // (Opcional) seguimiento público, igual formato que index
+      const pubId = ref.id.slice(0,22);
+      await db.collection('order_public').doc(pubId).set({
+        orderId: ref.id,
+        orderNumber,
+        status:'accepted',
+        entrega:'retira',
+        pago,
+        nombre,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true});
 
       // Reset UI
       cart={burger:{},drink:{}}; renderCart();
