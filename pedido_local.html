@@ -91,7 +91,8 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
-      getFirestore, collection, onSnapshot, updateDoc, doc
+      getFirestore, collection, onSnapshot, updateDoc, doc,
+      query, where, limit, getDocs, getDoc, setDoc, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     /* ================= FIREBASE ================= */
@@ -142,7 +143,17 @@
       },0);
     };
 
-    /* ================= SONIDO ================= */
+    /* ====== mapeo a estado público (para order_public) ====== */
+    const mapToPublic = (s) => ({
+      accepted: 'accepted',
+      in_prep: 'preparing',
+      ready: 'ready_for_pickup',
+      delivered: 'completed',
+      cancelled: 'cancelled',
+      pending_payment: 'pending_payment',
+    })[s] || 'accepted';
+
+    /* ====== sonido ====== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"false"); // APAGADO por defecto
     let audioCtx = null;
     const getAudioCtx = ()=> (audioCtx ??= new (window.AudioContext||window.webkitAudioContext)());
@@ -195,21 +206,55 @@
       return true;
     };
 
+    /* ===== espejo público: actualizar order_public ===== */
+    async function updatePublicMirror(orderId, patch){
+      try{
+        // Buscar por orderId
+        const q = query(collection(db, 'order_public'), where('orderId', '==', orderId), limit(1));
+        const qs = await getDocs(q);
+        let pubRef = null;
+
+        if (!qs.empty) {
+          pubRef = doc(db, 'order_public', qs.docs[0].id);
+        } else {
+          // Plan B: leer trackToken del pedido privado
+          const priv = await getDoc(doc(db,'orders',orderId));
+          if (priv.exists() && priv.data().trackToken) {
+            pubRef = doc(db,'order_public', String(priv.data().trackToken));
+            await setDoc(pubRef, { orderId }, { merge:true });
+          }
+        }
+        if (!pubRef) return;
+
+        await setDoc(pubRef, { ...patch, updatedAt: serverTimestamp() }, { merge:true });
+      }catch(e){
+        console.warn('updatePublicMirror falló:', e);
+      }
+    }
+
     async function setOrderStatus(id,next){
       try{
         await updateDoc(doc(db,"orders",id),{
           status: next,
           statusHistory: [{to:next,at:new Date().toISOString()}]
         });
-      }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
+        // reflejo público
+        await updatePublicMirror(id, { status: mapToPublic(next) });
+      }catch(e){
+        alert("No se pudo actualizar el estado: "+(e?.message||e));
+      }
     }
     async function setPaymentStatus(id, paid){
       try{
+        const payment_status = paid ? "paid" : "pending_payment";
         await updateDoc(doc(db,"orders",id),{
           paid: !!paid,
-          payment_status: paid ? "paid" : "pending_payment"
+          payment_status
         });
-      }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
+        await updatePublicMirror(id, { payment_status, paid: !!paid });
+      }catch(e){
+        alert("No se pudo actualizar el pago: "+(e?.message||e));
+      }
     }
     const btnStateClass=st=>`state-btn state-${st}`;
 
@@ -383,13 +428,6 @@
     }
 
     function renderList(docs){
-      const passFilter = (o)=>{
-        const s = o.status ?? "accepted";
-        if(currentFilter==="new"){ return s==="accepted" || s==="pending_payment"; }
-        if(currentFilter==="in_prep"){ return s==="in_prep" || s==="ready" || s==="delivered"; }
-        if(currentFilter==="cancelled"){ return s==="cancelled"; }
-        return true;
-      };
       const shown=docs.filter(d=>passFilter(d.data()));
       idToDoc=new Map(docs.map(d=>[d.id,d]));
       $("#orders").innerHTML = shown.length ? shown.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
