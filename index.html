@@ -73,9 +73,24 @@
     #btnCart:hover{ filter:brightness(.98); }
     #btnCart #cartBubble{ color:#333 !important; }
 
+    /* Modal Checkout */
+    .form label{font-weight:700;display:block;margin:6px 0 4px}
+    .form input,.form select,.form textarea{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
+    .form .row{gap:10px}
+    .right{display:flex;gap:10px;justify-content:flex-end}
+    .ok-chip{display:inline-block;margin-top:8px;font-weight:800}
+    .ok-chip a{color:#111}
+    .ok-chip .small{font-weight:600;color:#666}
+    .ok{color:#2e7d32}
+    .warn{color:#fb8c00}
+
     /* Disponibilidad */
     .card[data-soldout="1"]{ opacity:.55; }
-    .soldout-badge{ position:absolute; top:10px; left:10px; z-index:2; background:#222; color:#fff; font-weight:800; font-size:12px; padding:6px 8px; border-radius:999px; letter-spacing:.3px; }
+    .soldout-badge{
+      position:absolute; top:10px; left:10px; z-index:2;
+      background:#222; color:#fff; font-weight:800; font-size:12px;
+      padding:6px 8px; border-radius:999px; letter-spacing:.3px;
+    }
 
     @media (max-width:600px){
       .topbar{padding:8px 10px;gap:8px;flex-wrap:wrap}
@@ -140,7 +155,6 @@
       </div>
       <div class="cart-actions">
         <button class="btn ghost" id="btnVaciar">Vaciar</button>
-        <!-- Redirige a pedido_cliente.html -->
         <button class="btn primary" id="btnPagar">Ir a pagar</button>
       </div>
       <div id="placeResult"></div>
@@ -191,11 +205,53 @@
     </div>
   </div>
 
+  <!-- Modal Checkout -->
+  <div class="overlay" id="overlayCheckout">
+    <div class="modal">
+      <h3>Finalizar pedido</h3>
+      <div class="form">
+        <label for="chNombre">Nombre*</label>
+        <input id="chNombre" placeholder="Tu nombre">
+
+        <label for="chTelefono">Teléfono (opcional)</label>
+        <input id="chTelefono" placeholder="11 2345-6789">
+
+        <div class="row">
+          <div style="flex:1">
+            <label for="chPago">Medio de pago*</label>
+            <select id="chPago">
+              <option value="mercado_pago">mercado_pago</option>
+              <option value="efectivo">efectivo</option>
+              <option value="debito">debito</option>
+              <option value="credito">credito</option>
+              <option value="transferencia">transferencia</option>
+            </select>
+          </div>
+          <div style="flex:1">
+            <label for="chEntrega">Entrega</label>
+            <select id="chEntrega">
+              <option value="retira">retira</option>
+              <option value="delivery">delivery</option>
+            </select>
+          </div>
+        </div>
+
+        <label for="chNota">Comentario</label>
+        <textarea id="chNota" rows="3" placeholder="Aclaraciones opcionales"></textarea>
+      </div>
+
+      <div class="right">
+        <button class="btn ghost" id="btnChkCancel">Cancelar</button>
+        <button class="btn primary" id="btnChkConfirm">Confirmar pedido</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Firebase (App/Auth) -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
-  <!-- Horarios + Carta + Carrito + Disponibilidad -->
+  <!-- Horarios + Carta + Carrito + Checkout + Disponibilidad + Override -->
   <script>
     /* ===== Horarios ===== */
     const HOURS = {
@@ -229,12 +285,28 @@
       const pagar = document.getElementById('btnPagar');
       if(pagar){ if(orderable){ pagar.classList.remove('disabled'); pagar.removeAttribute('aria-disabled'); pagar.removeAttribute('disabled'); } else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); pagar.setAttribute('disabled',''); } }
     }
+
+    // ===== Estado global del override desde admin =====
+    let FORCE_OPEN = false;
+    let FORCE_MSG  = "";
+
     function renderStatus(){
       const pill=document.getElementById('statusPill');
       const main=pill.querySelector('.status-main');
       const sub=pill.querySelector('.status-sub');
+
       const now=new Date();
       const st=isOpenNow(now);
+
+      if (FORCE_OPEN) {
+        pill.classList.remove('status-closed'); 
+        pill.classList.add('status-open');
+        main.textContent='Abierto';
+        sub.textContent = FORCE_MSG ? FORCE_MSG : 'apertura especial';
+        setOrderable(true);
+        return;
+      }
+
       if(st.open){
         const [h,m]=st.until;
         pill.classList.remove('status-closed'); pill.classList.add('status-open');
@@ -289,13 +361,19 @@
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
     try{ firebase.initializeApp(firebaseConfig); }catch(_){}
-
-    // 🔧 FIX transporte: fuerza long-polling antes de crear `db`
-    firebase.firestore().settings({
-      experimentalForceLongPolling: true,
-      useFetchStreams: false
-    });
     const db = firebase.firestore();
+    // Evitar errores de red (QUIC) y warnings de "override host"
+    try{ db.settings({ experimentalAutoDetectLongPolling: true, merge: true }); }catch(_){}
+
+    /* === Suscripción al override desde admin (config/store) === */
+    try{
+      db.collection('config').doc('store').onSnapshot((snap)=>{
+        const d = snap.exists ? (snap.data() || {}) : {};
+        FORCE_OPEN = !!d.forceOpen;
+        FORCE_MSG  = d.forceOpenMessage || "";
+        renderStatus();
+      }, console.warn);
+    }catch(e){ console.warn('No se pudo suscribir a config/store:', e); }
 
     /* ===== Disponibilidad (products) ===== */
     const availability = new Map(); // id -> boolean
@@ -394,11 +472,10 @@
     document.getElementById("closeDrawer").onclick=closeDrawer;
     document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
 
-    // 👉 Redirigir a pedido_cliente.html (no mostramos modal propio)
-    document.getElementById("btnPagar").onclick = ()=>{
-      if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
-      window.location.href = "pedido_cliente.html";
-    };
+    // Abrir modal de checkout
+    const ovCheckout = document.getElementById('overlayCheckout');
+    document.getElementById("btnPagar").onclick = ()=>{ if(!orderable) return cantOrderAlert(); if(cartCount()===0){ alert('Tu carrito está vacío'); return; } ovCheckout.classList.add('open'); };
+    document.getElementById("btnChkCancel").onclick = ()=> ovCheckout.classList.remove('open');
 
     function renderCart(){
       cartItems.innerHTML="";
@@ -450,7 +527,7 @@
 
     /* ===== Modal Personalizar ===== */
     const overlay=$("#overlay"),modTitle=$("#modTitle");
-    const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar");
+    const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar"),noExtras=document.createElement('div');
     const patVal=$("#patVal"),patInc=$("#patInc"),patDec=$("#patDec");
     const cheVal=$("#cheVal"),cheInc=$("#cheInc"),cheDec=$("#cheDec");
     const notes=$("#notes"),btnAdd=$("#btnAdd"),btnCancel=$("#btnCancel");
@@ -489,6 +566,63 @@
         bucket[currentItem.id]={qty:1,item:currentItem,fries:friesEl.value,extras,...(txt?{notes:txt}:{})};
       }
       saveCart(); renderCart(); overlay.classList.remove("open");
+    };
+
+    /* ====== Checkout Firebase (contador global) ====== */
+    function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
+    async function nextOrderNumber(){
+      return await db.runTransaction(async tx=>{
+        const ref = globalCounterRef();
+        const snap = await tx.get(ref);
+        const cur = snap.exists ? (Number(snap.data().seq)||0) : 0;
+        const nxt = cur + 1;
+        tx.set(ref, { seq: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+        return nxt;
+      });
+    }
+    function cartToItems(){
+      const items=[];
+      for(const obj of Object.values(cart.burger||{})){
+        items.push({name:obj.item.name,price:obj.item.price,qty:obj.qty,fries:obj.fries||'',extras:{patty:obj.extras?.patty||0,cheddar:obj.extras?.cheddar||0,EXTRA_PRICE_PATTY:obj.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:obj.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR},notes:obj.notes||""});
+      }
+      for(const obj of Object.values(cart.drink||{})){
+        items.push({name:obj.item.name,price:obj.item.price,qty:obj.qty,extras:{},fries:'',notes:''});
+      }
+      return items;
+    }
+    const btnChkConfirm = document.getElementById('btnChkConfirm');
+    btnChkConfirm.onclick = async ()=>{
+      if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
+      const nombre = document.getElementById('chNombre').value.trim();
+      if(!nombre){ alert('Ingresá tu nombre'); return; }
+      const telefono = document.getElementById('chTelefono').value.trim();
+      const pago = document.getElementById('chPago').value;
+      const entrega = document.getElementById('chEntrega').value;
+      const comentario = document.getElementById('chNota').value.trim();
+      try{
+        const orderNumber = await nextOrderNumber();
+        const items = cartToItems();
+        const total = calcTotal();
+        const pedido = {
+          _from:'web', nombre, telefono, pago, entrega, comment: comentario,
+          items, total, orderNumber, number: orderNumber,
+          status:'accepted',
+          payment_status: pago==='efectivo' ? 'pending_payment' : 'paid',
+          source:'web', createdAt: new Date()
+        };
+        const ref = await db.collection('orders').add(pedido);
+        const pubId = ref.id.slice(0,22);
+        await db.collection('order_public').doc(pubId).set({
+          orderId: ref.id, orderNumber, status:'accepted', entrega, pago, nombre,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, {merge:true});
+        cart={burger:{},drink:{}}; saveCart(); renderCart();
+        document.getElementById('overlayCheckout').classList.remove('open');
+
+        // 👉 Redirigir a la página de confirmación
+        window.location.href = `pedido_cliente.html?id=${encodeURIComponent(ref.id)}`;
+      }catch(err){ console.error(err); alert('No se pudo crear el pedido. Probá de nuevo.'); }
     };
 
     /* Montar UI */
