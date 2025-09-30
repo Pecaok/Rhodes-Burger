@@ -10,7 +10,7 @@
       --primary:#625A45; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
       --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.08); --ring:#eaeaea;
 
-      /* Colores por estado */
+      /* Estado */
       --st-accepted:#FBC02D;
       --st-preparing:#FB8C00;
       --st-ready:#00ACC1;
@@ -34,7 +34,7 @@
     main{max-width:1100px;margin:24px auto;padding:0 12px;display:grid;grid-template-columns:1fr 420px;gap:18px}
     @media (max-width:900px){ main{grid-template-columns:1fr} }
 
-    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;overflow:visible}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
     h1{font-size:28px;margin:10px 0 8px}
     h2{font-size:18px;margin:10px 0}
     .muted{color:var(--muted)}
@@ -42,7 +42,7 @@
     .row{display:flex;align-items:center;justify-content:space-between;margin:8px 0;gap:12px;flex-wrap:wrap}
     .total{font-weight:800;font-size:18px}
 
-    /* Badge de estado */
+    /* Badge */
     .badge{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1.5px solid var(--ring);font-weight:800;background:#fff}
     .accepted{border-color:var(--st-accepted);color:var(--st-accepted)}
     .preparing{border-color:var(--st-preparing);color:var(--st-preparing)}
@@ -70,7 +70,7 @@
 
     .meta{display:flex;gap:8px;flex-wrap:wrap}
 
-    /* Watermark */
+    /* Marca de agua */
     html, body { min-height: 100%; }
     body { position: relative; }
     body::before{
@@ -91,12 +91,15 @@
   </header>
 
   <main>
-    <!-- Izquierda: estado -->
+    <!-- Estado -->
     <section class="card">
-      <h1>¡Gracias por tu pedido! <span id="greet" class="muted"></span></h1>
       <div class="row">
-        <div id="badge" class="badge">Estado: —</div>
+        <h1>¡Gracias por tu pedido! <span id="greet" class="muted"></span></h1>
         <div id="num" class="muted">#—</div>
+      </div>
+
+      <div class="row" style="margin-top:0">
+        <div id="badge" class="badge">Estado: —</div>
       </div>
 
       <div class="steps">
@@ -117,7 +120,7 @@
       <div id="info" class="small muted" style="margin-top:8px">Cargando estado…</div>
     </section>
 
-    <!-- Derecha: resumen -->
+    <!-- Resumen -->
     <aside class="card">
       <h2>Tu pedido</h2>
       <div id="items" class="items"></div>
@@ -132,11 +135,12 @@
     </aside>
   </main>
 
-  <!-- Firebase (SDK MODULAR) -->
+  <!-- Firebase SDK MODULAR -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import { getFirestore, doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+    // Config
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -148,7 +152,7 @@
     const app = initializeApp(firebaseConfig);
     const db  = getFirestore(app);
 
-    // -------- Helpers --------
+    // -------- Helpers
     const $ = s => document.querySelector(s);
     const params = new URLSearchParams(location.search);
     const orderId = params.get('id') || localStorage.getItem('lastOrderId') || '';
@@ -193,9 +197,8 @@
       const key = (cur==='received') ? 'accepted' : cur;
       const idx = PIPE.indexOf(key);
       for(let i=0;i<=idx;i++){
-        const id = 'st-'+PIPE[i];
-        const el = document.getElementById(id);
-        if(el) el.classList.add('fill-'+(PIPE[i]));
+        const el = document.getElementById('st-'+PIPE[i]);
+        if(el) el.classList.add('fill-'+PIPE[i]);
       }
       if(cur==='cancelled'){
         document.querySelectorAll('.steps .step').forEach(el=> el.className='step fill-cancelled');
@@ -239,8 +242,16 @@
     }
 
     function updateMeta(order){
-      $('#greet').textContent = order.customer?.name ? `, ${order.customer.name}` : '';
-      $('#num').textContent = order.orderCode ? order.orderCode : '#—';
+      // nombre
+      const nombre = order.nombre || order.customer?.name || '';
+      $('#greet').textContent = nombre ? `, ${nombre}` : '';
+
+      // NUMERO DE PEDIDO: prioridad al secuencial
+      const num = order.orderNumber || order.number || null;
+      const fallbackCode = order.orderCode || '';
+      $('#num').textContent = num ? `#${num}` : (fallbackCode || '#—');
+
+      // meta
       $('#time').textContent = fmt(order.updatedAt || order.createdAt);
       $('#pay').textContent = order.payment?.method==='efectivo' ? 'Efectivo' :
                               (order.payment?.method==='mercado_pago'? 'Mercado Pago' : (order.payment?.method||'—'));
@@ -267,13 +278,13 @@
       }
       const ref = doc(db,'orders',orderId);
 
-      // verificación de code (si está disponible)
+      // (Opcional) si hay code, validamos para mostrar/ocultar ítems
+      let allowItems = true;
       if(codeUrl){
         try{
           const snap = await getDoc(ref);
           if(snap.exists() && snap.data().orderCode && snap.data().orderCode !== codeUrl){
-            // code incorrecto → mostramos sin ítems
-            $('#items').innerHTML = '<div class="small error">Por seguridad, el detalle no se muestra porque el código no coincide.</div>';
+            allowItems = false;
           }
         }catch{}
       }
@@ -285,12 +296,13 @@
         }
         const order = snap.data();
         $('#info').textContent = '';
+
         updateMeta(order);
         updateStatus(order);
 
-        // si el code coincide (o no se pasó ningún code), mostramos ítems
-        if(!order.orderCode || !codeUrl || order.orderCode===codeUrl){
-          renderItems(order);
+        if(allowItems || !order.orderCode) renderItems(order);
+        else {
+          $('#items').innerHTML = '<div class="small error">Por seguridad, el detalle no se muestra porque el código no coincide.</div>';
         }
       }, (err)=>{
         $('#info').innerHTML = '<span class="error">Error de conexión: '+(err?.message||err)+'</span>';
