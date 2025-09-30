@@ -38,13 +38,11 @@
     .actions .btn{flex:1}
     .statusHint{font-size:13px;color:var(--muted);margin-top:10px}
 
-    /* Watermark de logo */
     html, body { min-height: 100%; }
     body { position: relative; }
     body::before{
       content: "";
-      position: fixed; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
       width: clamp(240px, 48vmin, 560px);
       background: url("images/logo.png") center / contain no-repeat;
       opacity: 0.08; pointer-events: none; z-index: 5;
@@ -61,7 +59,6 @@
   </header>
 
   <main>
-    <!-- Izquierda: formulario -->
     <section class="card">
       <h1>Confirmar pedido</h1>
 
@@ -104,7 +101,6 @@
       <div class="statusHint">Te redirigimos a WhatsApp con el detalle y un link para seguir el estado.</div>
     </section>
 
-    <!-- Derecha: resumen -->
     <aside class="card right">
       <h3>Resumen</h3>
       <div id="resumen"></div>
@@ -115,12 +111,14 @@
     </aside>
   </main>
 
-  <!-- ====== Firebase (SDK MODULAR) ====== -->
+  <!-- ===== Firebase (SDK MODULAR) ===== -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import {
+      getFirestore, collection, addDoc, serverTimestamp,
+      runTransaction, doc, getDoc, setDoc
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-    // Config
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -132,59 +130,56 @@
     const app = initializeApp(firebaseConfig);
     const db  = getFirestore(app);
 
-    // ------- Utilidades / Carrito -------
+    // ---------- Utils & cart ----------
     const CART_KEY = "rhodes_cart_v3";
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const genOrderCode = () => Math.random().toString(36).slice(2,8).toUpperCase();
 
-    function loadCart(){
-      try { return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}}; }
-      catch(e){ return {burger:{},drink:{}}; }
-    }
+    function loadCart(){ try { return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}}; } catch(e){ return {burger:{},drink:{}}; } }
     const cart = loadCart();
 
     function unitWithExtras(it){
       const base = (it.item && it.item.price) ? it.item.price : (it.price||0);
-      const pz = ((it.extras && it.extras.patty) ? it.extras.patty : 0) * ((it.extras && it.extras.EXTRA_PRICE_PATTY) ? it.extras.EXTRA_PRICE_PATTY : 2400);
-      const ch = ((it.extras && it.extras.cheddar) ? it.extras.cheddar : 0) * ((it.extras && it.extras.EXTRA_PRICE_CHEDDAR) ? it.extras.EXTRA_PRICE_CHEDDAR : 300);
+      const pz = (it.extras?.patty||0)   * (it.extras?.EXTRA_PRICE_PATTY   ?? 2400);
+      const ch = (it.extras?.cheddar||0) * (it.extras?.EXTRA_PRICE_CHEDDAR ?? 300);
       return base + pz + ch;
     }
     function calcTotal(){
       let t=0;
       for(const k in cart.burger){ const obj=cart.burger[k]; t += unitWithExtras(obj) * (obj.qty||0); }
-      for(const k in cart.drink){ const obj=cart.drink[k]; t += ((obj.item && obj.item.price)||0) * (obj.qty||0); }
+      for(const k in cart.drink){  const obj=cart.drink[k];  t += ((obj.item && obj.item.price)||0) * (obj.qty||0); }
       return t;
     }
     function friesName(v){ return v==="con_sazon" ? "Con sazón" : "Sin sazonar"; }
 
-    // ------- Resumen -------
+    // Resumen
     const resumen = $("#resumen"), resTotal = $("#resTotal");
     function renderResumen(){
       resumen.innerHTML = "";
       for(const k in cart.burger){
-        const obj = cart.burger[k];
-        const extras = [];
-        if(obj.extras?.patty) extras.push("+"+obj.extras.patty+" medallón(es)");
-        if(obj.extras?.cheddar) extras.push("+"+obj.extras.cheddar+" cheddar");
-        const line = unitWithExtras(obj) * (obj.qty||0);
+        const o = cart.burger[k];
+        const extras=[];
+        if(o.extras?.patty)   extras.push("+"+o.extras.patty+" medallón(es)");
+        if(o.extras?.cheddar) extras.push("+"+o.extras.cheddar+" cheddar");
+        const line = unitWithExtras(o)*(o.qty||0);
         resumen.insertAdjacentHTML("beforeend", `
           <div class="row" style="align-items:flex-start">
             <div>
-              <div><strong>${obj.qty||0}× ${obj.item?.name||""}</strong></div>
-              <div class="muted">Papas: ${friesName(obj.fries)}${extras.length?(' · '+extras.join(' · ')):""}</div>
-              ${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}
+              <div><strong>${o.qty||0}× ${o.item?.name||""}</strong></div>
+              <div class="muted">Papas: ${friesName(o.fries)}${extras.length?(' · '+extras.join(' · ')):""}</div>
+              ${o.notes?`<div class="muted">Notas: ${o.notes}</div>`:""}
             </div>
             <div>${money(line)}</div>
           </div>
         `);
       }
       for(const k in cart.drink){
-        const obj = cart.drink[k];
-        const line = ((obj.item && obj.item.price)||0) * (obj.qty||0);
+        const d = cart.drink[k];
+        const line = (d.item?.price||0)*(d.qty||0);
         resumen.insertAdjacentHTML("beforeend", `
           <div class="row">
-            <div><strong>${obj.qty||0}× ${obj.item?.name||""}</strong></div>
+            <div><strong>${d.qty||0}× ${d.item?.name||""}</strong></div>
             <div>${money(line)}</div>
           </div>
         `);
@@ -193,45 +188,45 @@
     }
     renderResumen();
 
-    // ------- Helpers -------
-    function selectedPago(){
-      const el = document.querySelector('input[name="pago"]:checked');
-      return el ? el.value : "";
-    }
+    // Helpers
+    function selectedPago(){ const el=document.querySelector('input[name="pago"]:checked'); return el?el.value:""; }
     function cartToItems(){
       const items=[];
       for(const k in cart.burger){
-        const b = cart.burger[k];
+        const b=cart.burger[k];
         items.push({
-          type:"burger",
-          id:b.item?.id||"",
-          name:b.item?.name||"",
-          qty:b.qty||0,
-          price:b.item?.price||0,
+          type:"burger", id:b.item?.id||"", name:b.item?.name||"",
+          qty:b.qty||0, price:b.item?.price||0,
           fries:b.fries||"sin_sazon",
-          extras:{
-            patty:b.extras?.patty||0,
-            cheddar:b.extras?.cheddar||0
-          },
+          extras:{ patty:b.extras?.patty||0, cheddar:b.extras?.cheddar||0 },
           notes:b.notes||""
         });
       }
       for(const k in cart.drink){
-        const d = cart.drink[k];
-        items.push({
-          type:"drink",
-          id:d.item?.id||"",
-          name:d.item?.name||"",
-          qty:d.qty||0,
-          price:d.item?.price||0
-        });
+        const d=cart.drink[k];
+        items.push({ type:"drink", id:d.item?.id||"", name:d.item?.name||"", qty:d.qty||0, price:d.item?.price||0 });
       }
       return items;
     }
+
+    // 🔢 Contador global: /counters/orders_global.seq
+    const counterRef = doc(db, 'counters', 'orders_global');
+    async function nextOrderNumber(){
+      return await runTransaction(db, async (tx)=>{
+        const snap = await tx.get(counterRef);
+        const cur  = snap.exists() ? (Number(snap.data().seq)||0) : 0;
+        const nxt  = cur + 1;
+        tx.set(counterRef, { seq: nxt, updatedAt: serverTimestamp() }, { merge:true });
+        return nxt;
+      });
+    }
+
+    // WhatsApp
     function buildWhatsappText(order){
+      const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
       const lines=[];
       const pagoLabel = (order.payment.method==='efectivo')? 'Efectivo':'Mercado Pago';
-      lines.push(`Hola! Quiero confirmar el pedido ${order.orderCode}`);
+      lines.push(`Hola! Quiero confirmar el pedido #${order.orderNumber}`);
       lines.push(`Nombre: ${order.customer.name}${order.customer.phone?` — Tel: ${order.customer.phone}`:''}`);
       lines.push(`Retiro: ${order.delivery.type==='take_away'?'Take Away':order.delivery.type}`);
       lines.push(`Medio de pago: ${pagoLabel}`);
@@ -250,58 +245,60 @@
       lines.push(`------------------------------`);
       lines.push(`Total: ${money(order.total)}`);
       if(order.comment) lines.push(`Notas del pedido: ${order.comment}`);
-
       const base = location.origin;
       const trackUrl = `${base}/gracias.html?id=${encodeURIComponent(order._id)}&code=${encodeURIComponent(order.orderCode)}`;
       lines.push(`Seguimiento: ${trackUrl}`);
       return encodeURIComponent(lines.join("\n"));
     }
     function openWhatsApp(order){
-      const PHONE_NUMBER = "5491170596483"; // ← cambiá por el del local
-      const txt = buildWhatsappText(order);
-      const url = `https://wa.me/${PHONE_NUMBER}?text=${txt}`;
+      const PHONE_NUMBER = "5491170596483"; // ← tu número (sin +, sin espacios)
+      const url = `https://wa.me/${PHONE_NUMBER}?text=${buildWhatsappText(order)}`;
       window.open(url, "_blank");
     }
-    function clearCart(){
-      try { localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{}})); } catch(e){}
-    }
+    function clearCart(){ try { localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{}})); } catch(e){} }
 
-    // ------- Confirmar (crear en /orders) -------
+    // Confirmar
     document.getElementById("btnConfirmar").addEventListener("click", async ()=>{
       const nombre = $("#inpNombre").value.trim();
       if(!nombre){ alert("Ingresá tu nombre."); return; }
       const pago = selectedPago();
       if(!pago){ alert("Elegí un medio de pago."); return; }
 
-      const orderCode = genOrderCode();
-      const order = {
-        customer:{ name:nombre, phone: $("#inpTelefono").value.trim() || null },
-        payment:{ method:pago, status: (pago==='efectivo'?'pending':'pending') },
-        delivery:{ type:'take_away' },
-        comment: $("#inpNotas").value.trim() || null,
-        items: cartToItems(),
-        total: calcTotal(),
-        status: (pago==='mercado_pago' ? 'pending_payment' : 'accepted'),
-        orderCode,
-        createdAt: serverTimestamp(),
-        source:'web'
-      };
-
       try{
+        // 1) Obtener número secuencial
+        const orderNumber = await nextOrderNumber();
+
+        // 2) Armar pedido
+        const orderCode = genOrderCode(); // sigue existiendo por seguridad
+        const order = {
+          // campos toplevel (para tu panel)
+          orderNumber, number: orderNumber, nombre,
+          // estructura detallada
+          customer:{ name:nombre, phone: $("#inpTelefono").value.trim() || null },
+          payment:{ method:pago, status: (pago==='efectivo'?'pending':'pending') },
+          delivery:{ type:'take_away' },
+          comment: $("#inpNotas").value.trim() || null,
+          items: cartToItems(),
+          total: calcTotal(),
+          status: (pago==='mercado_pago' ? 'pending_payment' : 'accepted'),
+          orderCode,
+          createdAt: serverTimestamp(),
+          source:'web'
+        };
+
+        // 3) Guardar
         const ref = await addDoc(collection(db,'orders'), order);
 
+        // 4) WhatsApp + redirect
         const enriched = {...order, _id: ref.id};
-        openWhatsApp(enriched);                   // WhatsApp ✅
+        openWhatsApp(enriched);
         clearCart();
-
         localStorage.setItem('lastOrderId', ref.id);
         localStorage.setItem('lastOrderCode', orderCode);
-
-        // Redirigir a la página de tracking
         window.location.href = `gracias.html?id=${encodeURIComponent(ref.id)}&code=${encodeURIComponent(orderCode)}`;
       }catch(err){
         console.error(err);
-        alert("No pudimos crear el pedido. Revisá las Reglas de Firestore o la configuración.");
+        alert("No pudimos crear el pedido. Revisá las Reglas de Firestore para /counters y /orders.");
       }
     });
   </script>
