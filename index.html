@@ -205,7 +205,7 @@
     </div>
   </div>
 
-  <!-- Modal Checkout -->
+  <!-- Modal Checkout (queda, pero no se usa con la redirección) -->
   <div class="overlay" id="overlayCheckout">
     <div class="modal">
       <h3>Finalizar pedido</h3>
@@ -285,6 +285,27 @@
       const pagar = document.getElementById('btnPagar');
       if(pagar){ if(orderable){ pagar.classList.remove('disabled'); pagar.removeAttribute('aria-disabled'); pagar.removeAttribute('disabled'); } else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); pagar.setAttribute('disabled',''); } }
     }
+    function renderStatus(){
+      const pill=document.getElementById('statusPill');
+      const main=pill.querySelector('.status-main');
+      const sub=pill.querySelector('.status-sub');
+      const now=new Date();
+      const st=isOpenNow(now);
+      if(st.open){
+        const [h,m]=st.until;
+        pill.classList.remove('status-closed'); pill.classList.add('status-open');
+        main.textContent='Abierto';
+        sub.textContent=`hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        setOrderable(true);
+      }else{
+        pill.classList.remove('status-open'); pill.classList.add('status-closed');
+        const nx = nextOpen(now);
+        main.textContent='Cerrado';
+        sub.textContent=`abrimos ${nx?nx:'pronto'}`;
+        setOrderable(false);
+      }
+    }
+    renderStatus(); setInterval(renderStatus, 60*1000);
 
     /* ===== Helpers & Datos ===== */
     const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
@@ -325,17 +346,6 @@
     };
     try{ firebase.initializeApp(firebaseConfig); }catch(_){}
     const db = firebase.firestore();
-
-    /* ===== Apertura forzada desde config/store ===== */
-    let forceState = { open:false, msg:"" };
-    try{
-      db.collection('config').doc('store').onSnapshot(s=>{
-        const d=s.data()||{};
-        forceState.open = !!d.forceOpen;
-        forceState.msg  = d.forceOpenMessage || "";
-        renderStatus();       // refresca UI al cambiar el override
-      });
-    }catch(e){ console.warn('No se pudo leer config/store', e); }
 
     /* ===== Disponibilidad (products) ===== */
     const availability = new Map(); // id -> boolean
@@ -434,10 +444,15 @@
     document.getElementById("closeDrawer").onclick=closeDrawer;
     document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
 
-    // Abrir modal de checkout
-    const ovCheckout = document.getElementById('overlayCheckout');
-    document.getElementById("btnPagar").onclick = ()=>{ if(!orderable) return cantOrderAlert(); if(cartCount()===0){ alert('Tu carrito está vacío'); return; } ovCheckout.classList.add('open'); };
-    document.getElementById("btnChkCancel").onclick = ()=> ovCheckout.classList.remove('open');
+    /* === REDIRECCIÓN A pedido_cliente === */
+    document.getElementById("btnPagar").onclick = () => {
+      if(!orderable) return cantOrderAlert();
+      if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
+      // Guardamos el carrito (por si el usuario no interactuó recientemente)
+      saveCart();
+      // Ir a la pantalla de confirmación del cliente
+      window.location.href = 'pedido_cliente.html';
+    };
 
     function renderCart(){
       cartItems.innerHTML="";
@@ -489,7 +504,6 @@
 
     /* ===== Modal Personalizar ===== */
     const overlay=$("#overlay"),modTitle=$("#modTitle");
-    const qtyVal=$("#qtyVal"),qtyInc=$("#qtyInc"),qtyDec=$("#qtyDec");
     const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar"),noExtras=document.createElement('div');
     const patVal=$("#patVal"),patInc=$("#patInc"),patDec=$("#patDec");
     const cheVal=$("#cheVal"),cheInc=$("#cheInc"),cheDec=$("#cheDec");
@@ -530,93 +544,6 @@
       }
       saveCart(); renderCart(); overlay.classList.remove("open");
     };
-
-    /* ====== Checkout Firebase (contador global) ====== */
-    function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
-    async function nextOrderNumber(){
-      return await db.runTransaction(async tx=>{
-        const ref = globalCounterRef();
-        const snap = await tx.get(ref);
-        const cur = snap.exists ? (Number(snap.data().seq)||0) : 0;
-        const nxt = cur + 1;
-        tx.set(ref, { seq: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-        return nxt;
-      });
-    }
-    function cartToItems(){
-      const items=[];
-      for(const obj of Object.values(cart.burger||{})){
-        items.push({name:obj.item.name,price:obj.item.price,qty:obj.qty,fries:obj.fries||'',extras:{patty:obj.extras?.patty||0,cheddar:obj.extras?.cheddar||0,EXTRA_PRICE_PATTY:obj.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:obj.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR},notes:obj.notes||""});
-      }
-      for(const obj of Object.values(cart.drink||{})){
-        items.push({name:obj.item.name,price:obj.item.price,qty:obj.qty,extras:{},fries:'',notes:''});
-      }
-      return items;
-    }
-    const btnChkConfirm = document.getElementById('btnChkConfirm');
-    btnChkConfirm.onclick = async ()=>{
-      if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
-      const nombre = document.getElementById('chNombre').value.trim();
-      if(!nombre){ alert('Ingresá tu nombre'); return; }
-      const telefono = document.getElementById('chTelefono').value.trim();
-      const pago = document.getElementById('chPago').value;
-      const entrega = document.getElementById('chEntrega').value;
-      const comentario = document.getElementById('chNota').value.trim();
-      try{
-        const orderNumber = await nextOrderNumber();
-        const items = cartToItems();
-        const total = calcTotal();
-        const pedido = {
-          _from:'web', nombre, telefono, pago, entrega, comment: comentario,
-          items, total, orderNumber, number: orderNumber,
-          status:'accepted',
-          payment_status: pago==='efectivo' ? 'pending_payment' : 'paid',
-          source:'web', createdAt: new Date()
-        };
-        const ref = await db.collection('orders').add(pedido);
-        const pubId = ref.id.slice(0,22);
-        await db.collection('order_public').doc(pubId).set({
-          orderId: ref.id, orderNumber, status:'accepted', entrega, pago, nombre,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, {merge:true});
-        cart={burger:{},drink:{}}; saveCart(); renderCart();
-        document.getElementById('overlayCheckout').classList.remove('open');
-        document.getElementById('placeResult').innerHTML = `<div class="ok-chip ok">¡Listo! Tu pedido es <strong>#${orderNumber}</strong> <span class="small">(guardado)</span></div>`;
-      }catch(err){ console.error(err); alert('No se pudo crear el pedido. Probá de nuevo.'); }
-    };
-
-    /* ===== Estado visual (incluye override) ===== */
-    function renderStatus(){
-      const pill=document.getElementById('statusPill');
-      const main=pill.querySelector('.status-main');
-      const sub=pill.querySelector('.status-sub');
-      const now=new Date();
-      const st=isOpenNow(now);
-
-      if (forceState.open){  // 👈 prioridad al forzado
-        pill.classList.remove('status-closed'); pill.classList.add('status-open');
-        main.textContent='Abierto (forzado)';
-        sub.textContent=forceState.msg || '';
-        setOrderable(true);
-        return;
-      }
-
-      if(st.open){
-        const [h,m]=st.until;
-        pill.classList.remove('status-closed'); pill.classList.add('status-open');
-        main.textContent='Abierto';
-        sub.textContent=`hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-        setOrderable(true);
-      }else{
-        pill.classList.remove('status-open'); pill.classList.add('status-closed');
-        const nx = nextOpen(now);
-        main.textContent='Cerrado';
-        sub.textContent=`abrimos ${nx?nx:'pronto'}`;
-        setOrderable(false);
-      }
-    }
-    renderStatus(); setInterval(renderStatus, 60*1000);
 
     /* Montar UI */
     mount();
