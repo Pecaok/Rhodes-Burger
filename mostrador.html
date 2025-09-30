@@ -152,7 +152,7 @@
     </div>
   </div>
 
-  <!-- Firebase -->
+  <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
@@ -174,17 +174,30 @@
   const money = n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
   const FALLBACK_IMG="images/logo.png";
 
-  // ===== CONTADOR GLOBAL (compartido con index) =====
-  function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
+  // ===== CONTADOR GLOBAL (igual que pedido_cliente) =====
+  function countersRef(){ return db.collection('config').doc('counters'); }
   async function nextOrderNumber(){
-    return await db.runTransaction(async tx=>{
-      const ref = globalCounterRef();
-      const snap = await tx.get(ref);
-      const cur = snap.exists ? (Number(snap.data().seq)||0) : 0;
-      const nxt = cur + 1;
-      tx.set(ref, { seq: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-      return nxt;
-    });
+    try{
+      return await db.runTransaction(async tx=>{
+        const ref = countersRef();
+        const snap = await tx.get(ref);
+        const cur = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
+        const nxt = cur + 1;
+        tx.set(ref, { orderNumber: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+        return nxt;
+      });
+    }catch(e){
+      console.warn('Fallo transacción de contador, intento fallback:', e?.message||e);
+      // Fallback: leo último pedido por orderNumber desc y sumo 1
+      try{
+        const qs = await db.collection('orders').orderBy('orderNumber','desc').limit(1).get();
+        const last = !qs.empty ? (Number(qs.docs[0].data().orderNumber)||0) : 0;
+        return last + 1;
+      }catch(_){
+        // último fallback: timestamp
+        return Math.floor(Date.now()/1000);
+      }
+    }
   }
 
   // ===== Datos menú =====
@@ -193,26 +206,19 @@
   const BURGERS=[
     { id:"bigjohn_simple", name:"Big John Simple", price:10900, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
     { id:"bigjohn_doble",  name:"Big John Doble",  price:13900, img:"images/Big John Doble.jpg",  kind:"double", desc:"Doble medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
-
     { id:"burguesa_simple", name:"Burguesa Simple", price:11900, img:"images/Burguesa Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
     { id:"burguesa_doble",  name:"Burguesa Doble",  price:14900, img:"images/Burguesa Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
-
     { id:"cheesebacon_simple", name:"CheeseBacon Simple", price:10500, img:"images/CheeseBacon Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar y bacon. Incluye papas." },
     { id:"cheesebacon_doble",  name:"CheeseBacon Doble",  price:13500, img:"images/CheeseBacon Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar y bacon. Incluye papas." },
-
     { id:"cheese_simple", name:"Cheeseburger Simple", price:9500,  img:"images/cheeseburger simple.jpg", kind:"simple", desc:"Medallón con doble cheddar. Incluye papas." },
     { id:"cheese_doble",  name:"Cheeseburger Doble",  price:12500, img:"images/cheeseburger doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar. Incluye papas." },
-
     { id:"rhodes_simple", name:"Rhodes Simple", price:11900, img:"images/Rhodes Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
     { id:"rhodes_doble",  name:"Rhodes Doble",  price:14900, img:"images/Rhodes Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
-
     { id:"morgan_simple", name:"Morgan Simple", price:10900, img:"images/Morgan Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, bacon, barbacoa y crispy onion. Incluye papas." },
     { id:"morgan_doble",  name:"Morgan Doble",  price:14500, img:"images/Morgan Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, barbacoa y crispy onion. Incluye papas." },
-
     { id:"pollo_crispy", name:"Pollo Crispy", price:8900, img:"images/Pollo crispy.jpg", kind:"chicken", desc:"Pechuga crispy con lechuga y mayo. Incluye papas." }
   ];
 
-  // Bebidas (las 9 que enviaste)
   const DRINKS=[
     { id:"andes_rubia", name:"Andes Origen Rubia 473ml", price:3800, img:"images/Andes Rubia.png" },
     { id:"andes_roja",  name:"Andes Origen Roja 473ml",  price:3800, img:"images/Andes Roja.png" },
@@ -369,12 +375,11 @@
   // ===== Pagar =====
   $("#btnPagar").onclick = async ()=>{
     try{
-      // Validaciones
       const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
       if(!hasItems){ alert("Agregá al menos un producto."); return; }
       const nombreRaw = ($("#inpNombre").value||"").trim();
       if(!nombreRaw){ alert("Ingresá el nombre."); return; }
-      const nombre = `${nombreRaw} (mostrador)`; // ← etiqueta pedida
+      const nombre = `${nombreRaw} (mostrador)`; // etiqueta
       const telefono = ($("#inpTel").value||"").trim();
       const pago = $("#selPago").value;
       const comentario = ($("#inpComentario").value||"").trim();
@@ -383,6 +388,7 @@
       const items=[];
       for(const o of Object.values(cart.burger)){
         items.push({
+          type:"burger",
           id:o.item.id, name:o.item.name, price:o.item.price, qty:o.qty,
           fries:o.fries, notes:o.notes||'',
           extras:{ patty:o.extras?.patty||0, cheddar:o.extras?.cheddar||0,
@@ -390,40 +396,38 @@
         });
       }
       for(const o of Object.values(cart.drink)){
-        items.push({ id:o.item.id, name:o.item.name, price:o.item.price, qty:o.qty, extras:{}, fries:'', notes:'' });
+        items.push({ type:"drink", id:o.item.id, name:o.item.name, price:o.item.price, qty:o.qty, extras:{}, fries:'', notes:'' });
       }
 
-      // Total
       const total = calcTotal();
-
-      // Número de pedido GLOBAL (transacción)
       const orderNumber = await nextOrderNumber();
 
-      // Guardar pedido (mismos campos que index para compatibilidad con pedido_local)
       const payload = {
         orderNumber,
         number: orderNumber,
         nombre,
         telefono,
         pago,
+        entrega: "take_away",
         comment: comentario,
         items, total,
         status:"accepted",
-        payment_status:"paid",    // mostrador ya cobrado
+        payment_status:"paid",         // en mostrador ya cobrado
         source:"mostrador",
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
       const ref = await db.collection("orders").add(payload);
 
-      // (Opcional) seguimiento público, igual formato que index
+      // espejo público
       const pubId = ref.id.slice(0,22);
       await db.collection('order_public').doc(pubId).set({
         orderId: ref.id,
         orderNumber,
         status:'accepted',
-        entrega:'retira',
+        entrega:'take_away',
         pago,
         nombre,
+        paid: true,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, {merge:true});
