@@ -73,24 +73,9 @@
     #btnCart:hover{ filter:brightness(.98); }
     #btnCart #cartBubble{ color:#333 !important; }
 
-    /* Modal Checkout */
-    .form label{font-weight:700;display:block;margin:6px 0 4px}
-    .form input,.form select,.form textarea{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
-    .form .row{gap:10px}
-    .right{display:flex;gap:10px;justify-content:flex-end}
-    .ok-chip{display:inline-block;margin-top:8px;font-weight:800}
-    .ok-chip a{color:#111}
-    .ok-chip .small{font-weight:600;color:#666}
-    .ok{color:#2e7d32}
-    .warn{color:#fb8c00}
-
     /* Disponibilidad */
     .card[data-soldout="1"]{ opacity:.55; }
-    .soldout-badge{
-      position:absolute; top:10px; left:10px; z-index:2;
-      background:#222; color:#fff; font-weight:800; font-size:12px;
-      padding:6px 8px; border-radius:999px; letter-spacing:.3px;
-    }
+    .soldout-badge{ position:absolute; top:10px; left:10px; z-index:2; background:#222; color:#fff; font-weight:800; font-size:12px; padding:6px 8px; border-radius:999px; letter-spacing:.3px; }
 
     @media (max-width:600px){
       .topbar{padding:8px 10px;gap:8px;flex-wrap:wrap}
@@ -155,6 +140,7 @@
       </div>
       <div class="cart-actions">
         <button class="btn ghost" id="btnVaciar">Vaciar</button>
+        <!-- Redirige a pedido_cliente.html -->
         <button class="btn primary" id="btnPagar">Ir a pagar</button>
       </div>
       <div id="placeResult"></div>
@@ -205,53 +191,11 @@
     </div>
   </div>
 
-  <!-- Modal Checkout (queda, pero no se usa con la redirección) -->
-  <div class="overlay" id="overlayCheckout">
-    <div class="modal">
-      <h3>Finalizar pedido</h3>
-      <div class="form">
-        <label for="chNombre">Nombre*</label>
-        <input id="chNombre" placeholder="Tu nombre">
-
-        <label for="chTelefono">Teléfono (opcional)</label>
-        <input id="chTelefono" placeholder="11 2345-6789">
-
-        <div class="row">
-          <div style="flex:1">
-            <label for="chPago">Medio de pago*</label>
-            <select id="chPago">
-              <option value="mercado_pago">mercado_pago</option>
-              <option value="efectivo">efectivo</option>
-              <option value="debito">debito</option>
-              <option value="credito">credito</option>
-              <option value="transferencia">transferencia</option>
-            </select>
-          </div>
-          <div style="flex:1">
-            <label for="chEntrega">Entrega</label>
-            <select id="chEntrega">
-              <option value="retira">retira</option>
-              <option value="delivery">delivery</option>
-            </select>
-          </div>
-        </div>
-
-        <label for="chNota">Comentario</label>
-        <textarea id="chNota" rows="3" placeholder="Aclaraciones opcionales"></textarea>
-      </div>
-
-      <div class="right">
-        <button class="btn ghost" id="btnChkCancel">Cancelar</button>
-        <button class="btn primary" id="btnChkConfirm">Confirmar pedido</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Firebase (App/Auth) -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
-  <!-- Horarios + Carta + Carrito + Checkout + Disponibilidad -->
+  <!-- Horarios + Carta + Carrito + Disponibilidad -->
   <script>
     /* ===== Horarios ===== */
     const HOURS = {
@@ -309,7 +253,7 @@
 
     /* ===== Helpers & Datos ===== */
     const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
-    const BURGERS=[ /* (usa los tuyos) */
+    const BURGERS=[
       { id:"bigjohn_simple", name:"Big John Simple", price:11500, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan brioche. Incluye papas fritas." },
       { id:"bigjohn_doble",  name:"Big John Doble",  price:13800, img:"images/Big John Doble.jpg",  kind:"double", desc:"Doble medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan brioche. Incluye papas fritas." },
       { id:"burguesa_simple", name:"Burguesa Simple", price:11900, img:"images/Burguesa Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, salsa mostaza y miel y cebolla caramelizada en pan Burgerluna. Incluye papas fritas." },
@@ -345,6 +289,12 @@
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
     try{ firebase.initializeApp(firebaseConfig); }catch(_){}
+
+    // 🔧 FIX transporte: fuerza long-polling antes de crear `db`
+    firebase.firestore().settings({
+      experimentalForceLongPolling: true,
+      useFetchStreams: false
+    });
     const db = firebase.firestore();
 
     /* ===== Disponibilidad (products) ===== */
@@ -444,14 +394,10 @@
     document.getElementById("closeDrawer").onclick=closeDrawer;
     document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
 
-    /* === REDIRECCIÓN A pedido_cliente === */
-    document.getElementById("btnPagar").onclick = () => {
-      if(!orderable) return cantOrderAlert();
+    // 👉 Redirigir a pedido_cliente.html (no mostramos modal propio)
+    document.getElementById("btnPagar").onclick = ()=>{
       if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
-      // Guardamos el carrito (por si el usuario no interactuó recientemente)
-      saveCart();
-      // Ir a la pantalla de confirmación del cliente
-      window.location.href = 'pedido_cliente.html';
+      window.location.href = "pedido_cliente.html";
     };
 
     function renderCart(){
@@ -504,7 +450,7 @@
 
     /* ===== Modal Personalizar ===== */
     const overlay=$("#overlay"),modTitle=$("#modTitle");
-    const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar"),noExtras=document.createElement('div');
+    const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar");
     const patVal=$("#patVal"),patInc=$("#patInc"),patDec=$("#patDec");
     const cheVal=$("#cheVal"),cheInc=$("#cheInc"),cheDec=$("#cheDec");
     const notes=$("#notes"),btnAdd=$("#btnAdd"),btnCancel=$("#btnCancel");
