@@ -49,7 +49,6 @@
     .field input,.field select,.field textarea{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
     textarea{min-height:84px;border-radius:12px;resize:vertical}
 
-    /* Modal */
     .overlay{position:fixed;inset:0;background:rgba(0,0,0,.32);display:none;align-items:center;justify-content:center;z-index:40}
     .overlay.open{display:flex}
     .modal{background:#fff;border-radius:20px;box-shadow:var(--shadow);width:520px;max-width:92vw;padding:16px}
@@ -61,13 +60,8 @@
     .pill input{accent-color:var(--primary)}
     .micro{font-size:12px;color:var(--muted)}
 
-    /* Disponibilidad */
     .card[data-soldout="1"]{ opacity:.55; }
-    .soldout-badge{
-      position:absolute; top:10px; left:10px; z-index:2;
-      background:#222; color:#fff; font-weight:800; font-size:12px;
-      padding:6px 8px; border-radius:999px; letter-spacing:.3px;
-    }
+    .soldout-badge{ position:absolute; top:10px; left:10px; z-index:2; background:#222; color:#fff; font-weight:800; font-size:12px; padding:6px 8px; border-radius:999px; letter-spacing:.3px; }
   </style>
 </head>
 <body>
@@ -169,28 +163,30 @@
     appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
   };
   try{ firebase.initializeApp(firebaseConfig); }catch(e){}
+
+  // 🔧 FIX transporte
+  firebase.firestore().settings({
+    experimentalForceLongPolling: true,
+    useFetchStreams: false
+  });
   const db = firebase.firestore();
 
   const $=s=>document.querySelector(s);
   const money = n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
   const FALLBACK_IMG="images/logo.png";
 
-  // ===== Contador GLOBAL (sin transacción; compatible con reglas públicas) =====
   function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
   async function nextOrderNumber(){
-    const ref = globalCounterRef();
-    // Crea/actualiza el doc y aumenta en 1 de forma atómica
-    await ref.set({
-      seq: firebase.firestore.FieldValue.increment(1),
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge:true });
-    // Lee el valor actualizado
-    const snap = await ref.get();
-    const seq = Number(snap.data()?.seq || 1);
-    return seq;
+    return await db.runTransaction(async tx=>{
+      const ref = globalCounterRef();
+      const snap = await tx.get(ref);
+      const cur = snap.exists ? (Number(snap.data().seq)||0) : 0;
+      const nxt = cur + 1;
+      tx.set(ref, { seq: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      return nxt;
+    });
   }
 
-  // ===== Menú =====
   const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
   const BURGERS=[
     { id:"bigjohn_simple", name:"Big John Simple", price:10900, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
@@ -219,7 +215,6 @@
     { id:"agua_sg",     name:"Agua sin gas 500ml",       price:2200, img:"images/Agua.png" }
   ];
 
-  /* ===== Disponibilidad ===== */
   const availability = new Map();
   const isAvailable = id => availability.has(id) ? !!availability.get(id) : true;
   function refreshAvailabilityUI(){
@@ -245,7 +240,6 @@
     });
   }catch(e){ console.warn(e); }
 
-  /* ===== Carrito & UI ===== */
   const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
   const cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
   let cart = { burger:{}, drink:{} };
@@ -333,7 +327,6 @@
     renderCart(); refreshAvailabilityUI();
   }
 
-  // ===== Modal =====
   const overlay=$("#overlay"),modTitle=$("#modTitle");
   const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar");
   const patVal=$("#patVal"),patInc=$("#patInc"),patDec=$("#patDec");
@@ -377,7 +370,6 @@
     overlay.classList.remove("open"); renderCart();
   };
 
-  // ===== Pagar (escribe en orders + order_public) =====
   document.getElementById("btnPagar").onclick = async ()=>{
     try{
       const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
@@ -388,13 +380,8 @@
       const pago = $("#selPago").value;
       const comentario = ($("#inpComentario").value||"").trim();
 
-      const items=[];
-      for(const o of Object.values(cart.burger)){
-        items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,fries:o.fries,notes:o.notes||'',extras:{patty:o.extras?.patty||0,cheddar:o.extras?.cheddar||0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR}});
-      }
-      for(const o of Object.values(cart.drink)){
-        items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,extras:{},fries:'',notes:''});
-      }
+      const items=[]; for(const o of Object.values(cart.burger)){ items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,fries:o.fries,notes:o.notes||'',extras:{patty:o.extras?.patty||0,cheddar:o.extras?.cheddar||0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR}}); }
+      for(const o of Object.values(cart.drink)){ items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,extras:{},fries:'',notes:''}); }
 
       const total = calcTotal();
       const orderNumber = await nextOrderNumber();
@@ -402,8 +389,7 @@
       const payload = {
         orderNumber, number: orderNumber, nombre, telefono, pago, comment: comentario,
         items, total, status:"accepted", payment_status:"paid",
-        source:"mostrador",
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
       const ref = await db.collection("orders").add(payload);
 
@@ -421,7 +407,6 @@
     }catch(e){ console.error(e); alert("No se pudo registrar el pedido."); }
   };
 
-  // Inicio
   mount();
   </script>
 </body>
