@@ -283,24 +283,13 @@
     </div>
   </div>
 
-  <!-- Firebase (App/Auth) -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-
   <!-- Horarios -->
   <script>
-    /* Estructura HOURS: 0=Dom ... 6=Sáb
-       Lunes abierto 19–24, Martes cerrado como tenías, resto 19–24 */
+    /* Estructura HOURS: 0=Dom ... 6=Sáb. Martes cerrado */
     const HOURS = {
-      0: [[19,0, 24,0]], // Domingo
-      1: [[19,0, 24,0]], // Lunes
-      2: [],             // Martes
-      3: [[19,0, 24,0]], // Miércoles
-      4: [[19,0, 24,0]], // Jueves
-      5: [[19,0, 24,0]], // Viernes
-      6: [[19,0, 24,0]]  // Sábado
+      0: [[19,0, 24,0]], 1: [[19,0, 24,0]], 2: [],
+      3: [[19,0, 24,0]], 4: [[19,0, 24,0]], 5: [[19,0, 24,0]], 6: [[19,0, 24,0]]
     };
-
     function isOpenNow(d=new Date()){
       const curMin = d.getHours()*60 + d.getMinutes();
       const blocks = HOURS[d.getDay()] || [];
@@ -322,7 +311,6 @@
       }
       return null;
     }
-
     let orderable = true;
     function setOrderable(v){
       orderable = !!v;
@@ -401,8 +389,8 @@
       let t=0;
       for(const obj of Object.values(cart.burger)){
         const base=(obj.item?.price||0);
-        const ep=(obj.extras?.patty||0)*(obj.extras?.EXTRA_PRICE_PATTY??EXTRA_PRICE_PATTY);
-        const ec=(obj.extras?.cheddar||0)*(obj.extras?.EXTRA_PRICE_CHEDDAR??EXTRA_PRICE_CHEDDAR);
+        const ep=(obj.extras?.patty||0)*2400;
+        const ec=(obj.extras?.cheddar||0)*300;
         t+=(base+ep+ec)*(obj.qty||0);
       }
       for(const d of Object.values(cart.drink)) t+=(d.item?.price||0)*(d.qty||0);
@@ -470,7 +458,7 @@
       cartItems.innerHTML="";
       for(const obj of Object.values(cart.burger)){
         const extras=[]; if(obj.extras){ if(obj.extras.patty) extras.push(`+${obj.extras.patty} medallón(es)`); if(obj.extras.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`); }
-        const unit=obj.item.price+(obj.extras?.patty||0)*(obj.extras?.EXTRA_PRICE_PATTY??1600)+(obj.extras?.cheddar||0)*(obj.extras?.EXTRA_PRICE_CHEDDAR??300);
+        const unit=obj.item.price+(obj.extras?.patty||0)*2400+(obj.extras?.cheddar||0)*300;
         cartItems.innerHTML+=`
           <div class="item">
             <div>
@@ -547,14 +535,14 @@
       const friesEl=document.querySelector('input[name="fries"]:checked');
       if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
       const qty=+qtyVal.textContent||1;
-      const extras={patty:0,cheddar:0,EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR};
+      const extras={patty:0,cheddar:0};
       if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
       else if(currentItem.kind==="chicken"){ extras.patty=0; extras.cheddar=+cheVal.textContent||0; }
       const txt=notes.value.trim();
       const bucket=cart.burger||(cart.burger={}); const prev=bucket[currentItem.id];
       if(prev){
         prev.qty+=qty;
-        prev.extras={patty:Math.max(prev.extras?.patty||0,extras.patty),cheddar:Math.max(prev.extras?.cheddar||0,extras.cheddar),EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR};
+        prev.extras={patty:Math.max(prev.extras?.patty||0,extras.patty),cheddar:Math.max(prev.extras?.cheddar||0,extras.cheddar)};
         prev.fries=friesEl.value; if(txt) prev.notes=txt;
       }else{
         bucket[currentItem.id]={qty,item:currentItem,fries:friesEl.value,extras,...(txt?{notes:txt}:{})};
@@ -566,125 +554,101 @@
     mount();
   </script>
 
-  <!-- === FIREBASE (App + Firestore) & Crear Pedido con contador global === -->
-  <script>
-    // ===== Firebase
+  <!-- ==== FIREBASE (SDK MODULAR) + GUARDADO EN /orders ==== -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    // ⚠️ Usé tu config. El storageBucket no es necesario para Firestore, así que lo omito.
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
       projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
       messagingSenderId: "951646688091",
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
-    try{ firebase.initializeApp(firebaseConfig); }catch(_){}
-    const db = firebase.firestore();
 
-    // ===== Contador GLOBAL (no se reinicia nunca)
-    function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
-    async function nextOrderNumber(){
-      return await db.runTransaction(async tx=>{
-        const ref = globalCounterRef();
-        const snap = await tx.get(ref);
-        const cur = snap.exists ? (Number(snap.data().seq)||0) : 0;
-        const nxt = cur + 1;
-        tx.set(ref, { seq: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-        return nxt;
-      });
-    }
+    const app = initializeApp(firebaseConfig);
+    const db  = getFirestore(app);
 
-    // ===== Transformar carrito → ítems del pedido
-    function cartToItems(){
-      const items=[];
-      for(const obj of Object.values(cart.burger||{})){
-        items.push({
-          name: obj.item.name,
-          price: obj.item.price,
-          qty: obj.qty,
-          fries: obj.fries||'',
-          extras: {
-            patty: obj.extras?.patty||0,
-            cheddar: obj.extras?.cheddar||0,
-            EXTRA_PRICE_PATTY: obj.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY,
-            EXTRA_PRICE_CHEDDAR: obj.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR
-          },
-          notes: obj.notes||""
-        });
-      }
-      for(const obj of Object.values(cart.drink||{})){
-        items.push({
-          name: obj.item.name,
-          price: obj.item.price,
-          qty: obj.qty,
-          extras:{}, fries:'', notes:''
-        });
-      }
-      return items;
-    }
+    // Utilidades
+    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const genOrderCode = () => Math.random().toString(36).slice(2,8).toUpperCase();
 
-    // ===== Modal checkout (Confirmar pedido)
+    // Checkout buttons (ya definidos arriba)
+    const btnChkCancel = document.getElementById('btnChkCancel');
     const btnChkConfirm = document.getElementById('btnChkConfirm');
-    btnChkConfirm.onclick = async ()=>{
+
+    btnChkCancel?.addEventListener('click', ()=> {
+      document.getElementById('overlayCheckout').classList.remove('open');
+    });
+
+    btnChkConfirm?.addEventListener('click', async ()=>{
+      // Estas funciones/variables existen en el scope global del otro script:
+      if(typeof cartCount!=='function' || typeof calcTotal!=='function'){ alert('Error de inicialización'); return; }
       if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
+
       const nombre = document.getElementById('chNombre').value.trim();
       if(!nombre){ alert('Ingresá tu nombre'); return; }
       const telefono = document.getElementById('chTelefono').value.trim();
-      const pago = document.getElementById('chPago').value;
-      const entrega = document.getElementById('chEntrega').value;
+      const pago     = document.getElementById('chPago').value;
+      const entrega  = document.getElementById('chEntrega').value;
       const comentario = document.getElementById('chNota').value.trim();
 
+      // Pasar carrito a ítems simples
+      function cartToItems(){
+        const items=[];
+        for(const obj of Object.values(window.cart?.burger||{})){
+          items.push({
+            type:'burger',
+            name: obj.item.name,
+            price: obj.item.price,
+            qty: obj.qty,
+            fries: obj.fries||'',
+            extras: { patty: obj.extras?.patty||0, cheddar: obj.extras?.cheddar||0 },
+            notes: obj.notes||""
+          });
+        }
+        for(const obj of Object.values(window.cart?.drink||{})){
+          items.push({ type:'drink', name: obj.item.name, price: obj.item.price, qty: obj.qty });
+        }
+        return items;
+      }
+
+      const order = {
+        customer: { name:nombre, phone:telefono||null },
+        payment:  { method:pago, status: (pago==='efectivo'?'pending':'pending') },
+        delivery: { type:entrega },
+        comment:  comentario || null,
+        items:    cartToItems(),
+        total:    calcTotal(),
+        status:   'received',                 // flujo inicial
+        orderCode: genOrderCode(),            // para seguimiento público
+        createdAt: serverTimestamp(),
+        source:   'web'
+      };
+
       try{
-        // 1) Número global
-        const orderNumber = await nextOrderNumber();
+        const ref = await addDoc(collection(db,'orders'), order);
 
-        // 2) Armar pedido
-        const items = cartToItems();
-        const total = calcTotal();
+        // limpiar carrito y UI
+        window.cart={burger:{},drink:{}}; localStorage.setItem('rhodes_cart_v3', JSON.stringify(window.cart));
+        (window.renderCart||(()=>{}))();
 
-        const pedido = {
-          _from:'web',
-          nombre,
-          telefono,
-          pago,
-          entrega,
-          comment: comentario,
-          items,
-          total,
-          orderNumber,
-          number: orderNumber,
-          status:'accepted',
-          payment_status: pago==='efectivo' ? 'pending_payment' : 'paid',
-          source:'web',
-          createdAt: new Date()
-        };
-
-        // 3) Guardar
-        const ref = await db.collection('orders').add(pedido);
-
-        // 4) Publico opcional (seguimiento)
-        const pubId = ref.id.slice(0,22);
-        await db.collection('order_public').doc(pubId).set({
-          orderId: ref.id,
-          orderNumber,
-          status:'accepted',
-          entrega,
-          pago,
-          nombre,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, {merge:true});
-
-        // 5) Limpiar carrito y UI
-        cart={burger:{},drink:{}}; saveCart(); renderCart();
         document.getElementById('overlayCheckout').classList.remove('open');
         document.getElementById('placeResult').innerHTML =
-          `<div class="ok-chip ok">¡Listo! Tu pedido es <strong>#${orderNumber}</strong> <span class="small">(guardado)</span></div>`;
+          `<div class="ok-chip ok">¡Listo! Tu pedido fue guardado. <span class="small">Código</span> <strong>${order.orderCode}</strong></div>
+           <div class="ok-chip"><a href="pedido_cliente.html?id=${encodeURIComponent(ref.id)}&code=${encodeURIComponent(order.orderCode)}">Ver seguimiento</a></div>`;
 
-      }catch(err){
-        console.error(err);
-        alert('No se pudo crear el pedido. Probá de nuevo.');
+        // guardo para pedido_cliente.html
+        localStorage.setItem('lastOrderId', ref.id);
+        localStorage.setItem('lastOrderCode', order.orderCode);
+
+      }catch(e){
+        console.error(e);
+        alert('No pudimos guardar el pedido. Revisá las Reglas de Firestore o la configuración.');
       }
-    };
+    });
   </script>
 </body>
 </html>
