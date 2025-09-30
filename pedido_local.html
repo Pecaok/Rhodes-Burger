@@ -129,7 +129,7 @@
     location.replace("login.html?reason=logout&next=pedido_local.html");
   };
 
-  /* ================== AUDIO (beep) ================== */
+  /* ================== AUDIO ================== */
   let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
   let audioCtx = null, audioReady = false;
   function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
@@ -145,7 +145,7 @@
   /* ================== FECHA (jornada 19→19) ================== */
   const dayPicker = $("#dayPicker");
   const rangeLabel = $("#rangeLabel");
-  const J_START_H = 19; // 19:00
+  const J_START_H = 19;
 
   function yyyy_mm_dd(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
   function startOfJornada(d){
@@ -361,7 +361,7 @@
           }
           initialLoaded = true;
         }, err=>{
-          // Muchos docs pueden no tener este campo: ignoramos el error de "FAILED_PRECONDITION: The query requires an index"
+          // Si muchos docs no tienen el campo, Firestore puede lanzar errors menores; los ignoramos.
           console.warn(`[listener ${field}]`, err?.message||err);
         });
       unsubs.push(unsub);
@@ -379,24 +379,12 @@
     const range = (currentFilter==="cancelled_hist") ? month19RangeFromAny(picked) : rangeForDay(picked);
     updateRangeLabel(range.start, range.end);
 
-    // escuchamos por múltiples campos de fecha sin where (no necesita índices)
+    // Escuchamos por múltiples campos de fecha (sin where)
     const FIELDS = ['createdAt','date','fecha','timestamp','created_at','time'];
     FIELDS.forEach(f=> listenForField(f, range));
-
-    // fallback adicional por documentId (sin índices)
-    try{
-      const unsubAny = db.collection("orders")
-        .orderBy(firebase.firestore.FieldPath.documentId(), "desc")
-        .limit(300)
-        .onSnapshot(snap=>{
-          snap.docs.forEach(d=> unionMap.set(d.id, d));
-          renderFromMap(range);
-        }, err=> console.warn("[listener docId]", err?.message||err));
-      unsubs.push(unsubAny);
-    }catch(e){}
   }
 
-  /* ==================== TICKET (impresión) ==================== */
+  /* ==================== TICKET ==================== */
   function buildTicketHTML(docSnap){
     const o = docSnap.data();
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
