@@ -49,12 +49,41 @@
     .state-ready.on{background:var(--st-ready);border-color:var(--st-ready);color:#fff}
     .state-delivered.on{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-cancelled.on{background:var(--st-cancelled);border-color:var(--st-cancelled);color:#fff}
-    .pay-line{margin-top:6px}
-    .pay-pill{display:inline-block;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}
-    .pay-paid{background:var(--pay-paid);color:#fff}
-    .pay-pending{background:var(--pay-pending);color:#fff}
+
+    /* --- Fijar layout del renglón de pago para que no “salte” --- */
+    .pay-line{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-height:36px;       /* altura estable */
+      flex-wrap:wrap;
+    }
+    .pay-wrap{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-width:360px;       /* ancho reservado (podés bajar a 320px si querés) */
+    }
+    .pay-pill{
+      display:inline-block;
+      border-radius:999px;
+      padding:6px 10px;
+      font-weight:800;
+      font-size:12px;
+      width:150px;           /* mismo ancho para PENDIENTE/PAGADO */
+      text-align:center;
+      color:#fff;
+    }
+    .pay-paid{background:var(--pay-paid)}
+    .pay-pending{background:var(--pay-pending)}
+    .btn.pay-toggle{
+      width:170px;           /* ancho fijo para “Marcar…” */
+      justify-content:center;
+    }
+
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
+
     @media print{
       @page{size:A4 portrait;margin:12mm}
       header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"]{display:none!important}
@@ -76,6 +105,7 @@
   <main class="container">
     <h1>Últimos pedidos</h1>
 
+    <!-- Filtros -->
     <div class="tabs" id="tabs">
       <span class="chipf active" data-f="new">Nuevos</span>
       <span class="chipf" data-f="in_prep">En preparación</span>
@@ -209,15 +239,13 @@
     /* ===== espejo público: actualizar order_public ===== */
     async function updatePublicMirror(orderId, patch){
       try{
-        // Buscar por orderId
         const q = query(collection(db, 'order_public'), where('orderId', '==', orderId), limit(1));
         const qs = await getDocs(q);
         let pubRef = null;
 
         if (!qs.empty) {
-          pubRef = doc(db, 'order_public', qs.docs[0].id);
+          pubRef = qs.docs[0].ref;
         } else {
-          // Plan B: leer trackToken del pedido privado
           const priv = await getDoc(doc(db,'orders',orderId));
           if (priv.exists() && priv.data().trackToken) {
             pubRef = doc(db,'order_public', String(priv.data().trackToken));
@@ -238,7 +266,6 @@
           status: next,
           statusHistory: [{to:next,at:new Date().toISOString()}]
         });
-        // reflejo público
         await updatePublicMirror(id, { status: mapToPublic(next) });
       }catch(e){
         alert("No se pudo actualizar el estado: "+(e?.message||e));
@@ -286,12 +313,19 @@
       </div>`;
 
       const paymentPaid=(o.payment_status==='paid'||o.paid);
-      const payLine=`<div class="pay-line">
-        <span class="chip">Pago: ${o.pago||o.payment?.method||'—'}</span>
-        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}</span>
-        <button class="btn" data-pay="${paymentPaid?'pending':'paid'}" style="margin-left:6px">${paymentPaid?'⏳ Marcar PENDIENTE':'✓ Marcar PAGADO'}</button>
-        <button class="btn" data-print>🖨 Imprimir</button>
-      </div>`;
+      const payLine = `
+        <div class="pay-line">
+          <div class="pay-wrap">
+            <span class="chip">Pago: ${o.pago||o.payment?.method||'—'}</span>
+            <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">
+              ${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}
+            </span>
+            <button class="btn pay-toggle" data-pay="${paymentPaid?'pending':'paid'}">
+              ${paymentPaid?'⏳ Marcar PENDIENTE':'✓ Marcar PAGADO'}
+            </button>
+          </div>
+          <button class="btn" data-print>🖨 Imprimir</button>
+        </div>`;
 
       const displayNum = displayOrderNumber(o, docSnap.id);
       const displayName = o.nombre ?? o.customer?.name ?? 'Cliente';
@@ -440,7 +474,7 @@
       const coll = collection(db, 'orders');
       onSnapshot(coll, (snap) => {
         // Ordenar en el cliente por fecha si existe, sino por id desc
-        lastDocs = snap.docs.slice().sort((a,b)=>{
+        const sorted = snap.docs.slice().sort((a,b)=>{
           const da = pickDocDate(a.data());
           const dbb = pickDocDate(b.data());
           if (dbb && da) return dbb - da;
@@ -448,6 +482,7 @@
           if (!dbb && da) return 1;
           return String(b.id).localeCompare(String(a.id));
         });
+        lastDocs = sorted;
 
         renderList(lastDocs);
 
