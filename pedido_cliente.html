@@ -38,20 +38,15 @@
     .actions .btn{flex:1}
     .statusHint{font-size:13px;color:var(--muted);margin-top:10px}
 
-    /* === Watermark de logo (overlay, visible en PC + móvil) === */
     html, body { min-height: 100%; }
     body { position: relative; }
     body::before{
       content: "";
-      position: fixed;
-      top: 50%;
-      left: 50%;
+      position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
       width: clamp(240px, 48vmin, 560px);
       background: url("images/logo.png") center / contain no-repeat;
-      opacity: 0.08;
-      pointer-events: none;
-      z-index: 5;
+      opacity: 0.08; pointer-events: none; z-index: 5;
     }
   </style>
 </head>
@@ -119,282 +114,201 @@
     </aside>
   </main>
 
-  <!-- Firebase (compat, sin auth obligatoria) -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <!-- ====== Firebase (SDK MODULAR) ====== -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-  <script>
-    /* ================== FIREBASE ================== */
-    var firebaseConfig = {
+    // Tu config
+    const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
       projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
       messagingSenderId: "951646688091",
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
-    if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
-    var db = firebase.firestore();
 
-    /* ================== (Opcional) Dominio público para links absolutos ================== */
-    // window.PUBLIC_BASE_URL = "https://tusitio.com"; // sin "/" final
+    const app = initializeApp(firebaseConfig);
+    const db  = getFirestore(app);
 
-    /* ================== UTIL & ESTADO ================== */
-    var CART_KEY = "rhodes_cart_v3";
-    function $(s){ return document.querySelector(s); }
-    function money(n){ return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}); }
-    function genTrackToken(len=22){
-      var c="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", s="";
-      for (var i=0;i<len;i++) s += c[Math.floor(Math.random()*c.length)];
-      return s;
-    }
+    // ------- Utilidades / Carrito -------
+    const CART_KEY = "rhodes_cart_v3";
+    const $ = s => document.querySelector(s);
+    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const genOrderCode = () => Math.random().toString(36).slice(2,8).toUpperCase();
 
     function loadCart(){
       try { return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}}; }
       catch(e){ return {burger:{},drink:{}}; }
     }
-    var cart = loadCart();
+    const cart = loadCart();
 
     function unitWithExtras(it){
-      var base = (it.item && it.item.price) ? it.item.price : (it.price||0);
-      var pz = ((it.extras && it.extras.patty) ? it.extras.patty : 0) * ((it.extras && it.extras.EXTRA_PRICE_PATTY) ? it.extras.EXTRA_PRICE_PATTY : 0);
-      var ch = ((it.extras && it.extras.cheddar) ? it.extras.cheddar : 0) * ((it.extras && it.extras.EXTRA_PRICE_CHEDDAR) ? it.extras.EXTRA_PRICE_CHEDDAR : 0);
+      const base = (it.item && it.item.price) ? it.item.price : (it.price||0);
+      const pz = ((it.extras && it.extras.patty) ? it.extras.patty : 0) * ((it.extras && it.extras.EXTRA_PRICE_PATTY) ? it.extras.EXTRA_PRICE_PATTY : 2400);
+      const ch = ((it.extras && it.extras.cheddar) ? it.extras.cheddar : 0) * ((it.extras && it.extras.EXTRA_PRICE_CHEDDAR) ? it.extras.EXTRA_PRICE_CHEDDAR : 300);
       return base + pz + ch;
     }
     function calcTotal(){
-      var t=0, k, obj;
-      for(k in cart.burger){ obj = cart.burger[k]; t += unitWithExtras(obj) * (obj.qty||0); }
-      for(k in cart.drink){ obj = cart.drink[k]; t += ((obj.item && obj.item.price)||0) * (obj.qty||0); }
+      let t=0;
+      for(const k in cart.burger){ const obj=cart.burger[k]; t += unitWithExtras(obj) * (obj.qty||0); }
+      for(const k in cart.drink){ const obj=cart.drink[k]; t += ((obj.item && obj.item.price)||0) * (obj.qty||0); }
       return t;
     }
     function friesName(v){ return v==="con_sazon" ? "Con sazón" : "Sin sazonar"; }
 
-    /* ================== RESUMEN ================== */
-    var resumen = $("#resumen"), resTotal = $("#resTotal");
+    // ------- Resumen -------
+    const resumen = $("#resumen"), resTotal = $("#resTotal");
     function renderResumen(){
       resumen.innerHTML = "";
-      var k, obj, extras, unit, line, html;
-
       // burgers
-      for(k in cart.burger){
-        obj = cart.burger[k];
-        extras = [];
-        if(obj.extras && obj.extras.patty){ extras.push("+"+obj.extras.patty+" medallón(es)"); }
-        if(obj.extras && obj.extras.cheddar){ extras.push("+"+obj.extras.cheddar+" cheddar"); }
-        unit = unitWithExtras(obj);
-        line = unit * (obj.qty||0);
-
-        html  = '<div class="row" style="align-items:flex-start">';
-        html +=   '<div>';
-        html +=     '<div><strong>'+(obj.qty||0)+'× '+(obj.item?obj.item.name:"")+'</strong></div>';
-        html +=     '<div class="muted">Papas: '+friesName(obj.fries)+(extras.length?(' · '+extras.join(' · ')):'')+'</div>';
-        if(obj.notes){ html += '<div class="muted">Notas: '+obj.notes+'</div>'; }
-        html +=   '</div>';
-        html +=   '<div>'+money(line)+'</div>';
-        html += '</div>';
-
-        resumen.insertAdjacentHTML("beforeend", html);
+      for(const k in cart.burger){
+        const obj = cart.burger[k];
+        const extras = [];
+        if(obj.extras?.patty) extras.push("+"+obj.extras.patty+" medallón(es)");
+        if(obj.extras?.cheddar) extras.push("+"+obj.extras.cheddar+" cheddar");
+        const line = unitWithExtras(obj) * (obj.qty||0);
+        resumen.insertAdjacentHTML("beforeend", `
+          <div class="row" style="align-items:flex-start">
+            <div>
+              <div><strong>${obj.qty||0}× ${obj.item?.name||""}</strong></div>
+              <div class="muted">Papas: ${friesName(obj.fries)}${extras.length?(' · '+extras.join(' · ')):""}</div>
+              ${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}
+            </div>
+            <div>${money(line)}</div>
+          </div>
+        `);
       }
-
       // drinks
-      for(k in cart.drink){
-        obj = cart.drink[k];
-        line = ((obj.item && obj.item.price)||0) * (obj.qty||0);
-
-        html  = '<div class="row">';
-        html +=   '<div><strong>'+(obj.qty||0)+'× '+(obj.item?obj.item.name:"")+'</strong></div>';
-        html +=   '<div>'+money(line)+'</div>';
-        html += '</div>';
-
-        resumen.insertAdjacentHTML("beforeend", html);
+      for(const k in cart.drink){
+        const obj = cart.drink[k];
+        const line = ((obj.item && obj.item.price)||0) * (obj.qty||0);
+        resumen.insertAdjacentHTML("beforeend", `
+          <div class="row">
+            <div><strong>${obj.qty||0}× ${obj.item?.name||""}</strong></div>
+            <div>${money(line)}</div>
+          </div>
+        `);
       }
       resTotal.textContent = money(calcTotal());
     }
     renderResumen();
 
-    /* ================== ORDEN ================== */
-    function takeNextOrderNumber(tx){
-      var ref = db.collection("config").doc("counters");
-      return tx.get(ref).then(function(snap){
-        var prev = snap.exists ? (snap.data().orderNumber||0) : 0;
-        var next = prev + 1;
-        tx.set(ref, {orderNumber: next}, {merge:true});
-        return next;
-      });
-    }
-
+    // ------- Helpers de armado -------
     function selectedPago(){
-      var el = document.querySelector('input[name="pago"]:checked');
+      const el = document.querySelector('input[name="pago"]:checked');
       return el ? el.value : "";
     }
-
-    function buildOrder(orderNumber){
-      var items = [], k, b, d;
-      // burgers
-      for(k in cart.burger){
-        b = cart.burger[k];
+    function cartToItems(){
+      const items=[];
+      for(const k in cart.burger){
+        const b = cart.burger[k];
         items.push({
-          type: "burger",
-          id: b.item ? b.item.id : "",
-          name: b.item ? b.item.name : "",
-          qty: b.qty||0,
-          price: b.item ? (b.item.price||0) : 0,
-          fries: b.fries||"sin_sazon",
-          extras: {
-            patty:   (b.extras && b.extras.patty)   ? b.extras.patty   : 0,
-            cheddar: (b.extras && b.extras.cheddar) ? b.extras.cheddar : 0,
-            EXTRA_PRICE_PATTY:   (b.extras && b.extras.EXTRA_PRICE_PATTY)   ? b.extras.EXTRA_PRICE_PATTY   : 0,
-            EXTRA_PRICE_CHEDDAR: (b.extras && b.extras.EXTRA_PRICE_CHEDDAR) ? b.extras.EXTRA_PRICE_CHEDDAR : 0
+          type:"burger",
+          id:b.item?.id||"",
+          name:b.item?.name||"",
+          qty:b.qty||0,
+          price:b.item?.price||0,
+          fries:b.fries||"sin_sazon",
+          extras:{
+            patty:b.extras?.patty||0,
+            cheddar:b.extras?.cheddar||0
           },
-          notes: b.notes||""
+          notes:b.notes||""
         });
       }
-      // drinks
-      for(k in cart.drink){
-        d = cart.drink[k];
+      for(const k in cart.drink){
+        const d = cart.drink[k];
         items.push({
-          type: "drink",
-          id: d.item ? d.item.id : "",
-          name: d.item ? d.item.name : "",
-          qty: d.qty||0,
-          price: d.item ? (d.item.price||0) : 0
+          type:"drink",
+          id:d.item?.id||"",
+          name:d.item?.name||"",
+          qty:d.qty||0,
+          price:d.item?.price||0
         });
       }
-
-      var pago = selectedPago();
-
-      return {
-        orderNumber: orderNumber,
-        nombre: $("#inpNombre").value.trim(),
-        telefono: $("#inpTelefono").value.trim(),
-        entrega: "take_away",
-        pago: pago,
-        notes: $("#inpNotas").value.trim(),
-        status: (pago==="mercado_pago" ? "pending_payment" : "accepted"),
-        items: items,
-        total: calcTotal(),
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
+      return items;
     }
-
     function buildWhatsappText(order){
-      var lines = [];
-      var pagoLabel = (order.pago === 'efectivo') ? 'Efectivo' : 'Mercado Pago';
-      lines.push("Hola! Quiero confirmar el pedido #"+order.orderNumber);
-      lines.push("Nombre: "+order.nombre+(order.telefono?(" — Tel: "+order.telefono):""));
-      lines.push("Retiro: Take Away");
-      lines.push("Medio de pago: "+pagoLabel);
-      lines.push("------------------------------");
-      var i, it, extras;
-      for(i=0;i<order.items.length;i++){
-        it = order.items[i];
-        if(it.type === "burger"){
-          extras = [];
-          if(it.extras && it.extras.patty){ extras.push("+"+it.extras.patty+" med"); }
-          if(it.extras && it.extras.cheddar){ extras.push("+"+it.extras.cheddar+" cheddar"); }
-          lines.push(it.qty+"× "+it.name+" (Papas: "+(it.fries==="con_sazon"?"Con sazón":"Sin sazonar")+(extras.length?(" · "+extras.join(" · ")):"")+")");
-          if(it.notes){ lines.push("  Notas: "+it.notes); }
-        }else{
-          lines.push(it.qty+"× "+it.name);
+      const lines=[];
+      const pagoLabel = (order.payment.method==='efectivo')? 'Efectivo':'Mercado Pago';
+      lines.push(`Hola! Quiero confirmar el pedido ${order.orderCode}`);
+      lines.push(`Nombre: ${order.customer.name}${order.customer.phone?` — Tel: ${order.customer.phone}`:''}`);
+      lines.push(`Retiro: ${order.delivery.type==='take_away'?'Take Away':order.delivery.type}`);
+      lines.push(`Medio de pago: ${pagoLabel}`);
+      lines.push(`------------------------------`);
+      for(const it of order.items){
+        if(it.type==='burger'){
+          const extras=[];
+          if(it.extras?.patty) extras.push(`+${it.extras.patty} med`);
+          if(it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
+          lines.push(`${it.qty}× ${it.name} (Papas: ${it.fries==='con_sazon'?'Con sazón':'Sin sazonar'}${extras.length?` · ${extras.join(' · ')}`:''})`);
+          if(it.notes) lines.push(`  Notas: ${it.notes}`);
+        } else {
+          lines.push(`${it.qty}× ${it.name}`);
         }
       }
-      lines.push("------------------------------");
-      lines.push("Total: "+money(order.total));
-      if(order.notes){ lines.push("Notas del pedido: "+order.notes); }
+      lines.push(`------------------------------`);
+      lines.push(`Total: ${money(order.total)}`);
+      if(order.comment) lines.push(`Notas del pedido: ${order.comment}`);
 
       // Link de seguimiento
-      if(order.trackToken){
-        var base = (window.PUBLIC_BASE_URL && typeof window.PUBLIC_BASE_URL==='string'
-                    ? window.PUBLIC_BASE_URL.replace(/\/$/, '')
-                    : location.origin);
-        var trackUrl = base + "/gracias.html?id=" + encodeURIComponent(order.id || "")
-                             + "&t=" + encodeURIComponent(order.trackToken);
-        lines.push("Seguimiento: " + trackUrl);
-      }
+      const base = location.origin;
+      const trackUrl = `${base}/pedido_cliente.html?id=${encodeURIComponent(order._id)}&code=${encodeURIComponent(order.orderCode)}`;
+      lines.push(`Seguimiento: ${trackUrl}`);
       return encodeURIComponent(lines.join("\n"));
     }
-
     function openWhatsApp(order){
-      // ⚠️ Reemplazá por el número del local en formato internacional, sin + ni espacios. Ej: 54911XXXXXXXX
-      var PHONE_NUMBER = "5491170596483";
-      var txt = buildWhatsappText(order);
-      var url = "https://wa.me/"+PHONE_NUMBER+"?text="+txt;
+      const PHONE_NUMBER = "5491170596483"; // ← cambiá por el de tu local
+      const txt = buildWhatsappText(order);
+      const url = `https://wa.me/${PHONE_NUMBER}?text=${txt}`;
       window.open(url, "_blank");
     }
-
     function clearCart(){
       try { localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{}})); } catch(e){}
     }
 
-    function createOrder(){
-      if(!Object.keys(cart.burger||{}).length && !Object.keys(cart.drink||{}).length){
-        alert("Tu carrito está vacío.");
-        return Promise.resolve(null);
+    // ------- Confirmar (crear en /orders solamente) -------
+    document.getElementById("btnConfirmar").addEventListener("click", async ()=>{
+      // Validaciones mínimas
+      const nombre = $("#inpNombre").value.trim();
+      if(!nombre){ alert("Ingresá tu nombre."); return; }
+      const pago = selectedPago();
+      if(!pago){ alert("Elegí un medio de pago."); return; }
+
+      // Armar orden local
+      const orderCode = genOrderCode();
+      const order = {
+        customer:{ name:nombre, phone: $("#inpTelefono").value.trim() || null },
+        payment:{ method:pago, status: (pago==='efectivo'?'pending':'pending') },
+        delivery:{ type:'take_away' },
+        comment: $("#inpNotas").value.trim() || null,
+        items: cartToItems(),
+        total: calcTotal(),
+        status: (pago==='mercado_pago' ? 'pending_payment' : 'accepted'),
+        orderCode,
+        createdAt: serverTimestamp(),
+        source:'web'
+      };
+
+      try{
+        // Guardar en /orders (SIN transacciones ni /config)
+        const ref = await addDoc(collection(db,'orders'), order);
+
+        // completar datos para WhatsApp
+        const enriched = {...order, _id: ref.id};
+
+        // Abrir WhatsApp + redirigir a seguimiento
+        openWhatsApp(enriched);
+        clearCart();
+        localStorage.setItem('lastOrderId', ref.id);
+        localStorage.setItem('lastOrderCode', orderCode);
+        window.location.href = `pedido_cliente.html?id=${encodeURIComponent(ref.id)}&code=${encodeURIComponent(orderCode)}`;
+      }catch(err){
+        console.error(err);
+        alert("No pudimos crear el pedido. Revisá las Reglas de Firestore o la configuración.");
       }
-      var nombre = $("#inpNombre").value.trim();
-      if(!nombre){ alert("Ingresá tu nombre."); return Promise.resolve(null); }
-      var pago = selectedPago();
-      if(!pago){ alert("Elegí un medio de pago."); return Promise.resolve(null); }
-
-      var createdId = null, orderNumber = null;
-      var trackToken = genTrackToken(); // token único
-
-      return db.runTransaction(function(tx){
-        return takeNextOrderNumber(tx).then(function(next){
-          orderNumber = next;
-          var order = buildOrder(orderNumber);
-          order.trackToken = trackToken; // guardar token en el pedido privado
-
-          var ref = db.collection("orders").doc(); // id auto
-          tx.set(ref, order);
-          createdId = ref.id;
-          return true;
-        });
-      }).then(function(){
-        // espejo público de seguimiento (solo campos necesarios)
-        return db.collection("order_public").doc(trackToken).set({
-          orderId: createdId,
-          orderNumber: orderNumber,
-          status: (selectedPago()==="mercado_pago" ? "pending_payment" : "accepted"),
-          entrega: "take_away",
-          pago: selectedPago(),
-          nombre: $("#inpNombre").value.trim().split(" ")[0] || "Cliente",
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-      }).then(function(){
-        return { id: createdId, orderNumber: orderNumber, trackToken: trackToken };
-      });
-    }
-
-    /* ================== CONFIRMAR ================== */
-    document.getElementById("btnConfirmar").onclick = function(){
-      createOrder().then(function(res){
-        if(!res) return;
-        var pago = selectedPago();
-
-        localStorage.setItem("last_order_id", res.id);
-
-        db.collection("orders").doc(res.id).get().then(function(doc){
-          var order = { id: res.id };
-          if(doc.exists){ order = Object.assign(order, doc.data()); }
-          // por las dudas
-          order.trackToken = order.trackToken || res.trackToken;
-
-          // abrir WhatsApp tanto en efectivo como en Mercado Pago
-          if (pago === "efectivo" || pago === "mercado_pago") {
-            openWhatsApp(order);
-          }
-
-          clearCart();
-          // mandar id y token para seguimiento en tiempo real
-          window.location.href = "gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
-        });
-      }).catch(function(e){
-        console.error(e);
-        alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
-      });
-    };
+    });
   </script>
 </body>
 </html>
