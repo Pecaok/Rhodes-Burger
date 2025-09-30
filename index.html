@@ -101,17 +101,6 @@
     #btnCart:hover{ filter:brightness(.98); }
     #btnCart #cartBubble{ color:#333 !important; }
 
-    /* Modal Checkout */
-    .form label{font-weight:700;display:block;margin:6px 0 4px}
-    .form input,.form select,.form textarea{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
-    .form .row{gap:10px}
-    .right{display:flex;gap:10px;justify-content:flex-end}
-    .ok-chip{display:inline-block;margin-top:8px;font-weight:800}
-    .ok-chip a{color:#111}
-    .ok-chip .small{font-weight:600;color:#666}
-    .ok{color:#2e7d32}
-    .warn{color:#fb8c00}
-
     @media (max-width:600px){
       .topbar{padding:8px 10px;gap:8px;flex-wrap:wrap}
       .brand img{width:32px;height:32px}
@@ -237,48 +226,6 @@
       <div class="rowx" style="justify-content:flex-end">
         <button class="btn ghost" id="btnCancel">Cancelar</button>
         <button class="btn primary" id="btnAdd">Agregar al carrito</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal Checkout -->
-  <div class="overlay" id="overlayCheckout">
-    <div class="modal">
-      <h3>Finalizar pedido</h3>
-      <div class="form">
-        <label for="chNombre">Nombre*</label>
-        <input id="chNombre" placeholder="Tu nombre">
-
-        <label for="chTelefono">Teléfono (opcional)</label>
-        <input id="chTelefono" placeholder="11 2345-6789">
-
-        <div class="row">
-          <div style="flex:1">
-            <label for="chPago">Medio de pago*</label>
-            <select id="chPago">
-              <option value="mercado_pago">mercado_pago</option>
-              <option value="efectivo">efectivo</option>
-              <option value="debito">debito</option>
-              <option value="credito">credito</option>
-              <option value="transferencia">transferencia</option>
-            </select>
-          </div>
-          <div style="flex:1">
-            <label for="chEntrega">Entrega</label>
-            <select id="chEntrega">
-              <option value="retira">retira</option>
-              <option value="delivery">delivery</option>
-            </select>
-          </div>
-        </div>
-
-        <label for="chNota">Comentario</label>
-        <textarea id="chNota" rows="3" placeholder="Aclaraciones opcionales"></textarea>
-      </div>
-
-      <div class="right">
-        <button class="btn ghost" id="btnChkCancel">Cancelar</button>
-        <button class="btn primary" id="btnChkConfirm">Confirmar pedido</button>
       </div>
     </div>
   </div>
@@ -445,14 +392,13 @@
     document.getElementById("closeDrawer").onclick=closeDrawer;
     document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
 
-    // Abrir modal de checkout
-    const ovCheckout = document.getElementById('overlayCheckout');
+    // ✅ Ir a pagar ⇒ navegar a pedido_cliente.html
     document.getElementById("btnPagar").onclick = ()=>{
       if(!orderable) return cantOrderAlert();
       if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
-      ovCheckout.classList.add('open');
+      // el carrito queda en localStorage (CART_KEY), pedido_cliente lo lee
+      window.location.href = "pedido_cliente.html";
     };
-    document.getElementById("btnChkCancel").onclick = ()=> ovCheckout.classList.remove('open');
 
     function renderCart(){
       cartItems.innerHTML="";
@@ -552,103 +498,6 @@
 
     // Montar UI
     mount();
-  </script>
-
-  <!-- ==== FIREBASE (SDK MODULAR) + GUARDADO EN /orders ==== -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-    // ⚠️ Usé tu config. El storageBucket no es necesario para Firestore, así que lo omito.
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-      authDomain: "rhodes-burguers.firebaseapp.com",
-      projectId: "rhodes-burguers",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db  = getFirestore(app);
-
-    // Utilidades
-    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const genOrderCode = () => Math.random().toString(36).slice(2,8).toUpperCase();
-
-    // Checkout buttons (ya definidos arriba)
-    const btnChkCancel = document.getElementById('btnChkCancel');
-    const btnChkConfirm = document.getElementById('btnChkConfirm');
-
-    btnChkCancel?.addEventListener('click', ()=> {
-      document.getElementById('overlayCheckout').classList.remove('open');
-    });
-
-    btnChkConfirm?.addEventListener('click', async ()=>{
-      // Estas funciones/variables existen en el scope global del otro script:
-      if(typeof cartCount!=='function' || typeof calcTotal!=='function'){ alert('Error de inicialización'); return; }
-      if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
-
-      const nombre = document.getElementById('chNombre').value.trim();
-      if(!nombre){ alert('Ingresá tu nombre'); return; }
-      const telefono = document.getElementById('chTelefono').value.trim();
-      const pago     = document.getElementById('chPago').value;
-      const entrega  = document.getElementById('chEntrega').value;
-      const comentario = document.getElementById('chNota').value.trim();
-
-      // Pasar carrito a ítems simples
-      function cartToItems(){
-        const items=[];
-        for(const obj of Object.values(window.cart?.burger||{})){
-          items.push({
-            type:'burger',
-            name: obj.item.name,
-            price: obj.item.price,
-            qty: obj.qty,
-            fries: obj.fries||'',
-            extras: { patty: obj.extras?.patty||0, cheddar: obj.extras?.cheddar||0 },
-            notes: obj.notes||""
-          });
-        }
-        for(const obj of Object.values(window.cart?.drink||{})){
-          items.push({ type:'drink', name: obj.item.name, price: obj.item.price, qty: obj.qty });
-        }
-        return items;
-      }
-
-      const order = {
-        customer: { name:nombre, phone:telefono||null },
-        payment:  { method:pago, status: (pago==='efectivo'?'pending':'pending') },
-        delivery: { type:entrega },
-        comment:  comentario || null,
-        items:    cartToItems(),
-        total:    calcTotal(),
-        status:   'received',                 // flujo inicial
-        orderCode: genOrderCode(),            // para seguimiento público
-        createdAt: serverTimestamp(),
-        source:   'web'
-      };
-
-      try{
-        const ref = await addDoc(collection(db,'orders'), order);
-
-        // limpiar carrito y UI
-        window.cart={burger:{},drink:{}}; localStorage.setItem('rhodes_cart_v3', JSON.stringify(window.cart));
-        (window.renderCart||(()=>{}))();
-
-        document.getElementById('overlayCheckout').classList.remove('open');
-        document.getElementById('placeResult').innerHTML =
-          `<div class="ok-chip ok">¡Listo! Tu pedido fue guardado. <span class="small">Código</span> <strong>${order.orderCode}</strong></div>
-           <div class="ok-chip"><a href="pedido_cliente.html?id=${encodeURIComponent(ref.id)}&code=${encodeURIComponent(order.orderCode)}">Ver seguimiento</a></div>`;
-
-        // guardo para pedido_cliente.html
-        localStorage.setItem('lastOrderId', ref.id);
-        localStorage.setItem('lastOrderCode', order.orderCode);
-
-      }catch(e){
-        console.error(e);
-        alert('No pudimos guardar el pedido. Revisá las Reglas de Firestore o la configuración.');
-      }
-    });
   </script>
 </body>
 </html>
