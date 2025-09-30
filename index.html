@@ -230,12 +230,140 @@
     </div>
   </div>
 
-  <!-- Horarios -->
-  <script>
-    /* Estructura HOURS: 0=Dom ... 6=Sáb. Martes cerrado */
-    const HOURS = {
-      0: [[19,0, 24,0]], 1: [], 2: [],
-      3: [[19,0, 24,0]], 4: [[19,0, 24,0]], 5: [[19,0, 24,0]], 6: [[19,0, 24,0]]
+ <!-- Horarios + Override remoto (config/store) -->
+<script>
+  /* ======= HORARIOS BASE (si no hay override) =======
+     0=Dom … 6=Sáb
+     Lunes, Mié, Jue, Vie, Sáb y Dom: 19–24. Martes cerrado. */
+  const HOURS = {
+    0:[[19,0,24,0]], 1:[[19,0,24,0]], 2:[], 3:[[19,0,24,0]],
+    4:[[19,0,24,0]], 5:[[19,0,24,0]], 6:[[19,0,24,0]]
+  };
+
+  function isOpenNow(d=new Date()){
+    const curMin = d.getHours()*60 + d.getMinutes();
+    const blocks = HOURS[d.getDay()] || [];
+    for(const [h1,m1,h2,m2] of blocks){
+      const a=h1*60+m1, b=h2*60+m2;
+      if(curMin>=a && curMin<b) return {open:true, until:[h2,m2]};
+    }
+    return {open:false};
+  }
+  function nextOpen(d=new Date()){
+    for(let i=0;i<8;i++){
+      const t=new Date(d.getTime()+i*86400000);
+      const blocks=HOURS[t.getDay()]||[];
+      if(blocks.length){
+        const [h1,m1]=blocks[0];
+        const lab=i===0?'hoy':(i===1?'mañana':t.toLocaleDateString('es-AR',{weekday:'long'}));
+        return `${lab} ${String(h1).padStart(2,'0')}:${String(m1).padStart(2,'0')}`;
+      }
+    }
+    return null;
+  }
+
+  // =========== OVERRIDE REMOTO ===========
+  // Espera flags de Firestore: config/store { forceOpen, forceClosed, forceMessage }
+  let storeOverride = {forceOpen:false, forceClosed:false, forceMessage:null};
+
+  // setOrderable ya existe más abajo en tu archivo; si no, mantené esta versión
+  let orderable = true;
+  function setOrderable(v){
+    orderable = !!v;
+    document.querySelectorAll('[data-add],[data-custom]').forEach(btn=>{
+      if(orderable){ btn.classList.remove('disabled'); btn.removeAttribute('aria-disabled'); }
+      else { btn.classList.add('disabled'); btn.setAttribute('aria-disabled','true'); }
+    });
+    const pagar = document.getElementById('btnPagar');
+    if(pagar){
+      if(orderable){ pagar.classList.remove('disabled'); pagar.removeAttribute('aria-disabled'); }
+      else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); }
+    }
+  }
+
+  function renderStatus(){
+    const pill = document.getElementById('statusPill');
+    const main = pill.querySelector('.status-main');
+    const sub  = pill.querySelector('.status-sub');
+
+    const now  = new Date();
+    const base = isOpenNow(now);
+
+    // lógica efectiva: cerrado forzado > abierto forzado > horario
+    let open, subtitle;
+    if(storeOverride.forceClosed){
+      open = false;
+      subtitle = storeOverride.forceMessage || 'cerrado por el momento';
+    }else if(storeOverride.forceOpen){
+      open = true;
+      if(base.open && base.until){
+        const [h,m] = base.until;
+        subtitle = storeOverride.forceMessage || `hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+      }else{
+        subtitle = storeOverride.forceMessage || 'abierto (fuera de horario)';
+      }
+    }else{
+      open = base.open;
+      subtitle = open && base.until
+        ? `hasta ${String(base.until[0]).padStart(2,'0')}:${String(base.until[1]).padStart(2,'0')}`
+        : `abrimos ${nextOpen(now) || 'pronto'}`;
+    }
+
+    if(open){
+      pill.classList.remove('status-closed'); pill.classList.add('status-open');
+      main.textContent = 'Abierto';
+      sub.textContent  = subtitle;
+      setOrderable(true);
+    }else{
+      pill.classList.remove('status-open'); pill.classList.add('status-closed');
+      main.textContent = 'Cerrado';
+      sub.textContent  = subtitle;
+      setOrderable(false);
+    }
+  }
+  // =========== BOOT: enganchar Firestore y escuchar cambios ===========
+  // Requiere que ya tengas firebase inicializado y `db = firebase.firestore();`
+  (function bootStoreOverride(){
+    try{
+      // escuchar tiempo real
+      firebase.firestore()
+        .collection('config').doc('store')
+        .onSnapshot(snap=>{
+          if(snap.exists){
+            const d = snap.data()||{};
+            storeOverride.forceOpen   = !!d.forceOpen;
+            storeOverride.forceClosed = !!d.forceClosed;
+            storeOverride.forceMessage= d.forceMessage || null;
+          }else{
+            storeOverride = {forceOpen:false, forceClosed:false, forceMessage:null};
+          }
+          renderStatus();
+        }, err=>{
+          // si falla la suscripción, al menos renderiza por horario
+          console.warn('override listener error:', err);
+          storeOverride = {forceOpen:false, forceClosed:false, forceMessage:null};
+          renderStatus();
+        });
+    }catch(e){
+      console.warn('No se pudo conectar a config/store:', e);
+      renderStatus();
+    }
+  })();
+
+  // Render inicial por si la suscripción demora
+  renderStatus();
+  // También podés mantener el refresco cada minuto para el caso “modo normal”
+  setInterval(renderStatus, 60*1000);
+
+  // En los lugares donde avisas “cerrado”, usá este helper para mostrar el motivo
+  function cantOrderAlert(){
+    const nx = nextOpen(new Date());
+    const msg = storeOverride.forceClosed
+      ? (storeOverride.forceMessage || 'Estamos cerrados en este momento.')
+      : `Estamos cerrados por ahora.\nPodés ver la carta y los precios, pero los pedidos abren ${nx?nx:''}.`;
+    alert(msg);
+  }
+</script>
     };
     function isOpenNow(d=new Date()){
       const curMin = d.getHours()*60 + d.getMinutes();
