@@ -49,6 +49,7 @@
     .field input,.field select,.field textarea{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
     textarea{min-height:84px;border-radius:12px;resize:vertical}
 
+    /* Modal */
     .overlay{position:fixed;inset:0;background:rgba(0,0,0,.32);display:none;align-items:center;justify-content:center;z-index:40}
     .overlay.open{display:flex}
     .modal{background:#fff;border-radius:20px;box-shadow:var(--shadow);width:520px;max-width:92vw;padding:16px}
@@ -60,8 +61,36 @@
     .pill input{accent-color:var(--primary)}
     .micro{font-size:12px;color:var(--muted)}
 
+    /* Disponibilidad */
     .card[data-soldout="1"]{ opacity:.55; }
-    .soldout-badge{ position:absolute; top:10px; left:10px; z-index:2; background:#222; color:#fff; font-weight:800; font-size:12px; padding:6px 8px; border-radius:999px; letter-spacing:.3px; }
+    .soldout-badge{
+      position:absolute; top:10px; left:10px; z-index:2;
+      background:#222; color:#fff; font-weight:800; font-size:12px;
+      padding:6px 8px; border-radius:999px; letter-spacing:.3px;
+    }
+
+    /* === Notas (mejoradas) === */
+    .textarea {
+      width: 100%;
+      min-height: 56px;
+      max-height: 200px;
+      padding: 12px 14px;
+      border: 1px solid var(--ring);
+      border-radius: 14px;
+      background: #faf9f7;
+      resize: none;
+      font-size: 15px;
+      line-height: 1.35;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .textarea::placeholder { color:#9a9a9a; }
+    .textarea:focus {
+      outline: 0;
+      background:#fff;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(98,90,69,.18);
+    }
+    .field-foot { display:flex; justify-content:flex-end; margin-top:6px; font-size:12px; color:#8a8a8a; }
   </style>
 </head>
 <body>
@@ -136,9 +165,13 @@
         </div>
       </div>
 
+      <!-- Notas mejoradas -->
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
-        <label>Notas (opcional)</label>
-        <textarea id="notes" placeholder="Sin cebolla, extra salsa, etc."></textarea>
+        <label style="font-weight:600">Notas (opcional)</label>
+        <textarea id="notes" class="textarea" maxlength="200"
+                  placeholder="Sin cebolla, extra salsa, etc."
+                  oninput="autoGrow(this); updateCount(this)"></textarea>
+        <div class="field-foot"><span id="notesCount">0/200</span></div>
       </div>
 
       <div class="rowx" style="justify-content:flex-end">
@@ -163,18 +196,13 @@
     appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
   };
   try{ firebase.initializeApp(firebaseConfig); }catch(e){}
-
-  // 🔧 FIX transporte
-  firebase.firestore().settings({
-    experimentalForceLongPolling: true,
-    useFetchStreams: false
-  });
   const db = firebase.firestore();
 
   const $=s=>document.querySelector(s);
   const money = n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
   const FALLBACK_IMG="images/logo.png";
 
+  // ===== Contador GLOBAL =====
   function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
   async function nextOrderNumber(){
     return await db.runTransaction(async tx=>{
@@ -187,6 +215,7 @@
     });
   }
 
+  // ===== Menú =====
   const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
   const BURGERS=[
     { id:"bigjohn_simple", name:"Big John Simple", price:10900, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
@@ -215,6 +244,7 @@
     { id:"agua_sg",     name:"Agua sin gas 500ml",       price:2200, img:"images/Agua.png" }
   ];
 
+  /* ===== Disponibilidad ===== */
   const availability = new Map();
   const isAvailable = id => availability.has(id) ? !!availability.get(id) : true;
   function refreshAvailabilityUI(){
@@ -240,6 +270,7 @@
     });
   }catch(e){ console.warn(e); }
 
+  /* ===== Carrito & UI ===== */
   const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
   const cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
   let cart = { burger:{}, drink:{} };
@@ -327,6 +358,7 @@
     renderCart(); refreshAvailabilityUI();
   }
 
+  // ===== Modal =====
   const overlay=$("#overlay"),modTitle=$("#modTitle");
   const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar");
   const patVal=$("#patVal"),patInc=$("#patInc"),patDec=$("#patDec");
@@ -338,7 +370,8 @@
   function openCustomize(item){
     if(!isAvailable(item.id)) return;
     currentItem=item; modTitle.textContent="Personalizar: "+item.name;
-    notes.value=""; resetFries(); patVal.textContent="0"; cheVal.textContent="0";
+    notes.value=""; autoGrow(notes); updateCount(notes);
+    resetFries(); patVal.textContent="0"; cheVal.textContent="0";
     if(item.kind==="double"){ rowPatties.style.display="flex"; rowCheddar.style.display="flex"; }
     else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; }
     else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; }
@@ -349,6 +382,11 @@
   patDec.onclick=()=>{const v=+patVal.textContent||0;if(v>0)patVal.textContent=v-1;};
   cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1;};
   cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1;};
+
+  // helpers de notas (auto-alto + contador)
+  function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
+  function updateCount(el){ const c=document.getElementById('notesCount'); if(c) c.textContent=`${el.value.length}/${el.maxLength||200}`; }
+
   btnAdd.onclick=()=>{
     if(!currentItem || !isAvailable(currentItem.id)) return;
     const friesEl=document.querySelector('input[name="fries"]:checked');
@@ -362,7 +400,7 @@
       prev.extras={ patty:Math.max(prev.extras?.patty||0, extras.patty),
                     cheddar:Math.max(prev.extras?.cheddar||0, extras.cheddar),
                     EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR };
-      prev.fries=friesEl.value; if(notes.value.trim()) prev.notes=notes.value.trim();
+      prev.fries=friesEl.value; const t=notes.value.trim(); if(t) prev.notes=t;
     }else{
       bucket[currentItem.id]={qty:1,item:currentItem,fries:friesEl.value,extras,
                               ...(notes.value.trim()?{notes:notes.value.trim()}:{})};
@@ -370,6 +408,7 @@
     overlay.classList.remove("open"); renderCart();
   };
 
+  // ===== Pagar =====
   document.getElementById("btnPagar").onclick = async ()=>{
     try{
       const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
@@ -407,6 +446,7 @@
     }catch(e){ console.error(e); alert("No se pudo registrar el pedido."); }
   };
 
+  // Inicio
   mount();
   </script>
 </body>
