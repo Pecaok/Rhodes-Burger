@@ -18,7 +18,7 @@
     localStorage.removeItem('rb_admin_t');
     localStorage.removeItem('rb_auth_v2');
     sessionStorage.removeItem('rb_auth_v2');
-    location.replace('login.html'); // <-- página de login
+    location.replace('login.html'); // página de login
   }
 
   // Requerir sesión en páginas internas
@@ -26,10 +26,10 @@
     if (!sessionValid()){
       // armar "next" con ruta+query+hash actuales
       const next = encodeURIComponent(
-        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
+        (location.pathname.replace(/^\//,'') || 'index.html') +
         (location.search || '') + (location.hash || '')
       );
-      location.replace('login.html?next=' + next); // <-- login con ?next=
+      location.replace('login.html?next=' + next); // login con ?next=
     } else {
       bumpSession();
     }
@@ -92,7 +92,7 @@
     .state-delivered.on{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-cancelled.on{background:var(--st-cancelled);border-color:var(--st-cancelled);color:#fff}
 
-    /* Línea de pago: ancho fijo para evitar "salto" del layout al cambiar chips/botón */
+    /* Línea de pago */
     .pay-line{margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
     .pay-pill{display:inline-block;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}
     .pay-paid{background:var(--pay-paid);color:#fff}
@@ -134,8 +134,8 @@
 
     <!-- Filtros -->
     <div class="tabs" id="tabs">
-      <span class="chipf active" data-f="new">Nuevos</span>
-      <span class="chipf" data-f="in_prep">En preparación</span>
+      <span class="chipf active" data-f="recibidos">Recibidos</span>
+      <span class="chipf" data-f="entregados">Entregados</span>
       <span class="chipf" data-f="cancelled">Cancelados</span>
       <span class="chipf" data-f="all">Todos</span>
     </div>
@@ -220,11 +220,11 @@
     btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
 
     /* ================= ESTADO UI ================= */
-    $("#btnLogout").onclick = logout;
+    $("#btnLogout").onclick=logout;
 
     const tabs=$("#tabs");
-    // Filtros: 'new' (default), 'in_prep' (agrupa), 'cancelled', 'all'
-    let currentFilter="new", lastSnap=null, idToDoc=new Map();
+    // Filtros: 'recibidos', 'entregados', 'cancelled', 'all'
+    let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
 
     tabs.addEventListener("click",(e)=>{
       const el=e.target.closest("[data-f]"); if(!el) return;
@@ -237,16 +237,17 @@
     // Lógica de filtros
     const passFilter=o=>{
       const s = o.status ?? "accepted";
-      if(currentFilter==="new"){
-        return s==="accepted" || s==="pending_payment";
+      if(currentFilter==="recibidos"){
+        // recibidos = aceptados + pendiente de pago + en prep + listos
+        return s==="accepted" || s==="pending_payment" || s==="in_prep" || s==="ready";
       }
-      if(currentFilter==="in_prep"){
-        return s==="in_prep" || s==="ready" || s==="delivered";
+      if(currentFilter==="entregados"){
+        return s==="delivered";
       }
       if(currentFilter==="cancelled"){
         return s==="cancelled";
       }
-      return true;
+      return true; // all
     };
 
     async function setOrderStatus(id,next){
@@ -269,85 +270,67 @@
     const btnStateClass=st=>`state-btn state-${st}`;
 
     function renderOrder(doc){
-  const o=doc.data(); 
-  const dt=pickDocDate(o);
-  const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
-  const items=Array.isArray(o.items)?o.items:[];
+      const o=doc.data(); const dt=pickDocDate(o);
+      const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
+      const items=Array.isArray(o.items)?o.items:[];
 
-  // 👉 Ítems con detalle de extras
-  const lines = items.map(it=>{
-    const qty = it.qty || 1;
-    const baseUnit = it.price || 0;
+      const lines=items.map(it=>{
+        const qty=it.qty||1;
+        const subtotal=(it.price||0)*qty
+          + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
+          + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
+        const extras = [];
+        if (it.extras?.patty) extras.push(`+${it.extras.patty} medallón(es)`);
+        if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
+        const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
+        return `<div class="item">
+          <div>• <strong>${qty}× ${it.name||''}</strong></div>
+          <div class="sub">Papas: ${friesName(it.fries)}${extrasLine}${it.notes?` · Nota: ${it.notes}`:''}</div>
+          <div class="sub">Subtotal: ${money(subtotal)}</div>
+        </div>`;
+      }).join("");
 
-    const pattyCount   = it.extras?.patty || 0;
-    const pattyUnit    = it.extras?.EXTRA_PRICE_PATTY || 0;
-    const pattyTotal   = qty * pattyCount * pattyUnit;
+      const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
+      const srcChip=o.source?`<span class="chip">Origen: ${o.source}</span>`:"";
+      const cmtChip=o.comment?`<span class="chip">Comentario: ${o.comment}</span>`:"";
 
-    const cheddarCount = it.extras?.cheddar || 0;
-    const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR || 0;
-    const cheddarTotal = qty * cheddarCount * cheddarUnit;
+      const st=o.status??"accepted";
+      const curIdx=Math.max(STATE_SEQ.indexOf(st),0);
+      const stateBtns=`<div class="stateBtns">
+        ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
+      </div>`;
 
-    const baseSubtotal = baseUnit * qty;
-    const lineTotal    = baseSubtotal + pattyTotal + cheddarTotal;
+      const paymentPaid=(o.payment_status==='paid'||o.paid);
+      const payLine=`<div class="pay-line">
+        <span class="chip">Pago: ${o.pago||'—'}</span>
+        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}</span>
+        <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PENDIENTE':'✓ Marcar PAGADO'}</button>
+        <button class="btn" data-print>🖨 Imprimir</button>
+      </div>`;
 
-    // Extras desglosados (solo si existen)
-    const extrasHTML = [
-      pattyCount   ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattyTotal)}</div>` : "",
-      cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarTotal)}</div>` : ""
-    ].join("");
-
-    return `
-      <div class="item">
-        <div>• <strong>${qty}× ${it.name || ""}</strong></div>
-        <div class="sub">
-          Papas: ${friesName(it.fries)}${it.notes ? ` · Nota: ${it.notes}` : ""}
+      return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
+        <div class="order-head">
+          <div>
+            <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
+            <div class="muted">${dtText}</div>
+            <div class="chips">
+              <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
+              <span class="chip">Estado: ${st}</span>
+              <span class="chip">Retiro: ${o.entrega||'—'}</span>
+              ${telChip}${srcChip}${cmtChip}
+            </div>
+            ${stateBtns}
+          </div>
+          <div>
+            <div class="right-total">${money(computeOrderTotal(o))}</div>
+            ${payLine}
+          </div>
         </div>
-        ${extrasHTML}
-        <div class="sub">Subtotal: ${money(lineTotal)}</div>
-      </div>
-    `;
-  }).join("");
+        <div class="divider"></div>
+        <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
+      </div>`;
+    }
 
-  const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
-  const srcChip=o.source?`<span class="chip">Origen: ${o.source}</span>`:"";
-  const cmtChip=o.comment?`<span class="chip">Comentario: ${o.comment}</span>`:"";
-
-  const st=o.status??"accepted";
-  const curIdx=Math.max(STATE_SEQ.indexOf(st),0);
-  const stateBtns=`<div class="stateBtns">
-    ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
-  </div>`;
-
-  const paymentPaid=(o.payment_status==='paid'||o.paid);
-  const payLine=`<div class="pay-line">
-    <span class="chip">Pago: ${o.pago||'—'}</span>
-    <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}</span>
-    <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PENDIENTE':'✓ Marcar PAGADO'}</button>
-    <button class="btn" data-print>🖨 Imprimir</button>
-  </div>`;
-
-  return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
-    <div class="order-head">
-      <div>
-        <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
-        <div class="muted">${dtText}</div>
-        <div class="chips">
-          <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
-          <span class="chip">Estado: ${st}</span>
-          <span class="chip">Retiro: ${o.entrega||'—'}</span>
-          ${telChip}${srcChip}${cmtChip}
-        </div>
-        ${stateBtns}
-      </div>
-      <div>
-        <div class="right-total">${money(computeOrderTotal(o))}</div>
-        ${payLine}
-      </div>
-    </div>
-    <div class="divider"></div>
-    <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
-  </div>`;
-}
     /* ==================== TICKET HTML ==================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
