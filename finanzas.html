@@ -1,5 +1,45 @@
 <!doctype html>
 <html lang="es">
+   <script>
+  /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
+  const TTL_HOURS = 20;
+  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
+
+  function sessionValid(){
+    const ok = localStorage.getItem('rb_admin_ok') === 'true';
+    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+    return ok && (Date.now() - ts) < TTL_MS;
+  }
+  function bumpSession(){  // renueva TTL con actividad
+    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
+  }
+  function logout(){
+    localStorage.removeItem('rb_admin_ok');
+    localStorage.removeItem('rb_admin_t');
+    localStorage.removeItem('rb_auth_v2');
+    sessionStorage.removeItem('rb_auth_v2');
+    location.replace('login.html'); // <-- página de login
+  }
+
+  // Requerir sesión en páginas internas
+  (function requireSession(){
+    if (!sessionValid()){
+      // armar "next" con ruta+query+hash actuales
+      const next = encodeURIComponent(
+        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
+        (location.search || '') + (location.hash || '')
+      );
+      location.replace('login.html?next=' + next); // <-- login con ?next=
+    } else {
+      bumpSession();
+    }
+  })();
+
+  // Mantener viva la sesión mientras se usa
+  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
+    window.addEventListener(evt, bumpSession, {passive:true});
+  });
+</script>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
