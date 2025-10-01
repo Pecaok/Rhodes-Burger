@@ -1,45 +1,5 @@
 <!doctype html>
 <html lang="es">
-   <script>
-  /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
-  const TTL_HOURS = 20;
-  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
-
-  function sessionValid(){
-    const ok = localStorage.getItem('rb_admin_ok') === 'true';
-    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
-    return ok && (Date.now() - ts) < TTL_MS;
-  }
-  function bumpSession(){  // renueva TTL con actividad
-    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
-  }
-  function logout(){
-    localStorage.removeItem('rb_admin_ok');
-    localStorage.removeItem('rb_admin_t');
-    localStorage.removeItem('rb_auth_v2');
-    sessionStorage.removeItem('rb_auth_v2');
-    location.replace('login.html'); // <-- página de login
-  }
-
-  // Requerir sesión en páginas internas
-  (function requireSession(){
-    if (!sessionValid()){
-      // armar "next" con ruta+query+hash actuales
-      const next = encodeURIComponent(
-        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
-        (location.search || '') + (location.hash || '')
-      );
-      location.replace('login.html?next=' + next); // <-- login con ?next=
-    } else {
-      bumpSession();
-    }
-  })();
-
-  // Mantener viva la sesión mientras se usa
-  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
-    window.addEventListener(evt, bumpSession, {passive:true});
-  });
-</script>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -47,390 +7,265 @@
   <link rel="icon" href="images/logo.png" />
   <style>
     :root{
-      --primary:#625A45; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
-      --ring:#eaeaea; --shadow:0 10px 28px rgba(0,0,0,.08); --good:#2e7d32; --warn:#fb8c00; --bad:#d32f2f;
+      --primary:#625A45; --text:#111; --muted:#5b5b5b; --bg:#f6f6f6; --card:#fff;
+      --ring:#eaeaea; --shadow:0 10px 28px rgba(0,0,0,.08);
+      --ok:#2e7d32; --warn:#fb8c00; --bad:#d32f2f;
       --radius:18px;
     }
     *{box-sizing:border-box}
-    html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
-    header{position:sticky;top:0;z-index:10;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    img{max-width:100%;display:block}
+
+    /* Header */
+    header{position:sticky;top:0;z-index:20;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .topbar{max-width:1200px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
-    .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:800}
-    .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain;margin-right:8px}
+    .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:800;gap:10px}
+    .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain}
+    nav{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:700;text-decoration:none;color:inherit}
+    .btn.primary,.btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .btn.ghost{border-color:#e7e7e7;color:#333}
+    .btn.danger{border-color:#ffd7d7;background:#fff5f5;color:#b00020}
+
+    /* Layout */
+    .container{max-width:1200px;margin:24px auto;padding:0 12px;display:grid;grid-template-columns:1.2fr 2fr;gap:18px}
+    @media (max-width:980px){ .container{grid-template-columns:1fr} }
+
+    h1{font-size:28px;margin:8px 0 14px}
+    h2{font-size:20px;margin:0 0 8px}
+    p.muted, .muted{color:var(--muted)}
+
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+    .row{display:flex;gap:10px;align-items:center}
+    .row.stretch{align-items:stretch}
     .spacer{flex:1}
 
-    main{max-width:1200px;margin:22px auto;padding:0 12px;display:grid;grid-template-columns:1fr;gap:18px}
-    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
-    h1{font-size:26px;margin:8px 0 10px}
-    h2{font-size:20px;margin:8px 0 14px}
-    .muted{color:var(--muted)}
-    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
-    .tile{border:1.5px solid var(--ring);border-radius:14px;padding:12px;display:flex;justify-content:space-between;gap:10px}
-    .pill{display:inline-flex;align-items:center;gap:8px;border:1.5px solid var(--ring);border-radius:999px;padding:6px 10px;font-weight:700}
-    .ok{color:var(--good);border-color:#cde8cf;background:#eef8ef}
-    .off{color:#777;border-color:#e6e6e6;background:#fafafa}
-    .bad{color:var(--bad);border-color:#ffd9d9;background:#fff3f3}
+    /* Switch */
+    .switch{position:relative;display:inline-block;width:50px;height:28px}
+    .switch input{opacity:0;width:0;height:0}
+    .slider{position:absolute;cursor:pointer;inset:0;background:#ddd;transition:.2s;border-radius:999px}
+    .slider:before{content:"";position:absolute;height:22px;width:22px;left:3px;top:3px;background:white;transition:.2s;border-radius:50%}
+    input:checked + .slider{background:var(--primary)}
+    input:checked + .slider:before{transform:translateX(22px)}
 
-    .btn{display:inline-flex;align-items:center;gap:8px;border:1.5px solid var(--ring);background:#fff;padding:8px 12px;border-radius:12px;cursor:pointer;font-weight:700}
-    .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
-    .btn.warn{background:#fff6e8;border-color:#ffe1b8}
-    .btn.good{background:#e9f6eb;border-color:#cfead3}
-    .btn.bad{background:#fff1f1;border-color:#ffd7d7}
-    .btn:disabled{opacity:.55;cursor:not-allowed}
-
-    input[type="text"],textarea{
-      padding:10px;border:1.5px solid var(--ring);border-radius:12px;background:#fff;width:100%;
+    .field{margin:10px 0}
+    input[type="text"], textarea, select{
+      width:100%;padding:12px;border:1px solid var(--ring);border-radius:12px;background:#fff
     }
-    textarea{min-height:90px}
-    .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
-    .sep{height:1px;background:#eee;margin:12px 0}
+    textarea{min-height:92px;resize:vertical}
 
-    table{width:100%;border-collapse:separate;border-spacing:0 8px}
-    td,th{padding:10px 12px;text-align:left;background:#fff}
-    th{font-size:13px;color:#555;border-bottom:1px solid #eee;background:#fafafa}
-    tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
-    .code{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-weight:800}
-    .tag{display:inline-block;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:800}
-    .tag.green{background:#e8f5e9;color:#2e7d32}
-    .tag.gray{background:#f3f3f3;color:#333}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    .tag{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ring);background:#fafafa;border-radius:999px;padding:6px 10px;font-size:12px}
+    .tag.ok{border-color:#cfe8d1;background:#edf8ee;color:#1b5e20}
+    .tag.warn{border-color:#ffe8c7;background:#fff7e6;color:#6a4200}
+
+    /* Products grid */
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(260px,1fr));gap:14px}
+    @media (max-width:720px){ .grid{grid-template-columns:1fr} }
+    .prod{display:flex;gap:12px;align-items:center;border:1px solid var(--ring);border-radius:16px;padding:10px 12px}
+    .prod img{width:72px;height:72px;border-radius:12px;object-fit:cover;background:#f2f2f2}
+    .prod .title{font-weight:800}
+    .prod .price{font-weight:800}
+    .prod .flex{flex:1}
+
+    .hr{height:1px;background:#efefef;margin:12px 0}
+
+    /* Footer note */
+    .hint{font-size:12px;color:#818181;margin-top:4px}
   </style>
 </head>
 <body>
   <header>
     <div class="topbar">
-      <a class="brand" href="#"><img src="images/logo.png" alt="">Rhodes Burgers • Admin</a>
-      <div class="spacer"></div>
-      <a class="btn" href="index.html">Ir al Menú</a>
+      <a class="brand" href="admin.html"><img src="images/logo.png" alt="">Rhodes Burgers</a>
+      <nav>
+        <a class="btn" href="pedido_local.html" title="Ver pedidos">📦 Pedidos</a>
+        <a class="btn" href="finanzas.html" title="Ver finanzas">📈 Finanzas</a>
+        <a class="btn" href="mostrador.html" title="Abrir mostrador">🧾 Mostrador</a>
+        <a class="btn active" href="admin.html" title="Panel admin">⚙️ Admin</a>
+        <button id="btnLogout" class="btn danger">⏻ Cerrar sesión</button>
+      </nav>
     </div>
   </header>
 
-  <main>
-    <!-- INVENTARIO -->
+  <main class="container">
+    <!-- Columna izquierda: Apertura especial -->
     <section class="card">
-      <h2>Inventario (activar / desactivar productos)</h2>
-      <p class="muted">Tocá el switch para sacar un producto sin stock. La web debe leer <code>products/{id}.available</code> para ocultar el botón de compra.</p>
-      <div id="invList" class="grid"></div>
+      <h2>Apertura especial</h2>
+      <p class="muted" style="margin-top:2px">
+        Permite **forzar** el local como abierto por fuera del horario.
+      </p>
+
+      <div class="field">
+        <label class="row" style="justify-content:space-between">
+          <div>
+            <div style="font-weight:800">Forzar “Abierto”</div>
+            <div class="hint">Escribe un mensaje corto (opcional) que verá el cliente.</div>
+          </div>
+          <label class="switch">
+            <input id="chkForceOpen" type="checkbox">
+            <span class="slider"></span>
+          </label>
+        </label>
+      </div>
+
+      <div class="field">
+        <input id="txtForceMsg" type="text" placeholder="Ej: apertura especial / partido / feriado, etc.">
+      </div>
+
+      <div class="actions">
+        <button id="btnSaveOpen" class="btn primary">Guardar</button>
+        <span id="saveOpenState" class="tag" style="display:none"></span>
+      </div>
+
+      <div class="hr"></div>
+      <div class="tag warn">Sugerencia</div>
+      <div class="hint">Si lo dejas desactivado, se mostrará el estado normal según los horarios.</div>
     </section>
 
-    <!-- ESTADO DE LA TIENDA -->
+    <!-- Columna derecha: Disponibilidad de productos -->
     <section class="card">
-      <h2>Apertura fuera de horario</h2>
-      <div class="row" style="margin:6px 0 12px">
-        <label class="pill" id="storeStatePill">Estado: —</label>
-      </div>
-      <div class="form-grid">
+      <div class="row" style="justify-content:space-between;align-items:flex-end">
         <div>
-          <label><strong>Forzar “Abierto”</strong></label>
-          <div class="row">
-            <button class="btn good" id="btnOpen">Activar</button>
-            <button class="btn bad" id="btnClose">Desactivar</button>
-          </div>
-          <div class="muted" style="margin-top:6px;font-size:13px">Si está activado, la tienda acepta pedidos aunque los horarios digan “cerrado”.</div>
+          <h2>Disponibilidad de productos</h2>
+          <div class="hint">Marca en “Disponible” para que se pueda vender.</div>
         </div>
-        <div>
-          <label><strong>Mensaje (opcional)</strong></label>
-          <textarea id="forceMsg" placeholder="Ej: Abrimos por evento especial hasta las 00:30."></textarea>
-          <div class="row" style="margin-top:8px">
-            <button class="btn primary" id="btnSaveMsg">Guardar mensaje</button>
-            <button class="btn" id="btnClearMsg">Limpiar</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- CUPONES -->
-    <section class="card">
-      <h2>Cupones de descuento</h2>
-
-      <div class="form-grid">
-        <div>
-          <label><strong>Código</strong></label>
-          <input id="cpCode" type="text" placeholder="Ej: BURGERS10">
-        </div>
-        <div>
-          <label><strong>Tipo</strong></label>
-          <select id="cpType">
-            <option value="percent">Porcentaje (%)</option>
-            <option value="fixed">Monto fijo ($)</option>
-          </select>
-        </div>
-        <div>
-          <label><strong>Valor</strong></label>
-          <input id="cpValue" type="number" min="0" step="1" placeholder="Ej: 10 o 1500">
-        </div>
-        <div>
-          <label><strong>Máx. usos (opcional)</strong></label>
-          <input id="cpMaxUses" type="number" min="0" step="1" placeholder="0 = ilimitado">
-        </div>
-        <div>
-          <label><strong>Válido desde (opcional)</strong></label>
-          <input id="cpFrom" type="datetime-local">
-        </div>
-        <div>
-          <label><strong>Válido hasta (opcional)</strong></label>
-          <input id="cpTo" type="datetime-local">
-        </div>
-        <div style="grid-column:1/-1">
-          <label><strong>Nota (opcional)</strong></label>
-          <input id="cpNote" type="text" placeholder="Texto interno de referencia">
-        </div>
+        <div class="tag ok" id="prodCount">—</div>
       </div>
 
-      <div class="row" style="margin-top:10px">
-        <button class="btn primary" id="btnCreateCp">Crear / Actualizar cupón</button>
-        <span class="muted">Los códigos se guardan en mayúsculas.</span>
-      </div>
-
-      <div class="sep"></div>
-
-      <h3 style="margin:0 0 6px">Cupones activos</h3>
-      <div class="muted" style="margin-bottom:6px">Podés habilitar/deshabilitar o eliminar un cupón.</div>
-      <div style="overflow:auto">
-        <table>
-          <thead>
-            <tr>
-              <th>Código</th><th>Tipo</th><th>Valor</th><th>Usos</th><th>Vigencia</th><th>Estado</th><th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="cpTable"></tbody>
-        </table>
+      <div id="prodGrid" class="grid" style="margin-top:8px"></div>
+      <div class="actions">
+        <button id="btnRefresh" class="btn ghost">Actualizar</button>
       </div>
     </section>
   </main>
 
-  <!-- Firebase -->
+  <!-- Firebase (compat) -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    // ===== Firebase =====
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-      authDomain: "rhodes-burguers.firebaseapp.com",
-      projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-    };
-    try{ firebase.initializeApp(firebaseConfig); }catch(e){}
+  /* ======== SESIÓN simple (igual a login.html) ======== */
+  const TTL_HOURS = 20;
+  const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
+  function sessionValid(){
+    const ok = localStorage.getItem('rb_admin_ok')==='true';
+    const ts = Number(localStorage.getItem('rb_admin_t')||0);
+    return ok && (Date.now()-ts) < TTL_MS;
+  }
+  function bumpSession(){ if(sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now())); }
+  function logout(){ localStorage.clear(); location.replace('login.html?reason=logout&next=admin.html'); }
+  if(!sessionValid()){
+    const next = encodeURIComponent('admin.html'+(location.search||'')+(location.hash||''));
+    location.replace('login.html?next='+next);
+  }else{ bumpSession(); }
+  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(e=>addEventListener(e,bumpSession,{passive:true}));
+  document.getElementById('btnLogout').onclick = logout;
 
-    // 🔧 FIX transporte: long-polling antes de crear `db`
-    firebase.firestore().settings({
-      experimentalForceLongPolling: true,
-      useFetchStreams: false
-    });
-    const db = firebase.firestore();
+  /* ======== Firebase ======== */
+  const firebaseConfig = {
+    apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+    authDomain: "rhodes-burguers.firebaseapp.com",
+    projectId: "rhodes-burguers",
+    storageBucket: "rhodes-burguers.firebasestorage.app",
+    messagingSenderId: "951646688091",
+    appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+  };
+  try{ firebase.initializeApp(firebaseConfig) }catch(_){}
+  const db = firebase.firestore();
 
-    // ===== Catálogo (ids deben coincidir con index/mostrador) =====
-    const CATALOG = [
-      { id:"bigjohn_simple", name:"Big John Simple", category:"hamburguesas" },
-      { id:"bigjohn_doble",  name:"Big John Doble",  category:"hamburguesas" },
-      { id:"burguesa_simple",name:"Burguesa Simple", category:"hamburguesas" },
-      { id:"burguesa_doble", name:"Burguesa Doble",  category:"hamburguesas" },
-      { id:"cheesebacon_simple", name:"CheeseBacon Simple", category:"hamburguesas" },
-      { id:"cheesebacon_doble",  name:"CheeseBacon Doble",  category:"hamburguesas" },
-      { id:"cheese_simple", name:"Cheeseburger Simple", category:"hamburguesas" },
-      { id:"cheese_doble",  name:"Cheeseburger Doble",  category:"hamburguesas" },
-      { id:"rhodes_simple", name:"Rhodes Simple", category:"hamburguesas" },
-      { id:"rhodes_doble",  name:"Rhodes Doble",  category:"hamburguesas" },
-      { id:"morgan_simple", name:"Morgan Simple", category:"hamburguesas" },
-      { id:"morgan_doble",  name:"Morgan Doble",  category:"hamburguesas" },
-      { id:"pollo_crispy",  name:"Pollo Crispy",  category:"hamburguesas" },
-      // Bebidas
-      { id:"andes_rubia", name:"Andes Origen Rubia 473ml", category:"bebidas" },
-      { id:"andes_roja",  name:"Andes Origen Roja 473ml",  category:"bebidas" },
-      { id:"coca_org",    name:"Coca-Cola Original 500ml", category:"bebidas" },
-      { id:"coca_zero",   name:"Coca-Cola Zero 500ml",     category:"bebidas" },
-      { id:"sprite",      name:"Sprite 500ml",             category:"bebidas" },
-      { id:"aq_pomelo",   name:"Aquarius Pomelo 500ml",    category:"bebidas" },
-      { id:"aq_pera",     name:"Aquarius Pera 500ml",      category:"bebidas" },
-      { id:"aq_manzana",  name:"Aquarius Manzana 500ml",   category:"bebidas" },
-      { id:"agua_sg",     name:"Agua sin gas 500ml",       category:"bebidas" }
-    ];
+  const $ = s => document.querySelector(s);
+  const prodGrid = $('#prodGrid');
+  const prodCount = $('#prodCount');
+  const saveOpenState = $('#saveOpenState');
 
-    const $ = s => document.querySelector(s);
-    const fmtDate = ts => ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
-
-    /* ================= INVENTARIO ================= */
-    const invList = document.getElementById('invList');
-
-    async function ensureProductDoc(p){
-      const ref = db.collection('products').doc(p.id);
-      const snap = await ref.get();
-      if(!snap.exists){
-        await ref.set({ name:p.name, category:p.category, available:true, createdAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
-      }else{
-        const d = snap.data();
-        if(typeof d.available !== 'boolean' || !d.name || !d.category){
-          await ref.set({ name:p.name, category:p.category, available: d.available ?? true }, {merge:true});
-        }
-      }
-      return ref;
+  /* ======== Apertura especial (NO cambia la estructura) ======== */
+  async function loadStoreFlag(){
+    try{
+      const snap = await db.collection('config').doc('store').get();
+      const d = snap.exists ? (snap.data()||{}) : {};
+      $('#chkForceOpen').checked = !!d.forceOpen;
+      $('#txtForceMsg').value = d.forceOpenMessage || '';
+    }catch(e){ console.warn(e); }
+  }
+  async function saveStoreFlag(){
+    saveOpenState.style.display='inline-flex';
+    saveOpenState.textContent = 'Guardando…';
+    try{
+      await db.collection('config').doc('store').set({
+        forceOpen: $('#chkForceOpen').checked,
+        forceOpenMessage: $('#txtForceMsg').value.trim()
+      }, { merge:true });
+      saveOpenState.className='tag ok';
+      saveOpenState.textContent='Guardado';
+      setTimeout(()=>{ saveOpenState.style.display='none'; }, 1400);
+    }catch(e){
+      saveOpenState.className='tag';
+      saveOpenState.textContent='Error';
+      console.error(e);
     }
+  }
+  $('#btnSaveOpen').onclick = saveStoreFlag;
 
-    async function toggleProduct(id, val){
+  /* ======== Productos (NO cambia la estructura) ======== */
+  function renderProductCard(id, data){
+    const name = data.name || id;
+    const price = Number(data.price||0);
+    const img = data.img || 'images/logo.png';
+    const available = data.available !== false;
+
+    const card = document.createElement('div');
+    card.className='prod';
+    card.innerHTML = `
+      <img src="${img}" alt="">
+      <div class="flex">
+        <div class="title">${name}</div>
+        <div class="muted" style="margin-top:2px">${data.desc ? data.desc : ''}</div>
+        <div class="hint" style="margin-top:6px">ID: <code>${id}</code></div>
+      </div>
+      <div style="text-align:right">
+        <div class="price">$ ${price.toLocaleString('es-AR',{maximumFractionDigits:0})}</div>
+        <div class="row" style="margin-top:6px;justify-content:flex-end">
+          <label class="switch">
+            <input type="checkbox" ${available?'checked':''} data-id="${id}">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    `;
+    // toggle
+    const input = card.querySelector('input[type="checkbox"]');
+    input.addEventListener('change', async (e)=>{
+      const on = e.target.checked;
+      e.target.disabled = true;
       try{
-        await db.collection('products').doc(id).set({ available: !!val, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
-      }catch(e){ alert('No se pudo cambiar el estado del producto.'); console.error(e); }
-    }
+        await db.collection('products').doc(id).set({ available:on }, { merge:true });
+      }catch(err){ console.error(err); e.target.checked = !on; }
+      finally{ e.target.disabled = false; }
+    });
+    return card;
+  }
 
-    function renderInventory(productsState){
-      invList.innerHTML = '';
-      CATALOG.forEach(p=>{
-        const st = productsState.get(p.id) ?? true;
-        const el = document.createElement('div');
-        el.className = 'tile';
-        el.innerHTML = `
-          <div>
-            <div style="font-weight:800">${p.name}</div>
-            <div class="muted" style="font-size:13px">${p.category}</div>
-          </div>
-          <div class="row">
-            <span class="pill ${st?'ok':'off'}">${st?'Disponible':'Sin stock'}</span>
-            <button class="btn ${st?'warn':'good'}" data-id="${p.id}" data-next="${st?0:1}">
-              ${st?'Desactivar':'Activar'}
-            </button>
-          </div>
-        `;
-        invList.appendChild(el);
+  let unsubProds = null;
+  function subscribeProducts(){
+    if (unsubProds) { try{unsubProds()}catch(_){ } }
+    unsubProds = db.collection('products').onSnapshot(snap=>{
+      prodGrid.innerHTML='';
+      let n=0;
+      snap.forEach(doc=>{
+        n++;
+        prodGrid.appendChild(renderProductCard(doc.id, doc.data()||{}));
       });
+      prodCount.textContent = `${n} productos`;
+    }, err=>{
+      console.error(err);
+    });
+  }
+  $('#btnRefresh').onclick = ()=>subscribeProducts();
 
-      invList.querySelectorAll('button[data-id]').forEach(btn=>{
-        btn.addEventListener('click', async ()=>{
-          const id = btn.dataset.id;
-          const next = btn.dataset.next === '1';
-          btn.disabled = true;
-          await toggleProduct(id, next);
-          await loadInventory();
-        });
-      });
-    }
-
-    async function loadInventory(){
-      await Promise.all(CATALOG.map(ensureProductDoc));
-      const snaps = await Promise.all(CATALOG.map(p => db.collection('products').doc(p.id).get()));
-      const map = new Map();
-      snaps.forEach((s,i)=> map.set(CATALOG[i].id, !!(s.data()?.available ?? true)) );
-      renderInventory(map);
-    }
-
-    /* ============== STORE OVERRIDE (FORCE OPEN) ============== */
-    const storeDoc = () => db.collection('config').doc('store');
-
-    async function refreshStoreState(){
-      const s = await storeDoc().get();
-      const d = s.exists ? s.data() : {};
-      const on = !!d.forceOpen;
-      const msg = d.forceOpenMessage || '';
-      $('#storeStatePill').className = 'pill ' + (on ? 'ok' : 'off');
-      $('#storeStatePill').textContent = 'Estado: ' + (on ? 'Forzado ABIERTO' : 'Normal');
-      $('#forceMsg').value = msg;
-    }
-    $('#btnOpen').onclick  = async ()=>{ await storeDoc().set({forceOpen:true,  updatedAt:new Date()}, {merge:true}); refreshStoreState(); };
-    $('#btnClose').onclick = async ()=>{ await storeDoc().set({forceOpen:false, updatedAt:new Date()}, {merge:true}); refreshStoreState(); };
-    $('#btnSaveMsg').onclick = async ()=>{
-      await storeDoc().set({forceOpenMessage: $('#forceMsg').value.trim(), updatedAt:new Date()}, {merge:true});
-      refreshStoreState();
-    };
-    $('#btnClearMsg').onclick = async ()=>{
-      $('#forceMsg').value = '';
-      await storeDoc().set({forceOpenMessage: firebase.firestore.FieldValue.delete(), updatedAt:new Date()}, {merge:true});
-      refreshStoreState();
-    };
-
-    /* ==================== CUPONES ==================== */
-    const cpTbody = document.getElementById('cpTable');
-
-    function upsertCouponFromForm(){
-      const code = ($('#cpCode').value||'').trim().toUpperCase();
-      if(!code){ alert('Ingresá un código'); return; }
-      const type = $('#cpType').value;
-      const value = Number($('#cpValue').value||0);
-      if(!(value>0)){ alert('Ingresá un valor mayor a 0'); return; }
-
-      const maxUses = Number($('#cpMaxUses').value||0);
-      const note = ($('#cpNote').value||'').trim();
-
-      const from = $('#cpFrom').value ? new Date($('#cpFrom').value) : null;
-      const to   = $('#cpTo').value   ? new Date($('#cpTo').value)   : null;
-
-      const payload = {
-        code, type, value,
-        enabled: true,
-        note: note || null,
-        validFrom: from ? firebase.firestore.Timestamp.fromDate(from) : null,
-        validTo: to ? firebase.firestore.Timestamp.fromDate(to) : null,
-        maxUses: maxUses>0 ? maxUses : null,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-
-      db.collection('coupons').doc(code).set({
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        uses: 0,
-        ...payload
-      }, {merge:true})
-      .then(()=>{ alert('Cupón guardado'); loadCoupons(); })
-      .catch(e=>{ console.error(e); alert('No se pudo guardar el cupón'); });
-    }
-    $('#btnCreateCp').onclick = upsertCouponFromForm;
-
-    function renderCoupons(list){
-      cpTbody.innerHTML = '';
-      list.forEach(doc=>{
-        const c = doc.data();
-        const uses = `${c.uses||0}${c.maxUses?` / ${c.maxUses}`:''}`;
-        const vf = c.validFrom ? fmtDate(c.validFrom) : null;
-        const vt = c.validTo ? fmtDate(c.validTo) : null;
-        const vig = (vf?vf.toLocaleDateString('es-AR')+' ':'') + (vt?('→ '+vt.toLocaleDateString('es-AR')):'');
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td class="code">${c.code}</td>
-          <td>${c.type==='percent'?'%':'$'}</td>
-          <td>${c.value}</td>
-          <td>${uses}</td>
-          <td>${vig||'-'}</td>
-          <td>${c.enabled ? '<span class="tag green">HABILITADO</span>' : '<span class="tag gray">PAUSADO</span>'}</td>
-          <td class="row">
-            <button class="btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
-              ${c.enabled?'Deshabilitar':'Habilitar'}
-            </button>
-            <button class="btn bad" data-act="delete" data-id="${doc.id}">Eliminar</button>
-          </td>
-        `;
-        cpTbody.appendChild(tr);
-      });
-
-      cpTbody.querySelectorAll('button[data-act]').forEach(btn=>{
-        btn.addEventListener('click', async ()=>{
-          const id = btn.dataset.id;
-          const act = btn.dataset.act;
-          if(act==='toggle'){
-            const snap = await db.collection('coupons').doc(id).get();
-            const enabled = !!(snap.data()?.enabled);
-            await db.collection('coupons').doc(id).set({ enabled: !enabled, updatedAt:new Date() }, {merge:true});
-            loadCoupons();
-          }else if(act==='delete'){
-            if(confirm('¿Eliminar cupón '+id+'?')){
-              await db.collection('coupons').doc(id).delete();
-              loadCoupons();
-            }
-          }
-        });
-      });
-    }
-
-    async function loadCoupons(){
-      const q = await db.collection('coupons').orderBy('code').get();
-      renderCoupons(q.docs);
-    }
-
-    /* ================== INIT ================== */
-    (async function boot(){
-      await loadInventory();
-      await refreshStoreState();
-      await loadCoupons();
-    })();
+  // Init
+  loadStoreFlag();
+  subscribeProducts();
   </script>
 </body>
 </html>
