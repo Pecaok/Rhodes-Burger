@@ -1,7 +1,6 @@
-
 <!doctype html>
 <html lang="es">
-   <script>
+  <script>
   /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
   const TTL_HOURS = 20;
   const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
@@ -25,7 +24,6 @@
   // Requerir sesión en páginas internas
   (function requireSession(){
     if (!sessionValid()){
-      // armar "next" con ruta+query+hash actuales
       const next = encodeURIComponent(
         (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
         (location.search || '') + (location.hash || '')
@@ -40,7 +38,7 @@
   ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
     window.addEventListener(evt, bumpSession, {passive:true});
   });
-</script>
+  </script>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -59,6 +57,11 @@
     .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:800}
     .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain;margin-right:8px}
     .spacer{flex:1}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:700;text-decoration:none;color:inherit}
+    .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .btn.ghost{background:#fff}
+    .btn:disabled,.btn.disabled{opacity:.55;cursor:not-allowed}
+
     .container{max-width:1200px;margin:20px auto;padding:0 12px;display:grid;grid-template-columns:1fr 380px;gap:18px}
     @media (max-width:980px){ .container{grid-template-columns:1fr} }
 
@@ -75,10 +78,6 @@
     .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
     .price{font-weight:800}
     .actions{display:flex;gap:8px;flex-wrap:wrap}
-    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:700}
-    .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
-    .btn.ghost{background:#fff}
-    .btn:disabled,.btn.disabled{opacity:.55;cursor:not-allowed}
 
     .side{background:var(--card);border-radius:20px;box-shadow:var(--shadow);padding:14px;position:sticky;top:82px;height:fit-content}
     .side h3{margin:0 0 8px}
@@ -132,6 +131,7 @@
       box-shadow: 0 0 0 3px rgba(98,90,69,.18);
     }
     .field-foot { display:flex; justify-content:flex-end; margin-top:6px; font-size:12px; color:#8a8a8a; }
+    .preview{font-weight:800}
   </style>
 </head>
 <body>
@@ -139,6 +139,12 @@
     <div class="topbar">
       <a class="brand" href="#"><img src="images/logo.png" alt="Rhodes Burgers">Rhodes Burgers</a>
       <div class="spacer"></div>
+
+      <!-- Nav agregado -->
+      <a class="btn" href="pedido_local.html" title="Ver pedidos">📦 Pedidos</a>
+      <a class="btn" href="finanzas.html" title="Ver finanzas">📈 Finanzas</a>
+      <a class="btn" href="admin.html" title="Panel admin">⚙️ Admin</a>
+
       <strong>Mostrador</strong>
     </div>
   </header>
@@ -173,7 +179,7 @@
     </aside>
   </main>
 
-  <!-- Modal Personalizar -->
+  <!-- Modal Personalizar (se usa al tocar Agregar) -->
   <div class="overlay" id="overlay">
     <div class="modal">
       <h3 id="modTitle">Personalizar</h3>
@@ -203,6 +209,12 @@
           <span id="cheVal">0</span>
           <button id="cheInc">+</button>
         </div>
+      </div>
+
+      <!-- Preview de precio unitario -->
+      <div class="rowx" id="rowPreview" style="justify-content:flex-end">
+        <span class="muted">Subtotal unitario:</span>
+        <span class="preview" id="unitPreview">$0</span>
       </div>
 
       <!-- Notas mejoradas -->
@@ -269,7 +281,7 @@
     { id:"rhodes_simple", name:"Rhodes Simple", price:11900, img:"images/Rhodes Simple.jpg", kind:"simple", desc:"Doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
     { id:"rhodes_doble",  name:"Rhodes Doble",  price:14500, img:"images/Rhodes Doble.jpg",  kind:"double", desc:"Doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
     { id:"morgan_simple", name:"Morgan Simple", price:11500, img:"images/Morgan Simple.jpg", kind:"simple", desc:"Doble cheddar, bacon, barbacoa y crispy onion. Incluye papas." },
-    { id:"morgan_doble",  name:"Morgan Doble",  price:14200, img:"images/Morgan Doble.jpg",  kind:"double", desc:"Doble cheddar, bacon, barbacoa y crispy onion. Incluye papas." },
+    { id:"morgan_doble",  name:"Morgan Doble",  price:14200, img:"images/Morgan Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, barbacoa y crispy onion. Incluye papas." },
     { id:"pollo_crispy", name:"Pollo Crispy", price:9100, img:"images/Pollo crispy.jpg", kind:"chicken", desc:"Pechuga crispy con lechuga y mayo. Incluye papas." }
   ];
   const DRINKS=[
@@ -293,9 +305,7 @@
       const ok = isAvailable(id);
       card.setAttribute('data-soldout', ok ? '0' : '1');
       const addBtn = card.querySelector('[data-add]');
-      const custBtn = card.querySelector('[data-custom]');
       if(addBtn){ ok ? (addBtn.removeAttribute('disabled'), addBtn.classList.remove('disabled')) : (addBtn.setAttribute('disabled',''), addBtn.classList.add('disabled')); }
-      if(custBtn){ ok ? (custBtn.removeAttribute('disabled'), custBtn.classList.remove('disabled')) : (custBtn.setAttribute('disabled',''), custBtn.classList.add('disabled')); }
       let badge = card.querySelector('.soldout-badge');
       if(!ok){
         if(!badge){ badge=document.createElement('div'); badge.className='soldout-badge'; badge.textContent='SIN STOCK'; (card.querySelector('.imgwrap')||card).appendChild(badge); }
@@ -318,7 +328,12 @@
 
   function calcTotal(){
     let t=0;
-    for(const b of Object.values(cart.burger)){ const base=(b.item?.price||0), ep=(b.extras?.patty||0)*EXTRA_PRICE_PATTY, ec=(b.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR; t+=(base+ep+ec)*(b.qty||0); }
+    for(const b of Object.values(cart.burger)){
+      const base=(b.item?.price||0),
+            ep=(b.extras?.patty||0)*EXTRA_PRICE_PATTY,
+            ec=(b.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR;
+      t+=(base+ep+ec)*(b.qty||0);
+    }
     for(const d of Object.values(cart.drink)){ t+=(d.item?.price||0)*(d.qty||0); }
     return t;
   }
@@ -378,17 +393,15 @@
           <span class="price">${moneyInt(item.price)}</span>
           <div class="actions">
             <button class="btn" data-add ${ok?'':'disabled'}>Agregar</button>
-            ${type==="burger"?`<button class="btn" data-custom ${ok?'':'disabled'}>Personalizar</button>`:""}
           </div>
         </div>
       </div>`;
     const addBtn = card.querySelector("[data-add]");
-    const customBtn = card.querySelector("[data-custom]");
     if(type==="drink"){
       addBtn.onclick=()=>{ if(!isAvailable(item.id)) return; const b=cart.drink; if(!b[item.id]) b[item.id]={qty:0,item}; b[item.id].qty+=1; renderCart(); };
     }else{
+      // Para hamburguesas pedimos papas y (si aplica) extras, mostrando preview
       addBtn.onclick=()=>{ if(!isAvailable(item.id)) return; openCustomize(item); };
-      if(customBtn) customBtn.onclick=()=>{ if(!isAvailable(item.id)) return; openCustomize(item); };
     }
     return card;
   }
@@ -403,8 +416,15 @@
   const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar");
   const patVal=$("#patVal"),patInc=$("#patInc"),patDec=$("#patDec");
   const cheVal=$("#cheVal"),cheInc=$("#cheInc"),cheDec=$("#cheDec");
+  const unitPreview=$("#unitPreview");
   const notes=$("#notes"),btnAdd=$("#btnAdd"),btnCancel=$("#btnCancel");
   let currentItem=null;
+
+  function unitPricePreview(base){
+    const pat = (+patVal.textContent||0) * EXTRA_PRICE_PATTY;
+    const che = (+cheVal.textContent||0) * EXTRA_PRICE_CHEDDAR;
+    unitPreview.textContent = money(base + pat + che);
+  }
 
   function resetFries(){ document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false); }
   function openCustomize(item){
@@ -415,13 +435,14 @@
     if(item.kind==="double"){ rowPatties.style.display="flex"; rowCheddar.style.display="flex"; }
     else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; }
     else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; }
+    unitPricePreview(item.price);
     overlay.classList.add("open");
   }
   btnCancel.onclick=()=> overlay.classList.remove("open");
-  patInc.onclick=()=>{const v=+patVal.textContent||0;if(v<2)patVal.textContent=v+1;};
-  patDec.onclick=()=>{const v=+patVal.textContent||0;if(v>0)patVal.textContent=v-1;};
-  cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1;};
-  cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1;};
+  patInc.onclick=()=>{const v=+patVal.textContent||0;if(v<2)patVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
+  patDec.onclick=()=>{const v=+patVal.textContent||0;if(v>0)patVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
+  cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
+  cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
 
   // helpers de notas (auto-alto + contador)
   function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
