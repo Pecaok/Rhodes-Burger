@@ -269,63 +269,85 @@
     const btnStateClass=st=>`state-btn state-${st}`;
 
     function renderOrder(doc){
-      const o=doc.data(); const dt=pickDocDate(o);
-      const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
-      const items=Array.isArray(o.items)?o.items:[];
+  const o=doc.data(); 
+  const dt=pickDocDate(o);
+  const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
+  const items=Array.isArray(o.items)?o.items:[];
 
-      const lines=items.map(it=>{
-        const qty=it.qty||1;
-        const subtotal=(it.price||0)*qty
-          + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
-          + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
-        return `<div class="item">
-          <div>• <strong>${qty}× ${it.name||''}</strong></div>
-          <div class="sub">Papas: ${friesName(it.fries)}${it.notes?` · Nota: ${it.notes}`:''}</div>
-          <div class="sub">Subtotal: ${money(subtotal)}</div>
-        </div>`;
-      }).join("");
+  // 👉 Ítems con detalle de extras
+  const lines = items.map(it=>{
+    const qty = it.qty || 1;
+    const baseUnit = it.price || 0;
 
-      const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
-      const srcChip=o.source?`<span class="chip">Origen: ${o.source}</span>`:"";
-      const cmtChip=o.comment?`<span class="chip">Comentario: ${o.comment}</span>`:"";
+    const pattyCount   = it.extras?.patty || 0;
+    const pattyUnit    = it.extras?.EXTRA_PRICE_PATTY || 0;
+    const pattyTotal   = qty * pattyCount * pattyUnit;
 
-      const st=o.status??"accepted";
-      const curIdx=Math.max(STATE_SEQ.indexOf(st),0);
-      const stateBtns=`<div class="stateBtns">
-        ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
-      </div>`;
+    const cheddarCount = it.extras?.cheddar || 0;
+    const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR || 0;
+    const cheddarTotal = qty * cheddarCount * cheddarUnit;
 
-      const paymentPaid=(o.payment_status==='paid'||o.paid);
-      const payLine=`<div class="pay-line">
-        <span class="chip">Pago: ${o.pago||'—'}</span>
-        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}</span>
-        <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PENDIENTE':'✓ Marcar PAGADO'}</button>
-        <button class="btn" data-print>🖨 Imprimir</button>
-      </div>`;
+    const baseSubtotal = baseUnit * qty;
+    const lineTotal    = baseSubtotal + pattyTotal + cheddarTotal;
 
-      return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
-        <div class="order-head">
-          <div>
-            <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
-            <div class="muted">${dtText}</div>
-            <div class="chips">
-              <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
-              <span class="chip">Estado: ${st}</span>
-              <span class="chip">Retiro: ${o.entrega||'—'}</span>
-              ${telChip}${srcChip}${cmtChip}
-            </div>
-            ${stateBtns}
-          </div>
-          <div>
-            <div class="right-total">${money(computeOrderTotal(o))}</div>
-            ${payLine}
-          </div>
+    // Extras desglosados (solo si existen)
+    const extrasHTML = [
+      pattyCount   ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattyTotal)}</div>` : "",
+      cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarTotal)}</div>` : ""
+    ].join("");
+
+    return `
+      <div class="item">
+        <div>• <strong>${qty}× ${it.name || ""}</strong></div>
+        <div class="sub">
+          Papas: ${friesName(it.fries)}${it.notes ? ` · Nota: ${it.notes}` : ""}
         </div>
-        <div class="divider"></div>
-        <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
-      </div>`;
-    }
+        ${extrasHTML}
+        <div class="sub">Subtotal: ${money(lineTotal)}</div>
+      </div>
+    `;
+  }).join("");
 
+  const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
+  const srcChip=o.source?`<span class="chip">Origen: ${o.source}</span>`:"";
+  const cmtChip=o.comment?`<span class="chip">Comentario: ${o.comment}</span>`:"";
+
+  const st=o.status??"accepted";
+  const curIdx=Math.max(STATE_SEQ.indexOf(st),0);
+  const stateBtns=`<div class="stateBtns">
+    ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
+  </div>`;
+
+  const paymentPaid=(o.payment_status==='paid'||o.paid);
+  const payLine=`<div class="pay-line">
+    <span class="chip">Pago: ${o.pago||'—'}</span>
+    <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}</span>
+    <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PENDIENTE':'✓ Marcar PAGADO'}</button>
+    <button class="btn" data-print>🖨 Imprimir</button>
+  </div>`;
+
+  return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
+    <div class="order-head">
+      <div>
+        <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
+        <div class="muted">${dtText}</div>
+        <div class="chips">
+          <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
+          <span class="chip">Estado: ${st}</span>
+          <span class="chip">Retiro: ${o.entrega||'—'}</span>
+          ${telChip}${srcChip}${cmtChip}
+        </div>
+        ${stateBtns}
+      </div>
+      <div>
+        <div class="right-total">${money(computeOrderTotal(o))}</div>
+        ${payLine}
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
+  </div>`;
+}
     /* ==================== TICKET HTML ==================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
