@@ -244,22 +244,38 @@
       if(pagar){ if(orderable){ pagar.classList.remove('disabled'); pagar.removeAttribute('aria-disabled'); pagar.removeAttribute('disabled'); } else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); pagar.setAttribute('disabled',''); } }
     }
 
-    // ===== Forzar abierto (config/store) =====
+    // ===== Forzar abierto (config/store) - ahora con forceOpenUntil =====
     let FORCE_OPEN = false;
     let FORCE_MSG  = "";
+    let FORCE_UNTIL = null; // Date or null
+
     function renderStatus(){
       const pill=document.getElementById('statusPill');
       const main=pill.querySelector('.status-main');
       const sub=pill.querySelector('.status-sub');
       const now=new Date();
-      const st=isOpenNow(now);
-      if (FORCE_OPEN) {
+
+      // si forceUntil definido y futuro -> consideramos abierto
+      const until = FORCE_UNTIL instanceof Date ? FORCE_UNTIL : (FORCE_UNTIL ? new Date(FORCE_UNTIL) : null);
+      const untilActive = until && (until.getTime() > Date.now());
+
+      if (FORCE_OPEN || untilActive) {
         pill.classList.remove('status-closed'); pill.classList.add('status-open');
         main.textContent='Abierto';
-        sub.textContent = FORCE_MSG ? FORCE_MSG : 'apertura especial';
+        if(untilActive){
+          // mostrar 'hasta HH:MM'
+          const hh = String(until.getHours()).padStart(2,'0');
+          const mm = String(until.getMinutes()).padStart(2,'0');
+          sub.textContent = `hasta ${hh}:${mm}`;
+        } else {
+          sub.textContent = FORCE_MSG ? FORCE_MSG : 'apertura especial';
+        }
         setOrderable(true);
         return;
       }
+
+      // comportamiento normal según horarios
+      const st=isOpenNow(now);
       if(st.open){
         const [h,m]=st.until;
         pill.classList.remove('status-closed'); pill.classList.add('status-open');
@@ -286,11 +302,11 @@
       { id:"cheesebacon_spl", name:"CheeseBacon Simple", price:10600, img:"images/CheeseBacon Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar y bacon en pan brioche. Incluye papas fritas." },
       { id:"cheesebacon_dbl", name:"CheeseBacon Doble",  price:13100, img:"images/CheeseBacon Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar y bacon en pan brioche. Incluye papas fritas." },
       { id:"cheese_simple", name:"Cheeseburger Simple", price:10100, img:"images/cheeseburger simple.jpg", kind:"simple", desc:"Medallón con doble cheddar en pan brioche. Incluye papas fritas." },
-      { id:"cheese_doble",  name:"Cheeseburger Doble",  price:12500, img:"images/cheeseburger doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar en pan brioche. Incluye papas fritas." },
+      { id:"cheese_doble",  name:"Cheeseburger Doble",  price:12500, img:"images/cheeseburger doble.jpg", kind:"double", desc:"Doble medallón con doble cheddar en pan brioche. Incluye papas fritas." },
       { id:"rhodes_simple", name:"Rhodes Simple", price:11900, img:"images/Rhodes Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy en pan brioche. Incluye papas fritas." },
-      { id:"rhodes_doble",  name:"Rhodes Doble",  price:14500, img:"images/Rhodes Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas fritas." },
+      { id:"rhodes_doble",  name:"Rhodes Doble",  price:14500, img:"images/Rhodes Doble.jpg", kind:"double", desc:"Doble medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas fritas." },
       { id:"morgan_simple", name:"Morgan Simple", price:11500, img:"images/Morgan Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, bacon, salsa barbacoa y cebolla crispy. Incluye papas fritas." },
-      { id:"morgan_doble",  name:"Morgan Doble",  price:14200, img:"images/Morgan Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, salsa barbacoa y cebolla crispy. Incluye papas fritas." },
+      { id:"morgan_doble",  name:"Morgan Doble",  price:14200, img:"images/Morgan Doble.jpg", kind:"double", desc:"Doble cheddar, bacon, barbacoa y onion crispy. Incluye papas fritas." },
       { id:"pollo_crispy",  name:"Pollo Crispy",  price:9100,  img:"images/Pollo crispy.jpg", kind:"chicken", desc:"Pechuga de pollo crispy con lechuga y mayonesa. Incluye papas fritas." }
     ];
     const DRINKS = [
@@ -322,12 +338,23 @@
     const db = firebase.firestore();
     try{ db.settings({ experimentalAutoDetectLongPolling:true, merge:true }); }catch(_){}
 
-    // Suscripción a forzar abierto
+    // Suscripción a forzar abierto (ahora lee forceOpenUntil también)
     try{
       db.collection('config').doc('store').onSnapshot(s=>{
         const d=s.exists?(s.data()||{}):{};
         FORCE_OPEN=!!d.forceOpen;
         FORCE_MSG=d.forceOpenMessage||"";
+        // parseamos forceOpenUntil si viene
+        if(d.forceOpenUntil){
+          try{
+            // si es Timestamp de firestore tiene toDate()
+            FORCE_UNTIL = (typeof d.forceOpenUntil.toDate === 'function') ? d.forceOpenUntil.toDate() : new Date(d.forceOpenUntil);
+          }catch(_){
+            FORCE_UNTIL = new Date(d.forceOpenUntil);
+          }
+        } else {
+          FORCE_UNTIL = null;
+        }
         renderStatus();
       });
     }catch(e){ console.warn('No se pudo suscribir a config/store:', e); }
@@ -424,7 +451,7 @@
     document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
 
     // 👉 Redirección directa a pedido_cliente.html
-    document.getElementById("btnPagar").onclick = ()=>{
+    document.getElementById("btnPagar").onclick = ()=>{ 
       if(!orderable) return cantOrderAlert();
       if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
       window.location.href = 'pedido_cliente.html';
