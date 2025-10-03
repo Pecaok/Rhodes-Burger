@@ -24,18 +24,16 @@ function logout(){
 // Requerir sesión en páginas internas
 (function requireSession(){
   if (!sessionValid()){
-    // armar "next" con ruta+query+hash actuales
     const next = encodeURIComponent(
       (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
       (location.search || '') + (location.hash || '')
     );
-    location.replace('login.html?next=' + next); // <-- login con ?next=
+    location.replace('login.html?next=' + next);
   } else {
     bumpSession();
   }
 })();
 
-// Mantener viva la sesión mientras se usa
 ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
   window.addEventListener(evt, bumpSession, {passive:true});
 });
@@ -96,7 +94,6 @@ function logout(){
     .tag.green{background:#e8f5e9;color:#2e7d32}
     .tag.gray{background:#f3f3f3;color:#333}
 
-    /* mobile tweaks */
     @media (max-width:720px){
       .topbar{padding:8px}
       .grid{grid-template-columns:1fr}
@@ -125,7 +122,7 @@ function logout(){
     <!-- INVENTARIO -->
     <section class="card">
       <h2>Inventario (activar / desactivar productos)</h2>
-      <p class="muted">Tocá el switch para sacar un producto sin stock. La web debe leer <code>products/{id}.available</code> para ocultar el botón de compra.</p>
+      <p class="muted">Tocá el switch para sacar un producto sin stock. La web lee <code>products/{id}.available</code>.</p>
       <div id="invList" class="grid"></div>
     </section>
 
@@ -368,13 +365,26 @@ function logout(){
         // rellenar inputs
         $('#forceMsg').value = d.forceOpenMessage || '';
         if(untilDate){
+          // convertimos a local iso para datetime-local
           const localIso = new Date(untilDate.getTime() - untilDate.getTimezoneOffset()*60000).toISOString().slice(0,16);
           $('#openUntil').value = localIso;
         } else {
           $('#openUntil').value = '';
         }
+        // fijar min del input
+        setMinOpenUntil();
       }catch(e){ console.error(e); }
     }
+
+    // fija min del datetime-local al ahora (evita elegir el pasado)
+    function setMinOpenUntil(){
+      const input = document.getElementById('openUntil');
+      if(!input) return;
+      const now = new Date();
+      const localIso = new Date(now.getTime() - now.getTimezoneOffset()*60000).toISOString().slice(0,16);
+      input.min = localIso;
+    }
+    setInterval(setMinOpenUntil, 30*1000); // actualizar el min cada 30s
 
     $('#btnOpen').onclick  = async ()=>{ await storeDoc().set({forceOpen:true,  updatedAt:new Date()}, {merge:true}); refreshStoreState(); };
     $('#btnClose').onclick = async ()=>{ await storeDoc().set({forceOpen:false, updatedAt:new Date()}, {merge:true}); refreshStoreState(); };
@@ -385,9 +395,10 @@ function logout(){
     $('#btnSetUntil').onclick = async ()=>{
       const v = $('#openUntil').value;
       if(!v){ alert('Elegí fecha y hora.'); return; }
-      // v viene en formato "YYYY-MM-DDTHH:MM"
       const dt = new Date(v);
       if(isNaN(dt.getTime())){ alert('Fecha inválida.'); return; }
+      // validación: no permitir fecha pasada
+      if(dt.getTime() <= Date.now()){ alert('No podés elegir una fecha/hora pasada.'); return; }
       try{
         await storeDoc().set({ forceOpenUntil: firebase.firestore.Timestamp.fromDate(dt), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
         refreshStoreState();
