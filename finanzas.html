@@ -273,7 +273,7 @@
     messagingSenderId: "951646688091",
     appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
   };
-  try{ firebase.initializeApp(firebaseConfig); }catch(e){}
+  try{ firebase.initializeApp(firebaseConfig);}catch(e){}
   const db = firebase.firestore();
 
   // Helpers
@@ -508,6 +508,39 @@
       return ym2;
     }
 
+    // Helper: decide si un item corresponde a hamburguesa (tolerante a distintos esquemas)
+    function isBurgerItem(it){
+      if(!it) return false;
+      // 1) type explícito
+      if(typeof it.type === 'string' && it.type.toLowerCase() === 'burger') return true;
+      if(it.item && typeof it.item.type === 'string' && it.item.type.toLowerCase() === 'burger') return true;
+
+      // 2) buscar palabras clave en name/id
+      const name = (it.name || it.item?.name || it.item?.title || '').toString().toLowerCase();
+      const id   = (it.id   || it.item?.id || it.sku || '').toString().toLowerCase();
+
+      // palabras que cubren tu menú (ajustá si agregás nuevos nombres)
+      const burgerKeywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|cheese|bacon)/i;
+      if(name && burgerKeywords.test(name)) return true;
+      if(id && burgerKeywords.test(id)) return true;
+
+      // 3) categoría fallback
+      if(it.category && typeof it.category === 'string' && it.category.toLowerCase().includes('burg')) return true;
+      if(it.item && it.item.category && typeof it.item.category === 'string' && it.item.category.toLowerCase().includes('burg')) return true;
+
+      return false;
+    }
+
+    // Evita inyección/HTML inesperado en nombres mostrados
+    function escapeHtml(s){
+      return (s||'').toString()
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
+    }
+
     async function loadBurgersByMonth(){
       const err = $("#bmErr"); err.style.display='none'; err.textContent='';
       const tbody = $("#bmBody"); const totalEl = $("#bmTotal"); const range = $("#bmRange");
@@ -524,7 +557,9 @@
 
         const ym = $("#burgMonth").value || (new Date().toISOString().slice(0,7));
         const {start,end} = monthRange(ym);
-        range.textContent = `${start.toLocaleDateString('es-AR')} → ${end.toLocaleDateString('es-AR')}`;
+        // mostrar rango (end-1ms)
+        const endDisplay = new Date(end.getTime() - 1);
+        range.textContent = `${start.toLocaleDateString('es-AR')} → ${endDisplay.toLocaleDateString('es-AR')}`;
 
         let q = db.collection('orders')
           .where(dateField, '>=', start)
@@ -539,24 +574,33 @@
         snap.forEach(doc=>{
           const o = doc.data();
           const items = Array.isArray(o.items)? o.items : [];
-          items.forEach(it=>{
-            if((it.type||'').toLowerCase() !== 'burger') return;
-            const qty = Number(it.qty)||1;
-            const name = (it.name || it.item?.name || 'Hamburguesa');
-            counter.set(name, (counter.get(name)||0)+qty);
+
+          items.forEach(rawItem=>{
+            const it = rawItem || {};
+            // qty tolerante
+            const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
+
+            if(!isBurgerItem(it)){
+              return;
+            }
+
+            const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || 'Hamburguesa').toString().trim();
+            const key = name || 'Hamburguesa';
+
+            counter.set(key, (counter.get(key)||0) + qty);
             total += qty;
           });
         });
 
         const rows = Array.from(counter.entries())
           .sort((a,b)=> b[1]-a[1])
-          .map(([name,cnt])=> `<tr><td>${name}</td><td>${cnt}</td></tr>`)
+          .map(([name,cnt])=> `<tr><td>${escapeHtml(name)}</td><td>${cnt}</td></tr>`)
           .join('');
 
         tbody.innerHTML = rows || `<tr><td colspan="2" class="muted">No hubo hamburguesas en este mes.</td></tr>`;
         totalEl.textContent = String(total);
       }catch(e){
-        console.error(e);
+        console.error('loadBurgersByMonth error:', e);
         err.textContent = "No se pudo cargar las hamburguesas del mes.";
         err.style.display = 'block';
         tbody.innerHTML = `<tr><td colspan="2" class="muted">Error al cargar.</td></tr>`;
