@@ -164,13 +164,13 @@
 
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <div class="muted" style="font-weight:600">Papas (obligatorio)</div>
-        <!-- reemplazar en el modal de index.html -->
-<div class="inline">
-  <label class="pill"><input type="radio" name="fries" value="con_sal"> Con sal</label>
-  <label class="pill"><input type="radio" name="fries" value="sin_sal"> Sin sal</label>
-  <label class="pill"><input type="radio" name="fries" value="con_sazon"> Con sazón</label>
-</div>
-  <div class="micro">Se toma lo que elijas acá por cada hamburguesa.</div>
+        <div class="inline">
+          <!-- CORREGIDO: tres opciones distintas -->
+          <label class="pill"><input type="radio" name="fries" value="con_sazon"> Con sazón</label>
+          <label class="pill"><input type="radio" name="fries" value="con_sal"> Con sal</label>
+          <label class="pill"><input type="radio" name="fries" value="sin_sal"> Sin sal</label>
+        </div>
+        <div class="micro">Se toma lo que elijas acá por cada hamburguesa.</div>
       </div>
 
       <div class="rowx" id="rowPatties" style="display:none">
@@ -265,7 +265,6 @@
         pill.classList.remove('status-closed'); pill.classList.add('status-open');
         main.textContent='Abierto';
         if(untilActive){
-          // mostrar 'hasta HH:MM'
           const hh = String(until.getHours()).padStart(2,'0');
           const mm = String(until.getMinutes()).padStart(2,'0');
           sub.textContent = `hasta ${hh}:${mm}`;
@@ -276,7 +275,6 @@
         return;
       }
 
-      // comportamiento normal según horarios
       const st=isOpenNow(now);
       if(st.open){
         const [h,m]=st.until;
@@ -346,10 +344,8 @@
         const d=s.exists?(s.data()||{}):{};
         FORCE_OPEN=!!d.forceOpen;
         FORCE_MSG=d.forceOpenMessage||"";
-        // parseamos forceOpenUntil si viene
         if(d.forceOpenUntil){
           try{
-            // si es Timestamp de firestore tiene toDate()
             FORCE_UNTIL = (typeof d.forceOpenUntil.toDate === 'function') ? d.forceOpenUntil.toDate() : new Date(d.forceOpenUntil);
           }catch(_){
             FORCE_UNTIL = new Date(d.forceOpenUntil);
@@ -391,16 +387,16 @@
     let cart=loadCart();
     function loadCart(){ try{return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{}};}catch{return {burger:{},drink:{}}} }
     function saveCart(){ localStorage.setItem(CART_KEY,JSON.stringify(cart)); }
-    function cartCount(){ let n=0; for(const b of Object.values(cart.burger)) n+=b.qty; for(const d of Object.values(cart.drink)) n+=d.qty; return n; }
+    function cartCount(){ let n=0; for(const b of Object.values(cart.burger||{})) n+=b.qty; for(const d of Object.values(cart.drink||{})) n+=d.qty; return n; }
     function calcTotal(){
       let t=0;
-      for(const obj of Object.values(cart.burger)){
+      for(const obj of Object.values(cart.burger||{})){
         const base=(obj.item?.price||0);
         const ep=(obj.extras?.patty||0)*(obj.extras?.EXTRA_PRICE_PATTY??EXTRA_PRICE_PATTY);
         const ec=(obj.extras?.cheddar||0)*(obj.extras?.EXTRA_PRICE_CHEDDAR??EXTRA_PRICE_CHEDDAR);
         t+=(base+ep+ec)*(obj.qty||0);
       }
-      for(const d of Object.values(cart.drink)) t+=(d.item?.price||0)*(d.qty||0);
+      for(const d of Object.values(cart.drink||{})) t+=(d.item?.price||0)*(d.qty||0);
       return t;
     }
 
@@ -431,7 +427,6 @@
       if(type==="drink"){
         addBtn.onclick=()=>{ if(!orderable) return cantOrderAlert(); if(!isAvailable(item.id)) return; addDrink(item); };
       }else{
-        // Burger: abrir modal (sin botón "Personalizar")
         addBtn.onclick=()=>{ if(!orderable) return cantOrderAlert(); if(!isAvailable(item.id)) return; openCustomize(item); };
       }
       return card;
@@ -453,58 +448,39 @@
     document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
 
     // 👉 Redirección directa a pedido_cliente.html
-    document.getElementById("btnPagar").onclick = ()=>{ 
+    document.getElementById("btnPagar").onclick = ()=>{
       if(!orderable) return cantOrderAlert();
       if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
       window.location.href = 'pedido_cliente.html';
     };
 
-    function renderCart(){
-      cartItems.innerHTML="";
-      for(const obj of Object.values(cart.burger)){
-        const extras=[]; if(obj.extras){ if(obj.extras.patty) extras.push(`+${obj.extras.patty} medallón(es)`); if(obj.extras.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`); }
-        const unit=obj.item.price+(obj.extras?.patty||0)*(obj.extras?.EXTRA_PRICE_PATTY??EXTRA_PRICE_PATTY)+(obj.extras?.cheddar||0)*(obj.extras?.EXTRA_PRICE_CHEDDAR??EXTRA_PRICE_CHEDDAR);
-        cartItems.innerHTML+=`
-          <div class="item">
-            <div>
-              <strong>${obj.item.name}</strong>
-              <div class="muted">Papas: ${obj.fries==="con_sazon"?"Con sazón":"Sin sazonar"}</div>
-              ${extras.length?`<div class="muted">${extras.join(" · ")}</div>`:""}
-              ${obj.notes?`<div class="muted">Notas: ${obj.notes}</div>`:""}
-            </div>
-            <div style="display:flex;align-items:center;gap:10px">
-              <button class="btn ghost" onclick="changeQty('burger','${obj.item.id}',-1)">-</button>
-              <span>${obj.qty}</span>
-              <button class="btn ghost" onclick="changeQty('burger','${obj.item.id}',1)">+</button>
-              <span>${money(unit*(obj.qty||0))}</span>
-            </div>
-          </div>`;
-      }
-      for(const obj of Object.values(cart.drink)){
-        cartItems.innerHTML+=`
-          <div class="item">
-            <div><strong>${obj.item.name}</strong></div>
-            <div style="display:flex;align-items:center;gap:10px">
-              <button class="btn ghost" onclick="changeQty('drink','${obj.item.id}',-1)">-</button>
-              <span>${obj.qty}</span>
-              <button class="btn ghost" onclick="changeQty('drink','${obj.item.id}',1)">+</button>
-              <span>${money((obj.item.price||0)*(obj.qty||0))}</span>
-            </div>
-          </div>`;
-      }
-      cartTotal.textContent=money(calcTotal());
-      document.getElementById("cartBubble").textContent=`(${cartCount()})`;
+    // ===== Nuevas utilidades: clave única y label legible =====
+    function makeItemKey(item, fries, extras, notes){
+      const parts = [
+        item.id || '',
+        'fries:' + (fries || ''),
+        'patty:' + ((extras && extras.patty) || 0),
+        'cheddar:' + ((extras && extras.cheddar) || 0),
+        'notes:' + (notes ? String(notes).trim().slice(0,120) : '')
+      ];
+      return parts.join('|'); // guardamos la key tal cual (no encode en storage)
     }
-    window.changeQty=function(type,id,delta){
-      const bucket=cart[type]; if(!bucket) return;
-      const cur=bucket[id]?.qty||0, next=Math.max(0,cur+delta);
-      if(next===0) delete bucket[id]; else bucket[id].qty=next;
-      saveCart(); renderCart();
+    function escapeHtml(s){
+      return (s||'').toString()
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
     }
-    function addDrink(item){
-      const bucket=cart.drink||(cart.drink={});
-      if(!bucket[item.id]) bucket[item.id]={qty:0,item};
-      bucket[item.id].qty+=1; saveCart(); renderCart();
+    function readableKeyLabel(item, fries, extras, notes){
+      const ex = [];
+      if(extras?.patty) ex.push(`+${extras.patty} medallón(es)`);
+      if(extras?.cheddar) ex.push(`+${extras.cheddar} cheddar`);
+      const extrasText = ex.length ? ' · ' + ex.join(' · ') : '';
+      const notesText = notes ? ` · Nota: ${escapeHtml(notes)}` : '';
+      const friesText = (fries === 'con_sazon' ? 'Con sazón' : (fries === 'con_sal' ? 'Con sal' : (fries === 'sin_sal' ? 'Sin sal' : (fries || '—'))));
+      return `${item.name} — Papas: ${friesText}${extrasText}${notesText}`;
     }
 
     /* ===== Modal Personalizar ===== */
@@ -523,10 +499,7 @@
     }
     function updatePreview(){
       if(!currentItem) return;
-      const extras={
-        patty: +patVal.textContent||0,
-        cheddar: +cheVal.textContent||0
-      };
+      const extras={ patty: +patVal.textContent||0, cheddar: +cheVal.textContent||0 };
       const unit = calcUnitPrice(currentItem, extras);
       pricePreview.textContent = money(unit);
       btnAdd.textContent = `Agregar al carrito — ${money(unit)}`;
@@ -549,25 +522,113 @@
     cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1;updatePreview();};
     cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1;updatePreview();};
 
-    btnAdd.onclick=()=>{
+    // ===== btnAdd: ahora crea key única y no mezcla configuraciones diferentes =====
+    btnAdd.onclick = ()=>{
       if(!orderable){ cantOrderAlert(); return; }
       if(!currentItem || !isAvailable(currentItem.id)) return;
-      const friesEl=document.querySelector('input[name="fries"]:checked');
+      const friesEl = document.querySelector('input[name="fries"]:checked');
       if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
-      const extras={patty:0,cheddar:0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR};
-      if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
-      else if(currentItem.kind==="chicken"){ extras.patty=0; extras.cheddar=+cheVal.textContent||0; }
-      const txt=notes.value.trim();
-      const bucket=cart.burger||(cart.burger={}); const prev=bucket[currentItem.id];
-      if(prev){
-        prev.qty+=1;
-        prev.extras={patty:Math.max(prev.extras?.patty||0,extras.patty),cheddar:Math.max(prev.extras?.cheddar||0,extras.cheddar),EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR};
-        prev.fries=friesEl.value; if(txt) prev.notes=txt;
-      }else{
-        bucket[currentItem.id]={qty:1,item:currentItem,fries:friesEl.value,extras,...(txt?{notes:txt}:{})};
+      const notesTxt = notes.value.trim();
+      const extras = {
+        patty: 0,
+        cheddar: 0,
+        EXTRA_PRICE_PATTY: EXTRA_PRICE_PATTY,
+        EXTRA_PRICE_CHEDDAR: EXTRA_PRICE_CHEDDAR
+      };
+      if(currentItem.kind === "double"){ extras.patty = +patVal.textContent || 0; extras.cheddar = +cheVal.textContent || 0; }
+      else if(currentItem.kind === "chicken"){ extras.patty = 0; extras.cheddar = +cheVal.textContent || 0; }
+      const friesVal = friesEl.value;
+      const key = makeItemKey(currentItem, friesVal, extras, notesTxt);
+      const bucket = cart.burger = (cart.burger || {});
+      if(bucket[key]){
+        bucket[key].qty = (bucket[key].qty || 0) + 1;
+      } else {
+        bucket[key] = {
+          qty: 1,
+          item: currentItem,
+          fries: friesVal,
+          extras: extras,
+          notes: notesTxt,
+          _label: readableKeyLabel(currentItem, friesVal, extras, notesTxt)
+        };
       }
-      saveCart(); renderCart(); overlay.classList.remove("open");
+      saveCart();
+      renderCart();
+      overlay.classList.remove("open");
     };
+
+    // ===== renderCart: muestra cada entry (clave única) =====
+    function renderCart(){
+      cartItems.innerHTML = "";
+      for(const [key, obj] of Object.entries(cart.burger || {})){
+        const extras = [];
+        if(obj.extras){
+          if(obj.extras.patty) extras.push(`+${obj.extras.patty} medallón(es)`);
+          if(obj.extras.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`);
+        }
+        const unit = (obj.item?.price || 0)
+          + (obj.extras?.patty || 0) * (obj.extras?.EXTRA_PRICE_PATTY ?? EXTRA_PRICE_PATTY)
+          + (obj.extras?.cheddar || 0) * (obj.extras?.EXTRA_PRICE_CHEDDAR ?? EXTRA_PRICE_CHEDDAR);
+
+        const label = obj._label || `${obj.item.name} · Papas: ${obj.fries || '—'}${extras.length?(' · '+extras.join(' · ')) : ''}${obj.notes ? ' · Nota: '+escapeHtml(obj.notes) : ''}`;
+
+        const ek = encodeURIComponent(key);
+
+        cartItems.innerHTML += `
+          <div class="item">
+            <div>
+              <strong>${escapeHtml(label)}</strong>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn ghost" onclick="changeQty('burger','${ek}',-1)">-</button>
+              <span>${obj.qty}</span>
+              <button class="btn ghost" onclick="changeQty('burger','${ek}',1)">+</button>
+              <span>${money(unit * (obj.qty || 0))}</span>
+            </div>
+          </div>`;
+      }
+
+      for(const dKey of Object.keys(cart.drink || {})){
+        const d = cart.drink[dKey];
+        const ek = encodeURIComponent(dKey);
+        cartItems.innerHTML += `
+          <div class="item">
+            <div><strong>${escapeHtml(d.item.name)}</strong></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn ghost" onclick="changeQty('drink','${ek}',-1)">-</button>
+              <span>${d.qty}</span>
+              <button class="btn ghost" onclick="changeQty('drink','${ek}',1)">+</button>
+              <span>${money((d.item.price||0)*(d.qty||0))}</span>
+            </div>
+          </div>`;
+      }
+
+      cartTotal.textContent = money(calcTotal());
+      document.getElementById("cartBubble").textContent = `(${cartCount()})`;
+    }
+
+    window.changeQty = function(type, encodedKey, delta){
+      const key = decodeURIComponent(encodedKey);
+      const bucket = cart[type];
+      if(!bucket) return;
+      const cur = bucket[key]?.qty || 0;
+      const next = Math.max(0, cur + delta);
+      if(next === 0){
+        delete bucket[key];
+      } else {
+        bucket[key].qty = next;
+      }
+      if(type === 'burger' && Object.keys(cart.burger || {}).length === 0) cart.burger = {};
+      if(type === 'drink' && Object.keys(cart.drink || {}).length === 0) cart.drink = {};
+      saveCart();
+      renderCart();
+    }
+
+    function addDrink(item){
+      const bucket=cart.drink||(cart.drink={});
+      if(!bucket[item.id]) bucket[item.id]={qty:0,item};
+      bucket[item.id].qty+=1; saveCart(); renderCart();
+    }
 
     /* Montar UI */
     mount();
