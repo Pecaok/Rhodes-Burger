@@ -166,43 +166,27 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-    // ===== NUEVA LÓGICA: solo reconocer "con sazon", "con sal" y "sin sal" =====
+    // ===== LÓGICA SIMPLIFICADA Y ESTRICTA: SOLO 3 variantes =====
     function normalizeText(v){
       if(v==null) return '';
       let s = String(v).toLowerCase().trim();
       s = s.replace(/[_\-]+/g,' ');
-      s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // quitar tildes
       s = s.replace(/\s+/g,' ').trim();
       return s;
     }
 
+    // extrae candidatos de varios campos posibles (fries, side, extras.fries, item.fries, etc.)
     function collectSidesFromItem(it){
       if(!it) return [];
       const candidates = [];
-      const probeKeys = ['fries','side','sides','guarnicion','guarniciones','addon','addons','extras','extra','sidesList'];
-
-      for(const k of probeKeys){
+      const keys = ['fries','side','sides','guarnicion','guarniciones','addon','addons','extra','extras','sidesList'];
+      for(const k of keys){
         if(it[k] != null) candidates.push(it[k]);
+        if(it.extras && it.extras[k] != null) candidates.push(it.extras[k]);
+        if(it.item && it.item[k] != null) candidates.push(it.item[k]);
       }
-
-      if(Array.isArray(it.sides)) candidates.push(...it.sides);
-      if(Array.isArray(it.addons)) candidates.push(...it.addons);
-      if(Array.isArray(it.guarniciones)) candidates.push(...(it.guarniciones||[]));
-
-      if(it.extras && typeof it.extras === 'object'){
-        const e = it.extras;
-        for(const k of ['side','sides','guarnicion','addons','fries']){
-          if(e[k] != null) candidates.push(e[k]);
-        }
-      }
-
-      if(it.item && typeof it.item === 'object'){
-        const nested = it.item;
-        for(const k of ['fries','side','sides','guarnicion','addons','name','title','id']){
-          if(nested[k] != null) candidates.push(nested[k]);
-        }
-      }
-
+      // normalizar arrays/objetos
       const out = [];
       candidates.forEach(c=>{
         if(c==null) return;
@@ -215,7 +199,7 @@
           out.push(String(c));
         }
       });
-
+      // quitar duplicados y vacíos
       const seen = new Set();
       return out.map(x=>x.trim()).filter(Boolean).filter(x => {
         if(seen.has(x)) return false;
@@ -223,58 +207,67 @@
       });
     }
 
-    // Mapea a SOLO tres etiquetas: Con sazón, Con sal, Sin sal.
+    // mapea estrictamente a las 3 etiquetas que querés
     function sideLabel(raw){
       if(raw==null) return '';
       const s = normalizeText(raw);
       if(!s) return '';
 
-      // clave explícita -> etiqueta
-      const map = new Map([
-        ['con sazon','Papas: Con sazón'],
-        ['con_sazon','Papas: Con sazón'],
-        ['con-sazon','Papas: Con sazón'],
-        ['consazon','Papas: Con sazón'],
-        ['con sal','Papas: Con sal'],
-        ['consal','Papas: Con sal'],
-        ['sin sal','Papas: Sin sal'],
-        ['sinsal','Papas: Sin sal'],
-        ['papas con sal','Papas: Con sal'],
-        ['papas con sazon','Papas: Con sazón']
-      ]);
+      // mapeos exactos o comunes
+      const map = {
+        // Con sazón (variantes)
+        "con sazon":"Papas: Con sazón",
+        "consazon":"Papas: Con sazón",
+        "con_sazon":"Papas: Con sazón",
+        "con-sazon":"Papas: Con sazón",
+        "con sazón":"Papas: Con sazón",
+        "con sazonada":"Papas: Con sazón",
+        "con sazón":"Papas: Con sazón",
 
-      if(map.has(s)) return map.get(s);
+        // Con sal
+        "con sal":"Papas: Con sal",
+        "consal":"Papas: Con sal",
+        "con_sal":"Papas: Con sal",
+        "con-sal":"Papas: Con sal",
+        "con saladas":"Papas: Con sal",
 
-      // heurística: si contiene 'papa' o 'papas', intentar decidir entre las 3 opciones
-      if(s.includes('papa') || s.includes('papas') || s.includes('potato')){
-        // si palabra "sazon" aparece y NO aparece la palabra "sin", lo consideramos "Con sazón"
-        if(s.includes('sazon') && !s.includes('sin')) return 'Papas: Con sazón';
-        // si explícitamente dice "con" y "sal" -> Con sal
-        if(s.includes('con') && s.includes('sal')) return 'Papas: Con sal';
-        // si dice "sin" y "sal" -> Sin sal
-        if(s.includes('sin') && s.includes('sal')) return 'Papas: Sin sal';
-        // por defecto, si no se identifica, dejar genérico "Papas fritas"
-        return 'Papas fritas';
-      }
+        // Sin sal
+        "sin sal":"Papas: Sin sal",
+        "sinsal":"Papas: Sin sal",
+        "sin_sal":"Papas: Sin sal",
+        "sin-sal":"Papas: Sin sal",
+        "sin sazon":"Papas: Sin sal",    // tratar 'sin sazon' como 'sin sal'
+        "sin sazonar":"Papas: Sin sal",
+        "sin sazonar":"Papas: Sin sal",
+        "sin sazon":"Papas: Sin sal"
+      };
 
-      // otras coincidencias comunes
-      if(s.includes('aro') || s.includes('ceboll')) return 'Aros de cebolla';
-      if(s.includes('ensal')) return 'Ensalada';
+      if(map[s]) return map[s];
 
-      // por defecto, capitalizamos la entrada para mostrar algo legible
-      return s.split(' ').map(w=> w[0]?.toUpperCase()+w.slice(1)).join(' ');
+      // heurística: si contiene 'sazon' (y no 'sin') => Con sazón
+      if(s.includes('sazon') && !s.includes('sin')) return 'Papas: Con sazón';
+      // si contiene 'sin' + 'sazon' o 'sin' + 'sal' => Sin sal
+      if(s.includes('sin') && (s.includes('sazon') || s.includes('sal'))) return 'Papas: Sin sal';
+      // si contiene 'con' + 'sal' => Con sal
+      if(s.includes('con') && s.includes('sal')) return 'Papas: Con sal';
+
+      // si menciona papas pero no coincide exactamente, NO devolvemos fallback ambiguo:
+      // devolvemos cadena vacía para que no se muestre "Sin sazón" u otra etiqueta errónea.
+      if(s.includes('papa') || s.includes('papas') || s.includes('papita')) return '';
+
+      return '';
     }
 
     function getSidesLabelForItem(it){
       const parts = collectSidesFromItem(it);
       if(!parts.length) return '';
       const mapped = parts.map(p => sideLabel(p)).filter(Boolean);
-      return mapped.join(' · ');
+      // devolvemos la primera coincidencia (no queremos concatenar varias)
+      return mapped.length ? mapped[0] : '';
     }
 
     // compatibilidad con código previo
     function friesName(raw){
-      // Queremos que el ticket muestre solo: "Papas: Con sazón", "Papas: Con sal", "Papas: Sin sal" o "Papas fritas"
       return sideLabel(raw) || '';
     }
 
@@ -395,13 +388,13 @@
         if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
         const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
 
-        // usamos la nueva función para etiquetas de papas (solo 3 variantes)
-        const friesLabel = getSidesLabelForItem(it) || (it.fries ? friesName(it.fries) : '');
-        const friesLine = friesLabel ? `Papas: ${friesLabel.replace(/^Papas:\s*/,'')}` : '';
+        // usamos la función estricta para papas (solo 3 variantes)
+        const friesLabel = getSidesLabelForItem(it) || (it.fries ? sideLabel(it.fries) : '');
+        const friesText = friesLabel ? friesLabel.replace(/^Papas:\s*/,'') : '—';
 
         return `<div class="item">
           <div>• <strong>${qty}× ${it.name||''}</strong></div>
-          <div class="sub">${ friesLine ? ('Papas: ' + friesLine.replace(/^Papas:\s*/,'')) : 'Papas: —' }${extrasLine}${it.notes?` · Nota: ${it.notes}`:''}</div>
+          <div class="sub">Papas: ${friesText}${extrasLine}${it.notes?` · Nota: ${it.notes}`:''}</div>
           <div class="sub">Subtotal: ${money(subtotal)}</div>
         </div>`;
       }).join("");
@@ -479,16 +472,8 @@
         const baseSubtotal = base * qty;
         const lineTotal    = baseSubtotal + pattySum + cheddarSum;
 
-        // obtener label de papas con la nueva función (solo 3 variantes)
-        const friesRaw = (() => {
-          if(it.fries) return it.fries;
-          // fallback: intentar leer campos alternativos
-          if(it.side) return it.side;
-          if(it.sides) return Array.isArray(it.sides)? it.sides.join(', ') : it.sides;
-          if(it.extras && it.extras.fries) return it.extras.fries;
-          if(it.item && it.item.fries) return it.item.fries;
-          return '';
-        })();
+        // obtener label de papas (solo 3 variantes). Fallback: campo it.fries o extras
+        const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
         const friesLabel = sideLabel(friesRaw) || '';
 
         return `
