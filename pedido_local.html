@@ -165,7 +165,140 @@
     /* ================= HELPERS ================= */
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const friesName = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "");
+
+    // -- Normalización básica de strings (quita tildes, guiones, underscores, espacios sobrantes)
+    function normalizeText(v){
+      if(v==null) return '';
+      let s = String(v).toLowerCase().trim();
+      s = s.replace(/[_\-]+/g,' ');
+      s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      s = s.replace(/\s+/g,' ').trim();
+      return s;
+    }
+
+    // -- Detecta guarniciones en un item (mira varias propiedades posibles)
+    function collectSidesFromItem(it){
+      if(!it) return [];
+      const candidates = [];
+
+      // Posibles campos donde se puede publicar la guarnición
+      const probeKeys = ['fries','side','sides','guarnicion','guarniciones','addon','addons','extras','extra'];
+
+      // 1) campos simples/fries/side
+      for(const k of ['fries','side','guarnicion','addon']){
+        if(it[k] != null){
+          candidates.push(it[k]);
+        }
+      }
+
+      // 2) arrays (sides, addons, extras.sides, extras.sidesList)
+      if(Array.isArray(it.sides)) candidates.push(...it.sides);
+      if(Array.isArray(it.addons)) candidates.push(...it.addons);
+      if(Array.isArray(it.guarniciones)) candidates.push(...it.guarniciones);
+
+      // 3) object extras with named fields
+      if(it.extras && typeof it.extras === 'object'){
+        const e = it.extras;
+        if(e.side) candidates.push(e.side);
+        if(e.sides) candidates.push(e.sides);
+        if(e.guarnicion) candidates.push(e.guarnicion);
+        if(e.addons) candidates.push(e.addons);
+      }
+
+      // 4) item.item nested
+      if(it.item && typeof it.item === 'object'){
+        const nested = it.item;
+        for(const k of ['fries','side','sides','guarnicion','addons']){
+          if(nested[k] != null) candidates.push(nested[k]);
+        }
+      }
+
+      // Normalizar y flatenear strings/arrays
+      const out = [];
+      candidates.forEach(c=>{
+        if(c==null) return;
+        if(Array.isArray(c)){
+          c.forEach(x=>{ if(x!=null) out.push(String(x)); });
+        }else if(typeof c === 'object'){
+          // objeto con label/name?
+          const label = c.name || c.title || c.label || c.id || c.type;
+          if(label) out.push(label);
+        }else{
+          out.push(String(c));
+        }
+      });
+
+      // Filtrar vacíos y devolver únicos
+      return Array.from(new Set(out.map(x=>x.trim()).filter(Boolean)));
+    }
+
+    // -- Mapeo legible para variantes comunes
+    function sideLabel(raw){
+      if(!raw && raw !== 0) return '';
+      const s = normalizeText(raw);
+      if(!s) return '';
+
+      // mapa explícito: claves normalizadas -> etiqueta
+      const map = new Map([
+        ['con sazon','Con sazón'],
+        ['con saz on','Con sazón'],
+        ['con sazonar','Con sazón'],
+        ['con sazón','Con sazón'],
+        ['con sal','Con sal'],
+        ['consal','Con sal'],
+        ['sin sal','Sin sal'],
+        ['sin saladas','Sin sal'],
+        ['sin sazon','Sin sazonar'],
+        ['sin sazonar','Sin sazonar'],
+        ['sin saz0nar','Sin sazonar'],
+        ['sin sazón','Sin sazonar'],
+        ['sin guarnicion','Sin guarnicion'],
+        ['sin guarniciones','Sin guarnicion'],
+        ['sin guarnición','Sin guarnicion'],
+        ['aros','Aros de cebolla'],
+        ['aros de cebolla','Aros de cebolla'],
+        ['ensalada','Ensalada'],
+        ['ensalada cesar','Ensalada César'],
+        ['pure','Puré'],
+        ['papas','Papas'],
+        ['papas fritas','Papas fritas'],
+        ['papas con sazon','Papas: Con sazón'],
+        ['papas con sal','Papas: Con sal'],
+        ['papas sin sal','Papas: Sin sal']
+      ]);
+
+      if(map.has(s)) return map.get(s);
+
+      // heurística: buscar palabras clave
+      if(s.includes('aro') || s.includes('ceboll')) return 'Aros de cebolla';
+      if(s.includes('ensal')) return 'Ensalada';
+      if(s.includes('pure')) return 'Puré';
+      if(s.includes('papa') || s.includes('papas') || s.includes('potato')) {
+        if(s.includes('sazon')) return 'Papas: Con sazón';
+        if(s.includes('sin') && s.includes('sal')) return 'Papas: Sin sal';
+        if(s.includes('sal')) return 'Papas: Con sal';
+        return 'Papas fritas';
+      }
+      // devolver capitalizado por defecto
+      return s.split(' ').map(w=> w[0]?.toUpperCase()+w.slice(1)).join(' ');
+    }
+
+    // Reutilizable: obtiene etiqueta para las guarniciones de un item
+    function getSidesLabelForItem(it){
+      const parts = collectSidesFromItem(it);
+      if(!parts.length) return '';
+      // mapear cada parte a etiqueta legible y unir con " · "
+      const mapped = parts.map(p=> sideLabel(p)).filter(Boolean);
+      return mapped.join(' · ');
+    }
+
+    // para compatibilidad con código previo (friesName)
+    function friesName(raw){
+      return sideLabel(raw);
+    }
+    function friesStr(raw){
+      return sideLabel(raw);
+    }
 
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
     const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
@@ -283,9 +416,11 @@
         if (it.extras?.patty) extras.push(`+${it.extras.patty} medallón(es)`);
         if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
         const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
+        // ahora usamos getSidesLabelForItem para detectar cualquier guarnición
+        const sidesLabel = getSidesLabelForItem(it);
         return `<div class="item">
           <div>• <strong>${qty}× ${it.name||''}</strong></div>
-          <div class="sub">Papas: ${friesName(it.fries)}${extrasLine}${it.notes?` · Nota: ${it.notes}`:''}</div>
+          <div class="sub">Guarnición: ${sidesLabel || '—'}${extrasLine}${it.notes?` · Nota: ${it.notes}`:''}</div>
           <div class="sub">Subtotal: ${money(subtotal)}</div>
         </div>`;
       }).join("");
@@ -304,7 +439,7 @@
       const payLine=`<div class="pay-line">
         <span class="chip">Pago: ${o.pago||'—'}</span>
         <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PAGADO':'✓ Marcar PENDIENTE'}</button>
-        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PENDIENTE DE PAGO':'PAGADO'}</span>
+        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}</span>
         <button class="btn" data-print>🖨 Imprimir</button>
       </div>`;
 
@@ -331,7 +466,7 @@
       </div>`;
     }
 
-    /* ==================== TICKET HTML ==================== */
+    /* ==================== TICKET HTML (usa getSidesLabelForItem) ==================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
@@ -349,8 +484,6 @@
       const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
       const items = Array.isArray(o.items)?o.items:[];
-      const friesStr = f => f==="con_sazon" ? "Con sazón" : (f==="sin_sazon" ? "Sin sazonar" : "");
-
       const linesHTML = items.map(it=>{
         const qty = it.qty||1;
         const name = (it.name||'').toString();
@@ -363,9 +496,10 @@
         const cheddarSum   = qty * cheddarCount * cheddarUnit;
         const baseSubtotal = base * qty;
         const lineTotal    = baseSubtotal + pattySum + cheddarSum;
+        const sidesLabel = getSidesLabelForItem(it);
         return `
           <div class="row name"><div class="l">${qty} × ${name}</div></div>
-          ${it.fries ? `<div class="sub">• Papas: ${friesStr(it.fries)}</div>` : ''}
+          ${sidesLabel ? `<div class="sub">• Guarnición: ${sidesLabel}</div>` : ''}
           <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
           ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>`:''}
           ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>`:''}
@@ -375,8 +509,7 @@
         `;
       }).join('') || '<div class="sub">Sin ítems.</div>';
 
-      const total = (()=>{
-        if(typeof o.total==='number') return o.total;
+      const total = (()=>{ if(typeof o.total==='number') return o.total;
         return items.reduce((t,it)=>{
           const qty = it.qty||1;
           const base = (it.price||0)*qty;
