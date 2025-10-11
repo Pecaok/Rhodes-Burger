@@ -187,9 +187,10 @@
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <div class="muted" style="font-weight:600">Papas (obligatorio)</div>
         <div class="pills">
-          <label class="pill">Con sal <input type="radio" name="fries" value="con_sazon"></label>
-          <label class="pill">Sin sal <input type="radio" name="fries" value="sin_sazon"></label>
-           <label class="pill">Con sazón <input type="radio" name="fries" value="con_sazon"></label>
+          <!-- Valores corregidos: con_sazon, con_sal, sin_sal -->
+          <label class="pill">Con sazón <input type="radio" name="fries" value="con_sazon"></label>
+          <label class="pill">Con sal  <input type="radio" name="fries" value="con_sal"></label>
+          <label class="pill">Sin sal  <input type="radio" name="fries" value="sin_sal"></label>
         </div>
         <div class="micro">Se toma lo que elijas acá por cada hamburguesa.</div>
       </div>
@@ -255,15 +256,15 @@
   const money = n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
   const FALLBACK_IMG="images/logo.png";
 
-  // ===== Contador GLOBAL =====
-  function globalCounterRef(){ return db.collection('counters').doc('orders_global'); }
+  // ===== Contador GLOBAL (misma referencia que pedido_cliente: config/counters.orderNumber) =====
+  function globalCounterRef(){ return db.collection('config').doc('counters'); }
   async function nextOrderNumber(){
     return await db.runTransaction(async tx=>{
       const ref = globalCounterRef();
       const snap = await tx.get(ref);
-      const cur = snap.exists ? (Number(snap.data().seq)||0) : 0;
+      const cur = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
       const nxt = cur + 1;
-      tx.set(ref, { seq: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      tx.set(ref, { orderNumber: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
       return nxt;
     });
   }
@@ -324,8 +325,23 @@
   /* ===== Carrito & UI ===== */
   const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
   const cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
+
+  // CART: separa variantes por key (id + fries + extras)
+  // estructura cart = { burger: { key1: { qty, item, fries, extras, notes } }, drink: { id: { qty, item } } }
   let cart = { burger:{}, drink:{} };
-  const moneyInt = n => money(n);
+
+  // util para mostrar nombre legible de papas
+  function friesName(v){
+    if(!v) return "—";
+    if(v === "con_sazon") return "Con sazón";
+    if(v === "con_sal") return "Con sal";
+    if(v === "sin_sal") return "Sin sal";
+    const s = v.toString().toLowerCase();
+    if(s.includes("sazon")) return "Con sazón";
+    if(s.includes("sin") && s.includes("sal")) return "Sin sal";
+    if(s.includes("sal")) return "Con sal";
+    return v;
+  }
 
   function calcTotal(){
     let t=0;
@@ -338,44 +354,51 @@
     for(const d of Object.values(cart.drink)){ t+=(d.item?.price||0)*(d.qty||0); }
     return t;
   }
+
   function renderCart(){
     const parts=[];
-    for(const obj of Object.values(cart.burger)){
+    for(const [key,obj] of Object.entries(cart.burger)){
       const unit=obj.item.price+(obj.extras?.patty||0)*EXTRA_PRICE_PATTY+(obj.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR;
       const extras=[]; if(obj.extras?.patty) extras.push(`+${obj.extras.patty} medallón`); if(obj.extras?.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`);
+      // usar friesName
       parts.push(`<div class="item">
         <div>
           <strong>${obj.item.name}</strong>
-          <div class="muted">Papas: ${obj.fries==="con_sazon"?"Con sal":"Sin sal"}</div>
+          <div class="muted">Papas: ${friesName(obj.fries)}</div>
           ${extras.length?`<div class="muted">${extras.join(" · ")}</div>`:""}
           ${obj.notes?`<div class="muted">Nota: ${obj.notes}</div>`:""}
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <button class="qtybtn" onclick="changeQty('burger','${obj.item.id}',-1)">-</button>
+          <button class="qtybtn" onclick="changeQty('burger','${encodeURIComponent(key)}',-1)">-</button>
           <span>${obj.qty}</span>
-          <button class="qtybtn" onclick="changeQty('burger','${obj.item.id}',1)">+</button>
-          <span>${moneyInt(unit*(obj.qty||0))}</span>
+          <button class="qtybtn" onclick="changeQty('burger','${encodeURIComponent(key)}',1)">+</button>
+          <span>${money(unit*(obj.qty||0))}</span>
         </div>
       </div>`);
     }
-    for(const obj of Object.values(cart.drink)){
+    for(const [key,obj] of Object.entries(cart.drink)){
       parts.push(`<div class="item">
         <div><strong>${obj.item.name}</strong></div>
         <div style="display:flex;align-items:center;gap:8px">
-          <button class="qtybtn" onclick="changeQty('drink','${obj.item.id}',-1)">-</button>
+          <button class="qtybtn" onclick="changeQty('drink','${encodeURIComponent(key)}',-1)">-</button>
           <span>${obj.qty}</span>
-          <button class="qtybtn" onclick="changeQty('drink','${obj.item.id}',1)">+</button>
-          <span>${moneyInt((obj.item.price||0)*(obj.qty||0))}</span>
+          <button class="qtybtn" onclick="changeQty('drink','${encodeURIComponent(key)}',1)">+</button>
+          <span>${money((obj.item.price||0)*(obj.qty||0))}</span>
         </div>
       </div>`);
     }
     cartItems.innerHTML = parts.length ? parts.join("") : "Sin ítems.";
-    cartTotal.textContent = moneyInt(calcTotal());
+    cartTotal.textContent = money(calcTotal());
   }
-  window.changeQty=function(type,id,delta){
-    const bucket=cart[type]; if(!bucket) return;
-    const cur=bucket[id]?.qty||0, next=Math.max(0,cur+delta);
-    if(next===0) delete bucket[id]; else bucket[id].qty=next;
+
+  window.changeQty=function(type,encKey,delta){
+    const key = decodeURIComponent(encKey);
+    const bucket = cart[type];
+    if(!bucket) return;
+    const cur = bucket[key]?.qty || 0;
+    const next = Math.max(0, cur+delta);
+    if(next === 0) delete bucket[key];
+    else bucket[key].qty = next;
     renderCart();
   }
 
@@ -391,7 +414,7 @@
         <h3 style="margin:4px 0 6px">${item.name}</h3>
         ${item.desc?`<div class="muted">${item.desc}</div>`:""}
         <div class="row">
-          <span class="price">${moneyInt(item.price)}</span>
+          <span class="price">${money(item.price)}</span>
           <div class="actions">
             <button class="btn" data-add ${ok?'':'disabled'}>Agregar</button>
           </div>
@@ -401,24 +424,24 @@
     if(type==="drink"){
       addBtn.onclick=()=>{ if(!isAvailable(item.id)) return; const b=cart.drink; if(!b[item.id]) b[item.id]={qty:0,item}; b[item.id].qty+=1; renderCart(); };
     }else{
-      // Para hamburguesas pedimos papas y (si aplica) extras, mostrando preview
       addBtn.onclick=()=>{ if(!isAvailable(item.id)) return; openCustomize(item); };
     }
     return card;
   }
+
   function mount(){
-    burgersGrid.innerHTML=""; BURGERS.forEach(b=>burgersGrid.appendChild(renderCard(b,"burger")));
-    drinksGrid.innerHTML="";  DRINKS.forEach(d=>drinksGrid.appendChild(renderCard(d,"drink")));
+    gridBurgers.innerHTML=""; BURGERS.forEach(b=>gridBurgers.appendChild(renderCard(b,"burger")));
+    gridDrinks.innerHTML="";  DRINKS.forEach(d=>drinksGrid.appendChild(renderCard(d,"drink")));
     renderCart(); refreshAvailabilityUI();
   }
 
   // ===== Modal =====
-  const overlay=$("#overlay"),modTitle=$("#modTitle");
-  const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar");
-  const patVal=$("#patVal"),patInc=$("#patInc"),patDec=$("#patDec");
-  const cheVal=$("#cheVal"),cheInc=$("#cheInc"),cheDec=$("#cheDec");
+  const overlay=$("#overlay"), modTitle=$("#modTitle");
+  const rowPatties=$("#rowPatties"), rowCheddar=$("#rowCheddar");
+  const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
+  const cheVal=$("#cheVal"), cheInc=$("#cheInc"), cheDec=$("#cheDec");
   const unitPreview=$("#unitPreview");
-  const notes=$("#notes"),btnAdd=$("#btnAdd"),btnCancel=$("#btnCancel");
+  const notes=$("#notes"), btnAdd=$("#btnAdd"), btnCancel=$("#btnCancel");
   let currentItem=null;
 
   function unitPricePreview(base){
@@ -449,6 +472,7 @@
   function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
   function updateCount(el){ const c=document.getElementById('notesCount'); if(c) c.textContent=`${el.value.length}/${el.maxLength||200}`; }
 
+  // Cuando agregamos: usamos key compuesto para diferenciar variantes
   btnAdd.onclick=()=>{
     if(!currentItem || !isAvailable(currentItem.id)) return;
     const friesEl=document.querySelector('input[name="fries"]:checked');
@@ -456,16 +480,24 @@
     const extras={patty:0,cheddar:0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR};
     if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
     else if(currentItem.kind==="chicken"){ extras.cheddar=+cheVal.textContent||0; }
-    const bucket=cart.burger; const prev=bucket[currentItem.id];
-    if(prev){
-      prev.qty+=1;
-      prev.extras={ patty:Math.max(prev.extras?.patty||0, extras.patty),
-                    cheddar:Math.max(prev.extras?.cheddar||0, extras.cheddar),
-                    EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR };
-      prev.fries=friesEl.value; const t=notes.value.trim(); if(t) prev.notes=t;
-    }else{
-      bucket[currentItem.id]={qty:1,item:currentItem,fries:friesEl.value,extras,
-                              ...(notes.value.trim()?{notes:notes.value.trim()}:{})};
+    const notesVal = notes.value.trim();
+    // key único por item + fries + extras (para no mezclar variantes)
+    const key = `${currentItem.id}::fries=${friesEl.value}::patty=${extras.patty}::cheddar=${extras.cheddar}`;
+    const bucket = cart.burger;
+    if(bucket[key]){
+      bucket[key].qty += 1;
+      // guardamos la info por si se agrega otra vez (lo dejamos como max de extras no para restar)
+      bucket[key].extras = { patty: Math.max(bucket[key].extras?.patty||0, extras.patty), cheddar: Math.max(bucket[key].extras?.cheddar||0, extras.cheddar), EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR };
+      bucket[key].fries = friesEl.value;
+      if(notesVal) bucket[key].notes = notesVal;
+    } else {
+      bucket[key] = {
+        qty: 1,
+        item: currentItem,
+        fries: friesEl.value,
+        extras,
+        ...(notesVal?{notes:notesVal}:{})
+      };
     }
     overlay.classList.remove("open"); renderCart();
   };
@@ -481,10 +513,33 @@
       const pago = $("#selPago").value;
       const comentario = ($("#inpComentario").value||"").trim();
 
-      const items=[]; for(const o of Object.values(cart.burger)){ items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,fries:o.fries,notes:o.notes||'',extras:{patty:o.extras?.patty||0,cheddar:o.extras?.cheddar||0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR}}); }
-      for(const o of Object.values(cart.drink)){ items.push({id:o.item.id,name:o.item.name,price:o.item.price,qty:o.qty,extras:{},fries:'',notes:''}); }
+      // Construyo items legibles para Firestore
+      const items=[];
+      for(const o of Object.values(cart.burger)){
+        items.push({
+          id:o.item.id,
+          name:o.item.name,
+          price:o.item.price,
+          qty:o.qty,
+          fries:o.fries,
+          notes:o.notes||'',
+          extras:{ patty:o.extras?.patty||0, cheddar:o.extras?.cheddar||0, EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR }
+        });
+      }
+      for(const o of Object.values(cart.drink)){
+        items.push({
+          id:o.item.id,
+          name:o.item.name,
+          price:o.item.price,
+          qty:o.qty,
+          fries:'',
+          notes:'',
+          extras:{}
+        });
+      }
 
       const total = calcTotal();
+      // Uso el mismo contador global (config/counters.orderNumber) para continuidad
       const orderNumber = await nextOrderNumber();
 
       const payload = {
@@ -494,6 +549,7 @@
       };
       const ref = await db.collection("orders").add(payload);
 
+      // public id (pequeño) para order_public: usar el id del doc o track token; aquí guardamos con id corto
       const pubId = ref.id.slice(0,22);
       await db.collection('order_public').doc(pubId).set({
         orderId: ref.id, orderNumber, status:'accepted',
@@ -508,7 +564,10 @@
     }catch(e){ console.error(e); alert("No se pudo registrar el pedido."); }
   };
 
-  // Inicio
+  // Inicio: renderizar menú
+  // Nota: en browsers con CSP o variables globales, asegúrate que 'drinksGrid' exista
+  const drinksGrid = document.getElementById('drinksGrid');
+  const burgersGrid = document.getElementById('burgersGrid');
   mount();
   </script>
 </body>
