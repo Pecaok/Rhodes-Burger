@@ -140,9 +140,27 @@
     function genTrackToken(len=22){var c="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",s="";for(var i=0;i<len;i++)s+=c[Math.floor(Math.random()*c.length)];return s;}
     function loadCart(){try{return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{}}}catch(e){return {burger:{},drink:{}}}}
     var cart=loadCart();
-    function unitWithExtras(it){var base=(it.item&&it.item.price)?it.item.price:(it.price||0);var pz=((it.extras&&it.extras.patty)?it.extras.patty:0)*((it.extras&&it.extras.EXTRA_PRICE_PATTY)?it.extras.EXTRA_PRICE_PATTY:0);var ch=((it.extras&&it.extras.cheddar)?it.extras.cheddar:0)*((it.extras&&it.extras.EXTRA_PRICE_CHEDDAR)?it.extras.EXTRA_PRICE_CHEDDAR:0);return base+pz+ch;}
+
+    function unitWithExtras(it){
+      var base=(it.item&&it.item.price)?it.item.price:(it.price||0);
+      var pz=((it.extras&&it.extras.patty)?it.extras.patty:0)*((it.extras&&it.extras.EXTRA_PRICE_PATTY)?it.extras.EXTRA_PRICE_PATTY:0);
+      var ch=((it.extras&&it.extras.cheddar)?it.extras.cheddar:0)*((it.extras&&it.extras.EXTRA_PRICE_CHEDDAR)?it.extras.EXTRA_PRICE_CHEDDAR:0);
+      return base+pz+ch;
+    }
     function calcTotal(){var t=0,k,obj;for(k in cart.burger){obj=cart.burger[k];t+=unitWithExtras(obj)*(obj.qty||0)}for(k in cart.drink){obj=cart.drink[k];t+=((obj.item&&obj.item.price)||0)*(obj.qty||0)}return t}
-    function friesName(v){return v==="con_sazon"?"Con sazón":"Sin sazonar"}
+
+    // CORRECCIÓN: mapear correctamente las 3 opciones de papas
+    function friesName(v){
+      if(!v) return "—";
+      if(v === "con_sazon") return "Con sazón";
+      if(v === "con_sal") return "Con sal";
+      if(v === "sin_sal") return "Sin sal";
+      // compatibilidad con valores anteriores o variantes
+      if(v.toString().toLowerCase().includes("sazon")) return "Con sazón";
+      if(v.toString().toLowerCase().includes("sal") && v.toString().toLowerCase().includes("sin")) return "Sin sal";
+      if(v.toString().toLowerCase().includes("sal")) return "Con sal";
+      return v;
+    }
 
     /* === RESUMEN === */
     (function renderResumen(){
@@ -168,9 +186,22 @@
       var items=[],k,b,d;
       for(k in cart.burger){
         b=cart.burger[k];
-        items.push({type:"burger",id:b.item?b.item.id:"",name:b.item?b.item.name:"",qty:b.qty||0,price:b.item?(b.item.price||0):0,fries:b.fries||"sin_sazon",
-          extras:{patty:(b.extras&&b.extras.patty)?b.extras.patty:0,cheddar:(b.extras&&b.extras.cheddar)?b.extras.cheddar:0,EXTRA_PRICE_PATTY:(b.extras&&b.extras.EXTRA_PRICE_PATTY)?b.extras.EXTRA_PRICE_PATTY:0,EXTRA_PRICE_CHEDDAR:(b.extras&&b.extras.EXTRA_PRICE_CHEDDAR)?b.extras.EXTRA_PRICE_CHEDDAR:0},
-          notes:b.notes||""});
+        // preserve exactly what the cart stored for fries (no default override)
+        items.push({
+          type:"burger",
+          id:b.item?b.item.id:"",
+          name:b.item?b.item.name:"",
+          qty:b.qty||0,
+          price:b.item?(b.item.price||0):0,
+          fries: b.fries || "",
+          extras:{
+            patty:(b.extras&&b.extras.patty)?b.extras.patty:0,
+            cheddar:(b.extras&&b.extras.cheddar)?b.extras.cheddar:0,
+            EXTRA_PRICE_PATTY:(b.extras&&b.extras.EXTRA_PRICE_PATTY)?b.extras.EXTRA_PRICE_PATTY:0,
+            EXTRA_PRICE_CHEDDAR:(b.extras&&b.extras.EXTRA_PRICE_CHEDDAR)?b.extras.EXTRA_PRICE_CHEDDAR:0
+          },
+          notes:b.notes||""
+        });
       }
       for(k in cart.drink){d=cart.drink[k];items.push({type:"drink",id:d.item?d.item.id:"",name:d.item?d.item.name:"",qty:d.qty||0,price:d.item?(d.item.price||0):0});}
       var pago=selectedPago();
@@ -201,7 +232,9 @@
         var it=order.items[i];
         if(it.type==='burger'){
           var extras=[]; if(it.extras&&it.extras.patty){extras.push("+"+it.extras.patty+" med")} if(it.extras&&it.extras.cheddar){extras.push("+"+it.extras.cheddar+" cheddar")}
-          lines.push((it.qty||0)+"× "+(it.name||"")+" (Papas: "+(it.fries==="con_sazon"?"Con sazón":"Sin sazonar")+(extras.length?(" · "+extras.join(" · ")):"")+")");
+          // usamos la función friesName para mostrar correctamente las 3 opciones
+          var friesLabel = friesName(it.fries);
+          lines.push((it.qty||0)+"× "+(it.name||"")+" (Papas: "+friesLabel+(extras.length?(" · "+extras.join(" · ")):"")+")");
           if(it.notes){lines.push("  Notas: "+it.notes);}
         }else{ lines.push((it.qty||0)+"× "+(it.name||"")); }
       }
