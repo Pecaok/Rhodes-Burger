@@ -166,7 +166,7 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-    // ===== LÓGICA SIMPLIFICADA Y ESTRICTA: SOLO 3 variantes =====
+    // Normalización base
     function normalizeText(v){
       if(v==null) return '';
       let s = String(v).toLowerCase().trim();
@@ -176,7 +176,7 @@
       return s;
     }
 
-    // extrae candidatos de varios campos posibles (fries, side, extras.fries, item.fries, etc.)
+    // recolecta candidatos desde varios campos posibles del item
     function collectSidesFromItem(it){
       if(!it) return [];
       const candidates = [];
@@ -207,53 +207,50 @@
       });
     }
 
-    // mapea estrictamente a las 3 etiquetas que querés
+    // mapea estrictamente a las 3 etiquetas que querés, usando word boundaries
     function sideLabel(raw){
       if(raw==null) return '';
       const s = normalizeText(raw);
       if(!s) return '';
 
-      // mapeos exactos o comunes
-      const map = {
-        // Con sazón (variantes)
+      // mapeos directos para valores comunes (incluye formatos con underscore/hyphen)
+      const direct = {
         "con sazon":"Papas: Con sazón",
         "consazon":"Papas: Con sazón",
         "con_sazon":"Papas: Con sazón",
         "con-sazon":"Papas: Con sazón",
         "con sazón":"Papas: Con sazón",
         "con sazonada":"Papas: Con sazón",
-        "con sazón":"Papas: Con sazón",
 
-        // Con sal
         "con sal":"Papas: Con sal",
         "consal":"Papas: Con sal",
         "con_sal":"Papas: Con sal",
         "con-sal":"Papas: Con sal",
-        "con saladas":"Papas: Con sal",
 
-        // Sin sal
         "sin sal":"Papas: Sin sal",
         "sinsal":"Papas: Sin sal",
         "sin_sal":"Papas: Sin sal",
         "sin-sal":"Papas: Sin sal",
-        "sin sazon":"Papas: Sin sal",    // tratar 'sin sazon' como 'sin sal'
-        "sin sazonar":"Papas: Sin sal",
-        "sin sazonar":"Papas: Sin sal",
-        "sin sazon":"Papas: Sin sal"
+        "sin sazon":"Papas: Sin sal",
+        "sin sazonar":"Papas: Sin sal"
       };
+      if(direct[s]) return direct[s];
 
-      if(map[s]) return map[s];
+      // heurística cuidadosa:
+      // 1) si contiene palabra 'sazon' => CON SAZON (excepto si contiene 'sin')
+      if(/\bsazon\b/.test(s) && !/\bsin\b/.test(s)) return 'Papas: Con sazón';
 
-      // heurística: si contiene 'sazon' (y no 'sin') => Con sazón
-      if(s.includes('sazon') && !s.includes('sin')) return 'Papas: Con sazón';
-      // si contiene 'sin' + 'sazon' o 'sin' + 'sal' => Sin sal
-      if(s.includes('sin') && (s.includes('sazon') || s.includes('sal'))) return 'Papas: Sin sal';
-      // si contiene 'con' + 'sal' => Con sal
-      if(s.includes('con') && s.includes('sal')) return 'Papas: Con sal';
+      // 2) si contiene 'sin' junto con 'sazon' o 'sal' => SIN SAL
+      if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s))) return 'Papas: Sin sal';
 
-      // si menciona papas pero no coincide exactamente, NO devolvemos fallback ambiguo:
-      // devolvemos cadena vacía para que no se muestre "Sin sazón" u otra etiqueta errónea.
-      if(s.includes('papa') || s.includes('papas') || s.includes('papita')) return '';
+      // 3) si hay 'con' y 'sal' separados por palabra => CON SAL
+      if(/\bcon\b/.test(s) && /\bsal\b/.test(s)) return 'Papas: Con sal';
+
+      // 4) si es exactamente 'sal' o contiene 'solo sal' -> CON SAL
+      if(/\b^sal$|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) return 'Papas: Con sal';
+
+      // 5) si menciona 'papa' pero no nada claro -> no devolvemos nada (evita mostrar "Sin sazón")
+      if(/\bpapa|papas|papita\b/.test(s)) return '';
 
       return '';
     }
@@ -584,6 +581,9 @@
       const docs=snap.docs.filter(d=>passFilter(d.data()));
       idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
       document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
+
+      // DEBUG: log para ver que valores llegan
+      // console.log('snap docs for debugging fries values:', docs.map(d=>({id:d.id, items:d.data().items})));
 
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
