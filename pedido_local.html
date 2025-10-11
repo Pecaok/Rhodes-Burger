@@ -166,7 +166,7 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-    // -- Normalización básica de strings (quita tildes, guiones, underscores, espacios sobrantes)
+    // ===== NUEVA LÓGICA: solo reconocer "con sazon", "con sal" y "sin sal" =====
     function normalizeText(v){
       if(v==null) return '';
       let s = String(v).toLowerCase().trim();
@@ -176,51 +176,39 @@
       return s;
     }
 
-    // -- Detecta guarniciones en un item (mira varias propiedades posibles)
     function collectSidesFromItem(it){
       if(!it) return [];
       const candidates = [];
+      const probeKeys = ['fries','side','sides','guarnicion','guarniciones','addon','addons','extras','extra','sidesList'];
 
-      // Posibles campos donde se puede publicar la guarnición
-      const probeKeys = ['fries','side','sides','guarnicion','guarniciones','addon','addons','extras','extra'];
+      for(const k of probeKeys){
+        if(it[k] != null) candidates.push(it[k]);
+      }
 
-      // 1) campos simples/fries/side
-      for(const k of ['fries','side','guarnicion','addon']){
-        if(it[k] != null){
-          candidates.push(it[k]);
+      if(Array.isArray(it.sides)) candidates.push(...it.sides);
+      if(Array.isArray(it.addons)) candidates.push(...it.addons);
+      if(Array.isArray(it.guarniciones)) candidates.push(...(it.guarniciones||[]));
+
+      if(it.extras && typeof it.extras === 'object'){
+        const e = it.extras;
+        for(const k of ['side','sides','guarnicion','addons','fries']){
+          if(e[k] != null) candidates.push(e[k]);
         }
       }
 
-      // 2) arrays (sides, addons, extras.sides, extras.sidesList)
-      if(Array.isArray(it.sides)) candidates.push(...it.sides);
-      if(Array.isArray(it.addons)) candidates.push(...it.addons);
-      if(Array.isArray(it.guarniciones)) candidates.push(...it.guarniciones);
-
-      // 3) object extras with named fields
-      if(it.extras && typeof it.extras === 'object'){
-        const e = it.extras;
-        if(e.side) candidates.push(e.side);
-        if(e.sides) candidates.push(e.sides);
-        if(e.guarnicion) candidates.push(e.guarnicion);
-        if(e.addons) candidates.push(e.addons);
-      }
-
-      // 4) item.item nested
       if(it.item && typeof it.item === 'object'){
         const nested = it.item;
-        for(const k of ['fries','side','sides','guarnicion','addons']){
+        for(const k of ['fries','side','sides','guarnicion','addons','name','title','id']){
           if(nested[k] != null) candidates.push(nested[k]);
         }
       }
 
-      // Normalizar y flatenear strings/arrays
       const out = [];
       candidates.forEach(c=>{
         if(c==null) return;
         if(Array.isArray(c)){
           c.forEach(x=>{ if(x!=null) out.push(String(x)); });
         }else if(typeof c === 'object'){
-          // objeto con label/name?
           const label = c.name || c.title || c.label || c.id || c.type;
           if(label) out.push(label);
         }else{
@@ -228,115 +216,67 @@
         }
       });
 
-      // Filtrar vacíos y devolver únicos
-      return Array.from(new Set(out.map(x=>x.trim()).filter(Boolean)));
+      const seen = new Set();
+      return out.map(x=>x.trim()).filter(Boolean).filter(x => {
+        if(seen.has(x)) return false;
+        seen.add(x); return true;
+      });
     }
 
-    // -- Mapeo legible para variantes comunes
+    // Mapea a SOLO tres etiquetas: Con sazón, Con sal, Sin sal.
     function sideLabel(raw){
-      if(!raw && raw !== 0) return '';
+      if(raw==null) return '';
       const s = normalizeText(raw);
       if(!s) return '';
 
-      // mapa explícito: claves normalizadas -> etiqueta
+      // clave explícita -> etiqueta
       const map = new Map([
-        ['con sazon','Con sazón'],
-        ['con saz on','Con sazón'],
-        ['con sazonar','Con sazón'],
-        ['con sazón','Con sazón'],
-        ['con sal','Con sal'],
-        ['consal','Con sal'],
-        ['sin sal','Sin sal'],
-        ['sin saladas','Sin sal'],
-        ['sin sazon','Sin sazonar'],
-        ['sin sazonar','Sin sazonar'],
-        ['sin saz0nar','Sin sazonar'],
-        ['sin sazón','Sin sazonar'],
-        ['sin guarnicion','Sin guarnicion'],
-        ['sin guarniciones','Sin guarnicion'],
-        ['sin guarnición','Sin guarnicion'],
-        ['aros','Aros de cebolla'],
-        ['aros de cebolla','Aros de cebolla'],
-        ['ensalada','Ensalada'],
-        ['ensalada cesar','Ensalada César'],
-        ['pure','Puré'],
-        ['papas','Papas'],
-        ['papas fritas','Papas fritas'],
-        ['papas con sazon','Papas: Con sazón'],
+        ['con sazon','Papas: Con sazón'],
+        ['con_sazon','Papas: Con sazón'],
+        ['con-sazon','Papas: Con sazón'],
+        ['consazon','Papas: Con sazón'],
+        ['con sal','Papas: Con sal'],
+        ['consal','Papas: Con sal'],
+        ['sin sal','Papas: Sin sal'],
+        ['sinsal','Papas: Sin sal'],
         ['papas con sal','Papas: Con sal'],
-        ['papas sin sal','Papas: Sin sal']
+        ['papas con sazon','Papas: Con sazón']
       ]);
 
       if(map.has(s)) return map.get(s);
 
-      // heurística: buscar palabras clave
-      if(s.includes('aro') || s.includes('ceboll')) return 'Aros de cebolla';
-      if(s.includes('ensal')) return 'Ensalada';
-      if(s.includes('pure')) return 'Puré';
-      if(s.includes('papa') || s.includes('papas') || s.includes('potato')) {
-        if(s.includes('sazon')) return 'Papas: Con sazón';
+      // heurística: si contiene 'papa' o 'papas', intentar decidir entre las 3 opciones
+      if(s.includes('papa') || s.includes('papas') || s.includes('potato')){
+        // si palabra "sazon" aparece y NO aparece la palabra "sin", lo consideramos "Con sazón"
+        if(s.includes('sazon') && !s.includes('sin')) return 'Papas: Con sazón';
+        // si explícitamente dice "con" y "sal" -> Con sal
+        if(s.includes('con') && s.includes('sal')) return 'Papas: Con sal';
+        // si dice "sin" y "sal" -> Sin sal
         if(s.includes('sin') && s.includes('sal')) return 'Papas: Sin sal';
-        if(s.includes('sal')) return 'Papas: Con sal';
+        // por defecto, si no se identifica, dejar genérico "Papas fritas"
         return 'Papas fritas';
       }
-      // devolver capitalizado por defecto
+
+      // otras coincidencias comunes
+      if(s.includes('aro') || s.includes('ceboll')) return 'Aros de cebolla';
+      if(s.includes('ensal')) return 'Ensalada';
+
+      // por defecto, capitalizamos la entrada para mostrar algo legible
       return s.split(' ').map(w=> w[0]?.toUpperCase()+w.slice(1)).join(' ');
     }
 
-    // Reutilizable: obtiene etiqueta para las guarniciones de un item
     function getSidesLabelForItem(it){
       const parts = collectSidesFromItem(it);
       if(!parts.length) return '';
-      // mapear cada parte a etiqueta legible y unir con " · "
-      const mapped = parts.map(p=> sideLabel(p)).filter(Boolean);
+      const mapped = parts.map(p => sideLabel(p)).filter(Boolean);
       return mapped.join(' · ');
     }
 
-    // para compatibilidad con código previo (friesName)
+    // compatibilidad con código previo
     function friesName(raw){
-      return sideLabel(raw);
+      // Queremos que el ticket muestre solo: "Papas: Con sazón", "Papas: Con sal", "Papas: Sin sal" o "Papas fritas"
+      return sideLabel(raw) || '';
     }
-    function friesStr(raw){
-      return sideLabel(raw);
-    }
-
-    const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
-    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
-    const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
-
-    function pickDocDate(obj){
-      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
-      for(const k of cand){
-        const v=obj[k];
-        if(v?.toDate) return v.toDate();
-        if(typeof v==='number') return new Date(v);
-        if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d; }
-      }
-      return null;
-    }
-    function chooseDateField(obj){
-      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
-      for(const k of cand){ if(obj && obj[k]!=null) return k; }
-      return null;
-    }
-    function displayOrderNumber(doc){
-      const o=doc.data();
-      const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
-      for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
-      return `#${doc.id.slice(-5).toUpperCase()}`;
-    }
-
-    const computeOrderTotal = o => {
-      if (typeof o.total === "number") return o.total;
-      const items = Array.isArray(o.items)?o.items:[];
-      return items.reduce((t,it)=>{
-        const qty = it.qty||1;
-        const base = (it.price||0)*qty;
-        const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty;
-        const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
-        return t + base + patty + cheddar;
-      },0);
-    };
 
     /* ================= SONIDO ================= */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
@@ -402,6 +342,44 @@
     }
     const btnStateClass=st=>`state-btn state-${st}`;
 
+    function pickDocDate(obj){
+      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
+      for(const k of cand){
+        const v=obj[k];
+        if(v?.toDate) return v.toDate();
+        if(typeof v==='number') return new Date(v);
+        if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d; }
+      }
+      return null;
+    }
+    function chooseDateField(obj){
+      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
+      for(const k of cand){ if(obj && obj[k]!=null) return k; }
+      return null;
+    }
+    function displayOrderNumber(doc){
+      const o=doc.data();
+      const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+      for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
+      return `#${doc.id.slice(-5).toUpperCase()}`;
+    }
+
+    const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
+    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
+    const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
+
+    const computeOrderTotal = o => {
+      if (typeof o.total === "number") return o.total;
+      const items = Array.isArray(o.items)?o.items:[];
+      return items.reduce((t,it)=>{
+        const qty = it.qty||1;
+        const base = (it.price||0)*qty;
+        const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty;
+        const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
+        return t + base + patty + cheddar;
+      },0);
+    };
+
     function renderOrder(doc){
       const o=doc.data(); const dt=pickDocDate(o);
       const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
@@ -416,11 +394,14 @@
         if (it.extras?.patty) extras.push(`+${it.extras.patty} medallón(es)`);
         if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
         const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
-        // ahora usamos getSidesLabelForItem para detectar cualquier guarnición
-        const sidesLabel = getSidesLabelForItem(it);
+
+        // usamos la nueva función para etiquetas de papas (solo 3 variantes)
+        const friesLabel = getSidesLabelForItem(it) || (it.fries ? friesName(it.fries) : '');
+        const friesLine = friesLabel ? `Papas: ${friesLabel.replace(/^Papas:\s*/,'')}` : '';
+
         return `<div class="item">
           <div>• <strong>${qty}× ${it.name||''}</strong></div>
-          <div class="sub">Guarnición: ${sidesLabel || '—'}${extrasLine}${it.notes?` · Nota: ${it.notes}`:''}</div>
+          <div class="sub">${ friesLine ? ('Papas: ' + friesLine.replace(/^Papas:\s*/,'')) : 'Papas: —' }${extrasLine}${it.notes?` · Nota: ${it.notes}`:''}</div>
           <div class="sub">Subtotal: ${money(subtotal)}</div>
         </div>`;
       }).join("");
@@ -439,7 +420,7 @@
       const payLine=`<div class="pay-line">
         <span class="chip">Pago: ${o.pago||'—'}</span>
         <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PAGADO':'✓ Marcar PENDIENTE'}</button>
-        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE DE PAGO'}</span>
+        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PENDIENTE DE PAGO':'PAGADO'}</span>
         <button class="btn" data-print>🖨 Imprimir</button>
       </div>`;
 
@@ -466,7 +447,7 @@
       </div>`;
     }
 
-    /* ==================== TICKET HTML (usa getSidesLabelForItem) ==================== */
+    /* ==================== TICKET HTML ==================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
@@ -484,6 +465,7 @@
       const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
       const items = Array.isArray(o.items)?o.items:[];
+
       const linesHTML = items.map(it=>{
         const qty = it.qty||1;
         const name = (it.name||'').toString();
@@ -496,10 +478,22 @@
         const cheddarSum   = qty * cheddarCount * cheddarUnit;
         const baseSubtotal = base * qty;
         const lineTotal    = baseSubtotal + pattySum + cheddarSum;
-        const sidesLabel = getSidesLabelForItem(it);
+
+        // obtener label de papas con la nueva función (solo 3 variantes)
+        const friesRaw = (() => {
+          if(it.fries) return it.fries;
+          // fallback: intentar leer campos alternativos
+          if(it.side) return it.side;
+          if(it.sides) return Array.isArray(it.sides)? it.sides.join(', ') : it.sides;
+          if(it.extras && it.extras.fries) return it.extras.fries;
+          if(it.item && it.item.fries) return it.item.fries;
+          return '';
+        })();
+        const friesLabel = sideLabel(friesRaw) || '';
+
         return `
           <div class="row name"><div class="l">${qty} × ${name}</div></div>
-          ${sidesLabel ? `<div class="sub">• Guarnición: ${sidesLabel}</div>` : ''}
+          ${friesLabel ? `<div class="sub">• Papas: ${friesLabel.replace(/^Papas:\s*/,'')}</div>` : ''}
           <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
           ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>`:''}
           ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>`:''}
@@ -509,7 +503,8 @@
         `;
       }).join('') || '<div class="sub">Sin ítems.</div>';
 
-      const total = (()=>{ if(typeof o.total==='number') return o.total;
+      const total = (()=>{
+        if(typeof o.total==='number') return o.total;
         return items.reduce((t,it)=>{
           const qty = it.qty||1;
           const base = (it.price||0)*qty;
