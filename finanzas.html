@@ -235,9 +235,9 @@
           </div>
           <div id="bmErr" class="err" style="display:none;margin-bottom:6px"></div>
           <table>
-            <thead><tr><th>Hamburguesa</th><th>Cantidad</th></tr></thead>
-            <tbody id="bmBody"><tr><td class="muted" colspan="2">Sin datos…</td></tr></tbody>
-            <tfoot><tr><th>Total hamburguesas</th><th id="bmTotal">0</th></tr></tfoot>
+            <thead><tr><th>Hamburguesa</th><th>Cantidad</th><th>Precio unitario</th><th>Total</th></tr></thead>
+            <tbody id="bmBody"><tr><td class="muted" colspan="4">Sin datos…</td></tr></tbody>
+            <tfoot><tr><th>Total hamburguesas</th><th id="bmTotal">0</th><th>Ingresos del mes</th><th id="bmRevenue">$0</th></tr></tfoot>
           </table>
         </div>
         <!-- ============== /HAMBURGUESAS POR MES ============== -->
@@ -520,7 +520,7 @@
       const id   = (it.id   || it.item?.id || it.sku || '').toString().toLowerCase();
 
       // palabras que cubren tu menú (ajustá si agregás nuevos nombres)
-      const burgerKeywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|cheese|bacon)/i;
+      const burgerKeywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|bacon)/i;
       if(name && burgerKeywords.test(name)) return true;
       if(id && burgerKeywords.test(id)) return true;
 
@@ -541,15 +541,38 @@
         .replace(/'/g,'&#39;');
     }
 
+    // Extrae precio unitario de un item (tolerante a varios campos).
+    function getUnitPrice(it){
+      if(!it) return 0;
+      const n = v => (typeof v === 'number' ? v : (typeof v === 'string' && v.trim()!=='' ? Number(v) : NaN));
+      // Campos comunes
+      const candidates = [
+        it.unit_price, it.unitPrice, it.price, it.prize, it.amount, it.value,
+        it.item?.price, it.item?.unit_price, it.item?.amount, it.line_price, it.line_total,
+        it.total, it.subtotal, it.unitamount
+      ];
+      for(const c of candidates){
+        const v = n(c);
+        if(!isNaN(v) && isFinite(v)) return v;
+      }
+      // Si existe total de línea y qty, derivar unitario
+      const lineTotal = n(it.total) || n(it.line_total) || n(it.amount) || n(it.subtotal);
+      const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
+      if(!isNaN(lineTotal) && qty>0) return lineTotal/qty;
+      return 0;
+    }
+
     async function loadBurgersByMonth(){
       const err = $("#bmErr"); err.style.display='none'; err.textContent='';
       const tbody = $("#bmBody"); const totalEl = $("#bmTotal"); const range = $("#bmRange");
-      tbody.innerHTML = `<tr><td colspan="2" class="muted">Cargando…</td></tr>`;
+      const revenueEl = $("#bmRevenue");
+      tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando…</td></tr>`;
       totalEl.textContent = '0';
+      revenueEl.textContent = money(0);
 
       try{
         const probe = await db.collection('orders').limit(1).get();
-        if (probe.empty){ tbody.innerHTML = `<tr><td colspan="2" class="muted">Sin datos.</td></tr>`; return; }
+        if (probe.empty){ tbody.innerHTML = `<tr><td colspan="4" class="muted">Sin datos.</td></tr>`; return; }
         let dateField = null;
         const sample = probe.docs[0].data();
         for (const k of ['createdAt','created_at','timestamp','date','fecha','time']){ if (sample[k]!=null){ dateField=k; break; } }
@@ -568,8 +591,10 @@
 
         const snap = await q.get();
 
+        // Map name -> { qty, revenue }
         const counter = new Map();
-        let total = 0;
+        let totalQty = 0;
+        let totalRevenue = 0;
 
         snap.forEach(doc=>{
           const o = doc.data();
@@ -587,23 +612,42 @@
             const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || 'Hamburguesa').toString().trim();
             const key = name || 'Hamburguesa';
 
-            counter.set(key, (counter.get(key)||0) + qty);
-            total += qty;
+            const unit = getUnitPrice(it);
+            const lineRevenue = (Number(unit)||0) * qty;
+
+            const prev = counter.get(key) || { qty:0, revenue:0 };
+            prev.qty += qty;
+            prev.revenue += lineRevenue;
+            counter.set(key, prev);
+
+            totalQty += qty;
+            totalRevenue += lineRevenue;
           });
         });
 
         const rows = Array.from(counter.entries())
-          .sort((a,b)=> b[1]-a[1])
-          .map(([name,cnt])=> `<tr><td>${escapeHtml(name)}</td><td>${cnt}</td></tr>`)
+          .sort((a,b)=> b[1].qty - a[1].qty)
+          .map(([name, data])=>{
+            const qty = data.qty || 0;
+            const revenue = data.revenue || 0;
+            const unit = qty ? (revenue/qty) : 0;
+            return `<tr>
+              <td>${escapeHtml(name)}</td>
+              <td>${qty}</td>
+              <td>${money(Math.round(unit))}</td>
+              <td>${money(Math.round(revenue))}</td>
+            </tr>`;
+          })
           .join('');
 
-        tbody.innerHTML = rows || `<tr><td colspan="2" class="muted">No hubo hamburguesas en este mes.</td></tr>`;
-        totalEl.textContent = String(total);
+        tbody.innerHTML = rows || `<tr><td colspan="4" class="muted">No hubo hamburguesas en este mes.</td></tr>`;
+        totalEl.textContent = String(totalQty);
+        revenueEl.textContent = money(Math.round(totalRevenue));
       }catch(e){
         console.error('loadBurgersByMonth error:', e);
         err.textContent = "No se pudo cargar las hamburguesas del mes.";
         err.style.display = 'block';
-        tbody.innerHTML = `<tr><td colspan="2" class="muted">Error al cargar.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="muted">Error al cargar.</td></tr>`;
       }
     }
 
