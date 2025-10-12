@@ -1,46 +1,5 @@
 <!doctype html>
 <html lang="es">
-  <script>
-  /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
-  const TTL_HOURS = 20;
-  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
-
-  function sessionValid(){
-    const ok = localStorage.getItem('rb_admin_ok') === 'true';
-    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
-    return ok && (Date.now() - ts) < TTL_MS;
-  }
-  function bumpSession(){  // renueva TTL con actividad
-    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
-  }
-  function logout(){
-    localStorage.removeItem('rb_admin_ok');
-    localStorage.removeItem('rb_admin_t');
-    localStorage.removeItem('rb_auth_v2');
-    sessionStorage.removeItem('rb_auth_v2');
-    location.replace('login.html'); // página de login
-  }
-
-  // Requerir sesión en páginas internas
-  (function requireSession(){
-    if (!sessionValid()){
-      // armar "next" con ruta+query+hash actuales
-      const next = encodeURIComponent(
-        (location.pathname.replace(/^\//,'') || 'index.html') +
-        (location.search || '') + (location.hash || '')
-      );
-      location.replace('login.html?next=' + next); // login con ?next=
-    } else {
-      bumpSession();
-    }
-  })();
-
-  // Mantener viva la sesión mientras se usa
-  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
-    window.addEventListener(evt, bumpSession, {passive:true});
-  });
-</script>
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -108,6 +67,13 @@
       @page{size:A4 portrait;margin:12mm}
       header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"],[title="Panel admin"],[title="Abrir mostrador"]{display:none!important}
       .order{break-inside:avoid;box-shadow:none;border:1px solid #eee}
+
+      /* Añadimos espacio extra al final de la página impresa para evitar cortes bruscos */
+      body::after{
+        content: "\A\A\A\A\A"; /* 5 líneas en blanco */
+        white-space: pre;
+        display: block;
+      }
     }
   </style>
 </head>
@@ -523,6 +489,8 @@
   .subtotal{ margin-top:2mm; }
   .total{ font-size:16px; margin-top:3mm; }
   .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
+  /* espacio extra al final del ticket impreso (para evitar cortes) */
+  .ticket .spacer { display:block; height:28mm; } /* altura generosa para asegurar espacio */
 </style>
 </head>
 <body>
@@ -543,6 +511,9 @@
     <div class="row total"><div class="l">TOTAL</div><div class="r">${money(total)}</div></div>
 
     <div class="foot">${dateStr} — ${timeStr}</div>
+
+    <!-- Spacer extra para impresoras térmicas: evita cortar contenido final -->
+    <div class="spacer"></div>
   </div>
   <script>
     window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); });
