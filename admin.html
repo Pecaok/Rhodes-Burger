@@ -18,7 +18,7 @@
     localStorage.removeItem('rb_admin_t');
     localStorage.removeItem('rb_auth_v2');
     sessionStorage.removeItem('rb_auth_v2');
-    location.replace('login.html'); // <-- página de login
+    location.replace('login.html'); // <-- redirige a login
   }
 
   // Requerir sesión en páginas internas
@@ -91,6 +91,10 @@
     .tag.green{background:#e8f5e9;color:#2e7d32}
     .tag.gray{background:#f3f3f3;color:#333}
     .header-right{display:flex;align-items:center;gap:10px}
+    .side-config{display:flex;gap:10px;flex-wrap:wrap}
+    .side-pill{display:flex;align-items:center;gap:8px;border-radius:12px;padding:8px 12px;border:1px solid var(--ring);background:#fff}
+    .side-pill.on{background:#eaf6ea;color:var(--good); border-color:#d7ecd7}
+    .side-pill.off{background:#fff6f6;color:var(--bad); color:#b33; border-color:#ffd7d7}
     @media (max-width:880px){ .topbar{flex-wrap:wrap} .store-controls{width:100%;justify-content:space-between} .header-right{width:100%;justify-content:space-between} }
   </style>
 </head>
@@ -126,6 +130,16 @@
   </header>
 
   <main>
+    <!-- SIDES / PAPAS -->
+    <section class="card">
+      <h2>Papas (habilitar / deshabilitar variantes)</h2>
+      <p class="muted">Aquí podés activar o desactivar las variantes de papas que querés ofrecer en la web y en mostrador. El estado se guarda en <code>config/sides</code>.</p>
+
+      <div id="sidesContainer" style="margin-top:12px" class="side-config">
+        <!-- Renderizado dinámico -->
+      </div>
+    </section>
+
     <!-- INVENTARIO -->
     <section class="card">
       <h2>Inventario (activar / desactivar productos)</h2>
@@ -246,6 +260,84 @@
       { id:"agua_sg",     name:"Agua sin gas 500ml",       category:"bebidas" }
     ];
 
+    /* ================= SIDES (papas) CONFIG ================= */
+    // Doc: config/sides
+    // structure: { con_sazon: true/false, con_sal: true/false, sin_sal: true/false, updatedAt: Timestamp }
+    const sidesRef = () => db.collection('config').doc('sides');
+    const sidesContainer = document.getElementById('sidesContainer');
+
+    const SIDES_META = [
+      { key: 'con_sazon', label: 'Con sazón' },
+      { key: 'con_sal',   label: 'Con sal' },
+      { key: 'sin_sal',   label: 'Sin sal' }
+    ];
+
+    function renderSidesUI(state){
+      // state: object with keys. If undefined assume all true.
+      sidesContainer.innerHTML = '';
+      SIDES_META.forEach(s=>{
+        const enabled = state ? !!state[s.key] : true;
+        const el = document.createElement('div');
+        el.className = 'side-pill ' + (enabled ? 'on' : 'off');
+        el.innerHTML = `
+          <div style="display:flex;flex-direction:column">
+            <div style="font-weight:800">${s.label}</div>
+            <div class="muted" style="font-size:13px">${enabled ? 'Visible en web y mostrador' : 'Bloqueada en web y mostrador'}</div>
+          </div>
+          <div>
+            <button class="btn ${enabled ? 'bad' : 'good'}" data-side="${s.key}" data-next="${enabled?0:1}">
+              ${enabled ? 'Deshabilitar' : 'Habilitar'}
+            </button>
+          </div>
+        `;
+        sidesContainer.appendChild(el);
+      });
+
+      // attach handlers
+      sidesContainer.querySelectorAll('button[data-side]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const key = btn.dataset.side;
+          const next = btn.dataset.next === '1';
+          btn.disabled = true;
+          try{
+            await sidesRef().set({ [key]: !!next, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+          }catch(e){
+            console.error('No se pudo cambiar side', e);
+            alert('No se pudo cambiar el estado. Revisá la consola.');
+          }finally{
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
+    async function loadSidesOnce(){
+      try{
+        const snap = await sidesRef().get();
+        const data = snap.exists ? (snap.data()||{}) : {};
+        renderSidesUI(data);
+      }catch(e){
+        console.warn('loadSidesOnce error', e);
+        renderSidesUI(null);
+      }
+    }
+
+    // live subscription: actualiza UI automáticamente
+    (function subscribeSidesLive(){
+      try{
+        sidesRef().onSnapshot(snap=>{
+          const data = snap.exists ? (snap.data()||{}) : {};
+          renderSidesUI(data);
+        }, err=>{
+          console.warn('sides.onSnapshot failed', err);
+          loadSidesOnce();
+        });
+      }catch(e){
+        console.warn('subscribeSidesLive', e);
+        loadSidesOnce();
+      }
+    })();
+
     /* ================= INVENTARIO ================= */
     const invList = document.getElementById('invList');
 
@@ -348,8 +440,6 @@
         const mm = String(until.getMinutes()).padStart(2,'0');
         storeSub.textContent = `Hasta: ${hh}:${mm}`;
         // set input value (as local datetime)
-        const localISO = until.toISOString().slice(0,16);
-        // Datetime-local expects local time; we'll build a local YYYY-MM-DDTHH:MM
         const local = new Date(until.getTime() - (until.getTimezoneOffset()*60000));
         forceUntilInput.value = local.toISOString().slice(0,16);
       } else {
@@ -484,8 +574,10 @@
     /* ================== INIT ================== */
     (async function boot(){
       await loadInventory();
-      readStoreDocOnceAndRender(); // live sub already attached, esto asegura init rápido
+      readStoreDocOnceAndRender(); // live sub already attached, this ensures init quick
       await loadCoupons();
+      await loadSidesOnce();
+      // (sides live subscription already attached above)
     })();
   </script>
 </body>
