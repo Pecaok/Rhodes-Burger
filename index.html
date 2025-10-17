@@ -66,6 +66,7 @@
     .inline{display:flex;gap:12px;flex-wrap:wrap}
     .pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);border-radius:999px;padding:8px 12px;cursor:pointer}
     .pill input{accent-color:var(--primary)}
+    .pill.disabled{opacity:.5;pointer-events:none}
     .micro{font-size:12px;color:var(--muted)}
 
     /* "Ver pedido" estilo neutro */
@@ -87,6 +88,8 @@
       background:#f7f3ee; border:1px solid #e8e0d4; color:#3a342b;
       border-radius:999px; padding:6px 12px; font-weight:800;
     }
+
+    .side-disabled-note{ color:#b33; font-size:13px; margin-top:6px }
 
     @media (max-width:600px){
       .topbar{padding:8px 10px;gap:8px;flex-wrap:wrap}
@@ -164,12 +167,13 @@
 
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <div class="muted" style="font-weight:600">Papas (obligatorio)</div>
-        <div class="inline">
+        <div class="inline" id="friesOptionsInline">
           <!-- CORREGIDO: tres opciones distintas -->
           <label class="pill"><input type="radio" name="fries" value="con_sazon"> Con sazón</label>
           <label class="pill"><input type="radio" name="fries" value="con_sal"> Con sal</label>
           <label class="pill"><input type="radio" name="fries" value="sin_sal"> Sin sal</label>
         </div>
+        <div id="friesStateNote" class="micro"></div>
         <div class="micro">Se toma lo que elijas acá por cada hamburguesa.</div>
       </div>
 
@@ -383,6 +387,57 @@
       }, console.warn);
     }catch(e){ console.warn('No se pudo suscribir a products:', e); }
 
+    /* ===== SIDES CONFIG (nuevo: leer desde config/sides) ===== */
+    // por defecto todas habilitadas
+    let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
+
+    function applySidesToUI(){
+      // deshabilitar/activar radios en el modal
+      document.querySelectorAll('#friesOptionsInline .pill').forEach(label=>{
+        const input = label.querySelector('input[name="fries"]');
+        if(!input) return;
+        const val = input.value;
+        const enabled = SIDES_STATE[val] !== false; // undefined => true
+        input.disabled = !enabled;
+        label.classList.toggle('disabled', !enabled);
+      });
+      // nota con variantes deshabilitadas
+      const noteEl = document.getElementById('friesStateNote');
+      const disabled = Object.entries(SIDES_STATE).filter(([k,v])=>v===false).map(([k])=>k);
+      if(disabled.length){
+        const human = disabled.map(k => {
+          if(k==='con_sazon') return 'Con sazón';
+          if(k==='con_sal') return 'Con sal';
+          if(k==='sin_sal') return 'Sin sal';
+          return k;
+        }).join(', ');
+        noteEl.textContent = 'Variantes deshabilitadas: ' + human;
+        noteEl.classList.add('side-disabled-note');
+      } else {
+        noteEl.textContent = '';
+        noteEl.classList.remove('side-disabled-note');
+      }
+    }
+
+    try{
+      // escucha en tiempo real a config/sides
+      db.collection('config').doc('sides').onSnapshot(snap=>{
+        const data = snap.exists ? (snap.data()||{}) : {};
+        SIDES_STATE = {
+          con_sazon: data.con_sazon !== false,
+          con_sal:   data.con_sal   !== false,
+          sin_sal:   data.sin_sal   !== false
+        };
+        applySidesToUI();
+      }, err=>{
+        console.warn('sides onSnapshot err', err);
+        applySidesToUI();
+      });
+    }catch(e){
+      console.warn('subscribe sides failed', e);
+      applySidesToUI();
+    }
+
     /* ===== Carrito ===== */
     let cart=loadCart();
     function loadCart(){ try{return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{}};}catch{return {burger:{},drink:{}}} }
@@ -438,6 +493,7 @@
       renderCart();
       setOrderable(orderable);
       refreshAvailabilityUI();
+      applySidesToUI(); // aplicar configuración de papas al iniciar
     }
 
     const drawer=$("#drawer"), cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
@@ -515,6 +571,7 @@
       else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; }
       else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; }
       updatePreview();
+      applySidesToUI(); // asegurarnos de estado reciente cuando abrimos modal
       overlay.classList.add("open");
     }
     patInc.onclick=()=>{const v=+patVal.textContent||0;if(v<2)patVal.textContent=v+1;updatePreview();};
@@ -522,12 +579,18 @@
     cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1;updatePreview();};
     cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1;updatePreview();};
 
-    // ===== btnAdd: ahora crea key única y no mezcla configuraciones diferentes =====
+    // ===== btnAdd: ahora valida SIDES_STATE y crea key única =====
     btnAdd.onclick = ()=>{
       if(!orderable){ cantOrderAlert(); return; }
       if(!currentItem || !isAvailable(currentItem.id)) return;
       const friesEl = document.querySelector('input[name="fries"]:checked');
       if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
+      const friesVal = friesEl.value;
+      // validar que la variante esté habilitada desde config
+      if(SIDES_STATE[friesVal] === false){
+        alert("La variante de papas elegida no está disponible. Elegí otra.");
+        return;
+      }
       const notesTxt = notes.value.trim();
       const extras = {
         patty: 0,
@@ -536,8 +599,7 @@
         EXTRA_PRICE_CHEDDAR: EXTRA_PRICE_CHEDDAR
       };
       if(currentItem.kind === "double"){ extras.patty = +patVal.textContent || 0; extras.cheddar = +cheVal.textContent || 0; }
-      else if(currentItem.kind === "chicken"){ extras.patty = 0; extras.cheddar = +cheVal.textContent || 0; }
-      const friesVal = friesEl.value;
+      else if(currentItem.kind === "chicken"){ extras.cheddar = +cheVal.textContent || 0; }
       const key = makeItemKey(currentItem, friesVal, extras, notesTxt);
       const bucket = cart.burger = (cart.burger || {});
       if(bucket[key]){
