@@ -177,7 +177,8 @@
       </div>
       <div class="field"><textarea id="inpComentario" placeholder="Comentario"></textarea></div>
 
-      <button id="btnPagar" class="btn primary" style="width:100%;margin-top:10px">Pagar</button>
+      <!-- Botón modificado: Imprimir y cargar -->
+      <button id="btnPrintAndLoad" class="btn primary" style="width:100%;margin-top:10px">Imprimir y cargar</button>
     </aside>
   </main>
 
@@ -284,7 +285,7 @@
     { id:"bigjohn_simple", name:"Big John Simple", price:11500, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
     { id:"bigjohn_doble",  name:"Big John Doble",  price:13800, img:"images/Big John Doble.jpg",  kind:"double", desc:"Doble medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
     { id:"rhodes_simple", name:"Rhodes Simple", price:11900, img:"images/Rhodes Simple.jpg", kind:"simple", desc:"Doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
-    { id:"rhodes_doble",  name:"Rhodes Doble",  price:14500, img:"images/Rhodes Doble.jpg",  kind:"double", desc:"Doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
+    { id:"rhodes_doble",  name:"Rhodes Doble",  price:14500, img:"images/Rhodes Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
     { id:"burguesa_simple", name:"Burguesa Simple", price:11900, img:"images/Burguesa Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
     { id:"burguesa_doble",  name:"Burguesa Doble",  price:14500, img:"images/Burguesa Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
     { id:"pollo_crispy", name:"Pollo Crispy", price:9100, img:"images/Pollo crispy.jpg", kind:"chicken", desc:"Pechuga crispy con lechuga y mayo. Incluye papas." }
@@ -567,12 +568,66 @@
     renderCart();
   };
 
-  // ===== Pagar =====
-  document.getElementById("btnPagar").onclick = async ()=>{
+  // ===== Imprimir y cargar (nuevo) =====
+  let inFlight = false;
+  const btnPrintAndLoad = document.getElementById('btnPrintAndLoad');
+
+  async function buildPrintableHtml(orderNumber, payload){
+    // payload contiene items, total, nombre, telefono, etc.
+    const lines = [];
+    lines.push(`<h2>Rhodes Burgers</h2>`);
+    lines.push(`<div>Pedido #${orderNumber}</div>`);
+    lines.push(`<div>Nombre: ${escapeHtml(payload.nombre)}</div>`);
+    if(payload.telefono) lines.push(`<div>Tel: ${escapeHtml(payload.telefono)}</div>`);
+    lines.push(`<hr/>`);
+    lines.push(`<div>Items:</div>`);
+    lines.push(`<ul>`);
+    for(const it of payload.items){
+      const extras = it.extras && ((it.extras.patty?` +${it.extras.patty}m`:'') + (it.extras.cheddar?` +${it.extras.cheddar}ch`:''));
+      const notes = it.notes ? ` - ${escapeHtml(it.notes)}` : '';
+      lines.push(`<li>${escapeHtml(it.name)} x${it.qty} ${extras} ${notes} — ${money((it.price + ((it.extras?.patty||0)*EXTRA_PRICE_PATTY) + ((it.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR)) * it.qty)}</li>`);
+    }
+    lines.push(`</ul>`);
+    lines.push(`<hr/>`);
+    lines.push(`<div>Total: <strong>${money(payload.total)}</strong></div>`);
+    lines.push(`<div>Pago: ${escapeHtml(payload.pago || '')}</div>`);
+    if(payload.comment) lines.push(`<div>Comentario: ${escapeHtml(payload.comment)}</div>`);
+    lines.push(`<hr/>`);
+    lines.push(`<div style="font-size:12px;color:#666">Generado: ${new Date().toLocaleString()}</div>`);
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Ticket #${orderNumber}</title>
+      <style>
+        body{font-family:Arial,Helvetica,sans-serif;padding:18px}
+        h2{margin:0 0 8px}
+        ul{padding-left:18px}
+        li{margin:6px 0}
+      </style>
+      </head><body>${lines.join('')}</body></html>`;
+    return html;
+  }
+
+  function escapeHtml(s){
+    return (s||'').toString()
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+  btnPrintAndLoad.addEventListener('click', async ()=>{
+    if(inFlight) return;
+    // disable immediately
+    inFlight = true;
+    btnPrintAndLoad.setAttribute('disabled','');
+    btnPrintAndLoad.classList.add('disabled');
+
     try{
       const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
-      if(!hasItems){ alert("Agregá al menos un producto."); return; }
-      const nombreRaw = ($("#inpNombre").value||"").trim(); if(!nombreRaw){ alert("Ingresá el nombre."); return; }
+      if(!hasItems){ alert("Agregá al menos un producto."); throw new Error('empty'); }
+
+      const nombreRaw = ($("#inpNombre").value||"").trim();
+      if(!nombreRaw){ alert("Ingresá el nombre."); throw new Error('no-name'); }
       const nombre = `${nombreRaw} (mostrador)`;
       const telefono = ($("#inpTel").value||"").trim();
       const pago = $("#selPago").value;
@@ -604,17 +659,21 @@
       }
 
       const total = calcTotal();
-      // Uso el mismo contador global (config/counters.orderNumber) para continuidad
+
+      // Reservar número de pedido
       const orderNumber = await nextOrderNumber();
 
+      // payload a guardar
       const payload = {
         orderNumber, number: orderNumber, nombre, telefono, pago, comment: comentario,
         items, total, status:"accepted", payment_status:"paid",
         source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
+
+      // Guardar en orders
       const ref = await db.collection("orders").add(payload);
 
-      // public id (pequeño) para order_public: usar el id del doc o track token; aquí guardamos con id corto
+      // Guardar resumen público
       const pubId = ref.id.slice(0,22);
       await db.collection('order_public').doc(pubId).set({
         orderId: ref.id, orderNumber, status:'accepted',
@@ -623,11 +682,51 @@
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, {merge:true});
 
-      cart={burger:{},drink:{}}; renderCart();
+      // Crear ticket imprimible y abrir ventana
+      const printHtml = await buildPrintableHtml(orderNumber, {
+        ...payload,
+        telefono, pago, comment: comentario
+      });
+
+      // abrir popup y solicitar impresión
+      const w = window.open('', '_blank', 'width=600,height=800');
+      if(!w){
+        alert('Se guardó el pedido, pero el navegador bloqueó la ventana de impresión. Abrí los popups o imprimí desde el panel de Pedidos.');
+      } else {
+        w.document.open();
+        w.document.write(printHtml);
+        w.document.close();
+        // algunos navegadores necesitan un pequeño delay
+        w.focus();
+        setTimeout(()=>{
+          try{ w.print(); }catch(e){ console.warn('print error', e); }
+          // cerrar la ventana luego de unos segundos
+          setTimeout(()=>{ try{ w.close(); }catch(e){} }, 1500);
+        }, 300);
+      }
+
+      // limpiar carrito y UI
+      cart={burger:{},drink:{}};
+      renderCart();
       $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
-      alert(`Pedido #${orderNumber} cargado`);
-    }catch(e){ console.error(e); alert("No se pudo registrar el pedido."); }
-  };
+      alert(`Pedido #${orderNumber} cargado e impresión solicitada.`);
+    }catch(err){
+      // si se lanzó error controlado, ya se mostró alerta
+      if(err && err.message && err.message !== 'empty' && err.message !== 'no-name'){
+        console.error(err);
+        alert('Error al cargar el pedido. Reintentá.');
+      }
+    }finally{
+      // prevenir doble submit inmediato: dejamos inFlight true unos segundos más para seguridad,
+      // pero también re-habilitamos después de 2s. Si querés mantenerlo bloqueado más tiempo,
+      // aumentá el timeout.
+      setTimeout(()=>{
+        inFlight = false;
+        btnPrintAndLoad.removeAttribute('disabled');
+        btnPrintAndLoad.classList.remove('disabled');
+      }, 2000);
+    }
+  });
 
   // Inicio: renderizar menú
   // Nota: en browsers con CSP o variables globales, asegúrate que 'drinksGrid' exista
