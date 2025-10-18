@@ -95,7 +95,7 @@
     .modal{background:#fff;border-radius:20px;box-shadow:var(--shadow);width:520px;max-width:92vw;padding:16px}
     .rowx{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0}
     .qtybox{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);border-radius:999px;padding:6px 10px}
-    .qtybox button{width:28px;height:28px;border:1px solid #e5e5e5;background:#fff;border-radius:999px;font-weight:900;cursor:pointer}
+    .qtybox button{width:28px;height:28px;border:1px solid var(--ring);background:#fff;border-radius:999px;font-weight:900;cursor:pointer}
     .pills{display:flex;flex-direction:column;gap:8px}
     .pill{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--ring);border-radius:12px;padding:10px 12px;cursor:pointer}
     .pill input{accent-color:var(--primary)}
@@ -380,8 +380,8 @@
   const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
   const cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
 
-  // CART: separa variantes por key (id + fries + extras)
-  // estructura cart = { burger: { key1: { qty, item, fries, extras, notes } }, drink: { id: { qty, item } } }
+  // CART: ahora las hamburguesas se guardan como entradas independientes (key único por unidad)
+  // estructura cart = { burger: { uniqueKey1: { qty, item, fries, extras, notes, _label } }, drink: { id: { qty, item } } }
   let cart = { burger:{}, drink:{} };
 
   // util para mostrar nombre legible de papas
@@ -411,9 +411,11 @@
 
   function renderCart(){
     const parts=[];
+    // burger: cada entry es una "unidad lógica" (puede tener qty>1 si el usuario incrementa)
     for(const [key,obj] of Object.entries(cart.burger)){
       const unit=obj.item.price+(obj.extras?.patty||0)*EXTRA_PRICE_PATTY+(obj.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR;
       const extras=[]; if(obj.extras?.patty) extras.push(`+${obj.extras.patty} medallón`); if(obj.extras?.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`);
+      // mostrar label por unidad (nota incluida por unidad)
       parts.push(`<div class="item">
         <div>
           <strong>${obj.item.name}</strong>
@@ -429,6 +431,7 @@
         </div>
       </div>`);
     }
+    // drinks still aggregate by id
     for(const [key,obj] of Object.entries(cart.drink)){
       parts.push(`<div class="item">
         <div><strong>${obj.item.name}</strong></div>
@@ -484,7 +487,7 @@
 
   function mount(){
     gridBurgers.innerHTML=""; BURGERS.forEach(b=>gridBurgers.appendChild(renderCard(b,"burger")));
-    gridDrinks.innerHTML="";  DRINKS.forEach(d=>gridDrinks.appendChild(renderCard(d,"drink")));
+    gridDrinks.innerHTML="";  DRINKS.forEach(d=>drinksGrid.appendChild(renderCard(d,"drink")));
     renderCart(); refreshAvailabilityUI();
     applySidesToUI(); // aplicar estado inicial de sides
   }
@@ -527,8 +530,9 @@
   function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
   function updateCount(el){ const c=document.getElementById('notesCount'); if(c) c.textContent=`${el.value.length}/${el.maxLength||200}`; }
 
-  // Cuando agregamos: usamos key compuesto para diferenciar variantes
-  btnAdd.onclick=()=>{
+  // Cuando agregamos: **ahora creamos una entrada única por hamburguesa**
+  // Esto permite que cada hamburguesa tenga su propia nota aunque sean "idénticas"
+  btnAdd.onclick=()=> {
     if(!currentItem || !isAvailable(currentItem.id)) return;
     const friesEl=document.querySelector('input[name="fries"]:checked');
     if(!friesEl){ alert("Elegí el tipo de papas."); return; }
@@ -541,25 +545,26 @@
     if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
     else if(currentItem.kind==="chicken"){ extras.cheddar=+cheVal.textContent||0; }
     const notesVal = notes.value.trim();
-    // key único por item + fries + extras (para no mezclar variantes)
-    const key = `${currentItem.id}::fries=${friesEl.value}::patty=${extras.patty}::cheddar=${extras.cheddar}`;
+    // base key por configuración (sin uid)
+    const baseKey = `${currentItem.id}::fries=${friesEl.value}::patty=${extras.patty}::cheddar=${extras.cheddar}`;
+    // UNIQUE suffix para separar unidades individualmente
+    const uid = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+    const uniqueKey = baseKey + '::uid=' + uid;
+
     const bucket = cart.burger;
-    if(bucket[key]){
-      bucket[key].qty += 1;
-      // guardamos la info por si se agrega otra vez (lo dejamos como max de extras)
-      bucket[key].extras = { patty: Math.max(bucket[key].extras?.patty||0, extras.patty), cheddar: Math.max(bucket[key].extras?.cheddar||0, extras.cheddar), EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR };
-      bucket[key].fries = friesEl.value;
-      if(notesVal) bucket[key].notes = notesVal;
-    } else {
-      bucket[key] = {
-        qty: 1,
-        item: currentItem,
-        fries: friesEl.value,
-        extras,
-        ...(notesVal?{notes:notesVal}:{})
-      };
-    }
-    overlay.classList.remove("open"); renderCart();
+    // Creamos siempre una nueva entrada individual (no sumamos a una existente),
+    // así cada hamburguesa puede llevar su propio comentario/nota.
+    bucket[uniqueKey] = {
+      qty: 1,
+      item: currentItem,
+      fries: friesEl.value,
+      extras,
+      ...(notesVal ? { notes: notesVal } : {}),
+      _label: `${currentItem.name} — Papas: ${friesName(friesEl.value)}${extras.patty?(' · +'+extras.patty+' medallón(es)'):''}${extras.cheddar?(' · +'+extras.cheddar+' cheddar'):''}${notesVal?(' · Nota: '+notesVal):''}`
+    };
+
+    overlay.classList.remove("open");
+    renderCart();
   };
 
   // ===== Pagar =====
@@ -625,6 +630,9 @@
   };
 
   // Inicio: renderizar menú
+  // Nota: en browsers con CSP o variables globales, asegúrate que 'drinksGrid' exista
+  const drinksGrid = document.getElementById('drinksGrid');
+  const burgersGrid = document.getElementById('burgersGrid');
   mount();
   </script>
 </body>
