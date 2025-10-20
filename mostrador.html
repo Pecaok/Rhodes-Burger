@@ -327,20 +327,17 @@
   }catch(e){ console.warn(e); }
 
   /* ===== SIDES CONFIG (nuevo: leer desde config/sides) ===== */
-  // por defecto todas habilitadas
   let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
 
   function applySidesToUI(){
-    // deshabilitar/activar radios en el modal
     document.querySelectorAll('#friesOptions .pill').forEach(label=>{
       const input = label.querySelector('input[name="fries"]');
       if(!input) return;
       const val = input.value;
-      const enabled = SIDES_STATE[val] !== false; // undefined => true
+      const enabled = SIDES_STATE[val] !== false;
       input.disabled = !enabled;
       label.classList.toggle('disabled', !enabled);
     });
-    // nota con variantes deshabilitadas
     const noteEl = document.getElementById('friesStateNote');
     const disabled = Object.entries(SIDES_STATE).filter(([k,v])=>v===false).map(([k])=>k);
     if(disabled.length){
@@ -359,7 +356,6 @@
   }
 
   try{
-    // escucha en tiempo real a config/sides
     db.collection('config').doc('sides').onSnapshot(snap=>{
       const data = snap.exists ? (snap.data()||{}) : {};
       SIDES_STATE = {
@@ -382,10 +378,8 @@
   const cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
 
   // CART: ahora las hamburguesas se guardan como entradas independientes (key único por unidad)
-  // estructura cart = { burger: { uniqueKey1: { qty, item, fries, extras, notes, _label } }, drink: { id: { qty, item } } }
   let cart = { burger:{}, drink:{} };
 
-  // util para mostrar nombre legible de papas
   function friesName(v){
     if(!v) return "—";
     if(v === "con_sazon") return "Con sazón";
@@ -412,11 +406,9 @@
 
   function renderCart(){
     const parts=[];
-    // burger: cada entry es una "unidad lógica" (puede tener qty>1 si el usuario incrementa)
     for(const [key,obj] of Object.entries(cart.burger)){
       const unit=obj.item.price+(obj.extras?.patty||0)*EXTRA_PRICE_PATTY+(obj.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR;
       const extras=[]; if(obj.extras?.patty) extras.push(`+${obj.extras.patty} medallón`); if(obj.extras?.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`);
-      // mostrar label por unidad (nota incluida por unidad)
       parts.push(`<div class="item">
         <div>
           <strong>${obj.item.name}</strong>
@@ -432,7 +424,6 @@
         </div>
       </div>`);
     }
-    // drinks still aggregate by id
     for(const [key,obj] of Object.entries(cart.drink)){
       parts.push(`<div class="item">
         <div><strong>${obj.item.name}</strong></div>
@@ -490,7 +481,7 @@
     gridBurgers.innerHTML=""; BURGERS.forEach(b=>gridBurgers.appendChild(renderCard(b,"burger")));
     gridDrinks.innerHTML="";  DRINKS.forEach(d=>drinksGrid.appendChild(renderCard(d,"drink")));
     renderCart(); refreshAvailabilityUI();
-    applySidesToUI(); // aplicar estado inicial de sides
+    applySidesToUI();
   }
 
   // ===== Modal =====
@@ -518,7 +509,7 @@
     else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; }
     else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; }
     unitPricePreview(item.price);
-    applySidesToUI(); // asegurarnos de aplicar la configuración más reciente
+    applySidesToUI();
     overlay.classList.add("open");
   }
   btnCancel.onclick=()=> overlay.classList.remove("open");
@@ -527,17 +518,14 @@
   cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
   cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
 
-  // helpers de notas (auto-alto + contador)
   function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
   function updateCount(el){ const c=document.getElementById('notesCount'); if(c) c.textContent=`${el.value.length}/${el.maxLength||200}`; }
 
-  // Cuando agregamos: **ahora creamos una entrada única por hamburguesa**
-  // Esto permite que cada hamburguesa tenga su propia nota aunque sean "idénticas"
+  // Agregar: nueva entrada única por hamburguesa (cada unidad su nota)
   btnAdd.onclick=()=> {
     if(!currentItem || !isAvailable(currentItem.id)) return;
     const friesEl=document.querySelector('input[name="fries"]:checked');
     if(!friesEl){ alert("Elegí el tipo de papas."); return; }
-    // validar que la variante esté habilitada desde config
     if(SIDES_STATE[friesEl.value] === false){
       alert("La variante de papas elegida no está disponible. Elegí otra.");
       return;
@@ -546,15 +534,11 @@
     if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
     else if(currentItem.kind==="chicken"){ extras.cheddar=+cheVal.textContent||0; }
     const notesVal = notes.value.trim();
-    // base key por configuración (sin uid)
     const baseKey = `${currentItem.id}::fries=${friesEl.value}::patty=${extras.patty}::cheddar=${extras.cheddar}`;
-    // UNIQUE suffix para separar unidades individualmente
     const uid = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
     const uniqueKey = baseKey + '::uid=' + uid;
 
     const bucket = cart.burger;
-    // Creamos siempre una nueva entrada individual (no sumamos a una existente),
-    // así cada hamburguesa puede llevar su propio comentario/nota.
     bucket[uniqueKey] = {
       qty: 1,
       item: currentItem,
@@ -568,44 +552,7 @@
     renderCart();
   };
 
-  // ===== Imprimir y cargar (nuevo) =====
-  let inFlight = false;
-  const btnPrintAndLoad = document.getElementById('btnPrintAndLoad');
-
-  async function buildPrintableHtml(orderNumber, payload){
-    // payload contiene items, total, nombre, telefono, etc.
-    const lines = [];
-    lines.push(`<h2>Rhodes Burgers</h2>`);
-    lines.push(`<div>Pedido #${orderNumber}</div>`);
-    lines.push(`<div>Nombre: ${escapeHtml(payload.nombre)}</div>`);
-    if(payload.telefono) lines.push(`<div>Tel: ${escapeHtml(payload.telefono)}</div>`);
-    lines.push(`<hr/>`);
-    lines.push(`<div>Items:</div>`);
-    lines.push(`<ul>`);
-    for(const it of payload.items){
-      const extras = it.extras && ((it.extras.patty?` +${it.extras.patty}m`:'') + (it.extras.cheddar?` +${it.extras.cheddar}ch`:''));
-      const notes = it.notes ? ` - ${escapeHtml(it.notes)}` : '';
-      lines.push(`<li>${escapeHtml(it.name)} x${it.qty} ${extras} ${notes} — ${money((it.price + ((it.extras?.patty||0)*EXTRA_PRICE_PATTY) + ((it.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR)) * it.qty)}</li>`);
-    }
-    lines.push(`</ul>`);
-    lines.push(`<hr/>`);
-    lines.push(`<div>Total: <strong>${money(payload.total)}</strong></div>`);
-    lines.push(`<div>Pago: ${escapeHtml(payload.pago || '')}</div>`);
-    if(payload.comment) lines.push(`<div>Comentario: ${escapeHtml(payload.comment)}</div>`);
-    lines.push(`<hr/>`);
-    lines.push(`<div style="font-size:12px;color:#666">Generado: ${new Date().toLocaleString()}</div>`);
-
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Ticket #${orderNumber}</title>
-      <style>
-        body{font-family:Arial,Helvetica,sans-serif;padding:18px}
-        h2{margin:0 0 8px}
-        ul{padding-left:18px}
-        li{margin:6px 0}
-      </style>
-      </head><body>${lines.join('')}</body></html>`;
-    return html;
-  }
-
+  // ===== TICKET: REUTILIZO EXACTAMENTE EL HTML/CSS DEL PEDIDO_LOCAL =====
   function escapeHtml(s){
     return (s||'').toString()
       .replace(/&/g,'&amp;')
@@ -615,9 +562,143 @@
       .replace(/'/g,'&#39;');
   }
 
+  function buildTicketHTMLFromPayload(orderId, payload){
+    // payload: objeto con fields similares a lo que guardamos en orders
+    const o = payload;
+    const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const orderDisplay = (()=>{ const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+      for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; } return `#${(orderId||'').slice(-5).toUpperCase()}`; })();
+
+    // date/time (payload.createdAt may be a Firestore Timestamp or Date)
+    let dt = new Date();
+    if(o.createdAt && typeof o.createdAt.toDate === 'function') dt = o.createdAt.toDate();
+    else if(o.createdAt && typeof o.createdAt === 'string') { const d=new Date(o.createdAt); if(!isNaN(d)) dt=d; }
+    else if(o.createdAt instanceof Date) dt = o.createdAt;
+    const dateStr = dt.toLocaleDateString('es-AR');
+    const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
+
+    const items = Array.isArray(o.items)? o.items : [];
+
+    const linesHTML = items.map(it=>{
+      const qty = it.qty||1;
+      const name = (it.name||'').toString();
+      const base = (it.price||0);
+      const pattyCount = it.extras?.patty||0;
+      const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY;
+      const pattySum   = qty * pattyCount * pattyUnit;
+      const cheddarCount = it.extras?.cheddar||0;
+      const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR;
+      const cheddarSum   = qty * cheddarCount * cheddarUnit;
+      const baseSubtotal = base * qty;
+      const lineTotal    = baseSubtotal + pattySum + cheddarSum;
+
+      const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
+      let friesLabel = '';
+      if(friesRaw){
+        const s = String(friesRaw).toLowerCase();
+        if(/\bcon sazon\b|\bconsazon\b|\bcon_sazon\b|\bcon-sazon\b|\bsazon\b/.test(s) && !/\bsin\b/.test(s)) friesLabel = 'Con sazón';
+        else if(/\bcon sal\b|\bconsal\b|\bcon_sal\b|\bcon-sal\b|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) friesLabel = 'Con sal';
+        else if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s) || /\bsin_sazon\b/.test(s))) friesLabel = 'Sin sal';
+      }
+
+      return `
+          <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
+          ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
+          <div class="row amount"><div class="l"></div><div class="r">${moneyFn(baseSubtotal)}</div></div>
+          ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${moneyFn(cheddarSum)}</div>`:''}
+          ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${moneyFn(pattySum)}</div>`:''}
+          ${it.notes ? `<div class="sub">• Nota: ${escapeHtml(it.notes)}</div>` : ''}
+          <div class="row amount final"><div class="l"></div><div class="r">${moneyFn(lineTotal)}</div></div>
+          <div class="sep"></div>
+        `;
+    }).join('') || '<div class="sub">Sin ítems.</div>';
+
+    const total = (()=>{ if(typeof o.total==='number') return o.total;
+      return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR)*qty; return t + base + patty + cheddar; },0);
+    })();
+
+    const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Ticket ${orderDisplay}</title>
+<style>
+  @page{ size:58mm auto; margin:0; }
+  html,body{margin:0;padding:0;color:#000;}
+  *{-webkit-print-color-adjust:exact; print-color-adjust:exact; -webkit-text-size-adjust:100%;}
+  body{ font-family: Arial, sans-serif; font-size:13px; font-weight:700; line-height:1.45; }
+  .ticket{ width:48mm; margin:0 auto; padding:2mm 3mm 10mm 2mm; box-sizing:border-box; }
+  .c{text-align:center}
+  .brand{ font-size:16px; }
+  .orderNo{ font-size:14px; margin:1mm 0 }
+  .hr{ border-top:1px solid #000; margin:4px 0 }
+  .lbl{ font-size:11px; text-transform:uppercase; }
+  .blk{ margin:2px 0 2mm 0; }
+  .row{ display:flex; justify-content:space-between; gap:4px; }
+  .row .l{ flex:1 1 auto; min-width:0; }
+  .row .r{ flex:0 0 auto; text-align:right; min-width:18mm; padding-left:1.5mm; white-space:nowrap; }
+  .row.name .r{ display:none; }
+  .row.amount .l{ display:block; }
+  .row.amount.final{ margin-top:3px; }
+  .sub{ font-size:11px; margin:1px 0 0 2mm; }
+  .sub.ex{ white-space:nowrap; }
+  .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
+  .subtotal{ margin-top:2mm; }
+  .total{ font-size:16px; margin-top:3mm; }
+  .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
+</style>
+</head>
+<body>
+  <div class="ticket">
+    <div class="c brand">Rhodes Burgers</div>
+    <div class="orderNo c">${escapeHtml(orderDisplay)}</div>
+
+    <div class="hr"></div>
+
+    ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>`:''}
+    ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml((o.pago||o.payment_method)||'')}</div></div>`:''}
+
+    <div class="hr"></div>
+    ${linesHTML}
+    <div class="hr"></div>
+
+    <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${moneyFn(total)}</div></div>
+    <div class="row total"><div class="l">TOTAL</div><div class="r">${moneyFn(total)}</div></div>
+
+    <div class="foot">${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}</div>
+  </div>
+  <script>
+    window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 60); });
+  <\/script>
+</body>
+</html>`;
+    return html;
+  }
+
+  // Imprime HTML en iframe oculto (sin popup)
+  function printHtmlInIframe(html){
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.setAttribute('aria-hidden','true');
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+
+    const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
+    // onafterprint puede no funcionar en todos los browsers, ponemos fallback cleanup
+    try{ iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150); }catch(e){}
+    setTimeout(cleanup, 15000);
+  }
+
+  // ===== Imprimir y cargar (nuevo) =====
+  let inFlight = false;
+  const btnPrintAndLoad = document.getElementById('btnPrintAndLoad');
+
   btnPrintAndLoad.addEventListener('click', async ()=>{
     if(inFlight) return;
-    // disable immediately
     inFlight = true;
     btnPrintAndLoad.setAttribute('disabled','');
     btnPrintAndLoad.classList.add('disabled');
@@ -659,11 +740,8 @@
       }
 
       const total = calcTotal();
-
-      // Reservar número de pedido
       const orderNumber = await nextOrderNumber();
 
-      // payload a guardar
       const payload = {
         orderNumber, number: orderNumber, nombre, telefono, pago, comment: comentario,
         items, total, status:"accepted", payment_status:"paid",
@@ -682,28 +760,18 @@
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, {merge:true});
 
-      // Crear ticket imprimible y abrir ventana
-      const printHtml = await buildPrintableHtml(orderNumber, {
-        ...payload,
-        telefono, pago, comment: comentario
-      });
+      // Para el ticket necesitamos un `createdAt` legible en payload:
+      // intentamos leer de Firestore el doc recientemente creado (para obtener Timestamp)
+      let savedDoc = null;
+      try{ savedDoc = await db.collection('orders').doc(ref.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
 
-      // abrir popup y solicitar impresión
-      const w = window.open('', '_blank', 'width=600,height=800');
-      if(!w){
-        alert('Se guardó el pedido, pero el navegador bloqueó la ventana de impresión. Abrí los popups o imprimí desde el panel de Pedidos.');
-      } else {
-        w.document.open();
-        w.document.write(printHtml);
-        w.document.close();
-        // algunos navegadores necesitan un pequeño delay
-        w.focus();
-        setTimeout(()=>{
-          try{ w.print(); }catch(e){ console.warn('print error', e); }
-          // cerrar la ventana luego de unos segundos
-          setTimeout(()=>{ try{ w.close(); }catch(e){} }, 1500);
-        }, 300);
-      }
+      const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt: new Date() };
+
+      // Generar HTML del ticket exactamente igual que en pedido_local
+      const html = buildTicketHTMLFromPayload(ref.id, docData);
+
+      // Imprimir en iframe oculto
+      printHtmlInIframe(html);
 
       // limpiar carrito y UI
       cart={burger:{},drink:{}};
@@ -711,15 +779,12 @@
       $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
       alert(`Pedido #${orderNumber} cargado e impresión solicitada.`);
     }catch(err){
-      // si se lanzó error controlado, ya se mostró alerta
       if(err && err.message && err.message !== 'empty' && err.message !== 'no-name'){
         console.error(err);
         alert('Error al cargar el pedido. Reintentá.');
       }
     }finally{
-      // prevenir doble submit inmediato: dejamos inFlight true unos segundos más para seguridad,
-      // pero también re-habilitamos después de 2s. Si querés mantenerlo bloqueado más tiempo,
-      // aumentá el timeout.
+      // evita doble-click inmediato; re-habilitamos en 2s
       setTimeout(()=>{
         inFlight = false;
         btnPrintAndLoad.removeAttribute('disabled');
@@ -729,7 +794,6 @@
   });
 
   // Inicio: renderizar menú
-  // Nota: en browsers con CSP o variables globales, asegúrate que 'drinksGrid' exista
   const drinksGrid = document.getElementById('drinksGrid');
   const burgersGrid = document.getElementById('burgersGrid');
   mount();
