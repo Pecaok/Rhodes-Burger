@@ -16,6 +16,7 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:2px solid var(--primary);background:#fff;color:var(--primary);padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;text-decoration:none}
     .btn.primary{background:var(--primary);color:#fff}
     .btn.ghost{border-color:#e7e7e7;color:#333}
+    .btn.disabled, .btn[disabled]{ opacity:.6; pointer-events:none; }
     main{max-width:1100px;margin:24px auto;padding:0 12px;display:grid;grid-template-columns:1fr 420px;gap:18px}
     @media (max-width:900px){ main{grid-template-columns:1fr} }
     .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
@@ -34,6 +35,7 @@
     .statusHint{font-size:13px;color:var(--muted);margin-top:10px}
     html,body{min-height:100%} body{position:relative}
     body::before{content:"";position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:clamp(240px,48vmin,560px);background:url("images/logo.png") center/contain no-repeat;opacity:.08;pointer-events:none;z-index:5}
+    .muted-small{color:var(--muted); font-size:13px; margin-top:6px;}
   </style>
 </head>
 <body>
@@ -78,6 +80,7 @@
       <div class="group">
         <label>Notas (opcional)</label>
         <textarea id="inpNotas" placeholder="Ej: pasar a las 20:30, sin cebolla, etc."></textarea>
+        <div class="muted-small">Estas notas serán guardadas en el pedido y aparecerán en el ticket.</div>
       </div>
 
       <div class="actions">
@@ -141,6 +144,7 @@
     function loadCart(){try{return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{}}}catch(e){return {burger:{},drink:{}}}}
     var cart=loadCart();
 
+    // util para calcular unidad con extras
     function unitWithExtras(it){
       var base=(it.item&&it.item.price)?it.item.price:(it.price||0);
       var pz=((it.extras&&it.extras.patty)?it.extras.patty:0)*((it.extras&&it.extras.EXTRA_PRICE_PATTY)?it.extras.EXTRA_PRICE_PATTY:0);
@@ -156,9 +160,10 @@
       if(v === "con_sal") return "Con sal";
       if(v === "sin_sal") return "Sin sal";
       // compatibilidad con valores anteriores o variantes
-      if(v.toString().toLowerCase().includes("sazon")) return "Con sazón";
-      if(v.toString().toLowerCase().includes("sal") && v.toString().toLowerCase().includes("sin")) return "Sin sal";
-      if(v.toString().toLowerCase().includes("sal")) return "Con sal";
+      var s = String(v||'').toLowerCase();
+      if(s.includes("sazon") && !s.includes("sin")) return "Con sazón";
+      if(s.includes("sin") && (s.includes("sal")||s.includes("sazon"))) return "Sin sal";
+      if(s.includes("sal")) return "Con sal";
       return v;
     }
 
@@ -166,18 +171,45 @@
     (function renderResumen(){
       var resumen=$("#resumen"),resTotal=$("#resTotal");resumen.innerHTML="";
       var k,obj,extras,unit,line,html;
+
+      // helper escape
+      function escapeHtml(s){
+        return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      }
+
       for(k in cart.burger){
-        obj=cart.burger[k];extras=[];if(obj.extras&&obj.extras.patty){extras.push("+"+obj.extras.patty+" medallón(es)")}if(obj.extras&&obj.extras.cheddar){extras.push("+"+obj.extras.cheddar+" cheddar")}
-        unit=unitWithExtras(obj);line=unit*(obj.qty||0);
-        html='<div class="row" style="align-items:flex-start"><div><div><strong>'+(obj.qty||0)+'× '+(obj.item?obj.item.name:"")+'</strong></div><div class="muted">Papas: '+friesName(obj.fries)+(extras.length?(' · '+extras.join(' · ')):'')+'</div>'+(obj.notes?('<div class="muted">Notas: '+obj.notes+'</div>'):'')+'</div><div>'+money(line)+'</div></div>';
-        resumen.insertAdjacentHTML("beforeend",html);
+        obj=cart.burger[k];
+        extras=[];
+        if(obj.extras && obj.extras.patty){ extras.push("+"+obj.extras.patty+" medallón(es)"); }
+        if(obj.extras && obj.extras.cheddar){ extras.push("+"+obj.extras.cheddar+" cheddar"); }
+        unit = unitWithExtras(obj);
+        line = unit * (obj.qty||0);
+
+        var notesEsc = obj.notes ? escapeHtml(obj.notes) : "";
+
+        html = '<div class="row" style="align-items:flex-start"><div><div><strong>' +
+          (obj.qty||0) + '× ' + (obj.item?escapeHtml(obj.item.name):"") + '</strong></div>' +
+          '<div class="muted">Papas: ' + friesName(obj.fries) + (extras.length?(' · '+extras.join(' · ')):'') + '</div>' +
+          (notesEsc ? ('<div class="muted">Notas: ' + notesEsc + '</div>') : '') +
+          '</div><div>' + money(line) + '</div></div>';
+        resumen.insertAdjacentHTML("beforeend", html);
       }
+
       for(k in cart.drink){
-        obj=cart.drink[k];line=((obj.item&&obj.item.price)||0)*(obj.qty||0);
-        html='<div class="row"><div><strong>'+(obj.qty||0)+'× '+(obj.item?obj.item.name:"")+'</strong></div><div>'+money(line)+'</div></div>';
-        resumen.insertAdjacentHTML("beforeend",html);
+        obj = cart.drink[k];
+        line = ((obj.item && obj.item.price) || 0) * (obj.qty||0);
+        html = '<div class="row"><div><strong>' + (obj.qty||0) + '× ' + (obj.item?escapeHtml(obj.item.name):"") + '</strong></div><div>' + money(line) + '</div></div>';
+        resumen.insertAdjacentHTML("beforeend", html);
       }
-      resTotal.textContent=money(calcTotal());
+
+      // Nota general del pedido (si existe)
+      var notaGeneral = $("#inpNotas").value ? $("#inpNotas").value.trim() : "";
+      if(notaGeneral){
+        var notaEsc = escapeHtml(notaGeneral);
+        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Nota del pedido</strong><div class="muted">' + notaEsc + '</div></div>');
+      }
+
+      resTotal.textContent = money(calcTotal());
     })();
 
     /* === BUILD ORDER === */
@@ -197,10 +229,10 @@
           extras:{
             patty:(b.extras&&b.extras.patty)?b.extras.patty:0,
             cheddar:(b.extras&&b.extras.cheddar)?b.extras.cheddar:0,
-            EXTRA_PRICE_PATTY:(b.extras&&b.extras.EXTRA_PRICE_PATTY)?b.extras.EXTRA_PRICE_PATTY:0,
-            EXTRA_PRICE_CHEDDAR:(b.extras&&b.extras.EXTRA_PRICE_CHEDDAR)?b.extras.EXTRA_PRICE_CHEDDAR:0
+            EXTRA_PRICE_PATTY:(b.extras&&b.extras.EXTRA_PRICE_PATTY)?b.extras.EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,
+            EXTRA_PRICE_CHEDDAR:(b.extras&&b.extras.EXTRA_PRICE_CHEDDAR)?b.extras.EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR
           },
-          notes:b.notes||""
+          notes: b.notes || "" // <-- nota por ítem
         });
       }
       for(k in cart.drink){d=cart.drink[k];items.push({type:"drink",id:d.item?d.item.id:"",name:d.item?d.item.name:"",qty:d.qty||0,price:d.item?(d.item.price||0):0});}
@@ -211,7 +243,7 @@
         telefono:$("#inpTelefono").value.trim(),
         entrega:"take_away",
         pago:pago,
-        notes:$("#inpNotas").value.trim(),
+        notes:$("#inpNotas").value.trim(), // <-- nota general del pedido
         status:(pago==="mercado_pago"?"pending_payment":"accepted"),
         payment_status:(pago==="mercado_pago"?"pending_payment":"paid"),
         items:items,total:calcTotal(),source:"web",
@@ -232,15 +264,14 @@
         var it=order.items[i];
         if(it.type==='burger'){
           var extras=[]; if(it.extras&&it.extras.patty){extras.push("+"+it.extras.patty+" med")} if(it.extras&&it.extras.cheddar){extras.push("+"+it.extras.cheddar+" cheddar")}
-          // usamos la función friesName para mostrar correctamente las 3 opciones
           var friesLabel = friesName(it.fries);
           lines.push((it.qty||0)+"× "+(it.name||"")+" (Papas: "+friesLabel+(extras.length?(" · "+extras.join(" · ")):"")+")");
-          if(it.notes){lines.push("  Notas: "+it.notes);}
+          if(it.notes){lines.push("  Notas: "+it.notes);} // nota por ítem
         }else{ lines.push((it.qty||0)+"× "+(it.name||"")); }
       }
       lines.push("------------------------------");
       lines.push("Total: "+moneyFmt(order.total));
-      if(order.notes){lines.push("Notas del pedido: "+order.notes);}
+      if(order.notes){lines.push("Notas del pedido: "+order.notes);} // nota general
       if(order.trackToken){
         var base=location.origin;
         var trackUrl=base+"/gracias.html?id="+encodeURIComponent(order.id||"")+"&t="+encodeURIComponent(order.trackToken);
@@ -286,8 +317,16 @@
       });
     }
 
-    document.getElementById("btnConfirmar").onclick=function(){
+    // Evitar doble click: deshabilitar mientras se procesa
+    document.getElementById("btnConfirmar").onclick = function(){
+      var btn = this;
+      if(btn.disabled) return;
+      btn.disabled = true;
+      btn.classList.add('disabled');
+
       createOrder().then(function(res){
+        btn.disabled = false;
+        btn.classList.remove('disabled');
         if(!res) return;
         var pago=selectedPago();
         localStorage.setItem("last_order_id",res.id);
@@ -297,11 +336,30 @@
           if(pago==="efectivo"||pago==="mercado_pago"){ openWhatsApp(order); }
           clearCart();
           window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
+        }).catch(function(e){
+          console.error(e);
+          // aunque haya error al recuperar, redirigimos con la info mínima
+          clearCart();
+          window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
         });
       }).catch(function(e){
-        console.error(e); alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
+        console.error(e);
+        btn.disabled = false;
+        btn.classList.remove('disabled');
+        alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
       });
     };
+
+    // Si el usuario edita la nota o el carrito desde otra pestaña, sería bueno refrescar resumen:
+    window.addEventListener('storage', function(e){
+      if(e.key===CART_KEY || e.key===null){ cart = loadCart(); /* re-render resumen */ (function(){ var resumen=$("#resumen"),resTotal=$("#resTotal"); resumen.innerHTML=""; var k,obj,extras,unit,line,html;
+        function escapeHtml(s){return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+        for(k in cart.burger){ obj=cart.burger[k]; extras=[]; if(obj.extras && obj.extras.patty) extras.push("+"+obj.extras.patty+" medallón(es)"); if(obj.extras && obj.extras.cheddar) extras.push("+"+obj.extras.cheddar+" cheddar"); unit=unitWithExtras(obj); line=unit*(obj.qty||0); var notesEsc = obj.notes ? escapeHtml(obj.notes) : ""; html = '<div class=\"row\" style=\"align-items:flex-start\"><div><div><strong>'+(obj.qty||0)+'× '+(obj.item?escapeHtml(obj.item.name):"")+'</strong></div><div class=\"muted\">Papas: '+friesName(obj.fries)+(extras.length?(' · '+extras.join(' · ')):'')+'</div>'+(notesEsc?('<div class=\"muted\">Notas: '+notesEsc+'</div>'):'')+'</div><div>'+money(line)+'</div></div>'; resumen.insertAdjacentHTML("beforeend", html); }
+        for(k in cart.drink){ obj=cart.drink[k]; line=((obj.item&&obj.item.price)||0)*(obj.qty||0); html = '<div class=\"row\"><div><strong>'+(obj.qty||0)+'× '+(obj.item?escapeHtml(obj.item.name):"")+'</strong></div><div>'+money(line)+'</div></div>'; resumen.insertAdjacentHTML("beforeend", html); }
+        var notaGeneral = $("#inpNotas") ? $("#inpNotas").value.trim() : ""; if(notaGeneral){ var notaEsc = escapeHtml(notaGeneral); resumen.insertAdjacentHTML("beforeend", '<div style=\"margin-top:8px\"><strong>Nota del pedido</strong><div class=\"muted\">' + notaEsc + '</div></div>'); }
+        resTotal.textContent = money(calcTotal()); })(); }
+    }, false);
+
   </script>
 </body>
 </html>
