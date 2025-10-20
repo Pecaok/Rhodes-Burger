@@ -284,14 +284,16 @@
       },0);
     };
 
-    function renderOrder(doc){
-      const o=doc.data(); const dt=pickDocDate(o);
-      const dtText=dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR'):'—';
-      const items=Array.isArray(o.items)?o.items:[];
+    /* ========== REEMPLAZADAS: renderOrder + buildTicketHTML ========== */
 
-      const lines=items.map(it=>{
-        const qty=it.qty||1;
-        const subtotal=(it.price||0)*qty
+    function renderOrder(doc){
+      const o = doc.data(); const dt = pickDocDate(o);
+      const dtText = dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
+      const items = Array.isArray(o.items) ? o.items : [];
+
+      const lines = items.map(it=>{
+        const qty = it.qty||1;
+        const subtotal = (it.price||0)*qty
           + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
           + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
         const extras = [];
@@ -308,18 +310,21 @@
         </div>`;
       }).join("");
 
-      const telChip=o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:"";
-      const srcChip=o.source?`<span class="chip">Origen: ${o.source}</span>`:"";
-      const cmtChip=o.comment?`<span class="chip">Comentario: ${o.comment}</span>`:"";
+      // buscar nota general en varias claves comunes (compatibilidad)
+      const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
 
-      const st=o.status??"accepted";
-      const curIdx=Math.max(STATE_SEQ.indexOf(st),0);
-      const stateBtns=`<div class="stateBtns">
+      const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
+      const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
+      const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
+
+      const st = o.status ?? "accepted";
+      const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
+      const stateBtns = `<div class="stateBtns">
         ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
       </div>`;
 
-      const paymentPaid=(o.payment_status==='paid'||o.paid);
-      const payLine=`<div class="pay-line">
+      const paymentPaid = (o.payment_status==='paid' || o.paid);
+      const payLine = `<div class="pay-line">
         <span class="chip">Pago: ${o.pago||'—'}</span>
         <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PAGADO':'✓ Marcar PENDIENTE'}</button>
         <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PENDIENTE DE PAGO':'PAGADO'}</span>
@@ -349,76 +354,69 @@
       </div>`;
     }
 
-    /* ==================== TICKET HTML ==================== */
     function buildTicketHTML(docSnap){
-  const o = docSnap.data();
-  const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-  const escapeHtml = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+      const o = docSnap.data();
+      const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+      const escapeHtml = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
-  const orderDisplay = (()=>{ 
-    const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
-    for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
-    return `#${(docSnap.id||'').slice(-5).toUpperCase()}`;
-  })();
+      const orderDisplay = (()=>{ 
+        const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+        for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
+        return `#${(docSnap.id||'').slice(-5).toUpperCase()}`;
+      })();
 
-  const dt = (()=>{ const k=['createdAt','created_at','timestamp','date','fecha','time'];
-    for(const kk of k){ const v=o[kk]; if(v?.toDate) return v.toDate(); if(typeof v==='number') return new Date(v); if(typeof v==='string'){const d=new Date(v); if(!isNaN(d)) return d;} }
-    return new Date();
-  })();
-  const dateStr = dt.toLocaleDateString('es-AR');
-  const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
+      const dt = (()=>{ const k=['createdAt','created_at','timestamp','date','fecha','time'];
+        for(const kk of k){ const v=o[kk]; if(v?.toDate) return v.toDate(); if(typeof v==='number') return new Date(v); if(typeof v==='string'){const d=new Date(v); if(!isNaN(d)) return d;} }
+        return new Date();
+      })();
+      const dateStr = dt.toLocaleDateString('es-AR');
+      const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
-  const items = Array.isArray(o.items)?o.items:[];
+      const items = Array.isArray(o.items)?o.items:[];
 
-  const linesHTML = items.map(it=>{
-    const qty = it.qty||1;
-    const name = (it.name||'').toString();
-    const base = (it.price||0);
-    const pattyCount = it.extras?.patty||0;
-    const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||0;
-    const pattySum   = qty * pattyCount * pattyUnit;
-    const cheddarCount = it.extras?.cheddar||0;
-    const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||0;
-    const cheddarSum   = qty * cheddarCount * cheddarUnit;
-    const baseSubtotal = base * qty;
-    const lineTotal    = baseSubtotal + pattySum + cheddarSum;
+      const linesHTML = items.map(it=>{
+        const qty = it.qty||1;
+        const name = (it.name||'').toString();
+        const base = (it.price||0);
+        const pattyCount = it.extras?.patty||0;
+        const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||0;
+        const pattySum   = qty * pattyCount * pattyUnit;
+        const cheddarCount = it.extras?.cheddar||0;
+        const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||0;
+        const cheddarSum   = qty * cheddarCount * cheddarUnit;
+        const baseSubtotal = base * qty;
+        const lineTotal    = baseSubtotal + pattySum + cheddarSum;
 
-    const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
-    let friesLabel = '';
-    if(friesRaw){
-      const s = String(friesRaw).toLowerCase();
-      if(/\bcon sazon\b|\bconsazon\b|\bcon_sazon\b|\bcon-sazon\b|\bsazon\b/.test(s) && !/\bsin\b/.test(s)) friesLabel = 'Con sazón';
-      else if(/\bcon sal\b|\bconsal\b|\bcon_sal\b|\bcon-sal\b|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) friesLabel = 'Con sal';
-      else if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s) || /\bsin_sazon\b/.test(s))) friesLabel = 'Sin sal';
-    }
+        const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
+        let friesLabel = '';
+        if(friesRaw){
+          const s = String(friesRaw).toLowerCase();
+          if(/\bcon sazon\b|\bconsazon\b|\bcon_sazon\b|\bcon-sazon\b|\bsazon\b/.test(s) && !/\bsin\b/.test(s)) friesLabel = 'Con sazón';
+          else if(/\bcon sal\b|\bconsal\b|\bcon_sal\b|\bcon-sal\b|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) friesLabel = 'Con sal';
+          else if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s) || /\bsin_sazon\b/.test(s))) friesLabel = 'Sin sal';
+        }
 
-    return `
-      <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
-      ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
-      <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
-      ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>` : ''}
-      ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>` : ''}
-      ${it.notes ? `<div class="sub">• Nota: ${escapeHtml(it.notes)}</div>` : ''}
-      <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
-      <div class="sep"></div>
-    `;
-  }).join('') || '<div class="sub">Sin ítems.</div>';
+        return `
+          <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
+          ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
+          <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
+          ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>` : ''}
+          ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>` : ''}
+          ${it.notes ? `<div class="sub">• Nota: ${escapeHtml(it.notes)}</div>` : ''}
+          <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
+          <div class="sep"></div>
+        `;
+      }).join('') || '<div class="sub">Sin ítems.</div>';
 
-  const total = (()=>{
-    if(typeof o.total === 'number') return o.total;
-    return items.reduce((t,it)=>{
-      const qty = it.qty||1;
-      const base = (it.price||0)*qty;
-      const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty;
-      const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
-      return t + base + patty + cheddar;
-    },0);
-  })();
+      const total = (()=>{ if(typeof o.total === 'number') return o.total;
+        return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty; return t + base + patty + cheddar; },0);
+      })();
 
-  // --- AÑADIMOS el bloque COMENTARIO (nota general del carrito) ---
-  const commentBlock = o.comment ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(o.comment)}</div></div><div class="hr"></div>` : '';
+      // --- Nota general: mirar varias claves posibles ---
+      const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
+      const commentBlock = generalNote ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(generalNote)}</div></div><div class="hr"></div>` : '';
 
-  return `
+      return `
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Ticket ${escapeHtml(orderDisplay)}</title>
 <style>
@@ -468,12 +466,11 @@
 
     <div class="foot">${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}</div>
   </div>
-  <script>
-    window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); });
-  <\/script>
+  <script> window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); }); </script>
 </body>
 </html>`;
-}
+    }
+
     // Imprimir en iframe oculto (botón manual)
     function printInIframe(docSnap){
       const html = buildTicketHTML(docSnap);
