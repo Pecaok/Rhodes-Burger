@@ -13,32 +13,27 @@
   function bumpSession(){  // renueva TTL con actividad
     if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
   }
-  // Nota: definimos logout aquí de forma global para evitar "logout is not defined"
   function logout(){
     try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
     try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
     try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
     try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
-    // Redirigir al login y volver a pedido_local después de loguear
     const next = encodeURIComponent('pedido_local.html');
     location.replace('login.html?reason=logout&next=' + next);
   }
 
-  // Requerir sesión en páginas internas
   (function requireSession(){
     if (!sessionValid()){
-      // armar "next" con ruta+query+hash actuales
       const next = encodeURIComponent(
         (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
         (location.search || '') + (location.hash || '')
       );
-      location.replace('login.html?next=' + next); // <-- login con ?next=
+      location.replace('login.html?next=' + next);
     } else {
       bumpSession();
     }
   })();
 
-  // Mantener viva la sesión mientras se usa
   ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
     window.addEventListener(evt, bumpSession, {passive:true});
   });
@@ -121,7 +116,6 @@
 
       <div class="spacer"></div>
 
-      <!-- Navegación cruzada: Pedidos - Finanzas - Mostrador -->
       <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <a href="pedido_local.html" class="btn primary" title="Ver pedidos">📦 Pedidos</a>
         <a href="finanzas.html" class="btn" title="Finanzas">📈 Finanzas</a>
@@ -137,7 +131,6 @@
   <main class="container">
     <h1>Últimos pedidos</h1>
 
-    <!-- Filtros -->
     <div class="tabs" id="tabs">
       <span class="chipf active" data-f="recibidos">Recibidos</span>
       <span class="chipf" data-f="entregados">Entregados</span>
@@ -149,13 +142,11 @@
     <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
   </main>
 
-  <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
   window.addEventListener('DOMContentLoaded', () => {
-    /* ================= FIREBASE ================= */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -167,7 +158,6 @@
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
     const db = firebase.firestore();
 
-    /* ================= HELPERS ================= */
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
@@ -193,7 +183,6 @@
       return `#${doc.id.slice(-5).toUpperCase()}`;
     }
 
-    /* ================= SONIDO ================= */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let audioCtx = null, audioReady = false;
     function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
@@ -207,11 +196,9 @@
     updateBellUI();
     btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
 
-    /* ================= ESTADO UI ================= */
     $("#btnLogout").onclick=()=>{ logout(); };
 
     const tabs=$("#tabs");
-    // Filtros: 'recibidos', 'entregados', 'cancelled', 'all'
     let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
 
     tabs.addEventListener("click",(e)=>{
@@ -222,11 +209,9 @@
       if (lastSnap) renderList(lastSnap);
     });
 
-    // Lógica de filtros
     const passFilter=o=>{
       const s = o.status ?? "accepted";
       if(currentFilter==="recibidos"){
-        // recibidos = aceptados + pendiente de pago + en prep + listos
         return s==="accepted" || s==="pending_payment" || s==="in_prep" || s==="ready";
       }
       if(currentFilter==="entregados"){
@@ -235,7 +220,7 @@
       if(currentFilter==="cancelled"){
         return s==="cancelled";
       }
-      return true; // all
+      return true;
     };
 
     async function setOrderStatus(id,next){
@@ -284,7 +269,7 @@
       },0);
     };
 
-    /* ========== REEMPLAZADAS: renderOrder + buildTicketHTML ========== */
+    /* ========== renderOrder + buildTicketHTML corregidas ========== */
 
     function renderOrder(doc){
       const o = doc.data(); const dt = pickDocDate(o);
@@ -310,7 +295,6 @@
         </div>`;
       }).join("");
 
-      // buscar nota general en varias claves comunes (compatibilidad)
       const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
 
       const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
@@ -412,7 +396,6 @@
         return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty; return t + base + patty + cheddar; },0);
       })();
 
-      // --- Nota general: mirar varias claves posibles ---
       const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
       const commentBlock = generalNote ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(generalNote)}</div></div><div class="hr"></div>` : '';
 
@@ -466,12 +449,13 @@
 
     <div class="foot">${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}</div>
   </div>
-  <script> window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); }); </script>
+  <script>
+    window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); });
+  <\/script>
 </body>
 </html>`;
     }
 
-    // Imprimir en iframe oculto (botón manual)
     function printInIframe(docSnap){
       const html = buildTicketHTML(docSnap);
       const iframe = document.createElement('iframe');
@@ -494,7 +478,6 @@
 
     function trySilentPrint(docSnap){ printInIframe(docSnap); }
 
-    /* ================= SUSCRIPCIÓN ================= */
     let initialLoaded = false;
 
     function renderList(snap){
@@ -525,7 +508,6 @@
           document.getElementById("ordersError").textContent="";
           renderList(snap);
 
-          // Beep sólo en pedidos nuevos después de la primera carga
           snap.docChanges().forEach(ch=>{
             if(ch.type==='added' && initialLoaded){
               playBeepTriple();
@@ -543,6 +525,7 @@
         document.getElementById("ordersError").style.display="block";
       }
     })();
+
   });
   </script>
 </body>
