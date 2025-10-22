@@ -38,6 +38,8 @@
     .statusHint{font-size:13px;color:var(--muted);margin-top:10px}
     html,body{min-height:100%} body{position:relative}
     body::before{content:"";position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:clamp(240px,48vmin,560px);background:url("images/logo.png") center/contain no-repeat;opacity:.08;pointer-events:none;z-index:5}
+    .cupon-ok{color:green;font-weight:700}
+    .cupon-err{color:#b00020;font-weight:700}
   </style>
 </head>
 <body>
@@ -88,6 +90,16 @@
         <div class="muted" style="margin-top:6px">* Solo retiro por el local.</div>
       </div>
 
+      <!-- CUPÓN -->
+      <div class="group">
+        <label>¿Tenés un cupón de descuento?</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="inpCupon" type="text" placeholder="Código del cupón" style="flex:1">
+          <button id="btnAplicarCupon" class="btn ghost">Aplicar</button>
+        </div>
+        <div id="cuponMsg" class="muted-small" style="margin-top:8px"></div>
+      </div>
+
       <div class="group">
         <label>Notas (opcional)</label>
         <textarea id="inpNotas" placeholder="Ej: pasar a las 20:30, sin cebolla, etc."></textarea>
@@ -128,6 +140,10 @@
     if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
     var db = firebase.firestore();
 
+    /* === ESTADO CUPÓN === */
+    var appliedCoupon = null; // objeto cupón leído desde Firestore (o null)
+    var appliedDiscount = 0;  // porcentaje (ej 10)
+
     /* === CONTADOR UNIFICADO === */
     async function getNextOrderNumber(){
       let lastKnown = 0;
@@ -161,7 +177,19 @@
       var ch=((it.extras&&it.extras.cheddar)?it.extras.cheddar:0)*((it.extras&&it.extras.EXTRA_PRICE_CHEDDAR)?it.extras.EXTRA_PRICE_CHEDDAR:0);
       return base+pz+ch;
     }
-    function calcTotal(){var t=0,k,obj;for(k in cart.burger){obj=cart.burger[k];t+=unitWithExtras(obj)*(obj.qty||0)}for(k in cart.drink){obj=cart.drink[k];t+=((obj.item&&obj.item.price)||0)*(obj.qty||0)}return t}
+    function calcRawTotal(){
+      var t=0,k,obj;
+      for(k in cart.burger){obj=cart.burger[k]; t += unitWithExtras(obj)*(obj.qty||0)}
+      for(k in cart.drink){obj=cart.drink[k]; t += ((obj.item&&obj.item.price)||0)*(obj.qty||0)}
+      return t;
+    }
+    function calcTotalWithDiscount(){
+      var raw = calcRawTotal();
+      if(appliedDiscount && appliedDiscount>0){
+        return Math.round(raw * (1 - (appliedDiscount/100)));
+      }
+      return raw;
+    }
 
     function friesName(v){
       if(!v) return "—";
@@ -175,7 +203,7 @@
       return v;
     }
 
-    /* === RESUMEN === */
+    /* === RENDER RESUMEN === */
     (function renderResumen(){
       var resumen=$("#resumen"),resTotal=$("#resTotal");resumen.innerHTML="";
       var k,obj,extras,unit,line,html;
@@ -212,8 +240,56 @@
         resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Nota del pedido</strong><div class="muted">' + notaEsc + '</div></div>');
       }
 
-      resTotal.textContent = money(calcTotal());
+      // mostrar cupón (si aplica)
+      if(appliedCoupon){
+        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Cupon</strong><div class="muted">Código: '+escapeHtml(appliedCoupon.codigo)+' — '+escapeHtml(String(appliedCoupon.descuento))+'% off</div></div>');
+      }
+
+      resTotal.textContent = money(calcTotalWithDiscount());
     })();
+
+    /* === APLICAR CUPÓN === */
+    async function applyCouponCode(){
+      var code = $("#inpCupon") ? $("#inpCupon").value.trim().toUpperCase() : "";
+      var msg = $("#cuponMsg");
+      msg.textContent = "";
+      msg.className = "muted-small";
+      appliedCoupon = null;
+      appliedDiscount = 0;
+
+      if(!code){ msg.textContent = "Ingresá un código de cupón."; msg.classList.add("cupon-err"); renderResumen(); return; }
+
+      try{
+        const q = await db.collection("cupones").where("codigo","==", code).limit(1).get();
+        if(q.empty){ msg.textContent = "Cupón inválido."; msg.classList.add("cupon-err"); renderResumen(); return; }
+        const data = q.docs[0].data();
+        // validar campo activo/expiración si existe
+        if(data.activo === false){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
+        // si hubiera fecha de expiración:
+        if(data.expiresAt){
+          let exp = data.expiresAt;
+          let expDate = exp.toDate ? exp.toDate() : new Date(exp);
+          if(Date.now() > expDate.getTime()){ msg.textContent = "Cupón vencido."; msg.classList.add("cupon-err"); renderResumen(); return; }
+        }
+        // OK
+        appliedCoupon = {
+          id: q.docs[0].id,
+          codigo: data.codigo || code,
+          descuento: Number(data.descuento) || 0,
+          raw: data
+        };
+        appliedDiscount = Number(appliedCoupon.descuento) || 0;
+        msg.textContent = "Cupón aplicado: " + appliedDiscount + "%";
+        msg.classList.add("cupon-ok");
+        renderResumen();
+      }catch(err){
+        console.error("Error al validar cupón:", err);
+        msg.textContent = "Error al validar el cupón.";
+        msg.classList.add("cupon-err");
+        renderResumen();
+      }
+    }
+    $("#btnAplicarCupon").addEventListener("click", applyCouponCode);
 
     /* === BUILD ORDER === */
     function selectedPago(){var el=document.querySelector('input[name="pago"]:checked');return el?el.value:"";}
@@ -239,7 +315,10 @@
       }
       for(k in cart.drink){d=cart.drink[k];items.push({type:"drink",id:d.item?d.item.id:"",name:d.item?d.item.name:"",qty:d.qty||0,price:d.item?(d.item.price||0):0});}
       var pago=selectedPago();
-      return {
+      var rawTotal = calcRawTotal();
+      var totalWithDiscount = calcTotalWithDiscount();
+
+      var order = {
         orderNumber:orderNumber, number:orderNumber,
         nombre:$("#inpNombre").value.trim(),
         telefono:$("#inpTelefono").value.trim(),
@@ -248,19 +327,34 @@
         notes:$("#inpNotas").value.trim(),
         status:(pago==="mercado_pago"?"pending_payment":"accepted"),
         payment_status:(pago==="mercado_pago"?"pending_payment":"paid"),
-        items:items,total:calcTotal(),source:"web",
+        items:items,
+        total: totalWithDiscount,
+        rawTotal: rawTotal,
+        source:"web",
         createdAt:firebase.firestore.FieldValue.serverTimestamp()
       };
+
+      // si aplicó cupón, agregar referencia
+      if(appliedCoupon){
+        order.cupon = appliedCoupon.codigo;
+        order.discount = appliedDiscount; // % aplicado
+        // si querés guardar el id del doc:
+        order.cuponId = appliedCoupon.id;
+      }
+
+      return order;
     }
 
     /* === WhatsApp & creación === */
     function moneyFmt(n){return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0})}
     function buildWhatsappText(order){
-      var lines=[],pagoLabel=(order.pago==='efectivo'?'Efectivo':'Mercado Pago');
+      var lines=[];
+      var pagoLabel = (order.pago==='efectivo'?'Efectivo': (order.pago==='mercado_pago' ? 'Transferencia' : order.pago));
       lines.push("Hola! Quiero confirmar el pedido #"+order.orderNumber);
       lines.push("Nombre: "+order.nombre+(order.telefono?(" — Tel: "+order.telefono):""));
       lines.push("Retiro: Take Away");
       lines.push("Medio de pago: "+pagoLabel);
+      if(order.cupon){ lines.push("Cupón: "+order.cupon+" — "+(order.discount||0)+"% off"); }
       lines.push("------------------------------");
       for(var i=0;i<order.items.length;i++){
         var it=order.items[i];
@@ -289,6 +383,7 @@
     }
     function clearCart(){try{localStorage.setItem(CART_KEY,JSON.stringify({burger:{},drink:{}}))}catch(e){}}
 
+    /* === CREAR ORDEN === */
     function createOrder(){
       if(!Object.keys(cart.burger||{}).length && !Object.keys(cart.drink||{}).length){alert("Tu carrito está vacío.");return Promise.resolve(null);}
       var nombre=$("#inpNombre").value.trim(); if(!nombre){alert("Ingresá tu nombre.");return Promise.resolve(null);}
@@ -298,21 +393,27 @@
 
       return getNextOrderNumber().then(async function(next){
         orderNumber=next;
-        var order=buildOrder(orderNumber);
-        order.trackToken=trackToken;
+        var order = buildOrder(orderNumber);
+        order.trackToken = trackToken;
 
         var ref=db.collection("orders").doc();
         await ref.set(order);
-        createdId=ref.id;
+        createdId = ref.id;
 
+        // publicar versión pública para seguimiento
         await db.collection("order_public").doc(trackToken).set({
           orderId:createdId, orderNumber:orderNumber,
           status: order.status==='pending_payment' ? 'pending_payment' : 'accepted',
-          entrega:"take_away", pago:selectedPago(),
-          nombre: ($("#inpNombre").value.trim().split(" ")[0]||"Cliente"),
+          entrega: order.entrega || "take_away",
+          pago: order.pago || "",
+          nombre: (order.nombre||"Cliente").split(" ")[0],
+          total: order.total || calcTotalWithDiscount(),
           createdAt:firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt:firebase.firestore.FieldValue.serverTimestamp()
         },{merge:true});
+
+        // si cupón aplicado, opcional: aumentar contador de uso (si manejás usos)
+        // if(appliedCoupon && appliedCoupon.id){ db.collection('cupones').doc(appliedCoupon.id).update({ uses: firebase.firestore.FieldValue.increment(1) }).catch(()=>{}); }
 
         return {id:createdId,orderNumber:orderNumber,trackToken:trackToken};
       });
@@ -352,13 +453,21 @@
 
     // refrescar resumen si cambian cosas en otra pestaña
     window.addEventListener('storage', function(e){
-      if(e.key===CART_KEY || e.key===null){ cart = loadCart(); (function(){ var resumen=$("#resumen"),resTotal=$("#resTotal"); resumen.innerHTML=""; var k,obj,extras,unit,line,html;
-        function escapeHtml(s){return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-        for(k in cart.burger){ obj=cart.burger[k]; extras=[]; if(obj.extras && obj.extras.patty) extras.push("+"+obj.extras.patty+" medallón(es)"); if(obj.extras && obj.extras.cheddar) extras.push("+"+obj.extras.cheddar+" cheddar"); unit=unitWithExtras(obj); line=unit*(obj.qty||0); var notesEsc = obj.notes ? escapeHtml(obj.notes) : ""; html = '<div class=\"row\" style=\"align-items:flex-start\"><div><div><strong>'+(obj.qty||0)+'× '+(obj.item?escapeHtml(obj.item.name):"")+'</strong></div><div class=\"muted\">Papas: '+friesName(obj.fries)+(extras.length?(' · '+extras.join(' · ')):'')+'</div>'+(notesEsc?('<div class=\"muted\">Notas: '+notesEsc+'</div>'):'')+'</div><div>'+money(line)+'</div></div>'; resumen.insertAdjacentHTML("beforeend", html); }
-        for(k in cart.drink){ obj=cart.drink[k]; line=((obj.item&&obj.item.price)||0)*(obj.qty||0); html = '<div class=\"row\"><div><strong>'+(obj.qty||0)+'× '+(obj.item?escapeHtml(obj.item.name):"")+'</strong></div><div>'+money(line)+'</div></div>'; resumen.insertAdjacentHTML("beforeend", html); }
-        var notaGeneral = $("#inpNotas") ? $("#inpNotas").value.trim() : ""; if(notaGeneral){ var notaEsc = escapeHtml(notaGeneral); resumen.insertAdjacentHTML("beforeend", '<div style=\"margin-top:8px\"><strong>Nota del pedido</strong><div class=\"muted\">' + notaEsc + '</div></div>'); }
-        resTotal.textContent = money(calcTotal()); })(); }
+      if(e.key===CART_KEY || e.key===null){
+        cart = loadCart();
+        (function(){ var resumen=$("#resumen"),resTotal=$("#resTotal"); resumen.innerHTML=""; var k,obj,extras,unit,line,html;
+          function escapeHtml(s){return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+          for(k in cart.burger){ obj=cart.burger[k]; extras=[]; if(obj.extras && obj.extras.patty) extras.push("+"+obj.extras.patty+" medallón(es)"); if(obj.extras && obj.extras.cheddar) extras.push("+"+obj.extras.cheddar+" cheddar"); unit=unitWithExtras(obj); line=unit*(obj.qty||0); var notesEsc = obj.notes ? escapeHtml(obj.notes) : ""; html = '<div class=\"row\" style=\"align-items:flex-start\"><div><div><strong>'+(obj.qty||0)+'× '+(obj.item?escapeHtml(obj.item.name):"")+'</strong></div><div class=\"muted\">Papas: '+friesName(obj.fries)+(extras.length?(' · '+extras.join(' · ')):'')+'</div>'+(notesEsc?('<div class=\"muted\">Notas: '+notesEsc+'</div>'):'')+'</div><div>'+money(line)+'</div></div>'; resumen.insertAdjacentHTML("beforeend", html); }
+          for(k in cart.drink){ obj=cart.drink[k]; line=((obj.item&&obj.item.price)||0)*(obj.qty||0); html = '<div class=\"row\"><div><strong>'+(obj.qty||0)+'× '+(obj.item?escapeHtml(obj.item.name):"")+'</strong></div><div>'+money(line)+'</div></div>'; resumen.insertAdjacentHTML("beforeend", html); }
+          var notaGeneral = $("#inpNotas") ? $("#inpNotas").value.trim() : ""; if(notaGeneral){ var notaEsc = escapeHtml(notaGeneral); resumen.insertAdjacentHTML("beforeend", '<div style=\"margin-top:8px\"><strong>Nota del pedido</strong><div class=\"muted\">' + notaEsc + '</div></div>'); }
+          // mostrar cupón si aplica
+          if(appliedCoupon){ resumen.insertAdjacentHTML("beforeend", '<div style=\"margin-top:8px\"><strong>Cupon</strong><div class=\"muted\">Código: '+escapeHtml(appliedCoupon.codigo)+' — '+escapeHtml(String(appliedCoupon.descuento))+'% off</div></div>'); }
+          resTotal.textContent = money(calcTotalWithDiscount()); })();
+      }
     }, false);
+
+    // al cargar, render del resumen inicial
+    (function(){ var ev = new Event('storage'); window.dispatchEvent(ev); })();
 
   </script>
 </body>
