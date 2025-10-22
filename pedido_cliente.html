@@ -28,6 +28,9 @@
     .chip{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--ring);border-radius:999px;padding:10px 14px}
     .chip input{accent-color:var(--primary)}
     .muted{color:var(--muted)}
+    .muted-small{color:var(--muted); font-size:13px; margin-top:6px;}
+    .pay-hint{font-size:13px;color:var(--muted);margin-top:6px}
+    .chip-col{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
     .right .row{display:flex;align-items:center;justify-content:space-between;margin:10px 0}
     .total{font-weight:800;font-size:18px}
     textarea{width:100%;min-height:90px;border:1px solid var(--ring);border-radius:12px;padding:10px}
@@ -35,7 +38,6 @@
     .statusHint{font-size:13px;color:var(--muted);margin-top:10px}
     html,body{min-height:100%} body{position:relative}
     body::before{content:"";position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:clamp(240px,48vmin,560px);background:url("images/logo.png") center/contain no-repeat;opacity:.08;pointer-events:none;z-index:5}
-    .muted-small{color:var(--muted); font-size:13px; margin-top:6px;}
   </style>
 </head>
 <body>
@@ -63,9 +65,18 @@
 
       <div class="group">
         <label>Medio de pago</label>
+
+        <!-- envolvemos cada opción en columna para poder poner el texto debajo -->
         <div class="chips">
-          <label class="chip"><input type="radio" name="pago" value="mercado_pago"> Transferencia</label>
-          <label class="chip"><input type="radio" name="pago" value="efectivo"> En Local</label>
+          <div class="chip-col">
+            <label class="chip"><input type="radio" name="pago" value="mercado_pago"> Transferencia</label>
+            <div class="muted-small">Enviar comprobante por WhatsApp</div>
+          </div>
+
+          <div class="chip-col">
+            <label class="chip"><input type="radio" name="pago" value="efectivo"> En Local</label>
+            <div class="muted-small">Débito, efectivo o transferencia</div>
+          </div>
         </div>
       </div>
 
@@ -144,7 +155,6 @@
     function loadCart(){try{return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{}}}catch(e){return {burger:{},drink:{}}}}
     var cart=loadCart();
 
-    // util para calcular unidad con extras
     function unitWithExtras(it){
       var base=(it.item&&it.item.price)?it.item.price:(it.price||0);
       var pz=((it.extras&&it.extras.patty)?it.extras.patty:0)*((it.extras&&it.extras.EXTRA_PRICE_PATTY)?it.extras.EXTRA_PRICE_PATTY:0);
@@ -153,13 +163,11 @@
     }
     function calcTotal(){var t=0,k,obj;for(k in cart.burger){obj=cart.burger[k];t+=unitWithExtras(obj)*(obj.qty||0)}for(k in cart.drink){obj=cart.drink[k];t+=((obj.item&&obj.item.price)||0)*(obj.qty||0)}return t}
 
-    // CORRECCIÓN: mapear correctamente las 3 opciones de papas
     function friesName(v){
       if(!v) return "—";
       if(v === "con_sazon") return "Sazonadas";
       if(v === "con_sal") return "Con sal";
       if(v === "sin_sal") return "Sin sal";
-      // compatibilidad con valores anteriores o variantes
       var s = String(v||'').toLowerCase();
       if(s.includes("sazon") && !s.includes("sin")) return "Sazonadas";
       if(s.includes("sin") && (s.includes("sal")||s.includes("sazon"))) return "Sin sal";
@@ -171,11 +179,7 @@
     (function renderResumen(){
       var resumen=$("#resumen"),resTotal=$("#resTotal");resumen.innerHTML="";
       var k,obj,extras,unit,line,html;
-
-      // helper escape
-      function escapeHtml(s){
-        return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      }
+      function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
       for(k in cart.burger){
         obj=cart.burger[k];
@@ -202,7 +206,6 @@
         resumen.insertAdjacentHTML("beforeend", html);
       }
 
-      // Nota general del pedido (si existe)
       var notaGeneral = $("#inpNotas").value ? $("#inpNotas").value.trim() : "";
       if(notaGeneral){
         var notaEsc = escapeHtml(notaGeneral);
@@ -218,7 +221,6 @@
       var items=[],k,b,d;
       for(k in cart.burger){
         b=cart.burger[k];
-        // preserve exactly what the cart stored for fries (no default override)
         items.push({
           type:"burger",
           id:b.item?b.item.id:"",
@@ -229,10 +231,10 @@
           extras:{
             patty:(b.extras&&b.extras.patty)?b.extras.patty:0,
             cheddar:(b.extras&&b.extras.cheddar)?b.extras.cheddar:0,
-            EXTRA_PRICE_PATTY:(b.extras&&b.extras.EXTRA_PRICE_PATTY)?b.extras.EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,
-            EXTRA_PRICE_CHEDDAR:(b.extras&&b.extras.EXTRA_PRICE_CHEDDAR)?b.extras.EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR
+            EXTRA_PRICE_PATTY:(b.extras&&b.extras.EXTRA_PRICE_PATTY)?b.extras.EXTRA_PRICE_PATTY:0,
+            EXTRA_PRICE_CHEDDAR:(b.extras&&b.extras.EXTRA_PRICE_CHEDDAR)?b.extras.EXTRA_PRICE_CHEDDAR:0
           },
-          notes: b.notes || "" // <-- nota por ítem
+          notes: b.notes || ""
         });
       }
       for(k in cart.drink){d=cart.drink[k];items.push({type:"drink",id:d.item?d.item.id:"",name:d.item?d.item.name:"",qty:d.qty||0,price:d.item?(d.item.price||0):0});}
@@ -243,7 +245,7 @@
         telefono:$("#inpTelefono").value.trim(),
         entrega:"take_away",
         pago:pago,
-        notes:$("#inpNotas").value.trim(), // <-- nota general del pedido
+        notes:$("#inpNotas").value.trim(),
         status:(pago==="mercado_pago"?"pending_payment":"accepted"),
         payment_status:(pago==="mercado_pago"?"pending_payment":"paid"),
         items:items,total:calcTotal(),source:"web",
@@ -251,7 +253,7 @@
       };
     }
 
-    /* === WhatsApp === */
+    /* === WhatsApp & creación === */
     function moneyFmt(n){return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0})}
     function buildWhatsappText(order){
       var lines=[],pagoLabel=(order.pago==='efectivo'?'Efectivo':'Mercado Pago');
@@ -266,12 +268,12 @@
           var extras=[]; if(it.extras&&it.extras.patty){extras.push("+"+it.extras.patty+" med")} if(it.extras&&it.extras.cheddar){extras.push("+"+it.extras.cheddar+" cheddar")}
           var friesLabel = friesName(it.fries);
           lines.push((it.qty||0)+"× "+(it.name||"")+" (Papas: "+friesLabel+(extras.length?(" · "+extras.join(" · ")):"")+")");
-          if(it.notes){lines.push("  Notas: "+it.notes);} // nota por ítem
+          if(it.notes){lines.push("  Notas: "+it.notes);}
         }else{ lines.push((it.qty||0)+"× "+(it.name||"")); }
       }
       lines.push("------------------------------");
       lines.push("Total: "+moneyFmt(order.total));
-      if(order.notes){lines.push("Notas del pedido: "+order.notes);} // nota general
+      if(order.notes){lines.push("Notas del pedido: "+order.notes);}
       if(order.trackToken){
         var base=location.origin;
         var trackUrl=base+"/gracias.html?id="+encodeURIComponent(order.id||"")+"&t="+encodeURIComponent(order.trackToken);
@@ -287,7 +289,6 @@
     }
     function clearCart(){try{localStorage.setItem(CART_KEY,JSON.stringify({burger:{},drink:{}}))}catch(e){}}
 
-    /* === Crear & Confirmar === */
     function createOrder(){
       if(!Object.keys(cart.burger||{}).length && !Object.keys(cart.drink||{}).length){alert("Tu carrito está vacío.");return Promise.resolve(null);}
       var nombre=$("#inpNombre").value.trim(); if(!nombre){alert("Ingresá tu nombre.");return Promise.resolve(null);}
@@ -338,7 +339,6 @@
           window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
         }).catch(function(e){
           console.error(e);
-          // aunque haya error al recuperar, redirigimos con la info mínima
           clearCart();
           window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
         });
@@ -350,9 +350,9 @@
       });
     };
 
-    // Si el usuario edita la nota o el carrito desde otra pestaña, sería bueno refrescar resumen:
+    // refrescar resumen si cambian cosas en otra pestaña
     window.addEventListener('storage', function(e){
-      if(e.key===CART_KEY || e.key===null){ cart = loadCart(); /* re-render resumen */ (function(){ var resumen=$("#resumen"),resTotal=$("#resTotal"); resumen.innerHTML=""; var k,obj,extras,unit,line,html;
+      if(e.key===CART_KEY || e.key===null){ cart = loadCart(); (function(){ var resumen=$("#resumen"),resTotal=$("#resTotal"); resumen.innerHTML=""; var k,obj,extras,unit,line,html;
         function escapeHtml(s){return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
         for(k in cart.burger){ obj=cart.burger[k]; extras=[]; if(obj.extras && obj.extras.patty) extras.push("+"+obj.extras.patty+" medallón(es)"); if(obj.extras && obj.extras.cheddar) extras.push("+"+obj.extras.cheddar+" cheddar"); unit=unitWithExtras(obj); line=unit*(obj.qty||0); var notesEsc = obj.notes ? escapeHtml(obj.notes) : ""; html = '<div class=\"row\" style=\"align-items:flex-start\"><div><div><strong>'+(obj.qty||0)+'× '+(obj.item?escapeHtml(obj.item.name):"")+'</strong></div><div class=\"muted\">Papas: '+friesName(obj.fries)+(extras.length?(' · '+extras.join(' · ')):'')+'</div>'+(notesEsc?('<div class=\"muted\">Notas: '+notesEsc+'</div>'):'')+'</div><div>'+money(line)+'</div></div>'; resumen.insertAdjacentHTML("beforeend", html); }
         for(k in cart.drink){ obj=cart.drink[k]; line=((obj.item&&obj.item.price)||0)*(obj.qty||0); html = '<div class=\"row\"><div><strong>'+(obj.qty||0)+'× '+(obj.item?escapeHtml(obj.item.name):"")+'</strong></div><div>'+money(line)+'</div></div>'; resumen.insertAdjacentHTML("beforeend", html); }
