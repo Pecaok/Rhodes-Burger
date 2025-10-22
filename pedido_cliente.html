@@ -431,37 +431,95 @@
       });
     }
 
-    // Evitar doble click: deshabilitar mientras se procesa
-    document.getElementById("btnConfirmar").onclick = function(){
-      var btn = this;
-      if(btn.disabled) return;
-      btn.disabled = true;
-      btn.classList.add('disabled');
+// Copiar alias al portapapeles si corresponde (Transferencia)
+async function copyAliasIfNeeded() {
+  var pago = selectedPago();
+  if (pago !== "mercado_pago") return false;
+  var alias = "rhodesburgers";
 
-      createOrder().then(function(res){
-        btn.disabled = false;
-        btn.classList.remove('disabled');
-        if(!res) return;
-        var pago=selectedPago();
-        localStorage.setItem("last_order_id",res.id);
-        db.collection("orders").doc(res.id).get().then(function(doc){
-          var order={id:res.id}; if(doc.exists){order=Object.assign(order,doc.data());}
-          order.trackToken=order.trackToken||res.trackToken;
-          if(pago==="efectivo"||pago==="mercado_pago"){ openWhatsApp(order); }
-          clearCart();
-          window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
-        }).catch(function(e){
-          console.error(e);
-          clearCart();
-          window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
-        });
-      }).catch(function(e){
-        console.error(e);
-        btn.disabled = false;
-        btn.classList.remove('disabled');
-        alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
-      });
-    };
+  // intento moderno
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(alias);
+      try {
+        const hint = document.getElementById("paymentHint");
+        if (hint) {
+          const prev = hint.textContent;
+          hint.textContent = prev + " — Alias copiado al portapapeles";
+          setTimeout(()=> { hint.textContent = prev; }, 2500);
+        }
+      } catch(_) {}
+      return true;
+    }
+  } catch (err) {
+    // continua a fallback
+  }
+
+  // fallback clásico: textarea + execCommand
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = alias;
+    // evitar mostrar en pantalla
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    if (ok) {
+      try {
+        const hint = document.getElementById("paymentHint");
+        if (hint) {
+          const prev = hint.textContent;
+          hint.textContent = prev + " — Alias copiado al portapapeles";
+          setTimeout(()=> { hint.textContent = prev; }, 2500);
+        }
+      } catch(_) {}
+      return true;
+    }
+  } catch (err) {
+    console.warn("No se pudo copiar el alias al portapapeles.", err);
+  }
+  return false;
+}
+
+// Evitar doble click: deshabilitar mientras se procesa
+document.getElementById("btnConfirmar").onclick = async function(){
+  var btn = this;
+  if(btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add('disabled');
+
+  try {
+    // si está en transferencia, intentar copiar alias antes de crear la orden
+    await copyAliasIfNeeded();
+
+    const res = await createOrder();
+    btn.disabled = false;
+    btn.classList.remove('disabled');
+    if(!res) return;
+    var pago = selectedPago();
+    localStorage.setItem("last_order_id",res.id);
+    try {
+      const doc = await db.collection("orders").doc(res.id).get();
+      var order={id:res.id}; if(doc.exists){order=Object.assign(order,doc.data());}
+      order.trackToken=order.trackToken||res.trackToken;
+      if(pago==="efectivo"||pago==="mercado_pago"){ openWhatsApp(order); }
+      clearCart();
+      window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
+    } catch(e) {
+      console.error(e);
+      clearCart();
+      window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
+    }
+  } catch(e) {
+    console.error(e);
+    btn.disabled = false;
+    btn.classList.remove('disabled');
+    alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
+  }
+};
 
     // refrescar resumen si cambian cosas en otra pestaña
     window.addEventListener('storage', function(e){
