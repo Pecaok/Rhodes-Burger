@@ -137,7 +137,7 @@
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
       projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
+      storageBucket: "rhodes-burguers.firebaseapp.com",
       messagingSenderId: "951646688091",
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
@@ -252,7 +252,9 @@
       resTotal.textContent = money(calcTotalWithDiscount());
     }
 
-    /* === APLICAR CUPÓN === */
+    /* === APLICAR CUPÓN ===
+       Ahora lee la colección 'coupons' (documentos por código)
+    */
     async function applyCouponCode(){
       var code = $("#inpCupon") ? $("#inpCupon").value.trim().toUpperCase() : "";
       var msg = $("#cuponMsg");
@@ -264,25 +266,53 @@
       if(!code){ msg.textContent = "Ingresá un código de cupón."; msg.classList.add("cupon-err"); renderResumen(); return; }
 
       try{
-        const q = await db.collection("cupones").where("codigo","==", code).limit(1).get();
-        if(q.empty){ msg.textContent = "Cupón inválido."; msg.classList.add("cupon-err"); renderResumen(); return; }
-        const data = q.docs[0].data();
-        if(data.activo === false){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
-        if(data.expiresAt){
-          let exp = data.expiresAt;
-          let expDate = exp.toDate ? exp.toDate() : new Date(exp);
-          if(Date.now() > expDate.getTime()){ msg.textContent = "Cupón vencido."; msg.classList.add("cupon-err"); renderResumen(); return; }
+        // Intentamos leer doc por ID (asumimos que cada cupón es un doc cuyo id es el código)
+        const docRef = db.collection("coupons").doc(code);
+        const docSnap = await docRef.get();
+
+        if(!docSnap.exists){
+          // fallback: buscar por campo 'codigo' si doc por id no existe
+          const q = await db.collection("coupons").where("codigo","==", code).limit(1).get();
+          if(q.empty){
+            msg.textContent = "Cupón inválido.";
+            msg.classList.add("cupon-err");
+            renderResumen();
+            return;
+          } else {
+            var data = q.docs[0].data();
+            var docId = q.docs[0].id;
+            // validar data
+            if(data.active === false || data.activo === false){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
+            if(data.expiresAt || data.expireAt){
+              let exp = data.expiresAt || data.expireAt;
+              let expDate = exp.toDate ? exp.toDate() : new Date(exp);
+              if(Date.now() > expDate.getTime()){ msg.textContent = "Cupón vencido."; msg.classList.add("cupon-err"); renderResumen(); return; }
+            }
+            var discount = Number(data.discount || data.descuento || 0) || 0;
+            appliedCoupon = { id: docId, codigo: data.codigo||code, descuento: discount, raw: data };
+            appliedDiscount = discount;
+            msg.textContent = "Cupón aplicado: " + appliedDiscount + "%";
+            msg.classList.add("cupon-ok");
+            renderResumen();
+            return;
+          }
+        } else {
+          var data2 = docSnap.data();
+          // validar campos (aceptamos tanto 'active' como 'activo' y 'discount' o 'descuento')
+          if((data2.active === false) || (data2.activo === false)){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
+          if(data2.expiresAt || data2.expireAt){
+            let exp = data2.expiresAt || data2.expireAt;
+            let expDate = exp.toDate ? exp.toDate() : new Date(exp);
+            if(Date.now() > expDate.getTime()){ msg.textContent = "Cupón vencido."; msg.classList.add("cupon-err"); renderResumen(); return; }
+          }
+          var discount2 = Number(data2.discount || data2.descuento || 0) || 0;
+          appliedCoupon = { id: docSnap.id, codigo: data2.codigo || code, descuento: discount2, raw: data2 };
+          appliedDiscount = discount2;
+          msg.textContent = "Cupón aplicado: " + appliedDiscount + "%";
+          msg.classList.add("cupon-ok");
+          renderResumen();
+          return;
         }
-        appliedCoupon = {
-          id: q.docs[0].id,
-          codigo: data.codigo || code,
-          descuento: Number(data.descuento) || 0,
-          raw: data
-        };
-        appliedDiscount = Number(appliedCoupon.descuento) || 0;
-        msg.textContent = "Cupón aplicado: " + appliedDiscount + "%";
-        msg.classList.add("cupon-ok");
-        renderResumen();
       }catch(err){
         console.error("Error al validar cupón:", err);
         msg.textContent = "Error al validar el cupón.";
@@ -431,95 +461,95 @@
       });
     }
 
-// Copiar alias al portapapeles si corresponde (Transferencia)
-async function copyAliasIfNeeded() {
-  var pago = selectedPago();
-  if (pago !== "mercado_pago") return false;
-  var alias = "rhodesburgers";
+    // Copiar alias al portapapeles si corresponde (Transferencia)
+    async function copyAliasIfNeeded() {
+      var pago = selectedPago();
+      if (pago !== "mercado_pago") return false;
+      var alias = "rhodesburgers";
 
-  // intento moderno
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(alias);
+      // intento moderno
       try {
-        const hint = document.getElementById("paymentHint");
-        if (hint) {
-          const prev = hint.textContent;
-          hint.textContent = prev + " — Alias copiado al portapapeles";
-          setTimeout(()=> { hint.textContent = prev; }, 2500);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(alias);
+          try {
+            const hint = document.getElementById("paymentHint");
+            if (hint) {
+              const prev = hint.textContent;
+              hint.textContent = prev + " — Alias copiado al portapapeles";
+              setTimeout(()=> { hint.textContent = prev; }, 2500);
+            }
+          } catch(_) {}
+          return true;
         }
-      } catch(_) {}
-      return true;
-    }
-  } catch (err) {
-    // continua a fallback
-  }
+      } catch (err) {
+        // continua a fallback
+      }
 
-  // fallback clásico: textarea + execCommand
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = alias;
-    // evitar mostrar en pantalla
-    ta.style.position = "fixed";
-    ta.style.left = "-9999px";
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, ta.value.length);
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    if (ok) {
+      // fallback clásico: textarea + execCommand
       try {
-        const hint = document.getElementById("paymentHint");
-        if (hint) {
-          const prev = hint.textContent;
-          hint.textContent = prev + " — Alias copiado al portapapeles";
-          setTimeout(()=> { hint.textContent = prev; }, 2500);
+        const ta = document.createElement("textarea");
+        ta.value = alias;
+        // evitar mostrar en pantalla
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (ok) {
+          try {
+            const hint = document.getElementById("paymentHint");
+            if (hint) {
+              const prev = hint.textContent;
+              hint.textContent = prev + " — Alias copiado al portapapeles";
+              setTimeout(()=> { hint.textContent = prev; }, 2500);
+            }
+          } catch(_) {}
+          return true;
         }
-      } catch(_) {}
-      return true;
+      } catch (err) {
+        console.warn("No se pudo copiar el alias al portapapeles.", err);
+      }
+      return false;
     }
-  } catch (err) {
-    console.warn("No se pudo copiar el alias al portapapeles.", err);
-  }
-  return false;
-}
 
-// Evitar doble click: deshabilitar mientras se procesa
-document.getElementById("btnConfirmar").onclick = async function(){
-  var btn = this;
-  if(btn.disabled) return;
-  btn.disabled = true;
-  btn.classList.add('disabled');
+    // Evitar doble click: deshabilitar mientras se procesa
+    document.getElementById("btnConfirmar").onclick = async function(){
+      var btn = this;
+      if(btn.disabled) return;
+      btn.disabled = true;
+      btn.classList.add('disabled');
 
-  try {
-    // si está en transferencia, intentar copiar alias antes de crear la orden
-    await copyAliasIfNeeded();
+      try {
+        // si está en transferencia, intentar copiar alias antes de crear la orden
+        await copyAliasIfNeeded();
 
-    const res = await createOrder();
-    btn.disabled = false;
-    btn.classList.remove('disabled');
-    if(!res) return;
-    var pago = selectedPago();
-    localStorage.setItem("last_order_id",res.id);
-    try {
-      const doc = await db.collection("orders").doc(res.id).get();
-      var order={id:res.id}; if(doc.exists){order=Object.assign(order,doc.data());}
-      order.trackToken=order.trackToken||res.trackToken;
-      if(pago==="efectivo"||pago==="mercado_pago"){ openWhatsApp(order); }
-      clearCart();
-      window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
-    } catch(e) {
-      console.error(e);
-      clearCart();
-      window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
-    }
-  } catch(e) {
-    console.error(e);
-    btn.disabled = false;
-    btn.classList.remove('disabled');
-    alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
-  }
-};
+        const res = await createOrder();
+        btn.disabled = false;
+        btn.classList.remove('disabled');
+        if(!res) return;
+        var pago = selectedPago();
+        localStorage.setItem("last_order_id",res.id);
+        try {
+          const doc = await db.collection("orders").doc(res.id).get();
+          var order={id:res.id}; if(doc.exists){order=Object.assign(order,doc.data());}
+          order.trackToken=order.trackToken||res.trackToken;
+          if(pago==="efectivo"||pago==="mercado_pago"){ openWhatsApp(order); }
+          clearCart();
+          window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
+        } catch(e) {
+          console.error(e);
+          clearCart();
+          window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
+        }
+      } catch(e) {
+        console.error(e);
+        btn.disabled = false;
+        btn.classList.remove('disabled');
+        alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
+      }
+    };
 
     // refrescar resumen si cambian cosas en otra pestaña
     window.addEventListener('storage', function(e){
