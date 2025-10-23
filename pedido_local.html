@@ -269,6 +269,35 @@
       },0);
     };
 
+    /* ====== Helper: normalizar etiqueta de papas ====== */
+    function normalizeFriesLabel(raw){
+      if(!raw && raw !== 0) return '';
+      let s = String(raw).toLowerCase();
+      // sustituir guiones/underscores por espacio, colapsar espacios
+      s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+
+      if(!s) return '';
+
+      // reglas
+      // si contiene 'sin' y 'sal' o 'sazon' => Sin sal
+      if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s) || s.includes('sin sal') || s.includes('sin sazon'))) {
+        return 'Sin sal';
+      }
+      // si tiene 'sazon' -> Sazonadas (prioritario antes de 'sal')
+      if(/\bsazon\b/.test(s) || s.includes('sazonadas') || s.includes('sazonada')) {
+        return 'Sazonadas';
+      }
+      // si contiene 'sal' -> Con sal
+      if(/\bsal\b/.test(s) || s.includes('con sal')) {
+        return 'Con sal';
+      }
+      // fallbacks
+      if(s.includes('sazon')) return 'Sazonadas';
+      if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
+      if(s.includes('sal')) return 'Con sal';
+      return '';
+    }
+
     /* ========== renderOrder + buildTicketHTML corregidas ========== */
 
     function renderOrder(doc){
@@ -286,7 +315,9 @@
         if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
         const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
 
-        const friesText = it.fries ? (String(it.fries).replace(/_/g,' ').replace(/con sazon/i,'Sazonadas').replace(/con sal/i,'Con sal').replace(/sin sal/i,'Sin sal')) : '—';
+        // NUEVA detección/normalización de papas
+        const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
+        const friesText = normalizeFriesLabel(friesRaw) || '—';
 
         return `<div class="item">
           <div>• <strong>${qty}× ${it.name||''}</strong></div>
@@ -371,14 +402,9 @@
         const baseSubtotal = base * qty;
         const lineTotal    = baseSubtotal + pattySum + cheddarSum;
 
+        // NORMALIZO el valor raw de papas para detectar correctamente "sin_sal", "con_sal", "con-sazon", "sin-sal", etc.
         const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
-        let friesLabel = '';
-        if(friesRaw){
-          const s = String(friesRaw).toLowerCase();
-          if(/\bcon sazon\b|\bconsazon\b|\bcon_sazon\b|\bcon-sazon\b|\bsazon\b/.test(s) && !/\bsin\b/.test(s)) friesLabel = 'Sazonadas';
-          else if(/\bcon sal\b|\bconsal\b|\bcon_sal\b|\bcon-sal\b|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) friesLabel = 'Con sal';
-          else if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s) || /\bsin_sazon\b/.test(s))) friesLabel = 'Sin sal';
-        }
+        const friesLabel = normalizeFriesLabel(friesRaw);
 
         return `
           <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
