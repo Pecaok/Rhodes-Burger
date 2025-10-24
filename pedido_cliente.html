@@ -19,7 +19,7 @@
     .btn.disabled, .btn[disabled]{ opacity:.6; pointer-events:none; }
     main{max-width:1100px;margin:24px auto;padding:0 12px;display:grid;grid-template-columns:1fr 420px;gap:18px}
     @media (max-width:900px){ main{grid-template-columns:1fr} }
-    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);Padding:16px}
     h1{font-size:32px;margin:10px 0 18px}
     label{font-weight:600;margin:6px 0;display:block}
     input[type="text"]{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
@@ -41,11 +41,10 @@
     .cupon-ok{color:green;font-weight:700}
     .cupon-err{color:#b00020;font-weight:700}
     .payment-hint-box{margin-top:8px;font-weight:700;color:var(--primary)}
+
     /* slots UI */
     .slots-row{display:flex;gap:8px;align-items:center}
     .slot-select{padding:10px;border-radius:12px;border:1px solid var(--ring);background:#fff}
-    .slot-full{color:#b00020;font-weight:800}
-    .slot-ok{color:var(--primary);font-weight:800}
     .slot-meta{font-size:13px;color:#666;margin-top:8px}
   </style>
 </head>
@@ -74,16 +73,21 @@
 
       <div class="group">
         <label>Medio de pago</label>
+
+        <!-- envolvemos cada opción en columna para poder poner el texto debajo -->
         <div class="chips">
           <div class="chip-col">
             <label class="chip"><input id="payTransfer" type="radio" name="pago" value="mercado_pago"> Transferencia</label>
             <div class="muted-small"></div>
           </div>
+
           <div class="chip-col">
             <label class="chip"><input id="payLocal" type="radio" name="pago" value="efectivo"> En Local</label>
             <div class="muted-small"></div>
           </div>
         </div>
+
+        <!-- Mensaje dinámico relacionado con la opción seleccionada -->
         <div id="paymentHint" class="payment-hint-box" aria-live="polite"></div>
       </div>
 
@@ -95,9 +99,9 @@
         <div class="muted" style="margin-top:6px">* Solo retiro por el local.</div>
       </div>
 
-      <!-- SLOTS: Solo hoy (intervalo base 15m). Adicionales según cantidad de hamburguesas -->
+      <!-- SLOT: selección de horario (se adapta a 10m/20m según cantidad de hamburguesas) -->
       <div class="group">
-        <label>Horario de retiro</label>
+        <label>Horario de retiro (solo hoy)</label>
         <div class="slots-row">
           <select id="slotTime" class="slot-select" aria-label="Seleccionar horario"></select>
           <button id="btnRefreshSlots" class="btn ghost" title="Actualizar turnos">🔁</button>
@@ -105,6 +109,7 @@
         <div id="slotNote" class="slot-meta">Cargando turnos...</div>
       </div>
 
+      <!-- CUPÓN -->
       <div class="group">
         <label>¿Tenés un cupón de descuento?</label>
         <div style="display:flex;gap:8px;align-items:center">
@@ -154,467 +159,530 @@
     if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
     var db = firebase.firestore();
 
-    /* === DEFAULT SLOTS CONFIG (puede ser sobreescrito por config/slots) ===
-         openTime, closeTime en "HH:mm"
-         baseInterval = 15 (minutos) -> slots base (siempre)
-         capacity = 4
-    */
-    var SLOTS_CONFIG = { openTime: "12:00", closeTime: "23:00", baseInterval: 15, capacity: 4 };
+    /* === ESTADO CUPÓN === */
+    var appliedCoupon = null; // objeto cupón leído desde Firestore (o null)
+    var appliedDiscount = 0;  // porcentaje (ej 10)
 
-    /* === CART / CUPON / PRECIOS === */
+    /* === CONTADOR UNIFICADO === */
+    async function getNextOrderNumber(){
+      let lastKnown = 0;
+      try {
+        const qs = await db.collection('orders').orderBy('orderNumber','desc').limit(1).get();
+        if(!qs.empty) lastKnown = Number(qs.docs[0].data().orderNumber)||0;
+      } catch(_){}
+      const ref = db.collection('config').doc('counters');
+      const next = await db.runTransaction(async tx=>{
+        const snap = await tx.get(ref);
+        const cur  = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
+        const base = Math.max(cur,lastKnown);
+        const nxt  = base + 1;
+        tx.set(ref,{orderNumber:nxt,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+        return nxt;
+      });
+      return next;
+    }
+
+    /* === UTIL & ESTADO === */
     var CART_KEY="rhodes_cart_v3";
-    function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}} } catch(e){ return {burger:{},drink:{}} } }
-    var cart = loadCart();
-
-    var appliedCoupon = null;
-    var appliedDiscount = 0;
+    function $(s){return document.querySelector(s)}
+    function money(n){return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0})}
+    function genTrackToken(len=22){var c="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",s="";for(var i=0;i<len;i++)s+=c[Math.floor(Math.random()*c.length)];return s;}
+    function loadCart(){try{return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{}}}catch(e){return {burger:{},drink:{}}}}
+    var cart=loadCart();
 
     const EXTRA_PRICE_PATTY = 2400, EXTRA_PRICE_CHEDDAR = 300;
+
     function unitWithExtras(it){
       var base=(it.item&&it.item.price)?it.item.price:(it.price||0);
       var pz=((it.extras&&it.extras.patty)?it.extras.patty:0)*((it.extras&&it.extras.EXTRA_PRICE_PATTY)?it.extras.EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY);
       var ch=((it.extras&&it.extras.cheddar)?it.extras.cheddar:0)*((it.extras&&it.extras.EXTRA_PRICE_CHEDDAR)?it.extras.EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR);
       return base+pz+ch;
     }
-    function calcRawTotal(){ var t=0; for(var k in cart.burger){ var o=cart.burger[k]; t += unitWithExtras(o)*(o.qty||0) } for(var k in cart.drink){ var d=cart.drink[k]; t += ((d.item&&d.item.price)||0)*(d.qty||0) } return t; }
-    function calcTotalWithDiscount(){ var raw=calcRawTotal(); if(appliedDiscount && appliedDiscount>0) return Math.round(raw*(1-(appliedDiscount/100))); return raw; }
-
-    function money(n){ return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}); }
-
-    // contar hamburguesas totales en cart
-    function totalBurgersInCart(){
-      var s=0; for(var k in cart.burger){ s += Number(cart.burger[k].qty||0); } return s;
+    function calcRawTotal(){
+      var t=0,k,obj;
+      for(k in cart.burger){obj=cart.burger[k]; t += unitWithExtras(obj)*(obj.qty||0)}
+      for(k in cart.drink){obj=cart.drink[k]; t += ((obj.item&&obj.item.price)||0)*(obj.qty||0)}
+      return t;
+    }
+    function calcTotalWithDiscount(){
+      var raw = calcRawTotal();
+      if(appliedDiscount && appliedDiscount>0){
+        return Math.round(raw * (1 - (appliedDiscount/100)));
+      }
+      return raw;
     }
 
-    /* === RENDER RESUMEN (muestra slot seleccionado) === */
+    function friesName(v){
+      if(!v) return "—";
+      if(v === "con_sazon") return "Sazonadas";
+      if(v === "con_sal") return "Con sal";
+      if(v === "sin_sal") return "Sin sal";
+      var s = String(v||'').toLowerCase();
+      if(s.includes("sazon") && !s.includes("sin")) return "Sazonadas";
+      if(s.includes("sin") && (s.includes("sal")||s.includes("sazon"))) return "Sin sal";
+      if(s.includes("sal")) return "Con sal";
+      return v;
+    }
+
+    // cuenta hamburguesas totales
+    function totalBurgersInCart(){
+      var s=0;
+      for(var k in cart.burger) s += Number(cart.burger[k].qty||0);
+      return s;
+    }
+
+    /* === RENDER RESUMEN === */
     function renderResumen(){
-      var resumen=document.getElementById('resumen'); resumen.innerHTML='';
-      function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+      var resumen=$("#resumen"),resTotal=$("#resTotal");resumen.innerHTML="";
+      var k,obj,extras,unit,line,html;
+      function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-      for(var k in cart.burger){
-        var o=cart.burger[k];
-        var extras=[];
-        if(o.extras && o.extras.patty) extras.push("+"+o.extras.patty+" medallón(es)");
-        if(o.extras && o.extras.cheddar) extras.push("+"+o.extras.cheddar+" cheddar");
-        var unit = unitWithExtras(o);
-        var line = unit * (o.qty||0);
-        resumen.insertAdjacentHTML('beforeend', '<div style="margin-bottom:8px"><strong>'+ (o.qty||0) +'× '+ esc(o.item?o.item.name:'') +'</strong><div class="muted">Papas: '+ esc(o.fries || '—') + (extras.length?(' · '+extras.join(' · ')) : '') + '</div><div>'+ money(line) +'</div></div>');
+      for(k in cart.burger){
+        obj=cart.burger[k];
+        extras=[];
+        if(obj.extras && obj.extras.patty){ extras.push("+"+obj.extras.patty+" medallón(es)"); }
+        if(obj.extras && obj.extras.cheddar){ extras.push("+"+obj.extras.cheddar+" cheddar"); }
+        unit = unitWithExtras(obj);
+        line = unit * (obj.qty||0);
+
+        var notesEsc = obj.notes ? escapeHtml(obj.notes) : "";
+
+        html = '<div class="row" style="align-items:flex-start"><div><div><strong>' +
+          (obj.qty||0) + '× ' + (obj.item?escapeHtml(obj.item.name):"") + '</strong></div>' +
+          '<div class="muted">Papas: ' + friesName(obj.fries) + (extras.length?(' · '+extras.join(' · ')):'') + '</div>' +
+          (notesEsc ? ('<div class="muted">Notas: ' + notesEsc + '</div>') : '') +
+          '</div><div>' + money(line) + '</div></div>';
+        resumen.insertAdjacentHTML("beforeend", html);
       }
-      for(var k in cart.drink){
-        var d=cart.drink[k];
-        resumen.insertAdjacentHTML('beforeend', '<div style="margin-bottom:8px"><strong>'+ (d.qty||0) +'× '+ esc(d.item?d.item.name:'') +'</strong><div>'+ money((d.item&&d.item.price||0)*(d.qty||0)) +'</div></div>');
+
+      for(k in cart.drink){
+        obj = cart.drink[k];
+        line = ((obj.item && obj.item.price) || 0) * (obj.qty||0);
+        html = '<div class="row"><div><strong>' + (obj.qty||0) + '× ' + (obj.item?escapeHtml(obj.item.name):"") + '</strong></div><div>' + money(line) + '</div></div>';
+        resumen.insertAdjacentHTML("beforeend", html);
       }
 
-      var nota = (document.getElementById('inpNotas').value||'').trim();
-      if(nota) resumen.insertAdjacentHTML('beforeend','<div style="margin-top:8px"><strong>Nota del pedido</strong><div class="muted">'+esc(nota)+'</div></div>');
+      var notaGeneral = $("#inpNotas").value ? $("#inpNotas").value.trim() : "";
+      if(notaGeneral){
+        var notaEsc = escapeHtml(notaGeneral);
+        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Nota del pedido</strong><div class="muted">' + notaEsc + '</div></div>');
+      }
 
+      // mostrar cupón (si aplica)
       if(appliedCoupon){
-        resumen.insertAdjacentHTML('beforeend','<div style="margin-top:8px"><strong>Cupón</strong><div class="muted">Código: '+esc(appliedCoupon.codigo)+' — '+esc(String(appliedCoupon.descuento))+'% off</div></div>');
+        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Cupon</strong><div class="muted">Código: '+escapeHtml(appliedCoupon.codigo)+' — '+escapeHtml(String(appliedCoupon.descuento))+'% off</div></div>');
       }
 
-      // slot selected
-      var slotSel = document.getElementById('slotTime');
+      // mostrar slot seleccionado
+      var slotSel = $("#slotTime");
       if(slotSel && slotSel.value){
         var opt = slotSel.selectedOptions[0];
-        var pretty = opt ? (opt.dataset.pretty || opt.textContent) : '';
-        if(pretty) resumen.insertAdjacentHTML('beforeend','<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">'+esc(pretty)+'</div></div>');
+        if(opt){
+          resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' + escapeHtml(opt.dataset.pretty || opt.textContent) + '</div></div>');
+        }
       }
 
-      document.getElementById('resTotal').textContent = money(calcTotalWithDiscount());
+      resTotal.textContent = money(calcTotalWithDiscount());
     }
 
-    /* === CUPÓN (igual que antes) === */
+    /* === APLICAR CUPÓN === (misma lógica que tenías) */
     async function applyCouponCode(){
-      var code = (document.getElementById('inpCupon').value||'').trim().toUpperCase();
-      var msg = document.getElementById('cuponMsg');
-      msg.textContent=''; msg.className='muted-small';
-      appliedCoupon = null; appliedDiscount = 0;
-      if(!code){ msg.textContent='Ingresá un código de cupón.'; msg.classList.add('cupon-err'); renderResumen(); return; }
-      try{
-        const docRef = db.collection('coupons').doc(code);
-        const snap = await docRef.get();
-        if(!snap.exists){
-          const q = await db.collection('coupons').where('codigo','==',code).limit(1).get();
-          if(q.empty){ msg.textContent='Cupón inválido.'; msg.classList.add('cupon-err'); renderResumen(); return; }
-          var d = q.docs[0].data(); var id = q.docs[0].id;
-          if(d.active===false || d.activo===false){ msg.textContent='Cupón inactivo.'; msg.classList.add('cupon-err'); renderResumen(); return; }
-          if(d.expiresAt||d.expireAt){ var exp = d.expiresAt||d.expireAt; var expDate = exp.toDate ? exp.toDate() : new Date(exp); if(Date.now()>expDate.getTime()){ msg.textContent='Cupón vencido.'; msg.classList.add('cupon-err'); renderResumen(); return; } }
-          var discount = Number(d.discount||d.descuento||0)||0;
-          appliedCoupon = { id:id, codigo:d.codigo||code, descuento:discount, raw:d }; appliedDiscount = discount; msg.textContent='Cupón aplicado: '+appliedDiscount+'%'; msg.classList.add('cupon-ok'); renderResumen(); return;
-        } else {
-          var d2 = snap.data();
-          if(d2.active===false || d2.activo===false){ msg.textContent='Cupón inactivo.'; msg.classList.add('cupon-err'); renderResumen(); return; }
-          if(d2.expiresAt||d2.expireAt){ var exp = d2.expiresAt||d2.expireAt; var expDate = exp.toDate ? exp.toDate() : new Date(exp); if(Date.now()>expDate.getTime()){ msg.textContent='Cupón vencido.'; msg.classList.add('cupon-err'); renderResumen(); return; } }
-          var discount2 = Number(d2.discount||d2.descuento||0)||0;
-          appliedCoupon = { id:snap.id, codigo:d2.codigo||code, descuento:discount2, raw:d2 }; appliedDiscount = discount2; msg.textContent='Cupón aplicado: '+appliedDiscount+'%'; msg.classList.add('cupon-ok'); renderResumen(); return;
-        }
-      }catch(e){ console.error(e); msg.textContent='Error al validar el cupón.'; msg.classList.add('cupon-err'); renderResumen(); }
-    }
-    document.getElementById('btnAplicarCupon').addEventListener('click', applyCouponCode);
+      var code = $("#inpCupon") ? $("#inpCupon").value.trim().toUpperCase() : "";
+      var msg = $("#cuponMsg");
+      msg.textContent = "";
+      msg.className = "muted-small";
+      appliedCoupon = null;
+      appliedDiscount = 0;
 
-    /* === PAYMENT HINT === */
-    function updatePaymentHint(){ var hint = document.getElementById('paymentHint'); var pago = (document.querySelector('input[name="pago"]:checked')||{}).value||''; if(pago==='mercado_pago') hint.textContent='Enviar comprobante por WhatsApp (alias: rhodesburgers)'; else if(pago==='efectivo') hint.textContent='Lo pagás cuando retiras'; else hint.textContent=''; }
-    document.querySelectorAll('input[name="pago"]').forEach(r=>r.addEventListener('change', updatePaymentHint));
+      if(!code){ msg.textContent = "Ingresá un código de cupón."; msg.classList.add("cupon-err"); renderResumen(); return; }
+
+      try{
+        const docRef = db.collection("coupons").doc(code);
+        const docSnap = await docRef.get();
+
+        if(!docSnap.exists){
+          const q = await db.collection("coupons").where("codigo","==", code).limit(1).get();
+          if(q.empty){
+            msg.textContent = "Cupón inválido.";
+            msg.classList.add("cupon-err");
+            renderResumen();
+            return;
+          } else {
+            var data = q.docs[0].data();
+            var docId = q.docs[0].id;
+            if(data.active === false || data.activo === false){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
+            if(data.expiresAt || data.expireAt){
+              let exp = data.expiresAt || data.expireAt;
+              let expDate = exp.toDate ? exp.toDate() : new Date(exp);
+              if(Date.now() > expDate.getTime()){ msg.textContent = "Cupón vencido."; msg.classList.add("cupon-err"); renderResumen(); return; }
+            }
+            var discount = Number(data.discount || data.descuento || 0) || 0;
+            appliedCoupon = { id: docId, codigo: data.codigo||code, descuento: discount, raw: data };
+            appliedDiscount = discount;
+            msg.textContent = "Cupón aplicado: " + appliedDiscount + "%";
+            msg.classList.add("cupon-ok");
+            renderResumen();
+            return;
+          }
+        } else {
+          var data2 = docSnap.data();
+          if((data2.active === false) || (data2.activo === false)){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
+          if(data2.expiresAt || data2.expireAt){
+            let exp = data2.expiresAt || data2.expireAt;
+            let expDate = exp.toDate ? exp.toDate() : new Date(exp);
+            if(Date.now() > expDate.getTime()){ msg.textContent = "Cupón vencido."; msg.classList.add("cupon-err"); renderResumen(); return; }
+          }
+          var discount2 = Number(data2.discount || data2.descuento || 0) || 0;
+          appliedCoupon = { id: docSnap.id, codigo: data2.codigo || code, descuento: discount2, raw: data2 };
+          appliedDiscount = discount2;
+          msg.textContent = "Cupón aplicado: " + appliedDiscount + "%";
+          msg.classList.add("cupon-ok");
+          renderResumen();
+          return;
+        }
+      }catch(err){
+        console.error("Error al validar cupón:", err);
+        msg.textContent = "Error al validar el cupón.";
+        msg.classList.add("cupon-err");
+        renderResumen();
+      }
+    }
+    $("#btnAplicarCupon").addEventListener("click", applyCouponCode);
+
+    /* === HANDLER: Mensaje dinámico para el pago === */
+    function updatePaymentHint(){
+      var hint = $("#paymentHint");
+      var pago = (document.querySelector('input[name="pago"]:checked')||{}).value || "";
+      if(pago === "mercado_pago"){
+        hint.textContent = "Enviar comprobante por WhatsApp (alias: rhodesburgers)";
+      } else if(pago === "efectivo"){
+        hint.textContent = "Lo pagás cuando retiras";
+      } else {
+        hint.textContent = "";
+      }
+    }
+    document.querySelectorAll('input[name="pago"]').forEach(r => r.addEventListener('change', updatePaymentHint));
     updatePaymentHint();
 
-    /* === SLOTS: generación y UI === */
+    /* === SLOTS: lógica 10m / 20m según hamburguesas === */
 
-    // parse "HH:mm" -> {h,m}
-    function parseHHMM(s){ if(!s) return null; var p=s.split(':'); if(p.length<2) return null; return {h:parseInt(p[0],10), m:parseInt(p[1],10)}; }
-    // format slot key YYYYMMDD_HHMM
+    // configuración (puedes cambiar aquí los horarios)
+    var OPEN_TIME = "12:00";   // formato HH:MM
+    var CLOSE_TIME = "23:00";  // formato HH:MM
+    var MINUTES_AHEAD = 5;     // no mostrar slots que estén dentro de los próximos X minutos
+
+    function parseHHMM(s){
+      if(!s) return null;
+      var parts = s.split(':'); if(parts.length<2) return null;
+      return { h: parseInt(parts[0],10), m: parseInt(parts[1],10) };
+    }
     function pad(n){ return String(n).padStart(2,'0'); }
     function slotKeyFromDate(d){ return ''+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes()); }
     function slotPretty(d){ return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
 
-    // generate base 15-min slots for today
-    function genBaseSlotsForToday(openHHMM, closeHHMM, interval){
+    function genSlotsForToday(intervalMin){
+      var open = parseHHMM(OPEN_TIME), close = parseHHMM(CLOSE_TIME);
       var today = new Date();
-      var base = new Date(today.getFullYear(), today.getMonth(), today.getDate(), openHHMM.h, openHHMM.m, 0,0);
-      var end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), closeHHMM.h, closeHHMM.m, 0,0);
-      var slots=[];
-      if(end.getTime() <= base.getTime()) return slots;
-      var cur = new Date(base.getTime());
-      while(cur.getTime() <= end.getTime() - interval*60*1000){
-        slots.push(new Date(cur.getTime()));
-        cur = new Date(cur.getTime() + interval*60*1000);
-      }
-      return slots;
-    }
-
-    // generate extra slots from a start time every step minutes until close
-    function genExtraSlotsFrom(startHHMM, step, closeHHMM){
-      var today = new Date();
-      var start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), startHHMM.h, startHHMM.m,0,0);
-      var end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), closeHHMM.h, closeHHMM.m,0,0);
-      var slots=[];
+      var start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), open.h, open.m, 0, 0);
+      var end   = new Date(today.getFullYear(), today.getMonth(), today.getDate(), close.h, close.m, 0, 0);
+      var slots = [];
+      if(!open || !close) return slots;
       if(end.getTime() <= start.getTime()) return slots;
       var cur = new Date(start.getTime());
-      while(cur.getTime() <= end.getTime() - 1){ // include last start <= end-1ms
+      while(cur.getTime() <= end.getTime() - intervalMin*60*1000){
         slots.push(new Date(cur.getTime()));
-        cur = new Date(cur.getTime() + step*60*1000);
+        cur = new Date(cur.getTime() + intervalMin*60*1000);
       }
       return slots;
     }
 
-    // fetch uses for many slot keys (returns map key->uses)
-    async function fetchUsesFor(slotKeys){
-      const out = {};
-      await Promise.all(slotKeys.map(async k=>{
-        try{
-          const s = await db.collection('slots').doc(k).get();
-          out[k] = s.exists ? (Number(s.data().uses)||0) : 0;
-        }catch(e){ out[k] = 0; }
-      }));
-      return out;
-    }
+    // rellena el <select> con slots (según cantidad de hamburguesas decide 10m o 20m)
+    function refreshSlotsUI(){
+      var sel = $("#slotTime");
+      sel.innerHTML = '';
+      $("#slotNote").textContent = 'Generando turnos...';
 
-    // load config from Firestore (optional)
-    async function loadSlotsConfig(){
-      try{
-        const snap = await db.collection('config').doc('slots').get();
-        if(snap.exists){
-          const d = snap.data();
-          SLOTS_CONFIG.openTime = d.openTime || SLOTS_CONFIG.openTime;
-          SLOTS_CONFIG.closeTime = d.closeTime || SLOTS_CONFIG.closeTime;
-          SLOTS_CONFIG.baseInterval = Number(d.baseInterval) || SLOTS_CONFIG.baseInterval;
-          SLOTS_CONFIG.capacity = Number(d.capacity) || SLOTS_CONFIG.capacity;
-        }
-      }catch(e){
-        console.warn('loadSlotsConfig failed', e);
-      }
-    }
+      var burgers = totalBurgersInCart();
+      var interval = burgers <= 2 ? 10 : 20;
 
-    // main function to compute union of slots and populate select
-    async function refreshSlotsUI(){
-      document.getElementById('slotNote').textContent = 'Cargando turnos...';
-      document.getElementById('slotTime').innerHTML = '';
-      await loadSlotsConfig();
-      const open = parseHHMM(SLOTS_CONFIG.openTime);
-      const close = parseHHMM(SLOTS_CONFIG.closeTime);
-      const baseInterval = Number(SLOTS_CONFIG.baseInterval) || 15;
-      const capacity = Number(SLOTS_CONFIG.capacity) || 4;
+      // generar
+      var slots = genSlotsForToday(interval);
 
-      if(!open || !close){ document.getElementById('slotNote').textContent = 'Horario de apertura/cierre mal configurado.'; return; }
+      // filtrar slots en el pasado (menos MINUTES_AHEAD)
+      var now = new Date();
+      var minTime = now.getTime() + MINUTES_AHEAD*60*1000;
 
-      // base slots (cada 15m)
-      const baseSlots = genBaseSlotsForToday(open, close, baseInterval);
-
-      // extras según cantidad de hamburguesas
-      const burgers = totalBurgersInCart();
-      let extraSlots = [];
-      if(burgers <= 2){
-        // cada 10 minutos desde 19:10
-        const start = parseHHMM('19:10');
-        if(start) extraSlots = genExtraSlotsFrom(start, 10, close);
-      } else {
-        // mas de 2 hamburguesas: cada 20m desde 19:20
-        const start = parseHHMM('19:20');
-        if(start) extraSlots = genExtraSlotsFrom(start, 20, close);
-      }
-
-      // union de slots (usamos key) -> Date
-      const map = new Map();
-      baseSlots.forEach(d=> map.set(slotKeyFromDate(d), d));
-      extraSlots.forEach(d=> map.set(slotKeyFromDate(d), d)); // si ya existía no duplica
-
-      // ordenar por hora
-      const entries = Array.from(map.entries()).sort((a,b)=> a[1].getTime() - b[1].getTime());
-
-      // fetch uses
-      const keys = entries.map(e=>e[0]);
-      const usesMap = await fetchUsesFor(keys);
-
-      // populate select with info: text = HH:MM (remaining e.g. 2/4) and disable if uses>=capacity or time < now+5min
-      const sel = document.getElementById('slotTime');
-      const now = new Date();
-      entries.forEach(([k,d])=>{
-        const uses = usesMap[k] || 0;
-        const remaining = Math.max(0, capacity - uses);
-        const opt = document.createElement('option');
-        opt.value = k;
+      for(var i=0;i<slots.length;i++){
+        var d = slots[i];
+        var key = slotKeyFromDate(d);
+        var opt = document.createElement('option');
+        opt.value = key;
         opt.dataset.pretty = slotPretty(d);
-        opt.dataset.timeIso = d.toISOString();
-        // show remaining and if it's an "extra" slot (10/20) mark with star
-        const isExtra = !baseSlots.find(b=> b.getTime() === d.getTime());
-        opt.textContent = slotPretty(d) + ' — ' + remaining + '/' + capacity + (isExtra? ' (slot especial)':'');
-        if(uses >= capacity) { opt.disabled = true; opt.className='slot-full'; }
-        else opt.className='slot-ok';
-
-        // also block if slot time is in the past or less than 5 minutes away
-        if(d.getTime() <= now.getTime() + (5*60*1000)){ opt.disabled = true; opt.textContent += ' — no disponible'; }
-
+        opt.dataset.iso = d.toISOString();
+        opt.textContent = slotPretty(d);
+        if(d.getTime() <= minTime){
+          opt.disabled = true;
+          opt.textContent += ' — no disponible';
+        }
         sel.appendChild(opt);
-      });
+      }
 
-      // auto-select first available
-      const first = sel.querySelector('option:not([disabled])');
-      if(first) sel.value = first.value;
-      else if(sel.options.length === 0) sel.appendChild(new Option('No hay turnos disponibles', ''));
-      // note text
-      document.getElementById('slotNote').textContent = 'Capacidad por horario: ' + capacity + ' pedidos. Los slots especiales (si aplica) se muestran marcados.';
+      if(sel.querySelector('option:not([disabled])')){
+        sel.value = sel.querySelector('option:not([disabled])').value;
+      } else if(sel.options.length === 0){
+        sel.appendChild(new Option('No hay turnos disponibles', ''));
+      }
+
+      $("#slotNote").textContent = 'Mostrando turnos cada ' + interval + ' minutos (según cantidad de hamburguesas).';
       renderResumen();
     }
 
-    document.getElementById('btnRefreshSlots').addEventListener('click', function(){ refreshSlotsUI(); });
-
-    /* === RESERVA + CREACION ORDEN (transacción segura) === */
-
-    // helper para obtener siguiente orderNumber en transacción y crear orden
-    function countersRef(){ return db.collection('config').doc('counters'); }
-
-    function buildOrderObject(orderNumber, slotKey, slotIso){
-      var items=[],k;
-      for(k in cart.burger){
-        var b = cart.burger[k];
-        items.push({
-          id: b.item?b.item.id:'',
-          name: b.item?b.item.name:'',
-          qty: b.qty||0,
-          price: b.item?(b.item.price||0):0,
-          fries: b.fries || '',
-          notes: b.notes || '',
-          extras: { patty: b.extras?.patty||0, cheddar: b.extras?.cheddar||0, EXTRA_PRICE_PATTY: b.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR: b.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR }
-        });
-      }
-      for(k in cart.drink){
-        var d = cart.drink[k];
-        items.push({ id: d.item?d.item.id:'', name:d.item?d.item.name:'', qty:d.qty||0, price:d.item?(d.item.price||0):0, fries:'', notes:'', extras:{} });
-      }
-      var pago = (document.querySelector('input[name="pago"]:checked')||{}).value||'';
-      var rawTotal = calcRawTotal();
-      var totalWithDiscount = calcTotalWithDiscount();
-      var order = {
-        orderNumber: orderNumber,
-        number: orderNumber,
-        nombre: (document.getElementById('inpNombre').value||'').trim(),
-        telefono: (document.getElementById('inpTelefono').value||'').trim(),
-        entrega: 'take_away',
-        pago: pago,
-        notes: (document.getElementById('inpNotas').value||'').trim(),
-        pickup_slot: slotKey || null,
-        pickup_time: slotIso || null,
-        status: (pago==='mercado_pago' ? 'pending_payment' : 'accepted'),
-        payment_status: (pago==='mercado_pago' ? 'pending_payment' : 'paid'),
-        items: items,
-        total: totalWithDiscount,
-        rawTotal: rawTotal,
-        source: 'web',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-      if(appliedCoupon){ order.cupon = appliedCoupon.codigo; order.discount = appliedDiscount; order.cuponId = appliedCoupon.id; }
-      return order;
-    }
-
-    async function createOrder(){
-      // basic validations
-      if(Object.keys(cart.burger||{}).length === 0 && Object.keys(cart.drink||{}).length === 0){ alert('Tu carrito está vacío.'); return null; }
-      var nombre = (document.getElementById('inpNombre').value||'').trim();
-      if(!nombre){ alert('Ingresá tu nombre.'); return null; }
-      var pago = (document.querySelector('input[name="pago"]:checked')||{}).value||'';
-      if(!pago){ alert('Elegí un medio de pago.'); return null; }
-
-      var slotSel = document.getElementById('slotTime');
-      if(!slotSel || !slotSel.value){ alert('Elegí un horario de retiro.'); return null; }
-      var slotKey = slotSel.value;
-      var slotIso = slotSel.selectedOptions[0].dataset.timeIso || null;
-
-      // reload config and capacity
-      await loadSlotsConfig();
-      var capacity = Number(SLOTS_CONFIG.capacity)||4;
-
-      // transaction
-      try{
-        var trackToken = (function(len=22){ var chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", s=''; for(var i=0;i<len;i++) s+=chars[Math.floor(Math.random()*chars.length)]; return s; })();
-        const res = await db.runTransaction(async tx=>{
-          const slotRef = db.collection('slots').doc(slotKey);
-          const slotSnap = await tx.get(slotRef);
-          const cur = slotSnap.exists ? (Number(slotSnap.data().uses)||0) : 0;
-          if(cur >= capacity) throw new Error('SLOT_FULL');
-
-          // increment slot
-          tx.set(slotRef, { uses: cur + 1, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
-
-          // bump counter
-          const cntRef = countersRef();
-          const cntSnap = await tx.get(cntRef);
-          const curCnt = cntSnap.exists ? (Number(cntSnap.data().orderNumber)||0) : 0;
-          const next = curCnt + 1;
-          tx.set(cntRef, { orderNumber: next, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
-
-          // create order
-          const orderRef = db.collection('orders').doc();
-          const orderObj = buildOrderObject(next, slotKey, slotIso);
-          orderObj.trackToken = trackToken;
-          tx.set(orderRef, orderObj);
-
-          // order_public
-          const pubRef = db.collection('order_public').doc(trackToken);
-          tx.set(pubRef, {
-            orderId: orderRef.id,
-            orderNumber: next,
-            status: orderObj.status === 'pending_payment' ? 'pending_payment' : 'accepted',
-            entrega: orderObj.entrega || 'take_away',
-            pago: orderObj.pago || '',
-            nombre: (orderObj.nombre||'Cliente').split(' ')[0],
-            total: orderObj.total || calcTotalWithDiscount(),
-            pickup_time: orderObj.pickup_time || null,
-            pickup_slot: orderObj.pickup_slot || null,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
-
-          return { orderId: orderRef.id, orderNumber: next, trackToken: trackToken };
-        }); // tx end
-        return res;
-      }catch(e){
-        if(e && e.message === 'SLOT_FULL'){
-          alert('El turno seleccionado se llenó en este momento. Elegí otro turno.');
-          await refreshSlotsUI();
-          return null;
-        }
-        console.error('createOrder tx failed', e);
-        alert('Error al confirmar el pedido. Reintentá.');
-        return null;
-      }
-    }
-
-    /* === WHATSAPP + FLOW final === */
-    function buildWhatsappText(order){
-      var lines=[];
-      var pagoLabel = (order.pago==='efectivo'?'Efectivo': (order.pago==='mercado_pago' ? 'Transferencia' : order.pago));
-      lines.push('Hola! Quiero confirmar el pedido #' + order.orderNumber);
-      lines.push('Nombre: ' + order.nombre + (order.telefono ? (' — Tel: '+order.telefono) : ''));
-      lines.push('Retiro: Take Away');
-      if(order.pickup_time){
-        try{ lines.push('Horario de retiro: ' + (new Date(order.pickup_time)).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false})); }catch(e){}
-      }
-      lines.push('Medio de pago: ' + pagoLabel);
-      if(order.cupon){ lines.push('Cupón: '+order.cupon+' — '+(order.discount||0)+'% off'); }
-      lines.push('------------------------------');
-      for(var i=0;i<order.items.length;i++){
-        var it = order.items[i];
-        if(it.name){
-          if(it.extras && (it.extras.patty || it.extras.cheddar)){
-            var extras = [];
-            if(it.extras.patty) extras.push('+'+it.extras.patty+' med');
-            if(it.extras.cheddar) extras.push('+'+it.extras.cheddar+' ched');
-            lines.push((it.qty||0) + '× ' + it.name + ' (' + (it.fries || '—') + (extras.length ? ' · ' + extras.join(' · ') : '') + ')');
-          } else {
-            lines.push((it.qty||0) + '× ' + it.name + (it.fries ? (' (Papas: '+it.fries+')') : ''));
-          }
-          if(it.notes) lines.push('  Notas: '+it.notes);
-        }
-      }
-      lines.push('------------------------------');
-      lines.push('Total: ' + (Number(order.total)||0).toLocaleString('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}));
-      if(order.notes) lines.push('Notas del pedido: '+order.notes);
-      if(order.trackToken){
-        var base = location.origin;
-        lines.push('Seguimiento: ' + base + '/gracias.html?id='+encodeURIComponent(order.id||'')+'&t='+encodeURIComponent(order.trackToken));
-      }
-      return encodeURIComponent(lines.join('\n'));
-    }
-
-    function openWhatsApp(order){
-      var PHONE_NUMBER = '5491170596483';
-      var txt = buildWhatsappText(order);
-      var url = 'https://wa.me/' + PHONE_NUMBER + '?text=' + txt;
-      window.open(url, '_blank');
-    }
-
-    // confirm button handler
-    document.getElementById('btnConfirmar').addEventListener('click', async function(){
-      var btn = this;
-      if(btn.disabled) return;
-      btn.disabled = true; btn.classList.add('disabled');
-
-      try{
-        // attempt create order (transaction reserves slot)
-        const res = await createOrder();
-        btn.disabled = false; btn.classList.remove('disabled');
-        if(!res) return;
-        localStorage.setItem('last_order_id', res.orderId);
-        // read order and open whatsapp if needed
-        try{
-          const doc = await db.collection('orders').doc(res.orderId).get();
-          var order = { id: res.orderId };
-          if(doc.exists) Object.assign(order, doc.data());
-          order.trackToken = order.trackToken || res.trackToken;
-          if(order.pago==='efectivo' || order.pago==='mercado_pago') openWhatsApp(order);
-          // clear cart & redirect
-          try{ localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{}})); }catch(_){}
-          window.location.href = 'gracias.html?id=' + encodeURIComponent(res.orderId) + '&t=' + encodeURIComponent(res.trackToken);
-        }catch(e){
-          console.warn('could not read created order', e);
-          try{ localStorage.setItem(CART_KEY, JSON.stringify({burger:{},drink:{}})); }catch(_){}
-          window.location.href = 'gracias.html?id=' + encodeURIComponent(res.orderId) + '&t=' + encodeURIComponent(res.trackToken);
-        }
-      }catch(e){
-        console.error(e);
-        btn.disabled = false; btn.classList.remove('disabled');
-        alert('Ocurrió un error al confirmar el pedido. Probá nuevamente.');
-      }
-    });
-
-    /* === refresh slots cuando cambie el carrito (para recalcular si <=2 o >2 hamburguesas) === */
+    // refrescar slots cuando cambie el carrito (escucha localStorage para cambios desde otra pestaña)
     window.addEventListener('storage', function(e){
       if(e.key === CART_KEY || e.key === null){
         cart = loadCart();
-        refreshSlotsUI().catch(()=>{});
+        refreshSlotsUI();
         renderResumen();
       }
     });
 
-    // init
-    (function init(){
-      // ensure cart loaded
+    // también permite refrescar manualmente
+    $("#btnRefreshSlots").addEventListener('click', function(){ cart = loadCart(); refreshSlotsUI(); });
+
+    /* === BUILD ORDER (incluye pickup_slot/time) === */
+    function selectedPago(){var el=document.querySelector('input[name="pago"]:checked');return el?el.value:"";}
+    function buildOrder(orderNumber){
+      var items=[],k,b,d;
+      for(k in cart.burger){
+        b=cart.burger[k];
+        items.push({
+          type:"burger",
+          id:b.item?b.item.id:"",
+          name:b.item?b.item.name:"",
+          qty:b.qty||0,
+          price:b.item?(b.item.price||0):0,
+          fries: b.fries || "",
+          extras:{
+            patty:(b.extras&&b.extras.patty)?b.extras.patty:0,
+            cheddar:(b.extras&&b.extras.cheddar)?b.extras.cheddar:0,
+            EXTRA_PRICE_PATTY:(b.extras&&b.extras.EXTRA_PRICE_PATTY)?b.extras.EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,
+            EXTRA_PRICE_CHEDDAR:(b.extras&&b.extras.EXTRA_PRICE_CHEDDAR)?b.extras.EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR
+          },
+          notes: b.notes || ""
+        });
+      }
+      for(k in cart.drink){d=cart.drink[k];items.push({type:"drink",id:d.item?d.item.id:"",name:d.item?d.item.name:"",qty:d.qty||0,price:d.item?(d.item.price||0):0});}
+      var pago=selectedPago();
+      var rawTotal = calcRawTotal();
+      var totalWithDiscount = calcTotalWithDiscount();
+
+      var slotSel = $("#slotTime");
+      var slotKey = slotSel && slotSel.value ? slotSel.value : null;
+      var slotIso = slotSel && slotSel.selectedOptions[0] ? slotSel.selectedOptions[0].dataset.iso : null;
+
+      var order = {
+        orderNumber:orderNumber, number:orderNumber,
+        nombre:$("#inpNombre").value.trim(),
+        telefono:$("#inpTelefono").value.trim(),
+        entrega:"take_away",
+        pago:pago,
+        notes:$("#inpNotas").value.trim(),
+        pickup_slot: slotKey,
+        pickup_time: slotIso,
+        status:(pago==="mercado_pago"?"pending_payment":"accepted"),
+        payment_status:(pago==="mercado_pago"?"pending_payment":"paid"),
+        items:items,
+        total: totalWithDiscount,
+        rawTotal: rawTotal,
+        source:"web",
+        createdAt:firebase.firestore.FieldValue.serverTimestamp()
+      };
+
+      if(appliedCoupon){
+        order.cupon = appliedCoupon.codigo;
+        order.discount = appliedDiscount;
+        order.cuponId = appliedCoupon.id;
+      }
+
+      return order;
+    }
+
+    /* === WhatsApp & creación === */
+    function moneyFmt(n){return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0})}
+    function buildWhatsappText(order){
+      var lines=[];
+      var pagoLabel = (order.pago==='efectivo'?'Efectivo': (order.pago==='mercado_pago' ? 'Transferencia' : order.pago));
+      lines.push("Hola! Quiero confirmar el pedido #"+order.orderNumber);
+      lines.push("Nombre: "+order.nombre+(order.telefono?(" — Tel: "+order.telefono):""));
+      lines.push("Retiro: Take Away");
+      if(order.pickup_time){
+        try{ lines.push("Horario de retiro: " + (new Date(order.pickup_time)).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false})); }catch(e){}
+      }
+      lines.push("Medio de pago: "+pagoLabel);
+      if(order.cupon){ lines.push("Cupón: "+order.cupon+" — "+(order.discount||0)+"% off"); }
+      lines.push("------------------------------");
+      for(var i=0;i<order.items.length;i++){
+        var it=order.items[i];
+        if(it.type==='burger'){
+          var extras=[]; if(it.extras&&it.extras.patty){extras.push("+"+it.extras.patty+" med")} if(it.extras&&it.extras.cheddar){extras.push("+"+it.extras.cheddar+" cheddar")}
+          var friesLabel = friesName(it.fries);
+          lines.push((it.qty||0)+"× "+(it.name||"")+" (Papas: "+friesLabel+(extras.length?(" · "+extras.join(" · ")):"")+")");
+          if(it.notes){lines.push("  Notas: "+it.notes);}
+        }else{ lines.push((it.qty||0)+"× "+(it.name||"")); }
+      }
+      lines.push("------------------------------");
+      lines.push("Total: "+moneyFmt(order.total));
+      if(order.notes){lines.push("Notas del pedido: "+order.notes);}
+      if(order.trackToken){
+        var base=location.origin;
+        var trackUrl=base+"/gracias.html?id="+encodeURIComponent(order.id||"")+"&t="+encodeURIComponent(order.trackToken);
+        lines.push("Seguimiento: "+trackUrl);
+      }
+      return encodeURIComponent(lines.join("\n"));
+    }
+    function openWhatsApp(order){
+      var PHONE_NUMBER="5491170596483";
+      var txt=buildWhatsappText(order);
+      var url="https://wa.me/"+PHONE_NUMBER+"?text="+txt;
+      window.open(url,"_blank");
+    }
+    function clearCart(){try{localStorage.setItem(CART_KEY,JSON.stringify({burger:{},drink:{}}))}catch(e){}}
+
+    /* === CREAR ORDEN === */
+    function createOrder(){
+      if(!Object.keys(cart.burger||{}).length && !Object.keys(cart.drink||{}).length){alert("Tu carrito está vacío.");return Promise.resolve(null);}
+      var nombre=$("#inpNombre").value.trim(); if(!nombre){alert("Ingresá tu nombre.");return Promise.resolve(null);}
+      var pago=selectedPago(); if(!pago){alert("Elegí un medio de pago.");return Promise.resolve(null);}
+
+      // validar slot seleccionado
+      var slotSel = $("#slotTime");
+      if(!slotSel || !slotSel.value){ alert("Elegí un horario de retiro."); return Promise.resolve(null); }
+
+      var createdId=null, orderNumber=null, trackToken=genTrackToken();
+
+      return getNextOrderNumber().then(async function(next){
+        orderNumber=next;
+        var order = buildOrder(orderNumber);
+        order.trackToken = trackToken;
+
+        var ref=db.collection("orders").doc();
+        await ref.set(order);
+        createdId = ref.id;
+
+        await db.collection("order_public").doc(trackToken).set({
+          orderId:createdId, orderNumber:orderNumber,
+          status: order.status==='pending_payment' ? 'pending_payment' : 'accepted',
+          entrega: order.entrega || "take_away",
+          pago: order.pago || "",
+          nombre: (order.nombre||"Cliente").split(" ")[0],
+          total: order.total || calcTotalWithDiscount(),
+          pickup_time: order.pickup_time || null,
+          pickup_slot: order.pickup_slot || null,
+          createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+        },{merge:true});
+
+        return {id:createdId,orderNumber:orderNumber,trackToken:trackToken};
+      });
+    }
+
+    // Copiar alias al portapapeles si corresponde (Transferencia)
+    async function copyAliasIfNeeded() {
+      var pago = selectedPago();
+      if (pago !== "mercado_pago") return false;
+      var alias = "rhodesburgers";
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(alias);
+          try {
+            const hint = document.getElementById("paymentHint");
+            if (hint) {
+              const prev = hint.textContent;
+              hint.textContent = prev + " — Alias copiado al portapapeles";
+              setTimeout(()=> { hint.textContent = prev; }, 2500);
+            }
+          } catch(_) {}
+          return true;
+        }
+      } catch (err) {}
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = alias;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (ok) {
+          try {
+            const hint = document.getElementById("paymentHint");
+            if (hint) {
+              const prev = hint.textContent;
+              hint.textContent = prev + " — Alias copiado al portapapeles";
+              setTimeout(()=> { hint.textContent = prev; }, 2500);
+            }
+          } catch(_) {}
+          return true;
+        }
+      } catch (err) { console.warn("No se pudo copiar el alias al portapapeles.", err); }
+      return false;
+    }
+
+    // Evitar doble click: deshabilitar mientras se procesa
+    document.getElementById("btnConfirmar").onclick = async function(){
+      var btn = this;
+      if(btn.disabled) return;
+      btn.disabled = true;
+      btn.classList.add('disabled');
+
+      try {
+        await copyAliasIfNeeded();
+
+        const res = await createOrder();
+        btn.disabled = false;
+        btn.classList.remove('disabled');
+        if(!res) return;
+        var pago = selectedPago();
+        localStorage.setItem("last_order_id",res.id);
+        try {
+          const doc = await db.collection("orders").doc(res.id).get();
+          var order={id:res.id}; if(doc.exists){order=Object.assign(order,doc.data());}
+          order.trackToken=order.trackToken||res.trackToken;
+          if(pago==="efectivo"||pago==="mercado_pago"){ openWhatsApp(order); }
+          clearCart();
+          window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
+        } catch(e) {
+          console.error(e);
+          clearCart();
+          window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
+        }
+      } catch(e) {
+        console.error(e);
+        btn.disabled = false;
+        btn.classList.remove('disabled');
+        alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
+      }
+    };
+
+    // refrescar resumen si cambian cosas en otra pestaña
+    window.addEventListener('storage', function(e){
+      if(e.key===CART_KEY || e.key===null){
+        cart = loadCart();
+        refreshSlotsUI();
+        renderResumen();
+      }
+    }, false);
+
+    // inicialización
+    window.addEventListener('DOMContentLoaded', function(){
       cart = loadCart();
-      refreshSlotsUI().catch(err=>{ console.warn(err); document.getElementById('slotNote').textContent = 'No se pudieron cargar turnos.'; });
+      refreshSlotsUI();
       renderResumen();
-      // update resumen when user changes selects
       document.getElementById('slotTime').addEventListener('change', renderResumen);
       document.getElementById('btnRefreshSlots').addEventListener('click', refreshSlotsUI);
-    })();
+    });
 
   </script>
 </body>
