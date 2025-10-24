@@ -94,6 +94,13 @@
         <div class="muted" style="margin-top:6px">* Solo retiro por el local.</div>
       </div>
 
+      <!-- NUEVO: Horario de retiro -->
+      <div class="group">
+        <label>Horario de retiro</label>
+        <input id="inpHorario" type="time" placeholder="Ej: 20:30">
+        <div class="muted-small">Elegí la hora a la que pasarás a retirar (local).</div>
+      </div>
+
       <!-- CUPÓN -->
       <div class="group">
         <label>¿Tenés un cupón de descuento?</label>
@@ -249,6 +256,12 @@
         resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Cupon</strong><div class="muted">Código: '+escapeHtml(appliedCoupon.codigo)+' — '+escapeHtml(String(appliedCoupon.descuento))+'% off</div></div>');
       }
 
+      // mostrar horario de retiro si está seleccionado
+      var horario = (document.getElementById("inpHorario") && document.getElementById("inpHorario").value) ? document.getElementById("inpHorario").value.trim() : "";
+      if(horario){
+        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' + escapeHtml(horario) + '</div></div>');
+      }
+
       resTotal.textContent = money(calcTotalWithDiscount());
     }
 
@@ -366,6 +379,9 @@
       var rawTotal = calcRawTotal();
       var totalWithDiscount = calcTotalWithDiscount();
 
+      // leer horario (si el cliente lo seleccionó)
+      var horario = (document.getElementById("inpHorario") && document.getElementById("inpHorario").value) ? document.getElementById("inpHorario").value.trim() : "";
+
       var order = {
         orderNumber:orderNumber, number:orderNumber,
         nombre:$("#inpNombre").value.trim(),
@@ -373,6 +389,7 @@
         entrega:"take_away",
         pago:pago,
         notes:$("#inpNotas").value.trim(),
+        pickup_time: horario || null, // <-- agregado
         status:(pago==="mercado_pago"?"pending_payment":"accepted"),
         payment_status:(pago==="mercado_pago"?"pending_payment":"paid"),
         items:items,
@@ -399,6 +416,10 @@
       lines.push("Hola! Quiero confirmar el pedido #"+order.orderNumber);
       lines.push("Nombre: "+order.nombre+(order.telefono?(" — Tel: "+order.telefono):""));
       lines.push("Retiro: Take Away");
+      // incluir horario si existe
+      if(order.pickup_time){
+        lines.push("Horario de retiro: " + order.pickup_time);
+      }
       lines.push("Medio de pago: "+pagoLabel);
       if(order.cupon){ lines.push("Cupón: "+order.cupon+" — "+(order.discount||0)+"% off"); }
       lines.push("------------------------------");
@@ -435,6 +456,14 @@
       var nombre=$("#inpNombre").value.trim(); if(!nombre){alert("Ingresá tu nombre.");return Promise.resolve(null);}
       var pago=selectedPago(); if(!pago){alert("Elegí un medio de pago.");return Promise.resolve(null);}
 
+      // validar horario obligatorio para take_away
+      var entregaSeleccionada = (document.querySelector('input[name="entrega"]:checked')||{}).value || "take_away";
+      var horario = (document.getElementById("inpHorario") && document.getElementById("inpHorario").value) ? document.getElementById("inpHorario").value.trim() : "";
+      if(entregaSeleccionada === "take_away" && !horario){
+        alert("Elegí el horario de retiro.");
+        return Promise.resolve(null);
+      }
+
       var createdId=null, orderNumber=null, trackToken=genTrackToken();
 
       return getNextOrderNumber().then(async function(next){
@@ -453,6 +482,7 @@
           pago: order.pago || "",
           nombre: (order.nombre||"Cliente").split(" ")[0],
           total: order.total || calcTotalWithDiscount(),
+          pickup_time: order.pickup_time || null, // <-- agregado
           createdAt:firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt:firebase.firestore.FieldValue.serverTimestamp()
         },{merge:true});
