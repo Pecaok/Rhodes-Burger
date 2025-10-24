@@ -41,15 +41,19 @@
     .cupon-ok{color:green;font-weight:700}
     .cupon-err{color:#b00020;font-weight:700}
     .payment-hint-box{margin-top:8px;font-weight:700;color:var(--primary)}
-    /* slots buttons */
-    .slots-wrap{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-    .slot-btn{
-      appearance:none;border:1px solid var(--ring);background:#fff;padding:10px 12px;border-radius:12px;
-      min-width:96px;text-align:center;cursor:pointer;font-weight:800;
-      box-shadow:0 2px 6px rgba(0,0,0,.03)
+    /* select/list styles */
+    .slots-row{display:flex;gap:8px;align-items:center}
+    #slotsContainer{
+      -webkit-appearance:none;appearance:none;
+      border:1px solid var(--ring);
+      padding:10px 12px;
+      border-radius:12px;
+      font-weight:800;
+      min-width:220px;
+      background:#fff;
+      box-shadow:0 2px 6px rgba(0,0,0,.03);
     }
-    .slot-btn.selected{background:var(--primary);color:#fff;border-color:var(--primary)}
-    .slot-btn.full{opacity:.55;cursor:not-allowed;border-color:#eee;background:#fafafa}
+    #slotsContainer option[disabled]{ color:#999; }
     .slot-meta{font-size:13px;color:#666;margin-top:8px}
   </style>
 </head>
@@ -99,12 +103,16 @@
         <div class="muted" style="margin-top:6px">* Solo retiro por el local.</div>
       </div>
 
-      <!-- SLOTS: botones grandes -->
+      <!-- SLOTS: lista desplegable -->
       <div class="group">
         <label>Horario de retiro (solo hoy)</label>
         <div style="display:flex;gap:8px;align-items:center">
-          <div id="slotsContainer" class="slots-wrap" aria-live="polite"></div>
-          <button id="btnRefreshSlots" class="btn ghost" title="Actualizar turnos">🔁</button>
+          <div class="slots-row">
+            <select id="slotsContainer" aria-live="polite">
+              <option>Cargando...</option>
+            </select>
+            <button id="btnRefreshSlots" class="btn ghost" title="Actualizar turnos">🔁</button>
+          </div>
         </div>
         <div id="slotNote" class="slot-meta">Cargando turnos...</div>
       </div>
@@ -216,12 +224,10 @@
       slotListeners = [];
     }
 
-    // crea botones y adjunta listeners onSnapshot a cada doc generado
+    // subscribe & render in <select>
     async function subscribeAndRenderSlots(){
-      // limpiar listeners previos
       clearSlotListeners();
 
-      // preparar slots a mostrar segun carrito
       cart = loadCart();
       var burgers = totalBurgersInCart();
       var interval = (burgers <= 2) ? 10 : 20;
@@ -231,68 +237,72 @@
 
       currentDisplayedSlots = slots.map(d => ({ date: d, key: slotKeyFromDate(d) }));
 
-      // render placeholder buttons (disabled) mientras se subscriben
-      var cont = $("#slotsContainer");
-      cont.innerHTML = '';
+      var sel = $("#slotsContainer");
+      sel.innerHTML = '';
+
+      // add a placeholder first option
+      var ph = document.createElement('option');
+      ph.textContent = 'Seleccioná un horario...';
+      ph.value = '';
+      ph.selected = true;
+      ph.disabled = true;
+      sel.appendChild(ph);
+
+      // create options (initially disabled while we fetch counts)
       currentDisplayedSlots.forEach(s=>{
-        var btn = document.createElement('button');
-        btn.className = 'slot-btn';
-        btn.dataset.key = s.key;
-        btn.dataset.iso = s.date.toISOString();
-        btn.textContent = slotPretty(s.date) + ' — ...';
-        btn.disabled = true;
-        cont.appendChild(btn);
+        var opt = document.createElement('option');
+        opt.value = s.key;
+        opt.dataset.iso = s.date.toISOString();
+        opt.textContent = slotPretty(s.date) + ' — ...';
+        opt.disabled = true;
+        sel.appendChild(opt);
       });
 
-      // attach onSnapshot to each slot doc so UI updates live
+      // attach realtime listeners to each slot doc
       currentDisplayedSlots.forEach(s=>{
         (function(slotObj){
           const ref = db.collection('slots').doc(slotObj.key);
-          // initial read + realtime updates
           const unsub = ref.onSnapshot(snap=>{
             try{
-              const cont = $("#slotsContainer");
-              if(!cont) return;
-              const btn = cont.querySelector('button[data-key="'+slotObj.key+'"]');
-              if(!btn) return;
+              const sel = $("#slotsContainer");
+              if(!sel) return;
+              const opt = sel.querySelector('option[value="'+slotObj.key+'"]');
+              if(!opt) return;
               const now = new Date();
               const minTime = now.getTime() + MINUTES_AHEAD*60*1000;
               const count = snap.exists ? (Number(snap.data().count||0)) : 0;
               const full = count >= MAX_PER_SLOT;
               const tooSoon = (new Date(slotObj.date)).getTime() <= minTime;
-              btn.dataset.count = count;
-              btn.textContent = slotPretty(slotObj.date) + (full ? ' — completo' : (' — ' + (MAX_PER_SLOT - count) + ' cupos'));
-              btn.classList.toggle('full', full);
-              btn.disabled = full || tooSoon;
-              // if previously selected and now full, unselect
-              if(btn.classList.contains('selected') && (full || btn.disabled)){
-                btn.classList.remove('selected');
-                // remove selectedSlot marker
-                delete btn.closest('body').selectedSlot;
+              opt.disabled = full || tooSoon;
+              opt.dataset.count = count;
+              // update label
+              opt.textContent = slotPretty(slotObj.date) + (full ? ' — completo' : (' — ' + (MAX_PER_SLOT - count) + ' cupos')) + (tooSoon ? ' (muy pronto)' : '');
+              // if this option was selected and became full/disabled => deselect and remove selectedSlot
+              var selSlot = sel.selectedSlot;
+              if(selSlot && selSlot.key === slotObj.key && (full || tooSoon)){
+                // deselect to placeholder
+                sel.selectedIndex = 0;
+                delete sel.selectedSlot;
+                // notify resumen update
+                renderResumen();
               }
             }catch(e){ console.warn('slot onSnapshot err', e); }
           }, err=>{ console.warn('slot snap err', err); });
-
           slotListeners.push(unsub);
         })(s);
       });
 
-      // una vez suscripciones creadas, permitir selección: delegación
-      // (delegation: single handler on container)
-      const contEl = $("#slotsContainer");
-      contEl.onclick = function(ev){
-        const btn = ev.target.closest('button.slot-btn');
-        if(!btn) return;
-        if(btn.disabled) return;
-        // deseleccionar prev
-        contEl.querySelectorAll('button.slot-btn.selected').forEach(b=>b.classList.remove('selected'));
-        btn.classList.add('selected');
-        // store selection on container for reading later
-        contEl.selectedSlot = { key: btn.dataset.key, iso: btn.dataset.iso, pretty: btn.textContent.split(' — ')[0].trim() };
+      // selection handler
+      sel.onchange = function(){
+        var val = sel.value;
+        if(!val){ delete sel.selectedSlot; renderResumen(); return; }
+        var opt = sel.querySelector('option[value="'+val+'"]');
+        if(!opt) { delete sel.selectedSlot; renderResumen(); return; }
+        if(opt.disabled){ delete sel.selectedSlot; sel.selectedIndex = 0; renderResumen(); return; }
+        sel.selectedSlot = { key: opt.value, iso: opt.dataset.iso, pretty: opt.textContent.split(' — ')[0].trim() };
         renderResumen();
       };
 
-      // set note text
       $("#slotNote").textContent = 'Mostrando turnos cada ' + interval + ' minutos, desde ' + startStr + '. (Max ' + MAX_PER_SLOT + ' pedidos/turno)';
     }
 
@@ -398,9 +408,9 @@
         resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Cupon</strong><div class="muted">Código: '+escapeHtml(appliedCoupon.codigo)+' — '+escapeHtml(String(appliedCoupon.descuento))+'% off</div></div>');
       }
       // mostrar slot seleccionado
-      var cont = $("#slotsContainer");
-      if(cont && cont.selectedSlot){
-        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' + escapeHtml(cont.selectedSlot.pretty || cont.selectedSlot.iso || '') + '</div></div>');
+      var sel = $("#slotsContainer");
+      if(sel && sel.selectedSlot){
+        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' + escapeHtml(sel.selectedSlot.pretty || sel.selectedSlot.iso || '') + '</div></div>');
       }
       resTotal.textContent = money(calcTotalWithDiscount());
     }
@@ -518,10 +528,10 @@
       }
       for(k in cart.drink){d=cart.drink[k];items.push({type:"drink",id:d.item?d.item.id:"",name:d.item?d.item.name:"",qty:d.qty||0,price:d.item?(d.item.price||0):0});}
       var pago = (document.querySelector('input[name="pago"]:checked')||{}).value || "";
-      var cont = $("#slotsContainer");
-      var sel = cont && cont.selectedSlot ? cont.selectedSlot : null;
-      var slotKey = sel ? sel.key : null;
-      var slotIso = sel ? sel.iso : null;
+      var sel = $("#slotsContainer");
+      var selObj = sel && sel.selectedSlot ? sel.selectedSlot : null;
+      var slotKey = selObj ? selObj.key : null;
+      var slotIso = selObj ? selObj.iso : null;
       var rawTotal = calcRawTotal();
       var totalWithDiscount = calcTotalWithDiscount();
 
@@ -584,11 +594,10 @@
         cart = loadCart();
         if(!Object.keys(cart.burger||{}).length && !Object.keys(cart.drink||{}).length){ alert("Tu carrito está vacío."); btn.disabled=false; btn.classList.remove('disabled'); return; }
         var nombre = $("#inpNombre").value.trim(); if(!nombre){ alert("Ingresá tu nombre."); btn.disabled=false; btn.classList.remove('disabled'); return; }
-        var cont = $("#slotsContainer");
-        if(!cont || !cont.selectedSlot){ alert("Elegí un horario de retiro."); btn.disabled=false; btn.classList.remove('disabled'); return; }
-        // comprobar que el botón seleccionado no esté marcado como full
-        var btnSel = document.querySelector('button.slot-btn.selected');
-        if(!btnSel || btnSel.classList.contains('full') || btnSel.disabled){ alert("El horario elegido no está disponible. Elegí otro."); await refreshSlotsUI(); btn.disabled=false; btn.classList.remove('disabled'); return; }
+        var sel = $("#slotsContainer");
+        if(!sel || !sel.selectedSlot){ alert("Elegí un horario de retiro."); btn.disabled=false; btn.classList.remove('disabled'); return; }
+        var optSel = sel.querySelector('option[value="'+sel.selectedSlot.key+'"]');
+        if(!optSel || optSel.disabled){ alert("El horario elegido no está disponible. Elegí otro."); await refreshSlotsUI(); btn.disabled=false; btn.classList.remove('disabled'); return; }
 
         var nextNum = await getNextOrderNumber();
         var orderObj = buildOrderObject(nextNum);
