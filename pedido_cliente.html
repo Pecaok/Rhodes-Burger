@@ -41,6 +41,11 @@
     .cupon-ok{color:green;font-weight:700}
     .cupon-err{color:#b00020;font-weight:700}
     .payment-hint-box{margin-top:8px;font-weight:700;color:var(--primary)}
+    /* slots UI */
+    .slots-row{display:flex;gap:8px;align-items:center}
+    .slot-select{padding:10px;border-radius:12px;border:1px solid var(--ring);background:#fff}
+    .slot-full{color:#b00020;font-weight:800}
+    .slot-ok{color:var(--primary);font-weight:800}
   </style>
 </head>
 <body>
@@ -68,21 +73,16 @@
 
       <div class="group">
         <label>Medio de pago</label>
-
-        <!-- envolvemos cada opción en columna para poder poner el texto debajo -->
         <div class="chips">
           <div class="chip-col">
             <label class="chip"><input id="payTransfer" type="radio" name="pago" value="mercado_pago"> Transferencia</label>
             <div class="muted-small"></div>
           </div>
-
           <div class="chip-col">
             <label class="chip"><input id="payLocal" type="radio" name="pago" value="efectivo"> En Local</label>
             <div class="muted-small"></div>
           </div>
         </div>
-
-        <!-- Mensaje dinámico relacionado con la opción seleccionada -->
         <div id="paymentHint" class="payment-hint-box" aria-live="polite"></div>
       </div>
 
@@ -94,11 +94,16 @@
         <div class="muted" style="margin-top:6px">* Solo retiro por el local.</div>
       </div>
 
-      <!-- NUEVO: Horario de retiro -->
+      <!-- NUEVO: Selector de slots (fecha+hora con intervalos) -->
       <div class="group">
         <label>Horario de retiro</label>
-        <input id="inpHorario" type="time" placeholder="Ej: 20:30">
-        <div class="muted-small">Elegí la hora a la que pasarás a retirar (local).</div>
+        <div class="slots-row" id="slotsUI">
+          <!-- Se llenará dinámicamente: select de días y select de turnos -->
+          <select id="slotDay" class="slot-select"></select>
+          <select id="slotTime" class="slot-select"></select>
+          <button id="btnRefreshSlots" class="btn ghost" title="Actualizar turnos">🔁</button>
+        </div>
+        <div id="slotNote" class="muted-small">Cargando turnos disponibles...</div>
       </div>
 
       <!-- CUPÓN -->
@@ -155,24 +160,20 @@
     var appliedCoupon = null; // objeto cupón leído desde Firestore (o null)
     var appliedDiscount = 0;  // porcentaje (ej 10)
 
-    /* === CONTADOR UNIFICADO === */
-    async function getNextOrderNumber(){
-      let lastKnown = 0;
-      try {
-        const qs = await db.collection('orders').orderBy('orderNumber','desc').limit(1).get();
-        if(!qs.empty) lastKnown = Number(qs.docs[0].data().orderNumber)||0;
-      } catch(_){}
-      const ref = db.collection('config').doc('counters');
-      const next = await db.runTransaction(async tx=>{
-        const snap = await tx.get(ref);
-        const cur  = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
-        const base = Math.max(cur,lastKnown);
-        const nxt  = base + 1;
-        tx.set(ref,{orderNumber:nxt,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
-        return nxt;
-      });
-      return next;
-    }
+    /* === CONFIG SLOTS (cargado desde Firestore) ===
+       doc: config/slots
+       {
+         openTime: "12:00",
+         closeTime: "23:00",
+         interval: 15,
+         daysAhead: 7,
+         capacity: 6
+       }
+    */
+    var SLOTS_CONFIG = { openTime: "12:00", closeTime: "23:00", interval:15, daysAhead:7, capacity:6 };
+
+    /* === CONTADOR UNIFICADO === (usado en la transacción principal) */
+    function countersRef(){ return db.collection('config').doc('counters'); }
 
     /* === UTIL & ESTADO === */
     var CART_KEY="rhodes_cart_v3";
@@ -182,10 +183,12 @@
     function loadCart(){try{return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{}}}catch(e){return {burger:{},drink:{}}}}
     var cart=loadCart();
 
+    /* === (mantengo tus funciones de precio y resumen) === */
+    const EXTRA_PRICE_PATTY = 2400, EXTRA_PRICE_CHEDDAR = 300;
     function unitWithExtras(it){
       var base=(it.item&&it.item.price)?it.item.price:(it.price||0);
-      var pz=((it.extras&&it.extras.patty)?it.extras.patty:0)*((it.extras&&it.extras.EXTRA_PRICE_PATTY)?it.extras.EXTRA_PRICE_PATTY:0);
-      var ch=((it.extras&&it.extras.cheddar)?it.extras.cheddar:0)*((it.extras&&it.extras.EXTRA_PRICE_CHEDDAR)?it.extras.EXTRA_PRICE_CHEDDAR:0);
+      var pz=((it.extras&&it.extras.patty)?it.extras.patty:0)*((it.extras&&it.extras.EXTRA_PRICE_PATTY)?it.extras.EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY);
+      var ch=((it.extras&&it.extras.cheddar)?it.extras.cheddar:0)*((it.extras&&it.extras.EXTRA_PRICE_CHEDDAR)?it.extras.EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR);
       return base+pz+ch;
     }
     function calcRawTotal(){
@@ -256,18 +259,16 @@
         resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Cupon</strong><div class="muted">Código: '+escapeHtml(appliedCoupon.codigo)+' — '+escapeHtml(String(appliedCoupon.descuento))+'% off</div></div>');
       }
 
-      // mostrar horario de retiro si está seleccionado
-      var horario = (document.getElementById("inpHorario") && document.getElementById("inpHorario").value) ? document.getElementById("inpHorario").value.trim() : "";
-      if(horario){
-        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' + escapeHtml(horario) + '</div></div>');
+      // mostrar slot seleccionado si hay
+      var selSlot = (document.getElementById("slotTime") && document.getElementById("slotTime").value) ? document.getElementById("slotTime").selectedOptions[0].dataset.pretty : "";
+      if(selSlot){
+        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' + escapeHtml(selSlot) + '</div></div>');
       }
 
       resTotal.textContent = money(calcTotalWithDiscount());
     }
 
-    /* === APLICAR CUPÓN ===
-       Ahora lee la colección 'coupons' (documentos por código)
-    */
+    /* === APLICAR CUPÓN === (idéntico al anterior) */
     async function applyCouponCode(){
       var code = $("#inpCupon") ? $("#inpCupon").value.trim().toUpperCase() : "";
       var msg = $("#cuponMsg");
@@ -279,12 +280,10 @@
       if(!code){ msg.textContent = "Ingresá un código de cupón."; msg.classList.add("cupon-err"); renderResumen(); return; }
 
       try{
-        // Intentamos leer doc por ID (asumimos que cada cupón es un doc cuyo id es el código)
         const docRef = db.collection("coupons").doc(code);
         const docSnap = await docRef.get();
 
         if(!docSnap.exists){
-          // fallback: buscar por campo 'codigo' si doc por id no existe
           const q = await db.collection("coupons").where("codigo","==", code).limit(1).get();
           if(q.empty){
             msg.textContent = "Cupón inválido.";
@@ -294,7 +293,6 @@
           } else {
             var data = q.docs[0].data();
             var docId = q.docs[0].id;
-            // validar data
             if(data.active === false || data.activo === false){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
             if(data.expiresAt || data.expireAt){
               let exp = data.expiresAt || data.expireAt;
@@ -311,7 +309,6 @@
           }
         } else {
           var data2 = docSnap.data();
-          // validar campos (aceptamos tanto 'active' como 'activo' y 'discount' o 'descuento')
           if((data2.active === false) || (data2.activo === false)){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
           if(data2.expiresAt || data2.expireAt){
             let exp = data2.expiresAt || data2.expireAt;
@@ -347,14 +344,181 @@
         hint.textContent = "";
       }
     }
-    // asignar listeners a radios
     document.querySelectorAll('input[name="pago"]').forEach(r => r.addEventListener('change', updatePaymentHint));
-    // inicializar al cargar
-    window.addEventListener('DOMContentLoaded', function(){ updatePaymentHint(); renderResumen(); });
 
-    /* === BUILD ORDER === */
+    /* === SLOTS: utilidades para generar y reservar slots === */
+
+    // parse "HH:mm" to {hour,minute}
+    function parseHHMM(s){
+      if(!s || typeof s !== 'string') return null;
+      var parts = s.split(':');
+      if(parts.length<2) return null;
+      return { h: parseInt(parts[0],10), m: parseInt(parts[1],10) };
+    }
+
+    // formato para id de slot: YYYYMMDD_HHMM
+    function slotKeyFromDate(d){
+      const pad = n => String(n).padStart(2,'0');
+      return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+    }
+    // formato legible
+    function slotPretty(d){
+      return d.toLocaleDateString('es-AR') +' '+ d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+    }
+
+    // genera array de días (Date at midnight local) para daysAhead
+    function genDaysArray(daysAhead){
+      var arr=[];
+      var now=new Date();
+      for(var i=0;i<=daysAhead;i++){
+        var dd=new Date(now.getFullYear(), now.getMonth(), now.getDate()+i, 0,0,0,0);
+        arr.push(dd);
+      }
+      return arr;
+    }
+
+    // generar slots para un día dado según open/close/interval
+    function genSlotsForDay(dayDate, openHHMM, closeHHMM, interval){
+      // dayDate is local midnight
+      var open = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate(), openHHMM.h, openHHMM.m, 0,0);
+      var close = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate(), closeHHMM.h, closeHHMM.m, 0,0);
+      var slots=[];
+      // si close <= open -> no slots
+      if(close.getTime() <= open.getTime()) return slots;
+      var cur = new Date(open.getTime());
+      while(cur.getTime() <= close.getTime() - (interval*60*1000)){
+        slots.push(new Date(cur.getTime()));
+        cur = new Date(cur.getTime() + interval*60*1000);
+      }
+      return slots;
+    }
+
+    // cargar config/slots desde Firestore
+    async function loadSlotsConfig(){
+      try{
+        const snap = await db.collection('config').doc('slots').get();
+        if(snap.exists){
+          const d = snap.data();
+          SLOTS_CONFIG.openTime = d.openTime || SLOTS_CONFIG.openTime;
+          SLOTS_CONFIG.closeTime = d.closeTime || SLOTS_CONFIG.closeTime;
+          SLOTS_CONFIG.interval = Number(d.interval) || SLOTS_CONFIG.interval;
+          SLOTS_CONFIG.daysAhead = Number(d.daysAhead) || SLOTS_CONFIG.daysAhead;
+          SLOTS_CONFIG.capacity = Number(d.capacity) || SLOTS_CONFIG.capacity;
+        }
+      }catch(e){
+        console.warn('loadSlotsConfig error', e);
+      }
+    }
+
+    // devuelve mapa { slotKey: uses }
+    async function fetchSlotsUsage(slotKeys){
+      // slotKeys: array of ids
+      const res = {};
+      await Promise.all(slotKeys.map(async k=>{
+        try{
+          const s = await db.collection('slots').doc(k).get();
+          res[k] = s.exists ? (Number(s.data().uses)||0) : 0;
+        }catch(e){
+          res[k] = 0;
+        }
+      }));
+      return res;
+    }
+
+    // build UI: populate day select and time select, mark full slots
+    async function refreshSlotsUI(){
+      $("#slotNote").textContent = "Cargando turnos disponibles...";
+      $("#slotDay").innerHTML = ""; $("#slotTime").innerHTML = "";
+      await loadSlotsConfig();
+
+      const openHHMM = parseHHMM(SLOTS_CONFIG.openTime);
+      const closeHHMM = parseHHMM(SLOTS_CONFIG.closeTime);
+      const interval = Number(SLOTS_CONFIG.interval) || 15;
+      const daysAhead = Number(SLOTS_CONFIG.daysAhead) || 0;
+      const capacity = Number(SLOTS_CONFIG.capacity) || 1;
+
+      if(!openHHMM || !closeHHMM){
+        $("#slotNote").textContent = "Configuración de horarios inválida. Contactá al local.";
+        return;
+      }
+
+      const days = genDaysArray(daysAhead);
+      // build mapping day -> slots (Date objects)
+      const daySlotsMap = {};
+      days.forEach(d=>{
+        const slots = genSlotsForDay(d, openHHMM, closeHHMM, interval);
+        daySlotsMap[d.toISOString().slice(0,10)] = slots; // key yyyy-mm-dd
+      });
+
+      // flatten keys to fetch usage
+      const allSlotDates = [];
+      for(const arr of Object.values(daySlotsMap)) arr.forEach(x=> allSlotDates.push(x));
+      const slotKeys = allSlotDates.map(slotKeyFromDate);
+
+      const usages = await fetchSlotsUsage(slotKeys);
+
+      // populate day select
+      const slotDay = $("#slotDay");
+      const slotTime = $("#slotTime");
+      days.forEach(d=>{
+        const opt = document.createElement('option');
+        const label = d.toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+        opt.value = d.toISOString().slice(0,10); // yyyy-mm-dd
+        opt.textContent = label;
+        slotDay.appendChild(opt);
+      });
+
+      // onchange -> fill times
+      function fillTimesForSelectedDay(){
+        slotTime.innerHTML = "";
+        const selectedDay = slotDay.value; // yyyy-mm-dd
+        const slots = daySlotsMap[selectedDay] || [];
+        if(slots.length === 0){
+          const opt = document.createElement('option');
+          opt.value = "";
+          opt.textContent = "No hay turnos en este día";
+          slotTime.appendChild(opt);
+          $("#slotNote").textContent = "Sin turnos disponibles en el día seleccionado.";
+          renderResumen();
+          return;
+        }
+        slots.forEach(sd=>{
+          const key = slotKeyFromDate(sd);
+          const uses = usages[key] || 0;
+          const opt = document.createElement('option');
+          opt.value = key; // slot id
+          opt.dataset.timeIso = sd.toISOString();
+          opt.dataset.pretty = slotPretty(sd);
+          opt.textContent = sd.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) + (uses >= capacity ? " — COMPLETO" : "");
+          if(uses >= capacity){
+            opt.disabled = true;
+            opt.className = 'slot-full';
+          } else {
+            opt.className = 'slot-ok';
+          }
+          slotTime.appendChild(opt);
+        });
+        const selectedAny = slotTime.querySelector('option:not([disabled])');
+        if(selectedAny) { slotTime.value = selectedAny.value; $("#slotNote").textContent = ""; }
+        else { $("#slotNote").textContent = "No quedan turnos con cupos libres en este día."; }
+        renderResumen();
+      }
+
+      slotDay.onchange = fillTimesForSelectedDay;
+      slotTime.onchange = renderResumen;
+      // select today if exists
+      slotDay.value = days[0].toISOString().slice(0,10);
+      fillTimesForSelectedDay();
+    }
+
+    $("#btnRefreshSlots").addEventListener('click', ()=>{ refreshSlotsUI(); });
+
+    /* === Resto: buildOrder, WhatsApp y creación (adaptado para usar slot reservation) === */
+
     function selectedPago(){var el=document.querySelector('input[name="pago"]:checked');return el?el.value:"";}
-    function buildOrder(orderNumber){
+
+    // build order object (without committing to Firestore)
+    function buildOrderObject(orderNumber, slotKey, slotIso){
       var items=[],k,b,d;
       for(k in cart.burger){
         b=cart.burger[k];
@@ -368,8 +532,8 @@
           extras:{
             patty:(b.extras&&b.extras.patty)?b.extras.patty:0,
             cheddar:(b.extras&&b.extras.cheddar)?b.extras.cheddar:0,
-            EXTRA_PRICE_PATTY:(b.extras&&b.extras.EXTRA_PRICE_PATTY)?b.extras.EXTRA_PRICE_PATTY:0,
-            EXTRA_PRICE_CHEDDAR:(b.extras&&b.extras.EXTRA_PRICE_CHEDDAR)?b.extras.EXTRA_PRICE_CHEDDAR:0
+            EXTRA_PRICE_PATTY:(b.extras&&b.extras.EXTRA_PRICE_PATTY)?b.extras.EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,
+            EXTRA_PRICE_CHEDDAR:(b.extras&&b.extras.EXTRA_PRICE_CHEDDAR)?b.extras.EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR
           },
           notes: b.notes || ""
         });
@@ -379,9 +543,6 @@
       var rawTotal = calcRawTotal();
       var totalWithDiscount = calcTotalWithDiscount();
 
-      // leer horario (si el cliente lo seleccionó)
-      var horario = (document.getElementById("inpHorario") && document.getElementById("inpHorario").value) ? document.getElementById("inpHorario").value.trim() : "";
-
       var order = {
         orderNumber:orderNumber, number:orderNumber,
         nombre:$("#inpNombre").value.trim(),
@@ -389,7 +550,8 @@
         entrega:"take_away",
         pago:pago,
         notes:$("#inpNotas").value.trim(),
-        pickup_time: horario || null, // <-- agregado
+        pickup_slot: slotKey || null,    // ej: 20251024_2015
+        pickup_time: slotIso || null,    // ISO time for readability
         status:(pago==="mercado_pago"?"pending_payment":"accepted"),
         payment_status:(pago==="mercado_pago"?"pending_payment":"paid"),
         items:items,
@@ -408,7 +570,6 @@
       return order;
     }
 
-    /* === WhatsApp & creación === */
     function moneyFmt(n){return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0})}
     function buildWhatsappText(order){
       var lines=[];
@@ -416,9 +577,9 @@
       lines.push("Hola! Quiero confirmar el pedido #"+order.orderNumber);
       lines.push("Nombre: "+order.nombre+(order.telefono?(" — Tel: "+order.telefono):""));
       lines.push("Retiro: Take Away");
-      // incluir horario si existe
       if(order.pickup_time){
-        lines.push("Horario de retiro: " + order.pickup_time);
+        // si viene ISO -> mostrar legible
+        try{ lines.push("Horario de retiro: " + (new Date(order.pickup_time)).toLocaleString('es-AR',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit',hour12:false})); }catch(e){}
       }
       lines.push("Medio de pago: "+pagoLabel);
       if(order.cupon){ lines.push("Cupón: "+order.cupon+" — "+(order.discount||0)+"% off"); }
@@ -448,56 +609,134 @@
       var url="https://wa.me/"+PHONE_NUMBER+"?text="+txt;
       window.open(url,"_blank");
     }
-    function clearCart(){try{localStorage.setItem(CART_KEY,JSON.stringify({burger:{},drink:{}}))}catch(e){}}
 
-    /* === CREAR ORDEN === */
-    function createOrder(){
+    /* === CREAR ORDEN + RESERVA DE SLOT (TRANSACCIÓN ÚNICA) ===
+       - Reservamos el slot incrementando slots/{slotKey}.uses
+       - Leemos/actualizamos counters.orderNumber
+       - Creamos orders/{newDoc} con orderNumber
+       - Creamos order_public/{trackToken}
+    */
+    async function createOrder(){
       if(!Object.keys(cart.burger||{}).length && !Object.keys(cart.drink||{}).length){alert("Tu carrito está vacío.");return Promise.resolve(null);}
       var nombre=$("#inpNombre").value.trim(); if(!nombre){alert("Ingresá tu nombre.");return Promise.resolve(null);}
       var pago=selectedPago(); if(!pago){alert("Elegí un medio de pago.");return Promise.resolve(null);}
 
-      // validar horario obligatorio para take_away
-      var entregaSeleccionada = (document.querySelector('input[name="entrega"]:checked')||{}).value || "take_away";
-      var horario = (document.getElementById("inpHorario") && document.getElementById("inpHorario").value) ? document.getElementById("inpHorario").value.trim() : "";
-      if(entregaSeleccionada === "take_away" && !horario){
-        alert("Elegí el horario de retiro.");
-        return Promise.resolve(null);
+      // slot seleccionado
+      var sel = (document.getElementById("slotTime") && document.getElementById("slotTime").value) ? document.getElementById("slotTime").value : "";
+      if(!sel){ alert("Elegí un horario de retiro."); return Promise.resolve(null); }
+
+      // reload config just before reserving
+      await loadSlotsConfig();
+      const capacity = Number(SLOTS_CONFIG.capacity) || 1;
+
+      // prepare values
+      var slotKey = sel; // id
+      var slotIso = document.getElementById("slotTime").selectedOptions[0].dataset.timeIso;
+
+      var trackToken = genTrackToken();
+
+      // run a single transaction that:
+      // - increments slots/{slotKey}.uses if below capacity
+      // - reads and increments config/counters.orderNumber to get orderNumber
+      // - creates orders/{doc} with orderNumber and pickup info
+      // - creates order_public/{trackToken} summary
+      try{
+        const result = await db.runTransaction(async tx=>{
+          const slotRef = db.collection('slots').doc(slotKey);
+          const countersRef = countersRef();
+          const slotSnap = await tx.get(slotRef);
+          const curUses = slotSnap.exists ? (Number(slotSnap.data().uses)||0) : 0;
+          if(curUses >= capacity){
+            throw new Error('SLOT_FULL');
+          }
+          // increment slot uses
+          tx.set(slotRef, { uses: curUses + 1, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+
+          // read & bump counter
+          const cSnap = await tx.get(countersRef);
+          const curCounter = cSnap.exists ? (Number(cSnap.data().orderNumber)||0) : 0;
+          const nextOrderNumber = curCounter + 1;
+          tx.set(countersRef, { orderNumber: nextOrderNumber, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+
+          // create order doc
+          const orderRef = db.collection('orders').doc();
+          const orderObj = buildOrderObject(nextOrderNumber, slotKey, slotIso);
+          orderObj.trackToken = trackToken;
+          // createdAt will be serverTimestamp inside transaction
+          tx.set(orderRef, orderObj);
+
+          // create public summary doc under order_public (id = trackToken)
+          const publicRef = db.collection('order_public').doc(trackToken);
+          tx.set(publicRef, {
+            orderId: orderRef.id,
+            orderNumber: nextOrderNumber,
+            status: orderObj.status==='pending_payment' ? 'pending_payment' : 'accepted',
+            entrega: orderObj.entrega || "take_away",
+            pago: orderObj.pago || "",
+            nombre: (orderObj.nombre||"Cliente").split(" ")[0],
+            total: orderObj.total || calcTotalWithDiscount(),
+            pickup_time: orderObj.pickup_time || null,
+            pickup_slot: orderObj.pickup_slot || null,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+
+          return { orderId: orderRef.id, orderNumber: nextOrderNumber, trackToken: trackToken };
+        }); // end transaction
+
+        return result; // {orderId, orderNumber, trackToken}
+      }catch(err){
+        if(err && err.message === 'SLOT_FULL'){
+          alert('El turno seleccionado se llenó en este momento. Elegí otro turno.');
+          // refrescar los slots UI para reflejar el cambio
+          await refreshSlotsUI();
+          return null;
+        }
+        console.error('Transaction failed', err);
+        alert('Error al confirmar el pedido. Reintentá.');
+        return null;
       }
-
-      var createdId=null, orderNumber=null, trackToken=genTrackToken();
-
-      return getNextOrderNumber().then(async function(next){
-        orderNumber=next;
-        var order = buildOrder(orderNumber);
-        order.trackToken = trackToken;
-
-        var ref=db.collection("orders").doc();
-        await ref.set(order);
-        createdId = ref.id;
-
-        await db.collection("order_public").doc(trackToken).set({
-          orderId:createdId, orderNumber:orderNumber,
-          status: order.status==='pending_payment' ? 'pending_payment' : 'accepted',
-          entrega: order.entrega || "take_away",
-          pago: order.pago || "",
-          nombre: (order.nombre||"Cliente").split(" ")[0],
-          total: order.total || calcTotalWithDiscount(),
-          pickup_time: order.pickup_time || null, // <-- agregado
-          createdAt:firebase.firestore.FieldValue.serverTimestamp(),
-          updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-        },{merge:true});
-
-        return {id:createdId,orderNumber:orderNumber,trackToken:trackToken};
-      });
     }
 
-    // Copiar alias al portapapeles si corresponde (Transferencia)
+    // Evitar doble click: deshabilitar mientras se procesa
+    document.getElementById("btnConfirmar").onclick = async function(){
+      var btn = this;
+      if(btn.disabled) return;
+      btn.disabled = true;
+      btn.classList.add('disabled');
+
+      try {
+        const res = await createOrder();
+        btn.disabled = false;
+        btn.classList.remove('disabled');
+        if(!res) return;
+        var pago = selectedPago();
+        localStorage.setItem("last_order_id",res.orderId);
+        try {
+          const doc = await db.collection("orders").doc(res.orderId).get();
+          var order={id:res.orderId}; if(doc.exists){order=Object.assign(order,doc.data());}
+          order.trackToken=order.trackToken||res.trackToken;
+          if(pago==="efectivo"||pago==="mercado_pago"){ openWhatsApp(order); }
+          clearCart();
+          window.location.href="gracias.html?id="+encodeURIComponent(res.orderId)+"&t="+encodeURIComponent(res.trackToken);
+        } catch(e) {
+          console.error(e);
+          clearCart();
+          window.location.href="gracias.html?id="+encodeURIComponent(res.orderId)+"&t="+encodeURIComponent(res.trackToken);
+        }
+      } catch(e) {
+        console.error(e);
+        btn.disabled = false;
+        btn.classList.remove('disabled');
+        alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
+      }
+    };
+
+    // Copiar alias al portapapeles si corresponde (Transferencia) - mantenido
     async function copyAliasIfNeeded() {
       var pago = selectedPago();
       if (pago !== "mercado_pago") return false;
       var alias = "rhodesburgers";
-
-      // intento moderno
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(alias);
@@ -511,15 +750,10 @@
           } catch(_) {}
           return true;
         }
-      } catch (err) {
-        // continua a fallback
-      }
-
-      // fallback clásico: textarea + execCommand
+      } catch (err) {}
       try {
         const ta = document.createElement("textarea");
         ta.value = alias;
-        // evitar mostrar en pantalla
         ta.style.position = "fixed";
         ta.style.left = "-9999px";
         document.body.appendChild(ta);
@@ -544,43 +778,6 @@
       return false;
     }
 
-    // Evitar doble click: deshabilitar mientras se procesa
-    document.getElementById("btnConfirmar").onclick = async function(){
-      var btn = this;
-      if(btn.disabled) return;
-      btn.disabled = true;
-      btn.classList.add('disabled');
-
-      try {
-        // si está en transferencia, intentar copiar alias antes de crear la orden
-        await copyAliasIfNeeded();
-
-        const res = await createOrder();
-        btn.disabled = false;
-        btn.classList.remove('disabled');
-        if(!res) return;
-        var pago = selectedPago();
-        localStorage.setItem("last_order_id",res.id);
-        try {
-          const doc = await db.collection("orders").doc(res.id).get();
-          var order={id:res.id}; if(doc.exists){order=Object.assign(order,doc.data());}
-          order.trackToken=order.trackToken||res.trackToken;
-          if(pago==="efectivo"||pago==="mercado_pago"){ openWhatsApp(order); }
-          clearCart();
-          window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
-        } catch(e) {
-          console.error(e);
-          clearCart();
-          window.location.href="gracias.html?id="+encodeURIComponent(res.id)+"&t="+encodeURIComponent(res.trackToken);
-        }
-      } catch(e) {
-        console.error(e);
-        btn.disabled = false;
-        btn.classList.remove('disabled');
-        alert("Ocurrió un error al confirmar el pedido. Probá nuevamente.");
-      }
-    };
-
     // refrescar resumen si cambian cosas en otra pestaña
     window.addEventListener('storage', function(e){
       if(e.key===CART_KEY || e.key===null){
@@ -590,8 +787,12 @@
     }, false);
 
     // inicialización
-    renderResumen();
-    updatePaymentHint();
+    (function init(){
+      // load slots UI and render resumen
+      refreshSlotsUI().catch(e=>{ console.warn('refreshSlotsUI failed', e); $("#slotNote").textContent = "No se pudieron cargar los turnos."; });
+      updatePaymentHint();
+      renderResumen();
+    })();
 
   </script>
 </body>
