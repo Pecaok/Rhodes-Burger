@@ -318,87 +318,78 @@
 
     /* ========== renderOrder + buildTicketHTML corregidas ========== */
 
-    function renderOrder(doc){
-      const o = doc.data(); const dt = pickDocDate(o);
-      const dtText = dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
-      const items = Array.isArray(o.items) ? o.items : [];
+   function renderOrder(doc){
+  const o = doc.data();
+  const dt = pickDocDate(o);
+  const dtText = dt ? dt.toLocaleDateString('es-AR') + ', ' + dt.toLocaleTimeString('es-AR') : '—';
+  const items = Array.isArray(o.items) ? o.items : [];
 
-      const lines = items.map(it=>{
-        const qty = it.qty||1;
-        const subtotal = (it.price||0)*qty
-          + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
-          + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
-        const extras = [];
-        if (it.extras?.patty) extras.push(`+${it.extras.patty} medallón(es)`);
-        if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
-        const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
+  const lines = items.map(it => {
+    const qty = it.qty || 1;
+    const subtotal = (it.price || 0) * qty
+      + (it.extras?.patty || 0) * (it.extras?.EXTRA_PRICE_PATTY || 0) * qty
+      + (it.extras?.cheddar || 0) * (it.extras?.EXTRA_PRICE_CHEDDAR || 0) * qty;
 
-        // NUEVA detección/normalización de papas
-        const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
-        const friesText = normalizeFriesLabel(friesRaw) || '—';
+    const extras = [];
+    if (it.extras?.patty) extras.push(`+${it.extras.patty} medallón(es)`);
+    if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
+    const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
 
-        return `<div class="item">
-          <div>• <strong>${qty}× ${it.name||''}</strong></div>
-          <div class="sub">Papas: ${friesText}${extrasLine}${it.notes?` · Nota: ${it.notes}`:''}</div>
-          <div class="sub">Subtotal: ${money(subtotal)}</div>
-        </div>`;
-      }).join("");
+    // Detectar papas o acompañamientos
+    const friesRaw = it.fries || it.side || (Array.isArray(it.sides) ? it.sides.join(', ') : '');
+    const friesNorm = normalizeFriesLabel(friesRaw);
+    const friesLine = friesNorm ? ` · Papas: ${friesNorm}` : '';
 
-      const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
-
-      const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
-      const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
-      const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
-
-      // nuevo: si existe pickup_time o pickup_slot mostramos chip
-      let pickupChip = '';
-      const pickTimeRaw = o.pickup_time || o.pickupTime || o.pickup || null;
-      const pickupPretty = formatSlotTime(pickTimeRaw);
-      if(!pickupPretty && o.pickup_slot) {
-        // intentar formatear pickup_slot tipo YYYYMMDD_HHMM o similar
-        const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
-        if(m) pickupPretty = m[1] + ':' + m[2];
-      }
-      if(pickupPretty){
-        pickupChip = `<span class="chip">Horario retiro: ${pickupPretty}</span>`;
-      }
-
-      const st = o.status ?? "accepted";
-      const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
-      const stateBtns = `<div class="stateBtns">
-        ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
-      </div>`;
-
-      const paymentPaid = (o.payment_status==='paid' || o.paid);
-      const payLine = `<div class="pay-line">
-        <span class="chip">Pago: ${o.pago||'—'}</span>
-        <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PAGADO':'✓ Marcar PENDIENTE'}</button>
-        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PENDIENTE DE PAGO':'PAGADO'}</span>
-        <button class="btn" data-print>🖨 Imprimir</button>
-      </div>`;
-
-      return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
-        <div class="order-head">
-          <div>
-            <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre??'Cliente'}</div>
-            <div class="muted">${dtText}</div>
-            <div class="chips">
-              <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
-              <span class="chip">Estado: ${st}</span>
-              <span class="chip">Retiro: ${o.entrega||'—'}</span>
-              ${telChip}${srcChip}${pickupChip}${cmtChip}
-            </div>
-            ${stateBtns}
-          </div>
-          <div>
-            <div class="right-total">${money(computeOrderTotal(o))}</div>
-            ${payLine}
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
-      </div>`;
+    // ✅ Mostrar comentario (individual o general)
+    let commentLine = '';
+    if (Array.isArray(it.comments) && it.comments.length > 0) {
+      // si hay varios comentarios (una por hamburguesa)
+      commentLine = it.comments.map((c, i) =>
+        `<div class="sub" style="color:#555">🍔 Comentario ${i + 1}: ${c}</div>`
+      ).join('');
+    } else if (it.comment) {
+      // si hay un único comentario
+      commentLine = `<div class="sub" style="color:#555">💬 ${it.comment}</div>`;
     }
+
+    return `
+      <div class="item">
+        <div><b>${qty}× ${it.name || 'Producto'}</b> — <span class="money">${money(subtotal)}</span></div>
+        ${extrasLine || friesLine ? `<div class="sub">${extrasLine}${friesLine}</div>` : ''}
+        ${commentLine}
+      </div>
+    `;
+  }).join('');
+
+  const total = computeOrderTotal(o);
+  const payState = o.paid ? 'pay-paid' : 'pay-pending';
+  const payLabel = o.paid ? 'PAGADO' : 'PENDIENTE';
+
+  return `
+    <div class="order ${o.status}">
+      <div class="order-head">
+        <div>
+          <div class="order-title">${displayOrderNumber(doc)} — ${o.name || 'Cliente'}</div>
+          <div class="muted">${dtText}</div>
+        </div>
+        <div class="right-total">${money(total)}</div>
+      </div>
+
+      <div class="items">${lines}</div>
+      <div class="divider"></div>
+      <div class="pay-line">
+        <span class="pay-pill ${payState}">${payLabel}</span>
+        <span class="chip">${o.deliveryType || o.type || 'take away'}</span>
+        ${o.paymentMethod ? `<span class="chip">${o.paymentMethod}</span>` : ''}
+      </div>
+      <div class="stateBtns">
+        ${STATE_SEQ.map(s => `
+          <button class="${btnStateClass(s)} ${o.status===s?'on':''}" onclick="setOrderStatus('${doc.id}','${s}')">${DISPLAY_LABEL(s)}</button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
 
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
