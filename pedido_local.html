@@ -273,17 +273,25 @@
     function normalizeFriesLabel(raw){
       if(!raw && raw !== 0) return '';
       let s = String(raw).toLowerCase();
+      // sustituir guiones/underscores por espacio, colapsar espacios
       s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+
       if(!s) return '';
+
+      // reglas
+      // si contiene 'sin' y 'sal' o 'sazon' => Sin sal
       if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s) || s.includes('sin sal') || s.includes('sin sazon'))) {
         return 'Sin sal';
       }
+      // si tiene 'sazon' -> Sazonadas (prioritario antes de 'sal')
       if(/\bsazon\b/.test(s) || s.includes('sazonadas') || s.includes('sazonada')) {
         return 'Sazonadas';
       }
+      // si contiene 'sal' -> Con sal
       if(/\bsal\b/.test(s) || s.includes('con sal')) {
         return 'Con sal';
       }
+      // fallbacks
       if(s.includes('sazon')) return 'Sazonadas';
       if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
       if(s.includes('sal')) return 'Con sal';
@@ -316,7 +324,7 @@
       return null;
     }
 
-    /* ========== renderOrder + buildTicketHTML corregidas ========== */
+    /* ========== renderOrder + buildTicketHTML corregidas (MUESTRA NOTAS POR UNIDADES) ========== */
 
     function renderOrder(doc){
       const o = doc.data(); const dt = pickDocDate(o);
@@ -337,9 +345,36 @@
         const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
         const friesText = normalizeFriesLabel(friesRaw) || '—';
 
+        // ---------- Comentarios: robusto para varios formatos ----------
+        // posibles campos: it.notes (string|array), it.comment, it.comments (array)
+        let perUnitNotes = null;
+        if (Array.isArray(it.notes)) perUnitNotes = it.notes;
+        else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
+        else if (Array.isArray(it.comment)) perUnitNotes = it.comment;
+
+        let commentHtml = '';
+        if (perUnitNotes && perUnitNotes.length){
+          // listar por unidad
+          commentHtml = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${c}</div>`).join('');
+        } else {
+          // un único string de nota
+          const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
+                       : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
+                       : (typeof it.notes === 'number' ? String(it.notes) : null);
+          if (single){
+            if (qty > 1){
+              commentHtml = `<div class="sub">• Nota: ${single} <small style="color:#666"> (aplica a las ${qty} unidades)</small></div>`;
+            } else {
+              commentHtml = `<div class="sub">• Nota: ${single}</div>`;
+            }
+          }
+        }
+        // ----------------------------------------------------------------
+
         return `<div class="item">
           <div>• <strong>${qty}× ${it.name||''}</strong></div>
-          <div class="sub">Papas: ${friesText}${extrasLine}${it.notes?` · Nota: ${it.notes}`:''}</div>
+          <div class="sub">Papas: ${friesText}${extrasLine ? (' · '+extrasLine.replace(/^ · /,'') ) : ''}${it.notes && typeof it.notes === 'string' && !Array.isArray(it.notes) ? '' : ''}</div>
+          ${commentHtml}
           <div class="sub">Subtotal: ${money(subtotal)}</div>
         </div>`;
       }).join("");
@@ -355,7 +390,6 @@
       const pickTimeRaw = o.pickup_time || o.pickupTime || o.pickup || null;
       const pickupPretty = formatSlotTime(pickTimeRaw);
       if(!pickupPretty && o.pickup_slot) {
-        // intentar formatear pickup_slot tipo YYYYMMDD_HHMM o similar
         const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
         if(m) pickupPretty = m[1] + ':' + m[2];
       }
@@ -433,17 +467,40 @@
         const baseSubtotal = base * qty;
         const lineTotal    = baseSubtotal + pattySum + cheddarSum;
 
-        // NORMALIZO el valor raw de papas para detectar correctamente "sin_sal", "con_sal", "con-sazon", "sin-sal", etc.
+        // NORMALIZO el valor raw de papas
         const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
         const friesLabel = normalizeFriesLabel(friesRaw);
+
+        // Comentarios: soporte array o string (si qty>1 dice que aplica a todas las unidades)
+        let perUnitNotes = null;
+        if (Array.isArray(it.notes)) perUnitNotes = it.notes;
+        else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
+        else if (Array.isArray(it.comment)) perUnitNotes = it.comment;
+
+        let commentPart = '';
+        if (perUnitNotes && perUnitNotes.length){
+          // mostrar enumeradas
+          commentPart = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${escapeHtml(c)}</div>`).join('');
+        } else {
+          const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
+                       : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
+                       : null;
+          if (single){
+            if (qty > 1){
+              commentPart = `<div class="sub">• Nota: ${escapeHtml(single)} (aplica a las ${qty} unidades)</div>`;
+            } else {
+              commentPart = `<div class="sub">• Nota: ${escapeHtml(single)}</div>`;
+            }
+          }
+        }
 
         return `
           <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
           ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
+          ${commentPart}
           <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
           ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>` : ''}
           ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>` : ''}
-          ${it.notes ? `<div class="sub">• Nota: ${escapeHtml(it.notes)}</div>` : ''}
           <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
           <div class="sep"></div>
         `;
@@ -461,7 +518,6 @@
       try{
         const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
         if(raw){
-          // Firestore Timestamp
           if(typeof raw.toDate === 'function'){ pickupPretty = raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
           else if(raw && typeof raw.seconds === 'number'){ pickupPretty = new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
           else if(typeof raw === 'string'){
