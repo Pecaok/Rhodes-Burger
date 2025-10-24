@@ -273,29 +273,47 @@
     function normalizeFriesLabel(raw){
       if(!raw && raw !== 0) return '';
       let s = String(raw).toLowerCase();
-      // sustituir guiones/underscores por espacio, colapsar espacios
       s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
-
       if(!s) return '';
-
-      // reglas
-      // si contiene 'sin' y 'sal' o 'sazon' => Sin sal
       if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s) || s.includes('sin sal') || s.includes('sin sazon'))) {
         return 'Sin sal';
       }
-      // si tiene 'sazon' -> Sazonadas (prioritario antes de 'sal')
       if(/\bsazon\b/.test(s) || s.includes('sazonadas') || s.includes('sazonada')) {
         return 'Sazonadas';
       }
-      // si contiene 'sal' -> Con sal
       if(/\bsal\b/.test(s) || s.includes('con sal')) {
         return 'Con sal';
       }
-      // fallbacks
       if(s.includes('sazon')) return 'Sazonadas';
       if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
       if(s.includes('sal')) return 'Con sal';
       return '';
+    }
+
+    /* ====== Helper: formatear pickup_time ====== */
+    function formatSlotTime(raw){
+      if(!raw) return null;
+      try{
+        // Firestore Timestamp
+        if(typeof raw.toDate === 'function') {
+          const d = raw.toDate(); return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        }
+        // object with seconds
+        if(raw && typeof raw.seconds === 'number') {
+          const d = new Date(raw.seconds * 1000); return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        }
+        // ISO string
+        if(typeof raw === 'string'){
+          const d = new Date(raw);
+          if(!isNaN(d)) return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+          // maybe pickup_slot like "20251004_1910" -> try parse last 4 digits HHMM
+          const m = raw.match(/(\d{2})(\d{2})$/);
+          if(m) return m[1]+':'+m[2];
+        }
+        // Date instance
+        if(raw instanceof Date) return raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+      }catch(e){}
+      return null;
     }
 
     /* ========== renderOrder + buildTicketHTML corregidas ========== */
@@ -332,6 +350,19 @@
       const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
       const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
 
+      // nuevo: si existe pickup_time o pickup_slot mostramos chip
+      let pickupChip = '';
+      const pickTimeRaw = o.pickup_time || o.pickupTime || o.pickup || null;
+      const pickupPretty = formatSlotTime(pickTimeRaw);
+      if(!pickupPretty && o.pickup_slot) {
+        // intentar formatear pickup_slot tipo YYYYMMDD_HHMM o similar
+        const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
+        if(m) pickupPretty = m[1] + ':' + m[2];
+      }
+      if(pickupPretty){
+        pickupChip = `<span class="chip">Horario retiro: ${pickupPretty}</span>`;
+      }
+
       const st = o.status ?? "accepted";
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const stateBtns = `<div class="stateBtns">
@@ -355,7 +386,7 @@
               <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
               <span class="chip">Estado: ${st}</span>
               <span class="chip">Retiro: ${o.entrega||'—'}</span>
-              ${telChip}${srcChip}${cmtChip}
+              ${telChip}${srcChip}${pickupChip}${cmtChip}
             </div>
             ${stateBtns}
           </div>
@@ -425,6 +456,27 @@
       const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
       const commentBlock = generalNote ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(generalNote)}</div></div><div class="hr"></div>` : '';
 
+      // formatear pickup_time si existe
+      let pickupPretty = null;
+      try{
+        const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
+        if(raw){
+          // Firestore Timestamp
+          if(typeof raw.toDate === 'function'){ pickupPretty = raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+          else if(raw && typeof raw.seconds === 'number'){ pickupPretty = new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+          else if(typeof raw === 'string'){
+            const d = new Date(raw);
+            if(!isNaN(d)) pickupPretty = d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+            else {
+              const m = raw.match(/(\d{2})(\d{2})$/);
+              if(m) pickupPretty = m[1]+':'+m[2];
+            }
+          } else if(raw instanceof Date) {
+            pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+          }
+        }
+      }catch(e){ pickupPretty = null; }
+
       return `
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Ticket ${escapeHtml(orderDisplay)}</title>
@@ -473,7 +525,10 @@
     <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${money(total)}</div></div>
     <div class="row total"><div class="l">TOTAL</div><div class="r">${money(total)}</div></div>
 
-    <div class="foot">${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}</div>
+    <div class="foot">
+      ${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}
+      ${pickupPretty ? `<div>Horario de retiro: ${escapeHtml(pickupPretty)}</div>` : ''}
+    </div>
   </div>
   <script>
     window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); });
