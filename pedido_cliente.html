@@ -16,6 +16,7 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:2px solid var(--primary);background:#fff;color:var(--primary);padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;text-decoration:none}
     .btn.primary{background:var(--primary);color:#fff}
     .btn.ghost{border-color:#e7e7e7;color:#333}
+    .btn.small{padding:6px 10px;border-radius:8px;font-size:14px}
     .btn.disabled, .btn[disabled]{ opacity:.6; pointer-events:none; }
     main{max-width:1100px;margin:24px auto;padding:0 12px;display:grid;grid-template-columns:1fr 420px;gap:18px}
     @media (max-width:900px){ main{grid-template-columns:1fr} }
@@ -41,19 +42,19 @@
     .cupon-ok{color:green;font-weight:700}
     .cupon-err{color:#b00020;font-weight:700}
     .payment-hint-box{margin-top:8px;font-weight:700;color:var(--primary)}
-    /* select/list styles */
-    .slots-row{display:flex;gap:8px;align-items:center}
-    #slotsContainer{
-      -webkit-appearance:none;appearance:none;
-      border:1px solid var(--ring);
-      padding:10px 12px;
-      border-radius:12px;
-      font-weight:800;
-      min-width:220px;
-      background:#fff;
-      box-shadow:0 2px 6px rgba(0,0,0,.03);
+
+    /* carousel UI */
+    .carousel{
+      display:flex;align-items:center;gap:12px;margin-top:8px;
     }
-    #slotsContainer option[disabled]{ color:#999; }
+    .arrow{
+      width:44px;height:44px;border-radius:10px;border:1px solid var(--ring);display:inline-grid;place-items:center;cursor:pointer;background:#fff;
+    }
+    .arrow.disabled{opacity:.5;cursor:not-allowed}
+    .slot-display{min-width:180px;padding:10px 14px;border-radius:10px;background:#fff;border:1px solid var(--ring);text-align:center;font-weight:800}
+    .slot-sub{font-size:13px;color:var(--muted);margin-top:6px}
+    .no-slots{color:#b00020;font-weight:700}
+
     .slot-meta{font-size:13px;color:#666;margin-top:8px}
   </style>
 </head>
@@ -103,15 +104,18 @@
         <div class="muted" style="margin-top:6px">* Solo retiro por el local.</div>
       </div>
 
-      <!-- SLOTS: lista desplegable -->
+      <!-- CAROUSEL DE SLOTS: flechitas -->
       <div class="group">
         <label>Horario de retiro (solo hoy)</label>
         <div style="display:flex;gap:8px;align-items:center">
-          <div class="slots-row">
-            <select id="slotsContainer" aria-live="polite">
-              <option>Cargando...</option>
-            </select>
-            <button id="btnRefreshSlots" class="btn ghost" title="Actualizar turnos">🔁</button>
+          <div class="carousel" id="slotsCarousel">
+            <div class="arrow" id="slotPrev" title="Anterior">◀</div>
+            <div class="slot-display" id="slotLabel">Cargando...</div>
+            <div class="arrow" id="slotNext" title="Siguiente">▶</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-left:8px">
+            <button id="btnRefreshSlots" class="btn ghost small" title="Actualizar turnos">🔁</button>
+            <div id="slotCount" class="slot-sub"></div>
           </div>
         </div>
         <div id="slotNote" class="slot-meta">Cargando turnos...</div>
@@ -160,7 +164,7 @@
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
       projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebaseapp.com",
+      storageBucket: "rhodes-burguers.firebasestorage.app",
       messagingSenderId: "951646688091",
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
@@ -215,16 +219,18 @@
       return slots;
     }
 
-    /* === SUSCRIPCIÓN EN VIVO A DOCS DE SLOTS === */
-    var slotListeners = []; // array de functions (unsubscribe)
-    var currentDisplayedSlots = []; // array of keys
+    /* === SUSCRIPCIÓN EN VIVO A DOCS DE SLOTS (carousel + hide full) === */
+    var slotListeners = []; // unsub functions
+    var allSlots = [];      // array of slotObj { date, key, count, full, tooSoon, unsub }
+    var visibleSlots = [];  // filtered (not full && not tooSoon) sorted
 
     function clearSlotListeners(){
-      slotListeners.forEach(fn => { try{ fn(); }catch(e){} });
+      allSlots.forEach(s => { try{ if(s.unsub) s.unsub(); }catch(e){} });
       slotListeners = [];
+      allSlots = [];
+      visibleSlots = [];
     }
 
-    // subscribe & render in <select>
     async function subscribeAndRenderSlots(){
       clearSlotListeners();
 
@@ -235,75 +241,111 @@
       var startAt = dateTodayAt(startStr);
       var slots = genSlots(startAt, interval);
 
-      currentDisplayedSlots = slots.map(d => ({ date: d, key: slotKeyFromDate(d) }));
+      // prepare slot objects
+      allSlots = slots.map(d => ({ date: d, key: slotKeyFromDate(d), count: 0, full: false, tooSoon: false, unsub: null }));
 
-      var sel = $("#slotsContainer");
-      sel.innerHTML = '';
-
-      // add a placeholder first option
-      var ph = document.createElement('option');
-      ph.textContent = 'Seleccioná un horario...';
-      ph.value = '';
-      ph.selected = true;
-      ph.disabled = true;
-      sel.appendChild(ph);
-
-      // create options (initially disabled while we fetch counts)
-      currentDisplayedSlots.forEach(s=>{
-        var opt = document.createElement('option');
-        opt.value = s.key;
-        opt.dataset.iso = s.date.toISOString();
-        opt.textContent = slotPretty(s.date) + ' — ...';
-        opt.disabled = true;
-        sel.appendChild(opt);
-      });
-
-      // attach realtime listeners to each slot doc
-      currentDisplayedSlots.forEach(s=>{
-        (function(slotObj){
-          const ref = db.collection('slots').doc(slotObj.key);
-          const unsub = ref.onSnapshot(snap=>{
-            try{
-              const sel = $("#slotsContainer");
-              if(!sel) return;
-              const opt = sel.querySelector('option[value="'+slotObj.key+'"]');
-              if(!opt) return;
-              const now = new Date();
-              const minTime = now.getTime() + MINUTES_AHEAD*60*1000;
-              const count = snap.exists ? (Number(snap.data().count||0)) : 0;
-              const full = count >= MAX_PER_SLOT;
-              const tooSoon = (new Date(slotObj.date)).getTime() <= minTime;
-              opt.disabled = full || tooSoon;
-              opt.dataset.count = count;
-              // update label
-              opt.textContent = slotPretty(slotObj.date) + (full ? ' — completo' : (' — ' + (MAX_PER_SLOT - count) + ' cupos')) + (tooSoon ? ' (muy pronto)' : '');
-              // if this option was selected and became full/disabled => deselect and remove selectedSlot
-              var selSlot = sel.selectedSlot;
-              if(selSlot && selSlot.key === slotObj.key && (full || tooSoon)){
-                // deselect to placeholder
-                sel.selectedIndex = 0;
-                delete sel.selectedSlot;
-                // notify resumen update
-                renderResumen();
-              }
-            }catch(e){ console.warn('slot onSnapshot err', e); }
-          }, err=>{ console.warn('slot snap err', err); });
-          slotListeners.push(unsub);
-        })(s);
-      });
-
-      // selection handler
-      sel.onchange = function(){
-        var val = sel.value;
-        if(!val){ delete sel.selectedSlot; renderResumen(); return; }
-        var opt = sel.querySelector('option[value="'+val+'"]');
-        if(!opt) { delete sel.selectedSlot; renderResumen(); return; }
-        if(opt.disabled){ delete sel.selectedSlot; sel.selectedIndex = 0; renderResumen(); return; }
-        sel.selectedSlot = { key: opt.value, iso: opt.dataset.iso, pretty: opt.textContent.split(' — ')[0].trim() };
-        renderResumen();
-      };
-
+      // render placeholder UI while we subscribe
+      $("#slotLabel").textContent = 'Cargando...';
+      $("#slotCount").textContent = '';
       $("#slotNote").textContent = 'Mostrando turnos cada ' + interval + ' minutos, desde ' + startStr + '. (Max ' + MAX_PER_SLOT + ' pedidos/turno)';
+
+      // attach snapshot to each slot doc
+      allSlots.forEach(slotObj=>{
+        (function(sObj){
+          var ref = db.collection('slots').doc(sObj.key);
+          var unsub = ref.onSnapshot(snap=>{
+            try{
+              var count = snap.exists ? Number(snap.data().count||0) : 0;
+              sObj.count = count;
+              sObj.full = count >= MAX_PER_SLOT;
+              var now = Date.now();
+              sObj.tooSoon = (new Date(sObj.date)).getTime() <= (now + MINUTES_AHEAD*60*1000);
+
+              rebuildVisibleSlotsAndKeepSelection();
+            }catch(e){
+              console.warn('slot snap err', e);
+            }
+          }, err=>{ console.warn('slot snap err', err); });
+          sObj.unsub = unsub;
+          slotListeners.push(unsub);
+        })(slotObj);
+      });
+
+      // initial rebuild (in case some slots had no snap change yet)
+      setTimeout(rebuildVisibleSlotsAndKeepSelection, 200);
+    }
+
+    // recompute visibleSlots from allSlots (exclude full & tooSoon), keep chronological order
+    // keep currently selected index pointing to same key if still present, otherwise try nearest
+    var currentVisibleIndex = 0;
+    function rebuildVisibleSlotsAndKeepSelection(){
+      var prevSelectedKey = null;
+      var container = $("#slotsCarousel");
+      if(container && container.selectedSlot) prevSelectedKey = container.selectedSlot.key;
+
+      visibleSlots = allSlots.filter(s => !s.full && !s.tooSoon).sort((a,b)=>a.date - b.date);
+
+      if(visibleSlots.length === 0){
+        currentVisibleIndex = -1;
+        updateCarouselUI();
+        return;
+      }
+
+      // try keep previous selection
+      var idx = visibleSlots.findIndex(s => s.key === prevSelectedKey);
+      if(idx >= 0){
+        currentVisibleIndex = idx;
+      } else {
+        // if previous selected not present, try to find first slot after now
+        var now = Date.now();
+        var nearIdx = visibleSlots.findIndex(s => s.date.getTime() >= now);
+        currentVisibleIndex = (nearIdx >= 0) ? nearIdx : 0;
+      }
+
+      updateCarouselUI();
+    }
+
+    function updateCarouselUI(){
+      var label = $('#slotLabel');
+      var countEl = $('#slotCount');
+      var prevBtn = $('#slotPrev');
+      var nextBtn = $('#slotNext');
+      var carousel = $('#slotsCarousel');
+
+      if(!visibleSlots || visibleSlots.length === 0){
+        label.innerHTML = '<div class="no-slots">No hay horarios disponibles</div>';
+        countEl.textContent = '';
+        prevBtn.classList.add('disabled');
+        nextBtn.classList.add('disabled');
+        if(carousel) delete carousel.selectedSlot;
+        return;
+      }
+
+      // clamp index
+      if(currentVisibleIndex < 0) currentVisibleIndex = 0;
+      if(currentVisibleIndex >= visibleSlots.length) currentVisibleIndex = visibleSlots.length - 1;
+
+      var s = visibleSlots[currentVisibleIndex];
+      label.textContent = slotPretty(s.date);
+      var remaining = Math.max(0, MAX_PER_SLOT - (Number(s.count||0)));
+      countEl.textContent = remaining > 0 ? (remaining + ' cupo' + (remaining>1?'s':'')) : 'último cupo';
+
+      // enable/disable arrows
+      if(currentVisibleIndex <= 0) prevBtn.classList.add('disabled'); else prevBtn.classList.remove('disabled');
+      if(currentVisibleIndex >= visibleSlots.length - 1) nextBtn.classList.add('disabled'); else nextBtn.classList.remove('disabled');
+
+      // store selection on carousel element (to be read by buildOrderObject / renderResumen)
+      carousel.selectedSlot = { key: s.key, iso: s.date.toISOString(), pretty: slotPretty(s.date) };
+    }
+
+    // arrow handlers
+    function goPrevSlot(){
+      if(!visibleSlots || visibleSlots.length===0) return;
+      if(currentVisibleIndex > 0){ currentVisibleIndex--; updateCarouselUI(); renderResumen(); }
+    }
+    function goNextSlot(){
+      if(!visibleSlots || visibleSlots.length===0) return;
+      if(currentVisibleIndex < visibleSlots.length - 1){ currentVisibleIndex++; updateCarouselUI(); renderResumen(); }
     }
 
     /* === REFRESH (re-genera slots y re-suscribe) === */
@@ -408,14 +450,14 @@
         resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Cupon</strong><div class="muted">Código: '+escapeHtml(appliedCoupon.codigo)+' — '+escapeHtml(String(appliedCoupon.descuento))+'% off</div></div>');
       }
       // mostrar slot seleccionado
-      var sel = $("#slotsContainer");
-      if(sel && sel.selectedSlot){
-        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' + escapeHtml(sel.selectedSlot.pretty || sel.selectedSlot.iso || '') + '</div></div>');
+      var carousel = $("#slotsCarousel");
+      if(carousel && carousel.selectedSlot){
+        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' + escapeHtml(carousel.selectedSlot.pretty || carousel.selectedSlot.iso || '') + '</div></div>');
       }
       resTotal.textContent = money(calcTotalWithDiscount());
     }
 
-    /* === CUPÓN === */
+    /* === CUPÓN (igual que antes) === */
     async function applyCouponCode(){
       var code = $("#inpCupon") ? $("#inpCupon").value.trim().toUpperCase() : "";
       var msg = $("#cuponMsg");
@@ -528,10 +570,10 @@
       }
       for(k in cart.drink){d=cart.drink[k];items.push({type:"drink",id:d.item?d.item.id:"",name:d.item?d.item.name:"",qty:d.qty||0,price:d.item?(d.item.price||0):0});}
       var pago = (document.querySelector('input[name="pago"]:checked')||{}).value || "";
-      var sel = $("#slotsContainer");
-      var selObj = sel && sel.selectedSlot ? sel.selectedSlot : null;
-      var slotKey = selObj ? selObj.key : null;
-      var slotIso = selObj ? selObj.iso : null;
+      var carousel = $("#slotsCarousel");
+      var sel = carousel && carousel.selectedSlot ? carousel.selectedSlot : null;
+      var slotKey = sel ? sel.key : null;
+      var slotIso = sel ? sel.iso : null;
       var rawTotal = calcRawTotal();
       var totalWithDiscount = calcTotalWithDiscount();
 
@@ -594,10 +636,13 @@
         cart = loadCart();
         if(!Object.keys(cart.burger||{}).length && !Object.keys(cart.drink||{}).length){ alert("Tu carrito está vacío."); btn.disabled=false; btn.classList.remove('disabled'); return; }
         var nombre = $("#inpNombre").value.trim(); if(!nombre){ alert("Ingresá tu nombre."); btn.disabled=false; btn.classList.remove('disabled'); return; }
-        var sel = $("#slotsContainer");
-        if(!sel || !sel.selectedSlot){ alert("Elegí un horario de retiro."); btn.disabled=false; btn.classList.remove('disabled'); return; }
-        var optSel = sel.querySelector('option[value="'+sel.selectedSlot.key+'"]');
-        if(!optSel || optSel.disabled){ alert("El horario elegido no está disponible. Elegí otro."); await refreshSlotsUI(); btn.disabled=false; btn.classList.remove('disabled'); return; }
+        var carousel = $("#slotsCarousel");
+        if(!carousel || !carousel.selectedSlot){ alert("Elegí un horario de retiro."); btn.disabled=false; btn.classList.remove('disabled'); return; }
+
+        // verify selected slot still in visibleSlots and not full
+        var selKey = carousel.selectedSlot.key;
+        var selObj = visibleSlots.find(s => s.key === selKey);
+        if(!selObj){ alert("El horario elegido ya no está disponible. Elegí otro."); await refreshSlotsUI(); btn.disabled=false; btn.classList.remove('disabled'); return; }
 
         var nextNum = await getNextOrderNumber();
         var orderObj = buildOrderObject(nextNum);
@@ -679,8 +724,13 @@
     /* === inicialización y listeners cross-tab === */
     window.addEventListener('DOMContentLoaded', function(){
       cart = loadCart();
-      refreshSlotsUI().then(()=>renderResumen()).catch(e=>{ console.warn(e); renderResumen(); });
-      $("#btnRefreshSlots").addEventListener('click', function(){ refreshSlotsUI().then(()=>renderResumen()); });
+      refreshSlotsUI().then(()=>{ renderResumen(); }).catch(e=>{ console.warn(e); renderResumen(); });
+
+      // arrows
+      $('#slotPrev').addEventListener('click', function(){ if(!this.classList.contains('disabled')){ goPrevSlot(); renderResumen(); } });
+      $('#slotNext').addEventListener('click', function(){ if(!this.classList.contains('disabled')){ goNextSlot(); renderResumen(); } });
+      $('#btnRefreshSlots').addEventListener('click', function(){ refreshSlotsUI().then(()=>renderResumen()); });
+
       // actualizar resumen si el usuario hace cambios en otras pestañas
       window.addEventListener('storage', function(e){
         if(e.key === CART_KEY || e.key === null){
