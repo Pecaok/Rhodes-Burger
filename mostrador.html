@@ -594,13 +594,25 @@
     const baseSubtotal = base * qty;
     const lineTotal    = baseSubtotal + pattySum + cheddarSum;
 
+    // --- NORMALIZO papas robustamente: aceptar con_sazon, con-sazon, con sazon, sin_sal, sin-sal, sazonadas, sal, etc.
     const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
     let friesLabel = '';
     if(friesRaw){
-      const s = String(friesRaw).toLowerCase();
-      if(/\bcon sazon\b|\bconsazon\b|\bcon_sazon\b|\bcon-sazon\b|\bsazon\b/.test(s) && !/\bsin\b/.test(s)) friesLabel = 'Sazonadas';
-      else if(/\bcon sal\b|\bconsal\b|\bcon_sal\b|\bcon-sal\b|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) friesLabel = 'Con sal';
-      else if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s) || /\bsin_sazon\b/.test(s))) friesLabel = 'Sin sal';
+      // normalizar guiones/underscores a espacios para facilitar matching
+      const s = String(friesRaw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+      if(/\b(sin)\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) {
+        friesLabel = 'Sin sal';
+      } else if(/\bsazon\b/.test(s) || s.includes('sazonadas') || s.includes('sazonada')) {
+        friesLabel = 'Sazonadas';
+      } else if(/\bsal\b/.test(s)) {
+        friesLabel = 'Con sal';
+      } else {
+        // fallbacks
+        if(s.includes('sazon')) friesLabel = 'Sazonadas';
+        else if(s.includes('sin') && s.includes('sal')) friesLabel = 'Sin sal';
+        else if(s.includes('sal')) friesLabel = 'Con sal';
+        else friesLabel = ''; // no reconocido
+      }
     }
 
     return `
@@ -781,8 +793,7 @@
       printHtmlInIframe(html);
 
       // limpiar carrito y UI
-      cart={burger:{},drink:{}};
-      renderCart();
+      cart={burger:{},drink:{}}; renderCart();
       $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
       alert(`Pedido #${orderNumber} cargado e impresión solicitada.`);
     }catch(err){
