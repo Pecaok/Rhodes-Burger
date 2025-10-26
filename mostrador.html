@@ -137,17 +137,19 @@
     .preview{font-weight:800}
     .side-disabled-note{ color:#b33; font-size:13px; margin-top:6px }
 
-    /* Pickup selector estilo solicitado */
+    /* Pickup selector (carousel igual al otro archivo) */
     .pickup-row{display:flex;align-items:center;gap:8px;margin-top:10px}
     .pickup-arrow{width:42px;height:42px;border-radius:10px;border:1px solid var(--ring);display:flex;align-items:center;justify-content:center;cursor:pointer;font-weight:800;background:#fff}
-    .pickup-time{min-width:120px;height:42px;border-radius:12px;border:1px solid var(--ring);display:flex;align-items:center;justify-content:center;font-weight:900;background:#fff;cursor:pointer}
-    .pickup-time.disabled{opacity:.5;cursor:not-allowed}
+    .pickup-arrow.disabled{opacity:.5;cursor:not-allowed}
+    .pickup-time{min-width:120px;height:42px;border-radius:12px;border:1px solid var(--ring);display:flex;align-items:center;justify-content:center;font-weight:900;background:#fff;cursor:default}
+    .pickup-time.disabled{opacity:.5}
     .pickup-mini{width:36px;height:36px;border-radius:8px;border:1px solid var(--ring);display:flex;align-items:center;justify-content:center;cursor:pointer;background:#fff}
     .pickup-cap{font-weight:800;margin-left:8px}
     .pickup-desc{font-size:12px;color:var(--muted);margin-top:6px}
     .slots-list{display:flex;flex-wrap:wrap;gap:8px}
     .slot-quick{padding:8px 10px;border-radius:999px;border:1px solid var(--ring);cursor:pointer}
     .slot-quick.disabled{opacity:.5;pointer-events:none}
+    .no-slots{color:#b00020;font-weight:700}
   </style>
 </head>
 <body>
@@ -156,7 +158,7 @@
       <a class="brand" href="#"><img src="images/logo.png" alt="Rhodes Burgers">Rhodes Burgers</a>
       <div class="spacer"></div>
 
-      <!-- Nav agregado -->
+      <!-- Nav -->
       <a class="btn" href="pedido_local.html" title="Ver pedidos">📦 Pedidos</a>
       <a class="btn" href="finanzas.html" title="Ver finanzas">📈 Finanzas</a>
       <a class="btn" href="admin.html" title="Panel admin">⚙️ Admin</a>
@@ -190,19 +192,17 @@
         </select>
       </div>
 
-      <!-- PICKUP selector -->
+      <!-- PICKUP selector (igual en lógica al de confirmar pedido) -->
       <div style="margin-top:10px">
         <div style="font-weight:700">Horario de retiro (solo hoy)</div>
-
         <div class="pickup-row" id="pickupControls">
           <div id="btnPrev" class="pickup-arrow" title="Anterior">◀</div>
-          <div id="pickupTime" class="pickup-time">--:--</div>
+          <div id="pickupTime" class="pickup-time">Cargando...</div>
           <div id="btnNext" class="pickup-arrow" title="Siguiente">▶</div>
           <div id="btnQuick" class="pickup-mini" title="Ver lista">▦</div>
           <div id="pickupCupos" class="pickup-cap muted" style="display:none">— cupos</div>
         </div>
-
-        <div id="pickupDesc" class="pickup-desc">Mostrando turnos cada 10 minutos, desde 19:10. (Max 4 pedidos/turno)</div>
+        <div id="pickupDesc" class="pickup-desc">Cargando turnos...</div>
       </div>
 
       <div class="field"><textarea id="inpComentario" placeholder="Comentario"></textarea></div>
@@ -291,7 +291,7 @@
     messagingSenderId: "951646688091",
     appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
   };
-  try{ firebase.initializeApp(firebaseConfig); }catch(e){}
+  try{ if(!firebase.apps.length) firebase.initializeApp(firebaseConfig); }catch(e){}
   const db = firebase.firestore();
 
   const $=s=>document.querySelector(s);
@@ -367,180 +367,221 @@
     applySidesToUI();
   }
 
-  /* ===== PICKUP / SLOTS ===== */
-  let pickupSlots = [];
-  let PICKUP_SOURCE = null;
-  let currentSlotIdx = 0;
-  let selectedPickup = null;
+  /* ===== PICKUP / SLOTS — configuración igual al otro archivo ===== */
+  const MAX_PER_SLOT   = 4;
+  const MINUTES_AHEAD  = 5;        // no mostrar slots dentro de los próximos X'
+  const OPEN_TIME      = "12:00";  // fallback
+  const CLOSE_TIME     = "23:59";  // fallback
+  const START_10       = "19:10";  // inicio serie 10'
+  const START_20       = "19:20";  // inicio serie 20'
 
-  function normId(v){ return String(v||'').trim().toLowerCase(); }
-  function extractTimeLabel(raw){
-    if(!raw) return '--:--';
-    const s = String(raw);
-    const m1 = s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
-    if(m1) return `${m1[1].padStart(2,'0')}:${m1[2]}`;
-    const m2 = s.match(/(\d{2})(\d{2})$/);
-    if(m2){ return `${m2[1]}:${m2[2]}`; }
-    const m3 = s.match(/[_-](\d{2})(\d{2})$/);
-    if(m3) return `${m3[1]}:${m3[2]}`;
-    const parts = s.split(/[\s_-]+/);
-    const last = parts[parts.length-1];
-    if(/^\d{3,4}$/.test(last)){
-      if(last.length===3) return last.slice(0,1)+':'+last.slice(1);
-      return last.slice(0,2)+':'+last.slice(2);
+  // helpers tiempo
+  function parseHHMM(s){ if(!s) return null; const p=s.split(':'); if(p.length<2) return null; return { h:parseInt(p[0],10), m:parseInt(p[1],10) }; }
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function slotKeyFromDate(d){ return ''+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes()); }
+  function slotPretty(d){ return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+  function dateTodayAt(hhmm){ const p=parseHHMM(hhmm); const now=new Date(); return new Date(now.getFullYear(),now.getMonth(),now.getDate(),p.h,p.m,0,0); }
+  function genSlots(startAt, intervalMin){
+    const open = dateTodayAt(OPEN_TIME), close = dateTodayAt(CLOSE_TIME);
+    const start = startAt > open ? startAt : open;
+    const res = [];
+    let cur = new Date(start.getTime());
+    while(cur.getTime() <= close.getTime() - intervalMin*60*1000){
+      res.push(new Date(cur.getTime()));
+      cur = new Date(cur.getTime() + intervalMin*60*1000);
     }
-    return (s.length>5) ? s.slice(-5) : s;
+    return res;
   }
 
-  function renderPickupControls(){
-    const timeEl = $("#pickupTime");
-    const cuposEl = $("#pickupCupos");
-    const descEl = $("#pickupDesc");
+  // estado de carousel (como en confirmar pedido)
+  let slotListeners = [];
+  let allSlots = [];       // { date, key, count, full, tooSoon, unsub }
+  let visibleSlots = [];   // filtrados
+  let currentVisibleIndex = 0;
 
-    if(!pickupSlots.length){
-      timeEl.textContent = '--:--';
+  function clearSlotListeners(){
+    allSlots.forEach(s=>{ try{ if(s.unsub) s.unsub(); }catch(e){} });
+    slotListeners=[]; allSlots=[]; visibleSlots=[];
+  }
+
+  // carrito — contamos hamburguesas para decidir 10' vs 20'
+  function totalBurgersInCart(){
+    let s=0;
+    for(const k in cart.burger) s += Number(cart.burger[k].qty||0);
+    return s;
+  }
+
+  async function subscribeAndRenderSlots(){
+    clearSlotListeners();
+
+    const burgers = totalBurgersInCart();
+    const interval = (burgers <= 2) ? 10 : 20;
+    const startStr = (burgers <= 2) ? START_10 : START_20;
+    const startAt = dateTodayAt(startStr);
+    const slots = genSlots(startAt, interval);
+
+    allSlots = slots.map(d => ({ date:d, key:slotKeyFromDate(d), count:0, full:false, tooSoon:false, unsub:null }));
+
+    // UI placeholders
+    $("#pickupTime").textContent = "Cargando...";
+    $("#pickupCupos").style.display = "none";
+    $("#pickupDesc").textContent = `Mostrando turnos cada ${interval} minutos, desde ${startStr}. (Max ${MAX_PER_SLOT} pedidos/turno)`;
+
+    // suscribir a cada doc slots/{key}
+    allSlots.forEach(sObj=>{
+      (function(slotObj){
+        const ref = db.collection('slots').doc(slotObj.key);
+        const unsub = ref.onSnapshot(snap=>{
+          try{
+            const count = snap.exists ? Number(snap.data().count||0) : 0;
+            slotObj.count = count;
+            slotObj.full  = count >= MAX_PER_SLOT;
+            const now = Date.now();
+            slotObj.tooSoon = (new Date(slotObj.date)).getTime() <= (now + MINUTES_AHEAD*60*1000);
+            rebuildVisibleSlotsAndKeepSelection();
+          }catch(e){ console.warn('slot snap err', e); }
+        }, err=>console.warn('slot snap err', err));
+        slotObj.unsub = unsub;
+        slotListeners.push(unsub);
+      })(sObj);
+    });
+
+    setTimeout(rebuildVisibleSlotsAndKeepSelection, 200);
+  }
+
+  function rebuildVisibleSlotsAndKeepSelection(){
+    const timeEl = $("#pickupTime");
+    const capEl  = $("#pickupCupos");
+
+    const prevKey = (window._selectedSlot && window._selectedSlot.key) ? window._selectedSlot.key : null;
+    visibleSlots = allSlots.filter(s=>!s.full && !s.tooSoon).sort((a,b)=>a.date-b.date);
+
+    if(visibleSlots.length===0){
+      currentVisibleIndex = -1;
+      timeEl.innerHTML = '<span class="no-slots">Sin horarios disponibles</span>';
       timeEl.classList.add('disabled');
-      cuposEl.style.display = 'none';
-      descEl.textContent = 'No hay turnos configurados.';
-      selectedPickup = null;
+      capEl.style.display='none';
+      $("#btnPrev").classList.add('disabled');
+      $("#btnNext").classList.add('disabled');
+      window._selectedSlot = null;
+      renderQuickList(); // lista vacía
       return;
     }
 
-    if(currentSlotIdx < 0) currentSlotIdx = 0;
-    if(currentSlotIdx >= pickupSlots.length) currentSlotIdx = pickupSlots.length - 1;
-    const s = pickupSlots[currentSlotIdx];
-
-    const timeLabel = extractTimeLabel(s.label || s.id || '');
-    timeEl.textContent = timeLabel;
-    const isFull = (s.available===false) || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity);
-    timeEl.classList.toggle('disabled', isFull);
-
-    cuposEl.style.display = 'none';
-    descEl.textContent = s.hint || s.desc || (pickupSlots.length>1 ? `Mostrando ${pickupSlots.length} turnos` : 'Turno único');
-
-    if(!isFull){
-      selectedPickup = { pickup_slot: s.id, pickup_time: s.label || s.id || timeLabel };
-    } else {
-      selectedPickup = null;
+    const idx = visibleSlots.findIndex(s=>s.key===prevKey);
+    if(idx>=0) currentVisibleIndex = idx;
+    else {
+      const now = Date.now();
+      const near = visibleSlots.findIndex(s=>s.date.getTime()>=now);
+      currentVisibleIndex = (near>=0)?near:0;
     }
 
-    $("#btnPrev").style.visibility = (currentSlotIdx>0) ? 'visible' : 'hidden';
-    $("#btnNext").style.visibility = (currentSlotIdx < pickupSlots.length-1) ? 'visible' : 'hidden';
+    updatePickupUI();
   }
 
-  function openSlotsQuick(){
-    const overlay = $("#slotsOverlay");
+  function updatePickupUI(){
+    const timeEl = $("#pickupTime");
+    const capEl  = $("#pickupCupos");
+    const prevBtn = $("#btnPrev");
+    const nextBtn = $("#btnNext");
+
+    if(currentVisibleIndex<0 || currentVisibleIndex>=visibleSlots.length){
+      timeEl.textContent='--:--'; timeEl.classList.add('disabled'); capEl.style.display='none';
+      prevBtn.classList.add('disabled'); nextBtn.classList.add('disabled');
+      window._selectedSlot=null; renderQuickList(); return;
+    }
+
+    const s = visibleSlots[currentVisibleIndex];
+    timeEl.textContent = slotPretty(s.date);
+    timeEl.classList.remove('disabled');
+
+    const remaining = Math.max(0, MAX_PER_SLOT - (Number(s.count||0)));
+    capEl.textContent = remaining>0 ? (remaining + ' cupo' + (remaining>1?'s':'')) : 'último cupo';
+    capEl.style.display = 'inline';
+
+    // Arrows
+    (currentVisibleIndex<=0) ? prevBtn.classList.add('disabled') : prevBtn.classList.remove('disabled');
+    (currentVisibleIndex>=visibleSlots.length-1) ? nextBtn.classList.add('disabled') : nextBtn.classList.remove('disabled');
+
+    window._selectedSlot = { key:s.key, iso:s.date.toISOString(), pretty:slotPretty(s.date) };
+
+    renderQuickList();
+  }
+
+  function renderQuickList(){
     const list = $("#slotsQuickList");
+    if(!list) return;
     list.innerHTML = '';
-    pickupSlots.forEach((s, idx)=>{
+    if(!visibleSlots.length){
+      const div = document.createElement('div');
+      div.className='muted';
+      div.textContent = 'No hay horarios disponibles.';
+      list.appendChild(div);
+      return;
+    }
+    visibleSlots.forEach((s, i)=>{
       const btn = document.createElement('div');
-      const timeLabel = extractTimeLabel(s.label || s.id || '');
-      const disabled = (s.available===false) || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity);
-      btn.className = 'slot-quick' + (disabled ? ' disabled' : '');
-      btn.textContent = timeLabel;
-      btn.onclick = ()=>{
-        if(disabled) return;
-        currentSlotIdx = idx;
-        renderPickupControls();
-        overlay.classList.remove('open');
-      };
+      const remaining = Math.max(0, MAX_PER_SLOT - (Number(s.count||0)));
+      btn.className = 'slot-quick';
+      btn.textContent = slotPretty(s.date) + (remaining? ` · ${remaining}`:' · 1');
+      btn.onclick = ()=>{ currentVisibleIndex = i; updatePickupUI(); $("#slotsOverlay").classList.remove('open'); };
       list.appendChild(btn);
     });
-    overlay.classList.add('open');
   }
 
-  function subscribeSlots(){
-    try{
-      const col = db.collection('slots');
-      col.onSnapshot(snap=>{
-        if(!snap.empty){
-          PICKUP_SOURCE = { type:'collection', ref: col, path:'slots' };
-          pickupSlots = [];
-          snap.forEach(doc=>{
-            const d = doc.data()||{};
-            pickupSlots.push({
-              id: d.id || doc.id,
-              label: d.label || d.hhmm || d.id || doc.id,
-              capacity: (typeof d.capacity==='number') ? d.capacity : (typeof d.cap==='number' ? d.cap : undefined),
-              booked: (typeof d.booked==='number') ? d.booked : 0,
-              available: d.available === false ? false : true,
-              __docId: doc.id,
-              hint: d.hint
-            });
-          });
-          pickupSlots.sort((a,b)=>{
-            const A = a.label || a.id, B = b.label || b.id;
-            const ta = (A.match(/(\d{2}):?(\d{2})$/)||[]).slice(1).join('');
-            const tb = (B.match(/(\d{2}):?(\d{2})$/)||[]).slice(1).join('');
-            if(ta && tb) return Number(ta) - Number(tb);
-            return 0;
-          });
-          currentSlotIdx = pickupSlots.findIndex(s=> s.available !== false && (typeof s.capacity!=='number' || (s.booked||0) < s.capacity));
-          if(currentSlotIdx === -1) currentSlotIdx = 0;
-          renderPickupControls();
-        } else {
-          tryDocCandidates();
-        }
-      }, err=>{
-        console.warn('slots collection err', err);
-        tryDocCandidates();
-      });
-      return;
-    }catch(e){ console.warn('subscribe collection failed', e); tryDocCandidates(); }
-
-    function tryDocCandidates(){
-      const cand = ['slots','config/pickup','config/slots'];
-      cand.forEach(path=>{
-        try{
-          const docRef = db.doc(path);
-          docRef.onSnapshot(snap=>{
-            if(!snap.exists) return;
-            const data = snap.data()||{};
-            if(Array.isArray(data.slots) && data.slots.length){
-              PICKUP_SOURCE = { type:'doc', ref: docRef, path };
-              pickupSlots = data.slots.map((s, i)=>({
-                id: s.id || s.slot || s.hhmm || ('slot_'+i),
-                label: s.label || s.hhmm || s.slot || s.id,
-                capacity: (typeof s.capacity==='number') ? s.capacity : (typeof s.cap === 'number' ? s.cap : undefined),
-                booked: (typeof s.booked === 'number') ? s.booked : 0,
-                available: s.available === false ? false : true,
-                __arrIdx: i,
-                hint: s.hint
-              }));
-              currentSlotIdx = pickupSlots.findIndex(s=> s.available !== false && (typeof s.capacity!=='number' || (s.booked||0) < s.capacity));
-              if(currentSlotIdx === -1) currentSlotIdx = 0;
-              renderPickupControls();
-            }
-          }, err=>console.warn('doc path err', path, err));
-        }catch(e){ console.warn('subscribe candidate failed', e); }
-      });
-    }
+  async function refreshSlotsUI(){
+    try{ await subscribeAndRenderSlots(); }catch(e){ console.warn('refreshSlotsUI error', e); $("#pickupDesc").textContent='Error al cargar turnos.'; }
   }
-  subscribeSlots();
 
-  // NAV controls
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const prev = document.getElementById('btnPrev');
-    const next = document.getElementById('btnNext');
-    const quick = document.getElementById('btnQuick');
-    const pickupTime = document.getElementById('pickupTime');
-    const closeSlots = document.getElementById('closeSlots');
-
-    if(prev) prev.addEventListener('click', ()=>{ if(currentSlotIdx>0){ currentSlotIdx--; renderPickupControls(); }});
-    if(next) next.addEventListener('click', ()=>{ if(currentSlotIdx < pickupSlots.length-1){ currentSlotIdx++; renderPickupControls(); }});
-    if(quick) quick.addEventListener('click', openSlotsQuick);
-    if(closeSlots) closeSlots.addEventListener('click', ()=>document.getElementById('slotsOverlay').classList.remove('open'));
-    document.getElementById('slotsOverlay').addEventListener('click', e=>{ if(e.target === document.getElementById('slotsOverlay')) document.getElementById('slotsOverlay').classList.remove('open'); });
-
-    if(pickupTime) pickupTime.addEventListener('click', ()=>{
-      const s = pickupSlots[currentSlotIdx];
-      if(!s) return;
-      const isFull = (s.available===false) || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity);
-      if(isFull){ alert('El horario está completo o inhabilitado.'); return; }
-      selectedPickup = { pickup_slot: s.id, pickup_time: s.label || s.id || extractTimeLabel(s.label || s.id) };
-      pickupTime.style.boxShadow = '0 0 0 3px rgba(100,90,70,0.12)';
-      setTimeout(()=>{ pickupTime.style.boxShadow=''; }, 300);
+  // reserva transaccional (igual que confirmar pedido)
+  function reserveSlotTransactional(slotKey){
+    const ref = db.collection('slots').doc(slotKey);
+    return db.runTransaction(async function(tx){
+      const snap = await tx.get(ref);
+      const cur = snap.exists ? (Number(snap.data().count||0)) : 0;
+      if(cur >= MAX_PER_SLOT){ throw new Error('SLOT_FULL'); }
+      tx.set(ref, { count: cur+1, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      return true;
     });
+  }
+  function decrementSlot(slotKey){
+    const ref = db.collection('slots').doc(slotKey);
+    return db.runTransaction(async function(tx){
+      const snap = await tx.get(ref);
+      if(!snap.exists) return;
+      const cur = Number(snap.data().count||0);
+      const next = Math.max(0,cur-1);
+      tx.set(ref, { count: next, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+    });
+  }
+
+  async function getNextOrderNumber(){
+    let lastKnown = 0;
+    try{
+      const qs = await db.collection('orders').orderBy('orderNumber','desc').limit(1).get();
+      if(!qs.empty) lastKnown = Number(qs.docs[0].data().orderNumber)||0;
+    }catch(_){}
+    const ref = db.collection('config').doc('counters');
+    const next = await db.runTransaction(async tx=>{
+      const snap = await tx.get(ref);
+      const cur = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
+      const base = Math.max(cur,lastKnown);
+      const nxt  = base+1;
+      tx.set(ref,{orderNumber:nxt,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+      return nxt;
+    });
+    return next;
+  }
+
+  // NAV controls + abrir lista
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const prev = $("#btnPrev"), next = $("#btnNext"), quick = $("#btnQuick");
+    const closeSlots = $("#closeSlots");
+    if(prev) prev.addEventListener('click', ()=>{ if(!prev.classList.contains('disabled')){ currentVisibleIndex=Math.max(0,currentVisibleIndex-1); updatePickupUI(); } });
+    if(next) next.addEventListener('click', ()=>{ if(!next.classList.contains('disabled')){ currentVisibleIndex=Math.min(visibleSlots.length-1,currentVisibleIndex+1); updatePickupUI(); } });
+    if(quick) quick.addEventListener('click', ()=>{ renderQuickList(); $("#slotsOverlay").classList.add('open'); });
+    if(closeSlots) closeSlots.addEventListener('click', ()=>$("#slotsOverlay").classList.remove('open'));
+    $("#slotsOverlay").addEventListener('click', e=>{ if(e.target === $("#slotsOverlay")) $("#slotsOverlay").classList.remove('open'); });
   });
 
   /* ===== Carrito & UI ===== */
@@ -556,8 +597,8 @@
     if(v === "con_sal") return "Con sal";
     if(v === "sin_sal") return "Sin sal";
     const s = v.toString().toLowerCase();
-    if(s.includes("sazon")) return "Sazonadas";
-    if(s.includes("sin") && s.includes("sal")) return "Sin sal";
+    if(s.includes("sazon") && !s.includes("sin")) return "Sazonadas";
+    if(s.includes("sin") && (s.includes("sal")||s.includes("sazon"))) return "Sin sal";
     if(s.includes("sal")) return "Con sal";
     return v;
   }
@@ -607,6 +648,9 @@
     }
     cartItems.innerHTML = parts.length ? parts.join("") : "Sin ítems.";
     cartTotal.textContent = money(calcTotal());
+
+    // IMPORTANT: al cambiar carrito, refrescamos slots (para 10'/20')
+    refreshSlotsUI();
   }
 
   window.changeQty=function(type,encKey,delta){
@@ -656,7 +700,9 @@
 
     renderCart(); refreshAvailabilityUI();
     applySidesToUI();
-    renderPickupControls();
+
+    // iniciar slots una vez montado
+    refreshSlotsUI();
   }
 
   /* ===== Disponibilidad (productos) ===== */
@@ -723,35 +769,37 @@
   if(typeof window !== 'undefined'){ window.autoGrow = autoGrow; window.updateCount = updateCount; }
 
   // ===== TICKET builder =====
-function buildTicketHTMLFromPayload(orderId, payload){
-  const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-  const title = `Pedido #${payload.orderNumber || orderId || ''}`;
-  const items = Array.isArray(payload.items) ? payload.items.map(it=>{
-    const ex = [];
-    if(it.extras?.patty)   ex.push(`+${it.extras.patty} medallón(es)`);
-    if(it.extras?.cheddar) ex.push(`+${it.extras.cheddar} cheddar`);
-    return `${(it.qty||1)} × ${it.name} ${ex.length?('('+ex.join(', ')+')'):''} ${it.notes?('- '+it.notes):''}`;
-  }).join('<br>') : '';
-  const pickup = payload.pickup_time ? `<div>Retira: ${payload.pickup_time}</div>` : '';
+  function buildTicketHTMLFromPayload(orderId, payload){
+    const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const title = `Pedido #${payload.orderNumber || orderId || ''}`;
+    const items = Array.isArray(payload.items) ? payload.items.map(it=>{
+      const ex = [];
+      if(it.extras?.patty)   ex.push(`+${it.extras.patty} medallón(es)`);
+      if(it.extras?.cheddar) ex.push(`+${it.extras.cheddar} cheddar`);
+      return `${(it.qty||1)} × ${it.name} ${ex.length?('('+ex.join(', ')+')'):''} ${it.notes?('- '+it.notes):''}`;
+    }).join('<br>') : '';
+    const pickup = payload.pickup_time ? `<div>Retira: ${new Date(payload.pickup_time).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false})}</div>` : '';
 
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
-  <style>body{font-family:Arial, sans-serif;font-weight:700;padding:10px} .c{text-align:center}</style>
-  </head><body><div class="c"><h2>Rhodes Burgers</h2><h3>${title}</h3></div>
-  <div><strong>Cliente:</strong> ${payload.nombre||''}</div>
-  ${pickup}
-  <hr>
-  <div>${items}</div>
-  <hr>
-  <div><strong>Total:</strong> ${moneyFn(payload.total||0)}</div>
-  <div style="margin-top:8px;font-size:12px;color:#666">${new Date().toLocaleString()}</div>
-  <script>
-    window.addEventListener('load', function(){
-      setTimeout(function(){ window.print(); }, 80);
-    });
-  <\/script>
-  </body></html>`;
-  return html;
-}
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
+    <style>
+      @media print { @page { size:auto; margin:0 } body{ margin:6mm } }
+      body{font-family:Arial, sans-serif;font-weight:700;padding:10px}
+      .c{text-align:center}
+    </style>
+    </head><body><div class="c"><h2>Rhodes Burgers</h2><h3>${title}</h3></div>
+    <div><strong>Cliente:</strong> ${payload.nombre||''}</div>
+    ${pickup}
+    <hr>
+    <div>${items}</div>
+    <hr>
+    <div><strong>Total:</strong> ${moneyFn(payload.total||0)}</div>
+    <div style="margin-top:8px;font-size:12px;color:#666">${new Date().toLocaleString()}</div>
+    <script>
+      window.addEventListener('load', function(){ setTimeout(function(){ window.print(); }, 80); });
+    <\/script>
+    </body></html>`;
+    return html;
+  }
 
   function printHtmlInIframe(html){
     const iframe = document.createElement('iframe');
@@ -772,54 +820,7 @@ function buildTicketHTMLFromPayload(orderId, payload){
     setTimeout(cleanup, 15000);
   }
 
-  // ===== reserveAndNextOrder (transacción) =====
-  function globalCounterRef(){ return db.collection('config').doc('counters'); }
-  async function reserveAndNextOrder(selectedSlotId){
-    return await db.runTransaction(async tx=>{
-      const ref = globalCounterRef();
-      const snap = await tx.get(ref);
-      const cur = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
-      const nxt = cur + 1;
-      tx.set(ref, { orderNumber: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-
-      if(selectedSlotId && PICKUP_SOURCE){
-        if(PICKUP_SOURCE.type === 'collection'){
-          const found = pickupSlots.find(s => normId(s.id) === normId(selectedSlotId));
-          if(!found || !found.__docId) throw new Error('slot-not-found');
-          const docRef = PICKUP_SOURCE.ref.doc(found.__docId);
-          const sSnap = await tx.get(docRef);
-          if(!sSnap.exists) throw new Error('slot-not-found');
-          const data = sSnap.data() || {};
-          const booked = typeof data.booked === 'number' ? data.booked : 0;
-          const capacity = typeof data.capacity === 'number' ? data.capacity : (typeof data.cap === 'number' ? data.cap : Infinity);
-          if(booked + 1 > capacity) throw new Error('slot-full');
-          tx.update(docRef, { booked: booked + 1, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-        } else if(PICKUP_SOURCE.type === 'doc'){
-          const docRef = PICKUP_SOURCE.ref;
-          const docSnap = await tx.get(docRef);
-          const data = docSnap.exists ? (docSnap.data()||{}) : {};
-          const slotsArr = Array.isArray(data.slots) ? data.slots.slice() : [];
-          let idx = -1;
-          for(let i=0;i<slotsArr.length;i++){
-            const s = slotsArr[i];
-            const sid = (s.id || s.slot || s.slot_id || s.hhmm || ('slot_'+i));
-            if(normId(sid) === normId(selectedSlotId)){ idx = i; break; }
-          }
-          if(idx === -1) throw new Error('slot-not-found');
-          const s = slotsArr[idx];
-          const booked = typeof s.booked === 'number' ? s.booked : 0;
-          const capacity = typeof s.capacity === 'number' ? s.capacity : (typeof s.cap === 'number' ? s.cap : Infinity);
-          if(booked + 1 > capacity) throw new Error('slot-full');
-          const newSlot = Object.assign({}, s, { booked: booked + 1 });
-          slotsArr[idx] = newSlot;
-          tx.set(docRef, { slots: slotsArr, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-        }
-      }
-      return { orderNumber: nxt };
-    });
-  }
-
-  // ===== Imprimir y cargar =====
+  // ===== Imprimir y cargar (con reserva de slot igual al otro archivo) =====
   let inFlight = false;
   const btnPrintAndLoad = document.getElementById('btnPrintAndLoad');
 
@@ -841,108 +842,99 @@ function buildTicketHTMLFromPayload(orderId, payload){
         const pago = $("#selPago").value;
         const comentario = ($("#inpComentario").value||"").trim();
 
-        const picked = selectedPickup || null;
+        // slot seleccionado
+        const selected = window._selectedSlot || null;
+        if(!selected){ alert("Elegí un horario de retiro."); throw new Error('no-slot'); }
 
+        // verificar que el seleccionado sigue visible/válido
+        const still = visibleSlots.find(s=> s.key === selected.key);
+        if(!still){ alert("El horario elegido ya no está disponible. Elegí otro."); await refreshSlotsUI(); throw new Error('slot-gone'); }
+
+        // número de pedido
+        const orderNumber = await getNextOrderNumber();
+
+        // construir items
         const items=[];
         for(const o of Object.values(cart.burger)){
           items.push({
-            id:o.item.id,
-            name:o.item.name,
-            price:o.item.price,
-            qty:o.qty,
-            fries:o.fries,
-            notes:o.notes||'',
+            id:o.item.id, name:o.item.name, price:o.item.price, qty:o.qty,
+            fries:o.fries, notes:o.notes||'',
             extras:{ patty:o.extras?.patty||0, cheddar:o.extras?.cheddar||0, EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR }
           });
         }
         for(const o of Object.values(cart.drink)){
-          items.push({
-            id:o.item.id,
-            name:o.item.name,
-            price:o.item.price,
-            qty:o.qty,
-            fries:'',
-            notes:'',
-            extras:{}
-          });
+          items.push({ id:o.item.id, name:o.item.name, price:o.item.price, qty:o.qty, fries:'', notes:'', extras:{} });
         }
 
         const total = calcTotal();
 
-        let txnRes;
+        // reservar slot (transacción count++)
         try{
-          const selSlotId = picked ? (picked.pickup_slot || picked.pickup_time || null) : null;
-          txnRes = await reserveAndNextOrder(selSlotId);
-        }catch(txErr){
-          if(txErr && txErr.message === 'slot-full'){
-            alert('El horario seleccionado ya está completo. Elegí otro horario.');
-            throw txErr;
-          } else if(txErr && txErr.message === 'slot-not-found'){
-            alert('El horario seleccionado no existe. Volvé a elegir.');
-            throw txErr;
-          } else {
-            console.error('transaction err', txErr);
-            throw txErr;
-          }
+          await reserveSlotTransactional(selected.key);
+        }catch(e){
+          if(e && e.message==='SLOT_FULL'){ alert('El horario seleccionado se llenó. Elegí otro.'); await refreshSlotsUI(); throw e; }
+          throw e;
         }
 
-        const orderNumber = txnRes.orderNumber;
-
+        // guardar orden
         const payload = {
-          orderNumber, number: orderNumber, nombre, telefono, pago, comment: comentario,
-          items, total, status:"accepted", payment_status:"paid",
-          source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          orderNumber, number:orderNumber, nombre, telefono, pago, comment: comentario,
+          items, total, status:(pago==='mercado_pago'?'pending_payment':'accepted'),
+          payment_status:(pago==='mercado_pago'?'pending_payment':'paid'),
+          source:"mostrador",
+          pickup_slot: selected.key,
+          pickup_time: selected.iso,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
         };
 
-        if(picked){
-          if(picked.pickup_slot) payload.pickup_slot = picked.pickup_slot;
-          if(picked.pickup_time) payload.pickup_time = picked.pickup_time;
+        let ref;
+        try{
+          ref = await db.collection("orders").add(payload);
+        }catch(err){
+          // revertir reserva si falla
+          try{ await decrementSlot(selected.key); }catch(_){}
+          throw err;
         }
 
-        const ref = await db.collection("orders").add(payload);
-
+        // publicar order_public (para seguimiento si lo usás)
         const pubId = ref.id.slice(0,22);
-        const pubDoc = {
-          orderId: ref.id, orderNumber, status:'accepted',
+        await db.collection('order_public').doc(pubId).set({
+          orderId: ref.id, orderNumber, status: payload.status==='pending_payment'?'pending_payment':'accepted',
           entrega:'retira', pago, nombre,
+          pickup_slot: selected.key, pickup_time: selected.iso,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        if(picked && picked.pickup_slot) pubDoc.pickup_slot = picked.pickup_slot;
-        if(picked && picked.pickup_time) pubDoc.pickup_time = picked.pickup_time;
-        await db.collection('order_public').doc(pubId).set(pubDoc, {merge:true});
+        }, {merge:true});
 
+        // imprimir
         let savedDoc = null;
         try{ savedDoc = await db.collection('orders').doc(ref.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
-
-        const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt: new Date() };
-
+        const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt:new Date() };
         const html = buildTicketHTMLFromPayload(ref.id, docData);
         printHtmlInIframe(html);
 
-        cart={burger:{},drink:{}};
-        renderCart();
+        // limpiar UI
+        cart={burger:{},drink:{}}; renderCart();
         $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
         alert(`Pedido #${orderNumber} cargado e impresión solicitada.`);
       }catch(err){
-        if(err && err.message && err.message !== 'empty' && err.message !== 'no-name'){
+        if(err && ['empty','no-name','no-slot','slot-gone','SLOT_FULL'].includes(err.message)) {
+          // mensajes ya mostrados
+        }else{
           console.error(err);
-          if(err.message !== 'slot-full' && err.message !== 'slot-not-found'){
-            alert('Error al cargar el pedido. Reintentá.');
-          }
+          alert('Error al cargar el pedido. Reintentá.');
         }
       }finally{
-        setTimeout(()=>{
-          inFlight = false;
-          btnPrintAndLoad.removeAttribute('disabled');
-          btnPrintAndLoad.classList.remove('disabled');
-        }, 2000);
+        setTimeout(()=>{ inFlight=false; btnPrintAndLoad.removeAttribute('disabled'); btnPrintAndLoad.classList.remove('disabled'); }, 800);
       }
     });
   }
 
-  // Inicio: renderizar menú cuando DOM esté listo
+  // Inicio
   document.addEventListener('DOMContentLoaded', mount);
+
+  // Si otro tab modifica el carrito, refrescar slots (por si cambia 10'/20')
+  window.addEventListener('storage', (e)=>{ if(e.key===null){ refreshSlotsUI(); } });
   </script>
 </body>
 </html>
