@@ -1,5 +1,11 @@
 <!doctype html>
 <html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mostrador • Rhodes Burgers</title>
+  <link rel="icon" href="images/logo.png" />
+
   <script>
   /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
   const TTL_HOURS = 20;
@@ -39,11 +45,7 @@
     window.addEventListener(evt, bumpSession, {passive:true});
   });
   </script>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Mostrador • Rhodes Burgers</title>
-  <link rel="icon" href="images/logo.png" />
+
   <style>
     :root{
       --primary:#645E52; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
@@ -143,7 +145,6 @@
     .pickup-mini{width:36px;height:36px;border-radius:8px;border:1px solid var(--ring);display:flex;align-items:center;justify-content:center;cursor:pointer;background:#fff}
     .pickup-cap{font-weight:800;margin-left:8px}
     .pickup-desc{font-size:12px;color:var(--muted);margin-top:6px}
-    /* modal list for quick choose */
     .slots-list{display:flex;flex-wrap:wrap;gap:8px}
     .slot-quick{padding:8px 10px;border-radius:999px;border:1px solid var(--ring);cursor:pointer}
     .slot-quick.disabled{opacity:.5;pointer-events:none}
@@ -189,7 +190,7 @@
         </select>
       </div>
 
-      <!-- PICKUP selector: VERSION estilo con flechas + pill central -->
+      <!-- PICKUP selector -->
       <div style="margin-top:10px">
         <div style="font-weight:700">Horario de retiro (solo hoy)</div>
 
@@ -198,7 +199,6 @@
           <div id="pickupTime" class="pickup-time">--:--</div>
           <div id="btnNext" class="pickup-arrow" title="Siguiente">▶</div>
           <div id="btnQuick" class="pickup-mini" title="Ver lista">▦</div>
-          <!-- cupos ocultos por defecto ahora -->
           <div id="pickupCupos" class="pickup-cap muted" style="display:none">— cupos</div>
         </div>
 
@@ -207,7 +207,7 @@
 
       <div class="field"><textarea id="inpComentario" placeholder="Comentario"></textarea></div>
 
-      <!-- Botón modificado: Imprimir y cargar -->
+      <!-- Botón: Imprimir y cargar -->
       <button id="btnPrintAndLoad" class="btn primary" style="width:100%;margin-top:10px">Imprimir y cargar</button>
     </aside>
   </main>
@@ -223,7 +223,7 @@
     </div>
   </div>
 
-  <!-- Modal Personalizar (se usa al tocar Agregar) -->
+  <!-- Modal Personalizar -->
   <div class="overlay" id="overlay">
     <div class="modal">
       <h3 id="modTitle">Personalizar</h3>
@@ -231,7 +231,6 @@
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <div class="muted" style="font-weight:600">Papas (obligatorio)</div>
         <div class="pills" id="friesOptions">
-          <!-- Valores: con_sazon, con_sal, sin_sal -->
           <label class="pill"><span>Sazonadas</span> <input type="radio" name="fries" value="con_sazon"></label>
           <label class="pill"><span>Con sal</span>  <input type="radio" name="fries" value="con_sal"></label>
           <label class="pill"><span>Sin sal</span>  <input type="radio" name="fries" value="sin_sal"></label>
@@ -258,13 +257,11 @@
         </div>
       </div>
 
-      <!-- Preview de precio unitario -->
       <div class="rowx" id="rowPreview" style="justify-content:flex-end">
         <span class="muted">Subtotal unitario:</span>
         <span class="preview" id="unitPreview">$0</span>
       </div>
 
-      <!-- Notas mejoradas -->
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <label style="font-weight:600">Notas (opcional)</label>
         <textarea id="notes" class="textarea" maxlength="200"
@@ -330,7 +327,7 @@
     { id:"agua_sg",     name:"Agua sin gas 500ml",       price:1500, img:"images/Agua.png" }
   ];
 
-  /* ===== SIDES CONFIG (nuevo: leer desde config/sides) ===== */
+  /* ===== SIDES CONFIG ===== */
   let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
   function applySidesToUI(){
     document.querySelectorAll('#friesOptions .pill').forEach(label=>{
@@ -344,12 +341,7 @@
     const noteEl = document.getElementById('friesStateNote');
     const disabled = Object.entries(SIDES_STATE).filter(([k,v])=>v===false).map(([k])=>k);
     if(disabled.length){
-      const human = disabled.map(k => {
-        if(k==='con_sazon') return 'Sazonadas';
-        if(k==='con_sal') return 'Con sal';
-        if(k==='sin_sal') return 'Sin sal';
-        return k;
-      }).join(', ');
+      const human = disabled.map(k => k==='con_sazon'?'Sazonadas':k==='con_sal'?'Con sal':k==='sin_sal'?'Sin sal':k).join(', ');
       noteEl.textContent = 'Variantes deshabilitadas: ' + human;
       noteEl.classList.add('side-disabled-note');
     } else {
@@ -375,37 +367,28 @@
     applySidesToUI();
   }
 
-  /* ===== PICKUP / SLOTS (colección o doc) ===== */
-  let pickupSlots = []; // array de {id,label,capacity,booked,available,__docId|__arrIdx}
+  /* ===== PICKUP / SLOTS ===== */
+  let pickupSlots = [];
   let PICKUP_SOURCE = null;
-  let currentSlotIdx = 0; // índice visible en el control
+  let currentSlotIdx = 0;
   let selectedPickup = null;
 
   function normId(v){ return String(v||'').trim().toLowerCase(); }
-
-  // helper: extrae HH:MM desde label que puede venir como "20251024_2140" o "2025-10-24 21:40" o ya "21:40"
   function extractTimeLabel(raw){
     if(!raw) return '--:--';
     const s = String(raw);
-    // buscar hh:mm
     const m1 = s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
     if(m1) return `${m1[1].padStart(2,'0')}:${m1[2]}`;
-    // buscar YYYYMMDD[_-]?HHMM o ...HHMM al final
     const m2 = s.match(/(\d{2})(\d{2})$/);
-    if(m2){
-      return `${m2[1]}:${m2[2]}`;
-    }
-    // buscar ..._HHMM o -HHMM
+    if(m2){ return `${m2[1]}:${m2[2]}`; }
     const m3 = s.match(/[_-](\d{2})(\d{2})$/);
     if(m3) return `${m3[1]}:${m3[2]}`;
-    // como fallback, si raw es "20251024_2140" intento a partir de última parte con dígitos
     const parts = s.split(/[\s_-]+/);
     const last = parts[parts.length-1];
     if(/^\d{3,4}$/.test(last)){
       if(last.length===3) return last.slice(0,1)+':'+last.slice(1);
       return last.slice(0,2)+':'+last.slice(2);
     }
-    // si no tiene hora, devuelvo raw pero recortado
     return (s.length>5) ? s.slice(-5) : s;
   }
 
@@ -417,38 +400,30 @@
     if(!pickupSlots.length){
       timeEl.textContent = '--:--';
       timeEl.classList.add('disabled');
-      // ocultamos cupos si no hay slots
       cuposEl.style.display = 'none';
       descEl.textContent = 'No hay turnos configurados.';
       selectedPickup = null;
       return;
     }
 
-    // clamp index
     if(currentSlotIdx < 0) currentSlotIdx = 0;
     if(currentSlotIdx >= pickupSlots.length) currentSlotIdx = pickupSlots.length - 1;
     const s = pickupSlots[currentSlotIdx];
 
-    // mostrar solo la hora
     const timeLabel = extractTimeLabel(s.label || s.id || '');
     timeEl.textContent = timeLabel;
     const isFull = (s.available===false) || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity);
     timeEl.classList.toggle('disabled', isFull);
 
-    // ocultamos la caja de cupos por pedido del cliente (no mostrar "0 reservas")
     cuposEl.style.display = 'none';
-
-    // descripción: preferimos hint/desc del slot; si no, mensaje por defecto para todo el grupo
     descEl.textContent = s.hint || s.desc || (pickupSlots.length>1 ? `Mostrando ${pickupSlots.length} turnos` : 'Turno único');
 
-    // seleccionado por defecto (solo si hay disponibilidad)
     if(!isFull){
       selectedPickup = { pickup_slot: s.id, pickup_time: s.label || s.id || timeLabel };
     } else {
       selectedPickup = null;
     }
 
-    // Prev/next enable/disable
     $("#btnPrev").style.visibility = (currentSlotIdx>0) ? 'visible' : 'hidden';
     $("#btnNext").style.visibility = (currentSlotIdx < pickupSlots.length-1) ? 'visible' : 'hidden';
   }
@@ -460,10 +435,11 @@
     pickupSlots.forEach((s, idx)=>{
       const btn = document.createElement('div');
       const timeLabel = extractTimeLabel(s.label || s.id || '');
-      btn.className = 'slot-quick' + ((s.available===false || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity)) ? ' disabled' : '');
+      const disabled = (s.available===false) || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity);
+      btn.className = 'slot-quick' + (disabled ? ' disabled' : '');
       btn.textContent = timeLabel;
       btn.onclick = ()=>{
-        if(btn.classList.contains('disabled')) return;
+        if(disabled) return;
         currentSlotIdx = idx;
         renderPickupControls();
         overlay.classList.remove('open');
@@ -473,7 +449,6 @@
     overlay.classList.add('open');
   }
 
-  // subscribe flexible: collection 'slots' preferred, otherwise doc candidates
   function subscribeSlots(){
     try{
       const col = db.collection('slots');
@@ -493,7 +468,6 @@
               hint: d.hint
             });
           });
-          // ordenar aproximado por label si contienen horas
           pickupSlots.sort((a,b)=>{
             const A = a.label || a.id, B = b.label || b.id;
             const ta = (A.match(/(\d{2}):?(\d{2})$/)||[]).slice(1).join('');
@@ -524,17 +498,15 @@
             const data = snap.data()||{};
             if(Array.isArray(data.slots) && data.slots.length){
               PICKUP_SOURCE = { type:'doc', ref: docRef, path };
-              pickupSlots = data.slots.map((s, i)=>{
-                return {
-                  id: s.id || s.slot || s.hhmm || ('slot_'+i),
-                  label: s.label || s.hhmm || s.slot || s.id,
-                  capacity: (typeof s.capacity==='number') ? s.capacity : (typeof s.cap === 'number' ? s.cap : undefined),
-                  booked: (typeof s.booked === 'number') ? s.booked : 0,
-                  available: s.available === false ? false : true,
-                  __arrIdx: i,
-                  hint: s.hint
-                };
-              });
+              pickupSlots = data.slots.map((s, i)=>({
+                id: s.id || s.slot || s.hhmm || ('slot_'+i),
+                label: s.label || s.hhmm || s.slot || s.id,
+                capacity: (typeof s.capacity==='number') ? s.capacity : (typeof s.cap === 'number' ? s.cap : undefined),
+                booked: (typeof s.booked === 'number') ? s.booked : 0,
+                available: s.available === false ? false : true,
+                __arrIdx: i,
+                hint: s.hint
+              }));
               currentSlotIdx = pickupSlots.findIndex(s=> s.available !== false && (typeof s.capacity!=='number' || (s.booked||0) < s.capacity));
               if(currentSlotIdx === -1) currentSlotIdx = 0;
               renderPickupControls();
@@ -572,10 +544,10 @@
   });
 
   /* ===== Carrito & UI ===== */
-  const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
+  const elBurgersGrid = document.getElementById('burgersGrid');
+  const elDrinksGrid  = document.getElementById('drinksGrid');
   const cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
 
-  // CART: ahora las hamburguesas se guardan como entradas independientes (key único por unidad)
   let cart = { burger:{}, drink:{} };
 
   function friesName(v){
@@ -676,8 +648,12 @@
   }
 
   function mount(){
-    gridBurgers.innerHTML=""; BURGERS.forEach(b=>gridBurgers.appendChild(renderCard(b,"burger")));
-    gridDrinks.innerHTML="";  DRINKS.forEach(d=>drinksGrid.appendChild(renderCard(d,"drink")));
+    elBurgersGrid.innerHTML="";
+    BURGERS.forEach(b=>elBurgersGrid.appendChild(renderCard(b,"burger")));
+
+    elDrinksGrid.innerHTML="";
+    DRINKS.forEach(d=>elDrinksGrid.appendChild(renderCard(d,"drink")));
+
     renderCart(); refreshAvailabilityUI();
     applySidesToUI();
     renderPickupControls();
@@ -707,7 +683,7 @@
     });
   }catch(e){ console.warn(e); }
 
-  // ===== Modal Personalizar (igual que antes) =====
+  // ===== Modal Personalizar =====
   const overlay=$("#overlay"), modTitle=$("#modTitle");
   const rowPatties=$("#rowPatties"), rowCheddar=$("#rowCheddar");
   const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
@@ -722,7 +698,10 @@
     unitPreview.textContent = money(base + pat + che);
   }
 
+  function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
+  function updateCount(el){ const c=document.getElementById('notesCount'); if(c) c.textContent=`${el.value.length}/${el.maxLength||200}`; }
   function resetFries(){ document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false); }
+
   function openCustomize(item){
     if(!isAvailable(item.id)) return;
     currentItem=item; modTitle.textContent="Personalizar: "+item.name;
@@ -741,41 +720,9 @@
   if(cheInc) cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
   if(cheDec) cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
 
-  function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
-  function updateCount(el){ const c=document.getElementById('notesCount'); if(c) c.textContent=`${el.value.length}/${el.maxLength||200}`; }
+  if(typeof window !== 'undefined'){ window.autoGrow = autoGrow; window.updateCount = updateCount; }
 
-  // Agregar: nueva entrada única por hamburguesa (cada unidad su nota)
-  if(btnAdd) btnAdd.onclick=()=> {
-    if(!currentItem || !isAvailable(currentItem.id)) return;
-    const friesEl=document.querySelector('input[name="fries"]:checked');
-    if(!friesEl){ alert("Elegí el tipo de papas."); return; }
-    if(SIDES_STATE[friesEl.value] === false){
-      alert("La variante de papas elegida no está disponible. Elegí otra.");
-      return;
-    }
-    const extras={patty:0,cheddar:0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR};
-    if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
-    else if(currentItem.kind==="chicken"){ extras.cheddar=+cheVal.textContent||0; }
-    const notesVal = notes.value.trim();
-    const baseKey = `${currentItem.id}::fries=${friesEl.value}::patty=${extras.patty}::cheddar=${extras.cheddar}`;
-    const uid = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
-    const uniqueKey = baseKey + '::uid=' + uid;
-
-    const bucket = cart.burger;
-    bucket[uniqueKey] = {
-      qty: 1,
-      item: currentItem,
-      fries: friesEl.value,
-      extras,
-      ...(notesVal ? { notes: notesVal } : {}),
-      _label: `${currentItem.name} — Papas: ${friesName(friesEl.value)}${extras.patty?(' · +'+extras.patty+' medallón(es)'):''}${extras.cheddar?(' · +'+extras.cheddar+' cheddar'):''}${notesVal?(' · Nota: '+notesVal):''}`
-    };
-
-    overlay.classList.remove("open");
-    renderCart();
-  };
-
-  // ===== TICKET builder (simple para imprimir) =====
+  // ===== TICKET builder =====
   function buildTicketHTMLFromPayload(orderId, payload){
     const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const title = `Pedido #${payload.orderNumber || orderId || ''}`;
@@ -801,7 +748,6 @@
     return html;
   }
 
-  // Imprime HTML en iframe oculto (sin popup)
   function printHtmlInIframe(html){
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
@@ -825,14 +771,12 @@
   function globalCounterRef(){ return db.collection('config').doc('counters'); }
   async function reserveAndNextOrder(selectedSlotId){
     return await db.runTransaction(async tx=>{
-      // incrementar contador
       const ref = globalCounterRef();
       const snap = await tx.get(ref);
       const cur = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
       const nxt = cur + 1;
       tx.set(ref, { orderNumber: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
 
-      // reservar slot si corresponde
       if(selectedSlotId && PICKUP_SOURCE){
         if(PICKUP_SOURCE.type === 'collection'){
           const found = pickupSlots.find(s => normId(s.id) === normId(selectedSlotId));
@@ -866,12 +810,11 @@
           tx.set(docRef, { slots: slotsArr, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
         }
       }
-
       return { orderNumber: nxt };
     });
   }
 
-  // ===== Imprimir y cargar (nuevo) =====
+  // ===== Imprimir y cargar =====
   let inFlight = false;
   const btnPrintAndLoad = document.getElementById('btnPrintAndLoad');
 
@@ -893,10 +836,8 @@
         const pago = $("#selPago").value;
         const comentario = ($("#inpComentario").value||"").trim();
 
-        // obtener selección (selectedPickup actualizado por control)
         const picked = selectedPickup || null;
 
-        // Construyo items legibles para Firestore
         const items=[];
         for(const o of Object.values(cart.burger)){
           items.push({
@@ -923,7 +864,6 @@
 
         const total = calcTotal();
 
-        // -------------- reserva slot e obtiene orderNumber en una transacción --------------
         let txnRes;
         try{
           const selSlotId = picked ? (picked.pickup_slot || picked.pickup_time || null) : null;
@@ -949,16 +889,13 @@
           source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp()
         };
 
-        // incluir campos de pickup si fueron seleccionados
         if(picked){
           if(picked.pickup_slot) payload.pickup_slot = picked.pickup_slot;
           if(picked.pickup_time) payload.pickup_time = picked.pickup_time;
         }
 
-        // Guardar en orders
         const ref = await db.collection("orders").add(payload);
 
-        // Guardar resumen público
         const pubId = ref.id.slice(0,22);
         const pubDoc = {
           orderId: ref.id, orderNumber, status:'accepted',
@@ -970,19 +907,14 @@
         if(picked && picked.pickup_time) pubDoc.pickup_time = picked.pickup_time;
         await db.collection('order_public').doc(pubId).set(pubDoc, {merge:true});
 
-        // Para el ticket necesitamos un `createdAt` legible en payload:
         let savedDoc = null;
         try{ savedDoc = await db.collection('orders').doc(ref.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
 
         const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt: new Date() };
 
-        // Generar HTML del ticket
         const html = buildTicketHTMLFromPayload(ref.id, docData);
-
-        // Imprimir en iframe oculto
         printHtmlInIframe(html);
 
-        // Limpiar carrito y UI
         cart={burger:{},drink:{}};
         renderCart();
         $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
@@ -1004,10 +936,8 @@
     });
   }
 
-  // Inicio: renderizar menú
-  const drinksGrid = document.getElementById('drinksGrid');
-  const burgersGrid = document.getElementById('burgersGrid');
-  mount();
+  // Inicio: renderizar menú cuando DOM esté listo
+  document.addEventListener('DOMContentLoaded', mount);
   </script>
 </body>
 </html>
