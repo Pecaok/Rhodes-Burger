@@ -303,14 +303,31 @@
 
   // ===== Menú =====
   const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
-  const BURGERS=[ /* same items as before, truncated for brevity in this paste */ 
+  const BURGERS=[
     { id:"cheese_simple", name:"Cheeseburger Simple", price:10100,  img:"images/cheeseburger simple.jpg", kind:"simple", desc:"Medallón con doble cheddar. Incluye papas." },
     { id:"cheese_doble",  name:"Cheeseburger Doble",  price:12500, img:"images/cheeseburger doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar. Incluye papas." },
+    { id:"cheesebacon_simple", name:"CheeseBacon Simple", price:10600, img:"images/CheeseBacon Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar y bacon. Incluye papas." },
+    { id:"cheesebacon_doble",  name:"CheeseBacon Doble",  price:13100, img:"images/CheeseBacon Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar y bacon. Incluye papas." },
+    { id:"morgan_simple", name:"Morgan Simple", price:11500, img:"images/Morgan Simple.jpg", kind:"simple", desc:"Doble cheddar, bacon, barbacoa y crispy onion. Incluye papas." },
+    { id:"morgan_doble",  name:"Morgan Doble",  price:14200, img:"images/Morgan Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, barbacoa y crispy onion. Incluye papas." },
+    { id:"bigjohn_simple", name:"Big John Simple", price:11500, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
+    { id:"bigjohn_doble",  name:"Big John Doble",  price:13800, img:"images/Big John Doble.jpg",  kind:"double", desc:"Doble medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
+    { id:"rhodes_simple", name:"Rhodes Simple", price:11900, img:"images/Rhodes Simple.jpg", kind:"simple", desc:"Doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
+    { id:"rhodes_doble",  name:"Rhodes Doble",  price:14500, img:"images/Rhodes Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
+    { id:"burguesa_simple", name:"Burguesa Simple", price:11900, img:"images/Burguesa Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
+    { id:"burguesa_doble",  name:"Burguesa Doble",  price:14500, img:"images/Burguesa Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
     { id:"pollo_crispy", name:"Pollo Crispy", price:9100, img:"images/Pollo crispy.jpg", kind:"chicken", desc:"Pechuga crispy con lechuga y mayo. Incluye papas." }
   ];
-  const DRINKS=[ 
+  const DRINKS=[
     { id:"andes_rubia", name:"Andes Origen Rubia 473ml", price:3800, img:"images/Andes Rubia.png" },
-    { id:"coca_org",    name:"Coca-Cola Original 500ml", price:2500, img:"images/Coca.png" }
+    { id:"andes_roja",  name:"Andes Origen Roja 473ml",  price:3800, img:"images/Andes Roja.png" },
+    { id:"coca_org",    name:"Coca-Cola Original 500ml", price:2500, img:"images/Coca.png" },
+    { id:"coca_zero",   name:"Coca-Cola Zero 500ml",     price:2500, img:"images/Coca Zero.png" },
+    { id:"sprite",      name:"Sprite 500ml",             price:2500, img:"images/Sprite.png" },
+    { id:"aq_pomelo",   name:"Aquarius Pomelo 500ml",    price:2000, img:"images/Pomelo.png" },
+    { id:"aq_pera",     name:"Aquarius Pera 500ml",      price:2000, img:"images/Pera.png" },
+    { id:"aq_manzana",  name:"Aquarius Manzana 500ml",   price:2000, img:"images/Manzana.png" },
+    { id:"agua_sg",     name:"Agua sin gas 500ml",       price:1500, img:"images/Agua.png" }
   ];
 
   /* ===== SIDES CONFIG (nuevo: leer desde config/sides) ===== */
@@ -476,11 +493,12 @@
               hint: d.hint
             });
           });
+          // ordenar aproximado por label si contienen horas
           pickupSlots.sort((a,b)=>{
             const A = a.label || a.id, B = b.label || b.id;
-            if(/\d{1,2}:\d{2}/.test(A) && /\d{1,2}:\d{2}/.test(B)){
-              return A.localeCompare(B);
-            }
+            const ta = (A.match(/(\d{2}):?(\d{2})$/)||[]).slice(1).join('');
+            const tb = (B.match(/(\d{2}):?(\d{2})$/)||[]).slice(1).join('');
+            if(ta && tb) return Number(ta) - Number(tb);
             return 0;
           });
           currentSlotIdx = pickupSlots.findIndex(s=> s.available !== false && (typeof s.capacity!=='number' || (s.booked||0) < s.capacity));
@@ -529,20 +547,29 @@
   subscribeSlots();
 
   // NAV controls
-  $("#btnPrev").addEventListener('click', ()=>{ if(currentSlotIdx>0){ currentSlotIdx--; renderPickupControls(); }});
-  $("#btnNext").addEventListener('click', ()=>{ if(currentSlotIdx < pickupSlots.length-1){ currentSlotIdx++; renderPickupControls(); }});
-  $("#pickupTime").addEventListener('click', ()=>{
-    const s = pickupSlots[currentSlotIdx];
-    if(!s) return;
-    const isFull = (s.available===false) || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity);
-    if(isFull){ alert('El horario está completo o inhabilitado.'); return; }
-    selectedPickup = { pickup_slot: s.id, pickup_time: s.label || s.id || extractTimeLabel(s.label || s.id) };
-    $("#pickupTime").style.boxShadow = '0 0 0 3px rgba(100,90,70,0.12)';
-    setTimeout(()=>{ $("#pickupTime").style.boxShadow=''; }, 300);
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const prev = document.getElementById('btnPrev');
+    const next = document.getElementById('btnNext');
+    const quick = document.getElementById('btnQuick');
+    const pickupTime = document.getElementById('pickupTime');
+    const closeSlots = document.getElementById('closeSlots');
+
+    if(prev) prev.addEventListener('click', ()=>{ if(currentSlotIdx>0){ currentSlotIdx--; renderPickupControls(); }});
+    if(next) next.addEventListener('click', ()=>{ if(currentSlotIdx < pickupSlots.length-1){ currentSlotIdx++; renderPickupControls(); }});
+    if(quick) quick.addEventListener('click', openSlotsQuick);
+    if(closeSlots) closeSlots.addEventListener('click', ()=>document.getElementById('slotsOverlay').classList.remove('open'));
+    document.getElementById('slotsOverlay').addEventListener('click', e=>{ if(e.target === document.getElementById('slotsOverlay')) document.getElementById('slotsOverlay').classList.remove('open'); });
+
+    if(pickupTime) pickupTime.addEventListener('click', ()=>{
+      const s = pickupSlots[currentSlotIdx];
+      if(!s) return;
+      const isFull = (s.available===false) || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity);
+      if(isFull){ alert('El horario está completo o inhabilitado.'); return; }
+      selectedPickup = { pickup_slot: s.id, pickup_time: s.label || s.id || extractTimeLabel(s.label || s.id) };
+      pickupTime.style.boxShadow = '0 0 0 3px rgba(100,90,70,0.12)';
+      setTimeout(()=>{ pickupTime.style.boxShadow=''; }, 300);
+    });
   });
-  $("#btnQuick").addEventListener('click', openSlotsQuick);
-  $("#closeSlots").addEventListener('click', ()=>$("#slotsOverlay").classList.remove('open'));
-  $("#slotsOverlay").addEventListener('click', e=>{ if(e.target === $("#slotsOverlay")) $("#slotsOverlay").classList.remove('open'); });
 
   /* ===== Carrito & UI ===== */
   const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
@@ -656,7 +683,7 @@
     renderPickupControls();
   }
 
-  /* ===== Disponibilidad (productos) — se mantiene igual) ===== */
+  /* ===== Disponibilidad (productos) ===== */
   const availability = new Map();
   const isAvailable = id => availability.has(id) ? !!availability.get(id) : true;
   function refreshAvailabilityUI(){
@@ -708,17 +735,17 @@
     applySidesToUI();
     overlay.classList.add("open");
   }
-  btnCancel.onclick=()=> overlay.classList.remove("open");
-  patInc.onclick=()=>{const v=+patVal.textContent||0;if(v<2)patVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
-  patDec.onclick=()=>{const v=+patVal.textContent||0;if(v>0)patVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
-  cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
-  cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
+  if(btnCancel) btnCancel.onclick=()=> overlay.classList.remove("open");
+  if(patInc) patInc.onclick=()=>{const v=+patVal.textContent||0;if(v<2)patVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
+  if(patDec) patDec.onclick=()=>{const v=+patVal.textContent||0;if(v>0)patVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
+  if(cheInc) cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
+  if(cheDec) cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
 
   function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
   function updateCount(el){ const c=document.getElementById('notesCount'); if(c) c.textContent=`${el.value.length}/${el.maxLength||200}`; }
 
   // Agregar: nueva entrada única por hamburguesa (cada unidad su nota)
-  btnAdd.onclick=()=> {
+  if(btnAdd) btnAdd.onclick=()=> {
     if(!currentItem || !isAvailable(currentItem.id)) return;
     const friesEl=document.querySelector('input[name="fries"]:checked');
     if(!friesEl){ alert("Elegí el tipo de papas."); return; }
@@ -747,6 +774,52 @@
     overlay.classList.remove("open");
     renderCart();
   };
+
+  // ===== TICKET builder (simple para imprimir) =====
+  function buildTicketHTMLFromPayload(orderId, payload){
+    const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const title = `Pedido #${payload.orderNumber || orderId || ''}`;
+    const items = Array.isArray(payload.items) ? payload.items.map(it=>{
+      const ex = [];
+      if(it.extras?.patty) ex.push(`+${it.extras.patty} medallón(es)`);
+      if(it.extras?.cheddar) ex.push(`+${it.extras.cheddar} cheddar`);
+      return `${(it.qty||1)} × ${it.name} ${ex.length?('('+ex.join(', ')+')'):''} ${it.notes?('- '+it.notes):''}`;
+    }).join('<br>') : '';
+    const pickup = payload.pickup_time ? `<div>Retira: ${payload.pickup_time}</div>` : '';
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
+    <style>body{font-family:Arial, sans-serif;font-weight:700;padding:10px} .c{text-align:center}</style>
+    </head><body><div class="c"><h2>Rhodes Burgers</h2><h3>${title}</h3></div>
+    <div><strong>Cliente:</strong> ${payload.nombre||''}</div>
+    ${pickup}
+    <hr>
+    <div>${items}</div>
+    <hr>
+    <div><strong>Total:</strong> ${moneyFn(payload.total||0)}</div>
+    <div style="margin-top:8px;font-size:12px;color:#666">${new Date().toLocaleString()}</div>
+    <script>window.addEventListener('load',()=>{ setTimeout(()=>window.print(),80); });</script>
+    </body></html>`;
+    return html;
+  }
+
+  // Imprime HTML en iframe oculto (sin popup)
+  function printHtmlInIframe(html){
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.setAttribute('aria-hidden','true');
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+
+    const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
+    try{ iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150); }catch(e){}
+    setTimeout(cleanup, 15000);
+  }
 
   // ===== reserveAndNextOrder (transacción) =====
   function globalCounterRef(){ return db.collection('config').doc('counters'); }
@@ -798,166 +871,138 @@
     });
   }
 
-  // ===== TICKET builder (igual que antes, función compactada) =====
-  function buildTicketHTMLFromPayload(orderId, payload){
-    // reuso la función larga del ejemplo anterior; para no ocupar espacio la dejo intacta en este archivo
-    // (en tu implementación real puedes copiar la versión completa anterior)
-    // Para mantener este ejemplo funcional, devuelvo un ticket simple:
-    const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Ticket</title></head><body><pre>${JSON.stringify(payload, null, 2)}</pre><script>window.print()</script></body></html>`;
-    return html;
-  }
-
-  // Imprime HTML en iframe oculto (sin popup)
-  function printHtmlInIframe(html){
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.setAttribute('aria-hidden','true');
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentWindow.document;
-    doc.open(); doc.write(html); doc.close();
-
-    const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
-    try{ iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150); }catch(e){}
-    setTimeout(cleanup, 15000);
-  }
-
   // ===== Imprimir y cargar (nuevo) =====
   let inFlight = false;
   const btnPrintAndLoad = document.getElementById('btnPrintAndLoad');
 
-  btnPrintAndLoad.addEventListener('click', async ()=>{
-    if(inFlight) return;
-    inFlight = true;
-    btnPrintAndLoad.setAttribute('disabled','');
-    btnPrintAndLoad.classList.add('disabled');
+  if(btnPrintAndLoad){
+    btnPrintAndLoad.addEventListener('click', async ()=>{
+      if(inFlight) return;
+      inFlight = true;
+      btnPrintAndLoad.setAttribute('disabled','');
+      btnPrintAndLoad.classList.add('disabled');
 
-    try{
-      const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
-      if(!hasItems){ alert("Agregá al menos un producto."); throw new Error('empty'); }
-
-      const nombreRaw = ($("#inpNombre").value||"").trim();
-      if(!nombreRaw){ alert("Ingresá el nombre."); throw new Error('no-name'); }
-      const nombre = `${nombreRaw} (mostrador)`;
-      const telefono = ($("#inpTel").value||"").trim();
-      const pago = $("#selPago").value;
-      const comentario = ($("#inpComentario").value||"").trim();
-
-      // obtener selección (selectedPickup actualizado por control)
-      const picked = selectedPickup || null;
-
-      // Construyo items legibles para Firestore
-      const items=[];
-      for(const o of Object.values(cart.burger)){
-        items.push({
-          id:o.item.id,
-          name:o.item.name,
-          price:o.item.price,
-          qty:o.qty,
-          fries:o.fries,
-          notes:o.notes||'',
-          extras:{ patty:o.extras?.patty||0, cheddar:o.extras?.cheddar||0, EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR }
-        });
-      }
-      for(const o of Object.values(cart.drink)){
-        items.push({
-          id:o.item.id,
-          name:o.item.name,
-          price:o.item.price,
-          qty:o.qty,
-          fries:'',
-          notes:'',
-          extras:{}
-        });
-      }
-
-      const total = calcTotal();
-
-      // -------------- reserva slot e obtiene orderNumber en una transacción --------------
-      let txnRes;
       try{
-        const selSlotId = picked ? (picked.pickup_slot || picked.pickup_time || null) : null;
-        txnRes = await reserveAndNextOrder(selSlotId);
-      }catch(txErr){
-        if(txErr && txErr.message === 'slot-full'){
-          alert('El horario seleccionado ya está completo. Elegí otro horario.');
-          throw txErr;
-        } else if(txErr && txErr.message === 'slot-not-found'){
-          alert('El horario seleccionado no existe. Volvé a elegir.');
-          throw txErr;
-        } else {
-          console.error('transaction err', txErr);
-          throw txErr;
+        const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
+        if(!hasItems){ alert("Agregá al menos un producto."); throw new Error('empty'); }
+
+        const nombreRaw = ($("#inpNombre").value||"").trim();
+        if(!nombreRaw){ alert("Ingresá el nombre."); throw new Error('no-name'); }
+        const nombre = `${nombreRaw} (mostrador)`;
+        const telefono = ($("#inpTel").value||"").trim();
+        const pago = $("#selPago").value;
+        const comentario = ($("#inpComentario").value||"").trim();
+
+        // obtener selección (selectedPickup actualizado por control)
+        const picked = selectedPickup || null;
+
+        // Construyo items legibles para Firestore
+        const items=[];
+        for(const o of Object.values(cart.burger)){
+          items.push({
+            id:o.item.id,
+            name:o.item.name,
+            price:o.item.price,
+            qty:o.qty,
+            fries:o.fries,
+            notes:o.notes||'',
+            extras:{ patty:o.extras?.patty||0, cheddar:o.extras?.cheddar||0, EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR }
+          });
         }
-      }
-
-      const orderNumber = txnRes.orderNumber;
-
-      const payload = {
-        orderNumber, number: orderNumber, nombre, telefono, pago, comment: comentario,
-        items, total, status:"accepted", payment_status:"paid",
-        source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-
-      // incluir campos de pickup si fueron seleccionados
-      if(picked){
-        if(picked.pickup_slot) payload.pickup_slot = picked.pickup_slot;
-        if(picked.pickup_time) payload.pickup_time = picked.pickup_time;
-      }
-
-      // Guardar en orders
-      const ref = await db.collection("orders").add(payload);
-
-      // Guardar resumen público
-      const pubId = ref.id.slice(0,22);
-      const pubDoc = {
-        orderId: ref.id, orderNumber, status:'accepted',
-        entrega:'retira', pago, nombre,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-      if(picked && picked.pickup_slot) pubDoc.pickup_slot = picked.pickup_slot;
-      if(picked && picked.pickup_time) pubDoc.pickup_time = picked.pickup_time;
-      await db.collection('order_public').doc(pubId).set(pubDoc, {merge:true});
-
-      // Para el ticket necesitamos un `createdAt` legible en payload:
-      let savedDoc = null;
-      try{ savedDoc = await db.collection('orders').doc(ref.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
-
-      const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt: new Date() };
-
-      // Generar HTML del ticket
-      const html = buildTicketHTMLFromPayload(ref.id, docData);
-
-      // Imprimir en iframe oculto
-      printHtmlInIframe(html);
-
-      // Limpiar carrito y UI
-      cart={burger:{},drink:{}};
-      renderCart();
-      $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
-      alert(`Pedido #${orderNumber} cargado e impresión solicitada.`);
-    }catch(err){
-      if(err && err.message && err.message !== 'empty' && err.message !== 'no-name'){
-        console.error(err);
-        if(err.message !== 'slot-full' && err.message !== 'slot-not-found'){
-          alert('Error al cargar el pedido. Reintentá.');
+        for(const o of Object.values(cart.drink)){
+          items.push({
+            id:o.item.id,
+            name:o.item.name,
+            price:o.item.price,
+            qty:o.qty,
+            fries:'',
+            notes:'',
+            extras:{}
+          });
         }
+
+        const total = calcTotal();
+
+        // -------------- reserva slot e obtiene orderNumber en una transacción --------------
+        let txnRes;
+        try{
+          const selSlotId = picked ? (picked.pickup_slot || picked.pickup_time || null) : null;
+          txnRes = await reserveAndNextOrder(selSlotId);
+        }catch(txErr){
+          if(txErr && txErr.message === 'slot-full'){
+            alert('El horario seleccionado ya está completo. Elegí otro horario.');
+            throw txErr;
+          } else if(txErr && txErr.message === 'slot-not-found'){
+            alert('El horario seleccionado no existe. Volvé a elegir.');
+            throw txErr;
+          } else {
+            console.error('transaction err', txErr);
+            throw txErr;
+          }
+        }
+
+        const orderNumber = txnRes.orderNumber;
+
+        const payload = {
+          orderNumber, number: orderNumber, nombre, telefono, pago, comment: comentario,
+          items, total, status:"accepted", payment_status:"paid",
+          source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        // incluir campos de pickup si fueron seleccionados
+        if(picked){
+          if(picked.pickup_slot) payload.pickup_slot = picked.pickup_slot;
+          if(picked.pickup_time) payload.pickup_time = picked.pickup_time;
+        }
+
+        // Guardar en orders
+        const ref = await db.collection("orders").add(payload);
+
+        // Guardar resumen público
+        const pubId = ref.id.slice(0,22);
+        const pubDoc = {
+          orderId: ref.id, orderNumber, status:'accepted',
+          entrega:'retira', pago, nombre,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if(picked && picked.pickup_slot) pubDoc.pickup_slot = picked.pickup_slot;
+        if(picked && picked.pickup_time) pubDoc.pickup_time = picked.pickup_time;
+        await db.collection('order_public').doc(pubId).set(pubDoc, {merge:true});
+
+        // Para el ticket necesitamos un `createdAt` legible en payload:
+        let savedDoc = null;
+        try{ savedDoc = await db.collection('orders').doc(ref.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
+
+        const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt: new Date() };
+
+        // Generar HTML del ticket
+        const html = buildTicketHTMLFromPayload(ref.id, docData);
+
+        // Imprimir en iframe oculto
+        printHtmlInIframe(html);
+
+        // Limpiar carrito y UI
+        cart={burger:{},drink:{}};
+        renderCart();
+        $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
+        alert(`Pedido #${orderNumber} cargado e impresión solicitada.`);
+      }catch(err){
+        if(err && err.message && err.message !== 'empty' && err.message !== 'no-name'){
+          console.error(err);
+          if(err.message !== 'slot-full' && err.message !== 'slot-not-found'){
+            alert('Error al cargar el pedido. Reintentá.');
+          }
+        }
+      }finally{
+        setTimeout(()=>{
+          inFlight = false;
+          btnPrintAndLoad.removeAttribute('disabled');
+          btnPrintAndLoad.classList.remove('disabled');
+        }, 2000);
       }
-    }finally{
-      setTimeout(()=>{
-        inFlight = false;
-        btnPrintAndLoad.removeAttribute('disabled');
-        btnPrintAndLoad.classList.remove('disabled');
-      }, 2000);
-    }
-  });
+    });
+  }
 
   // Inicio: renderizar menú
   const drinksGrid = document.getElementById('drinksGrid');
