@@ -1,78 +1,106 @@
 <!doctype html>
 <html lang="es">
+  <script>
+  /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
+  const TTL_HOURS = 20;
+  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
+
+  function sessionValid(){
+    const ok = localStorage.getItem('rb_admin_ok') === 'true';
+    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+    return ok && (Date.now() - ts) < TTL_MS;
+  }
+  function bumpSession(){  // renueva TTL con actividad
+    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
+  }
+  function logout(){
+    localStorage.removeItem('rb_admin_ok');
+    localStorage.removeItem('rb_admin_t');
+    localStorage.removeItem('rb_auth_v2');
+    sessionStorage.removeItem('rb_auth_v2');
+    location.replace('login.html'); // <-- página de login
+  }
+
+  // Requerir sesión en páginas internas
+  (function requireSession(){
+    if (!sessionValid()){
+      const next = encodeURIComponent(
+        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
+        (location.search || '') + (location.hash || '')
+      );
+      location.replace('login.html?next=' + next); // <-- login con ?next=
+    } else {
+      bumpSession();
+    }
+  })();
+
+  // Mantener viva la sesión mientras se usa
+  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
+    window.addEventListener(evt, bumpSession, {passive:true});
+  });
+  </script>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Rhodes Burgers - Menú</title>
+  <title>Mostrador • Rhodes Burgers</title>
   <link rel="icon" href="images/logo.png" />
   <style>
     :root{
-      --primary:#625A45; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
-      --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.08); --ring:#eaeaea;
+      --primary:#645E52; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
+      --ring:#eaeaea; --shadow:0 12px 34px rgba(0,0,0,.10);
+      --radius:18px;
     }
     *{box-sizing:border-box}
-    html,body{margin:0;background:var(--bg);color:var(--text);
-      font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
-    header{position:sticky;top:0;z-index:20;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06)}
-    .topbar{max-width:1100px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
-    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit}
-    .brand img{width:40px;height:40px;border-radius:10px;background:#fff;object-fit:contain}
-    .brand strong{font-weight:800}
-    .status-pill{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:140px;padding:10px 14px;border-radius:16px;font-weight:700;background:#f4f4f4;border:1px solid var(--ring);color:#222;text-align:center;line-height:1.1;gap:2px}
-    .status-pill .status-main{font-weight:800}
-    .status-pill .status-sub{font-weight:600}
-    .status-open{ background:#ECE7DD; border-color:#DCD4C3; color:#625A45;}
-    .status-closed{ background:#f7f7f7; border-color:#eaeaea; color:#444;}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
+    header{position:sticky;top:0;z-index:10;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+    .topbar{max-width:1200px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
+    .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:800}
+    .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain;margin-right:8px}
     .spacer{flex:1}
-    .btn{display:inline-flex;align-items:center;gap:10px;border:2px solid var(--primary);padding:10px 16px;border-radius:999px;color:var(--primary);background:#fff;font-weight:700;text-decoration:none;cursor:pointer;white-space:nowrap; flex:0 1 auto;}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:700;text-decoration:none;color:inherit}
     .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
-    .btn.ghost{border-color:#e7e7e7;color:#333}
-    .btn.disabled,.btn[disabled],.btn[aria-disabled="true"]{
-      background:#f5f5f5 !important;border-color:#e5e5e5 !important;color:#9a9a9a !important;cursor:not-allowed !important;pointer-events:none !important;
-    }
+    .btn.ghost{background:#fff}
+    .btn:disabled,.btn.disabled{opacity:.55;cursor:not-allowed}
 
-    .container{max-width:1100px;margin:24px auto;padding:0 12px}
-    h1{font-size:34px;margin:14px 4px 18px}
-    h2{font-size:26px;margin:24px 4px 14px}
-    h3{font-size:18px;margin:8px 0 6px}
-    p{margin:6px 0;color:var(--muted)}
+    .container{max-width:1200px;margin:20px auto;padding:0 12px;display:grid;grid-template-columns:1fr 380px;gap:18px}
+    @media (max-width:980px){ .container{grid-template-columns:1fr} }
 
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px}
-    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:0;overflow:hidden;display:flex;flex-direction:column; position:relative}
+    h1{font-size:26px;margin:8px 0 12px}
+    h2{font-size:20px;margin:18px 4px 10px}
+
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:16px}
+    @media (max-width:720px){ .grid{grid-template-columns:1fr} }
+
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column; position:relative}
     .card .imgwrap{ position:relative; }
-    .card img{width:100%;height:180px;object-fit:cover;background:#f0f0f0;border-bottom:1px solid #eee}
-    .card .content{padding:12px}
+    .card img{width:100%;height:200px;object-fit:cover;background:#eee}
+    .content{padding:12px}
     .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
     .price{font-weight:800}
     .actions{display:flex;gap:8px;flex-wrap:wrap}
 
-    .drawer{position:fixed;top:0;right:-460px;width:460px;max-width:92vw;height:100vh;background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.18);transition:right .25s;z-index:30;display:flex;flex-direction:column}
-    .drawer.open{right:0}
-    .drawer header{padding:14px 16px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
-    .drawer .body{padding:14px 16px;overflow:auto;flex:1}
+    .side{background:var(--card);border-radius:20px;box-shadow:var(--shadow);padding:14px;position:sticky;top:82px;height:fit-content}
+    .side h3{margin:0 0 8px}
+    .total{display:flex;align-items:center;justify-content:space-between;font-weight:800;font-size:18px;margin:8px 0 10px}
     .item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #efefef}
-    .total{display:flex;align-items:center;justify-content:space-between;font-weight:800;font-size:18px;margin-top:10px}
-    .cart-actions{margin-top:12px;display:flex;gap:10px}
+    .muted{color:var(--muted);font-size:13px}
+    .qtybtn{border:1px solid #ddd;background:#fff;border-radius:10px;padding:4px 8px;font-weight:800;cursor:pointer}
+    .field{margin-top:8px}
+    .field input,.field select,.field textarea{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
+    textarea{min-height:84px;border-radius:12px;resize:vertical}
 
-    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);display:none;align-items:center;justify-content:center;z-index:40}
+    /* Modal */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.32);display:none;align-items:center;justify-content:center;z-index:40}
     .overlay.open{display:flex}
-    .modal{background:#fff;border-radius:20px;box-shadow:var(--shadow);width:580px;max-width:92vw;padding:16px}
-    .modal h3{margin:0 0 8px}
-    .rowx{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
-    .qtybox{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--ring);border-radius:999px;padding:6px 10px}
-    .qtybox button{width:28px;height:28px;border:1px solid #e5e5e5;background:#fff;border-radius:999px;font-weight:900;cursor:pointer}
-    textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--ring);border-radius:12px}
-    .muted{color:var(--muted);font-size:14px}
-    .inline{display:flex;gap:12px;flex-wrap:wrap}
-    .pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);border-radius:999px;padding:8px 12px;cursor:pointer}
+    .modal{background:#fff;border-radius:20px;box-shadow:var(--shadow);width:520px;max-width:92vw;padding:16px}
+    .rowx{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0}
+    .qtybox{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);border-radius:999px;padding:6px 10px}
+    .qtybox button{width:28px;height:28px;border:1px solid var(--ring);background:#fff;border-radius:999px;font-weight:900;cursor:pointer}
+    .pills{display:flex;flex-direction:column;gap:8px}
+    .pill{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--ring);border-radius:12px;padding:10px 12px;cursor:pointer}
     .pill input{accent-color:var(--primary)}
-    .pill.disabled{opacity:.5;pointer-events:none}
+    .pill.disabled{opacity:.55; pointer-events:none}
     .micro{font-size:12px;color:var(--muted)}
-
-    /* "Ver pedido" estilo neutro */
-    #btnCart{background:#fff !important;border-color:#e7e7e7 !important;color:#333 !important;}
-    #btnCart:hover{ filter:brightness(.98); }
-    #btnCart #cartBubble{ color:#333 !important; }
 
     /* Disponibilidad */
     .card[data-soldout="1"]{ opacity:.55; }
@@ -82,96 +110,107 @@
       padding:6px 8px; border-radius:999px; letter-spacing:.3px;
     }
 
-    /* Preview de precio en modal */
-    .pricePreview{
-      display:inline-flex; align-items:center; gap:8px;
-      background:#f7f3ee; border:1px solid #e8e0d4; color:#3a342b;
-      border-radius:999px; padding:6px 12px; font-weight:800;
+    /* === Notas (mejoradas) === */
+    .textarea {
+      width: 100%;
+      min-height: 56px;
+      max-height: 200px;
+      padding: 12px 14px;
+      border: 1px solid var(--ring);
+      border-radius: 14px;
+      background: #faf9f7;
+      resize: none;
+      font-size: 15px;
+      line-height: 1.35;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
     }
-
+    .textarea::placeholder { color:#9a9a9a; }
+    .textarea:focus {
+      outline: 0;
+      background:#fff;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(98,90,69,.18);
+    }
+    .field-foot { display:flex; justify-content:flex-end; margin-top:6px; font-size:12px; color:#8a8a8a; }
+    .preview{font-weight:800}
     .side-disabled-note{ color:#b33; font-size:13px; margin-top:6px }
 
-    @media (max-width:600px){
-      .topbar{padding:8px 10px;gap:8px;flex-wrap:wrap}
-      .brand img{width:32px;height:32px}
-      .brand strong{font-size:16px}
-      .status-pill{min-width:0;padding:6px 10px;border-radius:14px;font-size:13px;line-height:1.1}
-      .btn{padding:8px 12px;font-size:14px}
-      .btn.primary{padding:8px 12px}
-      .spacer{display:none}
-      #btnCart{margin-left:auto;order:4}
-      .grid{grid-template-columns:1fr;gap:14px}
-      .card{border-radius:14px}
-      .card img{height:44vw;max-height:220px}
-      .card .content{padding:12px 12px 14px}
-      .row{align-items:stretch;flex-wrap:wrap;gap:10px}
-      .actions{gap:8px;width:100%}
-      .actions .btn{flex:1;justify-content:center;padding:10px 12px}
-      .drawer .body{padding-bottom:120px}
-    }
+    /* pickup selector styles (pills inline like ejemplo) */
+    .inline{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    .slot-pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);border-radius:999px;padding:8px 12px;cursor:pointer; background:#fff}
+    .slot-pill input{accent-color:var(--primary)}
+    .slot-pill.disabled{opacity:.5;pointer-events:none}
+    .slot-label{font-weight:700}
+    .slot-sub{font-size:12px;color:var(--muted)}
   </style>
 </head>
 <body>
   <header>
     <div class="topbar">
-      <a href="index.html" class="brand">
-        <img src="images/logo.png" alt="Rhodes Burgers" />
-        <strong>Rhodes Burgers</strong>
-      </a>
-
-      <span id="statusPill" class="status-pill status-open" aria-live="polite">
-        <span class="status-main">Abierto</span>
-        <span class="status-sub">hasta 23:30</span>
-      </span>
-
+      <a class="brand" href="#"><img src="images/logo.png" alt="Rhodes Burgers">Rhodes Burgers</a>
       <div class="spacer"></div>
-      <a class="btn ghost" href="contacto.html">Contacto</a>
-      <button class="btn" id="btnCart">Ver pedido <span id="cartBubble" class="muted">(0)</span></button>
+
+      <!-- Nav agregado -->
+      <a class="btn" href="pedido_local.html" title="Ver pedidos">📦 Pedidos</a>
+      <a class="btn" href="finanzas.html" title="Ver finanzas">📈 Finanzas</a>
+      <a class="btn" href="admin.html" title="Panel admin">⚙️ Admin</a>
+
+      <strong>Mostrador</strong>
     </div>
   </header>
 
   <main class="container">
-    <h1>Menú</h1>
+    <section>
+      <h1>Menú</h1>
+      <h2>Hamburguesas</h2>
+      <div id="burgersGrid" class="grid"></div>
+      <h2 style="margin-top:20px">Bebidas</h2>
+      <div id="drinksGrid" class="grid"></div>
+    </section>
 
-    <h2>Hamburguesas</h2>
-    <div id="burgersGrid" class="grid"></div>
+    <aside class="side">
+      <h3>Carrito</h3>
+      <div class="total"><span>Total</span><span id="cartTotal">$0</span></div>
+      <div id="cartItems" class="muted" style="margin-bottom:8px">Sin ítems.</div>
 
-    <h2>Bebidas</h2>
-    <div id="drinksGrid" class="grid"></div>
+      <div class="field"><input id="inpNombre" type="text" placeholder="Nombre (requerido)"></div>
+      <div class="field"><input id="inpTel" type="tel" placeholder="Teléfono (opcional)"></div>
+
+      <!-- PICKUP SELECTOR (igual a ejemplo: pills inline) -->
+      <div class="field" id="pickupField">
+        <label style="font-weight:700">Horario de retiro</label>
+        <div id="pickupNote" class="muted" style="margin-top:4px">Seleccioná el horario de retiro.</div>
+        <div id="pickupSelector" class="inline" aria-live="polite"></div>
+        <div id="pickupStateNote" class="micro"></div>
+      </div>
+
+      <div class="field">
+        <select id="selPago">
+          <option value="efectivo">Efectivo</option>
+          <option value="mercado_pago">Mercado Pago</option>
+          <option value="debito">Débito</option>
+          <option value="transferencia">Transferencia</option>
+        </select>
+      </div>
+      <div class="field"><textarea id="inpComentario" placeholder="Comentario"></textarea></div>
+
+      <!-- Botón modificado: Imprimir y cargar -->
+      <button id="btnPrintAndLoad" class="btn primary" style="width:100%;margin-top:10px">Imprimir y cargar</button>
+    </aside>
   </main>
 
-  <!-- Drawer Carrito -->
-  <aside class="drawer" id="drawer">
-    <header>
-      <strong>Tu pedido</strong>
-      <button class="btn ghost" id="closeDrawer" style="float:right">✕</button>
-    </header>
-    <div class="body">
-      <div id="cartItems"></div>
-      <div class="total">
-        <span>Total</span>
-        <span id="cartTotal">$0</span>
-      </div>
-      <div class="cart-actions">
-        <button class="btn ghost" id="btnVaciar">Vaciar</button>
-        <button class="btn primary" id="btnPagar">Ir a pagar</button>
-      </div>
-      <div id="placeResult"></div>
-    </div>
-  </aside>
-
-  <!-- Modal (sin botón "Personalizar", lo abre “Agregar” en burgers) -->
+  <!-- Modal Personalizar (se usa al tocar Agregar) -->
   <div class="overlay" id="overlay">
     <div class="modal">
       <h3 id="modTitle">Personalizar</h3>
 
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <div class="muted" style="font-weight:600">Papas (obligatorio)</div>
-        <div class="inline" id="friesOptionsInline">
-          <!-- CORREGIDO: tres opciones distintas -->
-          <label class="pill"><input type="radio" name="fries" value="con_sazon"> Sazonadas</label>
-          <label class="pill"><input type="radio" name="fries" value="con_sal"> Con sal</label>
-          <label class="pill"><input type="radio" name="fries" value="sin_sal"> Sin sal</label>
+        <div class="pills" id="friesOptions">
+          <!-- Valores: con_sazon, con_sal, sin_sal -->
+          <label class="pill"><span>Sazonadas</span> <input type="radio" name="fries" value="con_sazon"></label>
+          <label class="pill"><span>Con sal</span>  <input type="radio" name="fries" value="con_sal"></label>
+          <label class="pill"><span>Sin sal</span>  <input type="radio" name="fries" value="sin_sal"></label>
         </div>
         <div id="friesStateNote" class="micro"></div>
         <div class="micro">Se toma lo que elijas acá por cada hamburguesa.</div>
@@ -195,14 +234,19 @@
         </div>
       </div>
 
-      <div class="rowx" style="align-items:center; justify-content:space-between">
-        <span class="muted">Precio final de esta hamburguesa</span>
-        <span id="pricePreview" class="pricePreview">$ 0</span>
+      <!-- Preview de precio unitario -->
+      <div class="rowx" id="rowPreview" style="justify-content:flex-end">
+        <span class="muted">Subtotal unitario:</span>
+        <span class="preview" id="unitPreview">$0</span>
       </div>
 
+      <!-- Notas mejoradas -->
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
-        <label>Notas (opcional)</label>
-        <textarea id="notes" placeholder="Sin cebolla, extra salsa, etc."></textarea>
+        <label style="font-weight:600">Notas (opcional)</label>
+        <textarea id="notes" class="textarea" maxlength="200"
+                  placeholder="Sin cebolla, extra salsa, etc."
+                  oninput="autoGrow(this); updateCount(this)"></textarea>
+        <div class="field-foot"><span id="notesCount">0/200</span></div>
       </div>
 
       <div class="rowx" style="justify-content:flex-end">
@@ -217,483 +261,789 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    /* ===== Horarios ===== */
-    const HOURS = {
-      0: [[19,0, 24,0]], 1: [], 2: [],
-      3: [[19,0, 24,0]], 4: [[19,0, 24,0]], 5: [[19,0, 24,0]], 6: [[19,0, 24,0]]
-    };
-    function isOpenNow(d=new Date()){
-      const curMin = d.getHours()*60 + d.getMinutes();
-      const blocks = HOURS[d.getDay()] || [];
-      for(const [h1,m1,h2,m2] of blocks){ const a=h1*60+m1, b=h2*60+m2; if(curMin>=a && curMin<b) return {open:true, until:[h2,m2]}; }
-      return {open:false};
+  // ===== Firebase =====
+  const firebaseConfig = {
+    apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+    authDomain: "rhodes-burguers.firebaseapp.com",
+    projectId: "rhodes-burguers",
+    storageBucket: "rhodes-burguers.firebasestorage.app",
+    messagingSenderId: "951646688091",
+    appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+  };
+  try{ firebase.initializeApp(firebaseConfig); }catch(e){}
+  const db = firebase.firestore();
+
+  const $=s=>document.querySelector(s);
+  const money = n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+  const FALLBACK_IMG="images/logo.png";
+
+  // ===== Contador GLOBAL (misma referencia que pedido_cliente: config/counters.orderNumber) =====
+  function globalCounterRef(){ return db.collection('config').doc('counters'); }
+  async function nextOrderNumber(){
+    return await db.runTransaction(async tx=>{
+      const ref = globalCounterRef();
+      const snap = await tx.get(ref);
+      const cur = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
+      const nxt = cur + 1;
+      tx.set(ref, { orderNumber: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      return nxt;
+    });
+  }
+
+  // ===== Menú =====
+  const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
+  const BURGERS=[
+    { id:"cheese_simple", name:"Cheeseburger Simple", price:10100,  img:"images/cheeseburger simple.jpg", kind:"simple", desc:"Medallón con doble cheddar. Incluye papas." },
+    { id:"cheese_doble",  name:"Cheeseburger Doble",  price:12500, img:"images/cheeseburger doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar. Incluye papas." },
+    { id:"cheesebacon_simple", name:"CheeseBacon Simple", price:10600, img:"images/CheeseBacon Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar y bacon. Incluye papas." },
+    { id:"cheesebacon_doble",  name:"CheeseBacon Doble",  price:13100, img:"images/CheeseBacon Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar y bacon. Incluye papas." },
+    { id:"morgan_simple", name:"Morgan Simple", price:11500, img:"images/Morgan Simple.jpg", kind:"simple", desc:"Doble cheddar, bacon, barbacoa y crispy onion. Incluye papas." },
+    { id:"morgan_doble",  name:"Morgan Doble",  price:14200, img:"images/Morgan Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, barbacoa y crispy onion. Incluye papas." },
+    { id:"bigjohn_simple", name:"Big John Simple", price:11500, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
+    { id:"bigjohn_doble",  name:"Big John Doble",  price:13800, img:"images/Big John Doble.jpg",  kind:"double", desc:"Doble medallón con cheddar, lechuga, pepinillos y salsa Big Mac. Incluye papas." },
+    { id:"rhodes_simple", name:"Rhodes Simple", price:11900, img:"images/Rhodes Simple.jpg", kind:"simple", desc:"Doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
+    { id:"rhodes_doble",  name:"Rhodes Doble",  price:14500, img:"images/Rhodes Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas." },
+    { id:"burguesa_simple", name:"Burguesa Simple", price:11900, img:"images/Burguesa Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
+    { id:"burguesa_doble",  name:"Burguesa Doble",  price:14500, img:"images/Burguesa Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
+    { id:"pollo_crispy", name:"Pollo Crispy", price:9100, img:"images/Pollo crispy.jpg", kind:"chicken", desc:"Pechuga crispy con lechuga y mayo. Incluye papas." }
+  ];
+  const DRINKS=[
+    { id:"andes_rubia", name:"Andes Origen Rubia 473ml", price:3800, img:"images/Andes Rubia.png" },
+    { id:"andes_roja",  name:"Andes Origen Roja 473ml",  price:3800, img:"images/Andes Roja.png" },
+    { id:"coca_org",    name:"Coca-Cola Original 500ml", price:2500, img:"images/Coca.png" },
+    { id:"coca_zero",   name:"Coca-Cola Zero 500ml",     price:2500, img:"images/Coca Zero.png" },
+    { id:"sprite",      name:"Sprite 500ml",             price:2500, img:"images/Sprite.png" },
+    { id:"aq_pomelo",   name:"Aquarius Pomelo 500ml",    price:2000, img:"images/Pomelo.png" },
+    { id:"aq_pera",     name:"Aquarius Pera 500ml",      price:2000, img:"images/Pera.png" },
+    { id:"aq_manzana",  name:"Aquarius Manzana 500ml",   price:2000, img:"images/Manzana.png" },
+    { id:"agua_sg",     name:"Agua sin gas 500ml",       price:1500, img:"images/Agua.png" }
+  ];
+
+  /* ===== Disponibilidad ===== */
+  const availability = new Map();
+  const isAvailable = id => availability.has(id) ? !!availability.get(id) : true;
+  function refreshAvailabilityUI(){
+    document.querySelectorAll('.card[data-id]').forEach(card=>{
+      const id = card.getAttribute('data-id');
+      const ok = isAvailable(id);
+      card.setAttribute('data-soldout', ok ? '0' : '1');
+      const addBtn = card.querySelector('[data-add]');
+      if(addBtn){ ok ? (addBtn.removeAttribute('disabled'), addBtn.classList.remove('disabled')) : (addBtn.setAttribute('disabled',''), addBtn.classList.add('disabled')); }
+      let badge = card.querySelector('.soldout-badge');
+      if(!ok){
+        if(!badge){ badge=document.createElement('div'); badge.className='soldout-badge'; badge.textContent='SIN STOCK'; (card.querySelector('.imgwrap')||card).appendChild(badge); }
+      }else if(badge){ badge.remove(); }
+    });
+  }
+  try{
+    db.collection('products').onSnapshot(snap=>{
+      availability.clear();
+      snap.forEach(doc=>{ const d=doc.data()||{}; availability.set(doc.id, d.available !== false); });
+      refreshAvailabilityUI();
+    });
+  }catch(e){ console.warn(e); }
+
+  /* ===== SIDES CONFIG (nuevo: leer desde config/sides) ===== */
+  let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
+
+  function applySidesToUI(){
+    document.querySelectorAll('#friesOptions .pill').forEach(label=>{
+      const input = label.querySelector('input[name="fries"]');
+      if(!input) return;
+      const val = input.value;
+      const enabled = SIDES_STATE[val] !== false;
+      input.disabled = !enabled;
+      label.classList.toggle('disabled', !enabled);
+    });
+    const noteEl = document.getElementById('friesStateNote');
+    const disabled = Object.entries(SIDES_STATE).filter(([k,v])=>v===false).map(([k])=>k);
+    if(disabled.length){
+      const human = disabled.map(k => {
+        if(k==='con_sazon') return 'Sazonadas';
+        if(k==='con_sal') return 'Con sal';
+        if(k==='sin_sal') return 'Sin sal';
+        return k;
+      }).join(', ');
+      noteEl.textContent = 'Variantes deshabilitadas: ' + human;
+      noteEl.classList.add('side-disabled-note');
+    } else {
+      noteEl.textContent = '';
+      noteEl.classList.remove('side-disabled-note');
     }
-    function nextOpen(d=new Date()){
-      for(let i=0;i<8;i++){
-        const t = new Date(d.getTime() + i*24*60*60*1000);
-        const blocks = HOURS[t.getDay()] || [];
-        if(blocks.length){
-          const [h1,m1] = blocks[0];
-          const lab = i===0 ? 'hoy' : (i===1 ? 'mañana' : t.toLocaleDateString('es-AR',{weekday:'long'}));
-          return `${lab} ${String(h1).padStart(2,'0')}:${String(m1).padStart(2,'0')}`;
-        }
-      } return null;
-    }
-    let orderable = true;
-    function setOrderable(v){
-      orderable = !!v;
-      document.querySelectorAll('[data-add]').forEach(btn=>{
-        if(orderable){ btn.classList.remove('disabled'); btn.removeAttribute('aria-disabled'); btn.removeAttribute('disabled'); }
-        else { btn.classList.add('disabled'); btn.setAttribute('aria-disabled','true'); btn.setAttribute('disabled',''); }
-      });
-      const pagar = document.getElementById('btnPagar');
-      if(pagar){ if(orderable){ pagar.classList.remove('disabled'); pagar.removeAttribute('aria-disabled'); pagar.removeAttribute('disabled'); } else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); pagar.setAttribute('disabled',''); } }
-    }
+  }
 
-    // ===== Forzar abierto (config/store) - ahora con forceOpenUntil =====
-    let FORCE_OPEN = false;
-    let FORCE_MSG  = "";
-    let FORCE_UNTIL = null; // Date or null
+  try{
+    db.collection('config').doc('sides').onSnapshot(snap=>{
+      const data = snap.exists ? (snap.data()||{}) : {};
+      SIDES_STATE = {
+        con_sazon: data.con_sazon !== false,
+        con_sal:   data.con_sal   !== false,
+        sin_sal:   data.sin_sal   !== false
+      };
+      applySidesToUI();
+    }, err=>{
+      console.warn('sides onSnapshot err', err);
+      applySidesToUI();
+    });
+  }catch(e){
+    console.warn('subscribe sides failed', e);
+    applySidesToUI();
+  }
 
-    function renderStatus(){
-      const pill=document.getElementById('statusPill');
-      const main=pill.querySelector('.status-main');
-      const sub=pill.querySelector('.status-sub');
-      const now=new Date();
+  /* ===== PICKUP (slots) ===== */
+  // HOURS fallback (igual que ejemplo)
+  const HOURS = {
+    0: [[19,0, 24,0]], 1: [], 2: [],
+    3: [[19,0, 24,0]], 4: [[19,0, 24,0]], 5: [[19,0, 24,0]], 6: [[19,0, 24,0]]
+  };
 
-      // si forceUntil definido y futuro -> consideramos abierto
-      const until = FORCE_UNTIL instanceof Date ? FORCE_UNTIL : (FORCE_UNTIL ? new Date(FORCE_UNTIL) : null);
-      const untilActive = until && (until.getTime() > Date.now());
-
-      if (FORCE_OPEN || untilActive) {
-        pill.classList.remove('status-closed'); pill.classList.add('status-open');
-        main.textContent='Abierto';
-        if(untilActive){
-          const hh = String(until.getHours()).padStart(2,'0');
-          const mm = String(until.getMinutes()).padStart(2,'0');
-          sub.textContent = `hasta ${hh}:${mm}`;
-        } else {
-          sub.textContent = FORCE_MSG ? FORCE_MSG : 'apertura especial';
-        }
-        setOrderable(true);
-        return;
+  function isOpenNow(d=new Date()){
+    const curMin = d.getHours()*60 + d.getMinutes();
+    const blocks = HOURS[d.getDay()] || [];
+    for(const [h1,m1,h2,m2] of blocks){ const a=h1*60+m1, b=h2*60+m2; if(curMin>=a && curMin<b) return {open:true, until:[h2,m2]}; }
+    return {open:false};
+  }
+  function nextOpen(d=new Date()){
+    for(let i=0;i<8;i++){
+      const t = new Date(d.getTime() + i*24*60*60*1000);
+      const blocks = HOURS[t.getDay()] || [];
+      if(blocks.length){
+        const [h1,m1] = blocks[0];
+        const lab = i===0 ? 'hoy' : (i===1 ? 'mañana' : t.toLocaleDateString('es-AR',{weekday:'long'}));
+        return `${lab} ${String(h1).padStart(2,'0')}:${String(m1).padStart(2,'0')}`;
       }
+    } return null;
+  }
 
-      const st=isOpenNow(now);
-      if(st.open){
-        const [h,m]=st.until;
-        pill.classList.remove('status-closed'); pill.classList.add('status-open');
-        main.textContent='Abierto';
-        sub.textContent=`hasta ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-        setOrderable(true);
-      }else{
-        pill.classList.remove('status-open'); pill.classList.add('status-closed');
-        const nx = nextOpen(now);
-        main.textContent='Cerrado';
-        sub.textContent=`abrimos ${nx?nx:'pronto'}`;
-        setOrderable(false);
-      }
+  // pickupSlots: si config/pickup existe usamos esos slots; sino fallback generation from HOURS
+  let pickupSlots = []; // array of {id,label,capacity,booked,available}
+  let selectedPickup = null;
+  let pickupDocRef = db.collection('config').doc('pickup');
+
+  function normalizeSlotId(v){
+    return String(v||'').replace(/[^0-9]/g,'');
+  }
+
+  function renderPickupSelector(){
+    const container = document.getElementById('pickupSelector');
+    container.innerHTML = '';
+    const stateNote = document.getElementById('pickupStateNote');
+    if(!pickupSlots || pickupSlots.length===0){
+      // fallback: generate a few upcoming slots from HOURS (ex: next 6 slots every 15 min?) Simple fallback: show nextOpen only
+      const nx = nextOpen(new Date());
+      container.innerHTML = `<div class="muted">No hay slots configurados. Horarios activados: ${nx||'--'}</div>`;
+      stateNote.textContent = '';
+      return;
     }
-    renderStatus(); setInterval(renderStatus, 60*1000);
 
-    /* ===== Helpers & Datos ===== */
-    const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
-    const BURGERS=[
-      { id:"cheese_simple", name:"Cheeseburger Simple", price:10100, img:"images/cheeseburger simple.jpg", kind:"simple", desc:"Medallón con doble cheddar en pan brioche. Incluye papas fritas." },
-      { id:"cheese_doble",  name:"Cheeseburger Doble",  price:12500, img:"images/cheeseburger doble.jpg", kind:"double", desc:"Doble medallón con doble cheddar en pan brioche. Incluye papas fritas." },
-      { id:"cheesebacon_spl", name:"CheeseBacon Simple", price:10600, img:"images/CheeseBacon Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar y bacon en pan brioche. Incluye papas fritas." },
-      { id:"cheesebacon_dbl", name:"CheeseBacon Doble",  price:13100, img:"images/CheeseBacon Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar y bacon en pan brioche. Incluye papas fritas." },
-      { id:"morgan_simple", name:"Morgan Simple", price:11500, img:"images/Morgan Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, bacon, salsa barbacoa y cebolla crispy. Incluye papas fritas." },
-      { id:"morgan_doble",  name:"Morgan Doble",  price:14200, img:"images/Morgan Doble.jpg", kind:"double", desc:"Doble cheddar, bacon, barbacoa y onion crispy. Incluye papas fritas." },
-      { id:"bigjohn_simple", name:"Big John Simple", price:11500, img:"images/Big John Simple.jpg", kind:"simple", desc:"Medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan brioche. Incluye papas fritas." },
-      { id:"bigjohn_doble",  name:"Big John Doble",  price:13800, img:"images/Big John Doble.jpg",  kind:"double", desc:"Doble medallón con cheddar, lechuga, pepinillos y salsa Big Mac en pan brioche. Incluye papas fritas." },
-      { id:"rhodes_simple", name:"Rhodes Simple", price:11900, img:"images/Rhodes Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy en pan brioche. Incluye papas fritas." },
-      { id:"rhodes_doble",  name:"Rhodes Doble",  price:14500, img:"images/Rhodes Doble.jpg", kind:"double", desc:"Doble medallón con doble cheddar, bacon, morrones, cebolla y salsa spicy. Incluye papas fritas." },
-      { id:"burguesa_simple", name:"Burguesa Simple", price:11900, img:"images/Burguesa Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar, salsa mostaza y miel y cebolla caramelizada en pan Burgerluna. Incluye papas fritas." },
-      { id:"burguesa_doble",  name:"Burguesa Doble",  price:14500, img:"images/Burguesa Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, salsa mostaza y miel y cebolla caramelizada en pan Burgerluna. Incluye papas fritas." },
-      { id:"pollo_crispy",  name:"Pollo Crispy",  price:9100,  img:"images/Pollo crispy.jpg", kind:"chicken", desc:"Pechuga de pollo crispy con lechuga y mayonesa. Incluye papas fritas." }
-    ];
-    const DRINKS = [
-      { id:"andes_rubia", name:"Andes Origen Rubia 473ml", price:3800, img:"images/Andes Rubia.png" },
-      { id:"andes_roja",  name:"Andes Origen Roja 473ml",  price:3800, img:"images/Andes Roja.png" },
-      { id:"coca_org",    name:"Coca-Cola Original 500ml", price:2500, img:"images/coca cola original.jpg" },
-      { id:"coca_zero",   name:"Coca-Cola Zero 500ml",     price:2500, img:"images/coca cola zero.jpg" },
-      { id:"sprite",      name:"Sprite 500ml",             price:2500, img:"images/sprite.jpg" },
-      { id:"aq_pera",     name:"Aquarius Pera 500ml",      price:2000, img:"images/aquarius pera.jpg" },
-      { id:"aq_pomelo",   name:"Aquarius Pomelo 500ml",    price:2000, img:"images/aquarius pomelo.jpg" },
-      { id:"aq_manzana",  name:"Aquarius Manzana 500ml",   price:2000, img:"images/Manzana.png" },
-      { id:"agua_sg",     name:"Agua sin gas 500ml",       price:2200, img:"images/Agua.png" }
-    ];
-
-    const FALLBACK_IMG="images/logo.png", CART_KEY="rhodes_cart_v3";
-    const $=s=>document.querySelector(s);
-    const money=n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-
-    /* ===== Firebase ===== */
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-      authDomain: "rhodes-burguers.firebaseapp.com",
-      projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-    };
-    try{ firebase.initializeApp(firebaseConfig); }catch(_){}
-    const db = firebase.firestore();
-    try{ db.settings({ experimentalAutoDetectLongPolling:true, merge:true }); }catch(_){}
-
-    // Suscripción a forzar abierto (ahora lee forceOpenUntil también)
-    try{
-      db.collection('config').doc('store').onSnapshot(s=>{
-        const d=s.exists?(s.data()||{}):{};
-        FORCE_OPEN=!!d.forceOpen;
-        FORCE_MSG=d.forceOpenMessage||"";
-        if(d.forceOpenUntil){
-          try{
-            FORCE_UNTIL = (typeof d.forceOpenUntil.toDate === 'function') ? d.forceOpenUntil.toDate() : new Date(d.forceOpenUntil);
-          }catch(_){
-            FORCE_UNTIL = new Date(d.forceOpenUntil);
-          }
-        } else {
-          FORCE_UNTIL = null;
+    // Render each slot as pill (disable when full or not available)
+    pickupSlots.forEach(slot=>{
+      const pill = document.createElement('label');
+      pill.className = 'slot-pill' + ((slot.available===false || (typeof slot.capacity==='number' && typeof slot.booked==='number' && slot.booked >= slot.capacity)) ? ' disabled' : '');
+      // radio inside
+      pill.innerHTML = `<input type="radio" name="pickup_slot_radio" value="${escapeHtml(slot.id)}" ${slot.available===false || (typeof slot.capacity==='number' && typeof slot.booked==='number' && slot.booked >= slot.capacity) ? 'disabled' : ''}>
+                        <div style="display:flex;flex-direction:column">
+                          <span class="slot-label">${escapeHtml(slot.label||slot.id)}</span>
+                          <span class="slot-sub">${(typeof slot.capacity==='number' ? `cupos: ${Math.max(0, (slot.capacity - (slot.booked||0)))}` : '')}</span>
+                        </div>`;
+      // click to select
+      const input = pill.querySelector('input');
+      input.addEventListener('change', ()=>{
+        if(input.checked){
+          selectedPickup = { pickup_slot: slot.id, pickup_time: slot.label || slot.id };
         }
-        renderStatus();
       });
-    }catch(e){ console.warn('No se pudo suscribir a config/store:', e); }
+      container.appendChild(pill);
+    });
 
-    /* ===== Disponibilidad (products) ===== */
-    const availability = new Map();
-    const isAvailable = id => availability.has(id) ? !!availability.get(id) : true;
-    function refreshAvailabilityUI(){
-      document.querySelectorAll('.card[data-id]').forEach(card=>{
-        const id = card.getAttribute('data-id');
-        const ok = isAvailable(id);
-        card.setAttribute('data-soldout', ok ? '0' : '1');
-        const addBtn = card.querySelector('[data-add]');
-        if(addBtn){ ok ? (addBtn.removeAttribute('disabled'), addBtn.classList.remove('disabled')) : (addBtn.setAttribute('disabled',''), addBtn.classList.add('disabled')); }
-        let badge = card.querySelector('.soldout-badge');
-        if(!ok){ if(!badge){ badge=document.createElement('div'); badge.className='soldout-badge'; badge.textContent='SIN STOCK'; (card.querySelector('.imgwrap')||card).appendChild(badge); } }
-        else if(badge){ badge.remove(); }
-      });
-    }
-    try{
-      db.collection('products').onSnapshot(snap=>{
-        availability.clear();
-        snap.forEach(doc=>{
-          const data = doc.data()||{};
-          availability.set(doc.id, data.available !== false);
-        });
-        refreshAvailabilityUI();
-      }, console.warn);
-    }catch(e){ console.warn('No se pudo suscribir a products:', e); }
-
-    /* ===== SIDES CONFIG (nuevo: leer desde config/sides) ===== */
-    // por defecto todas habilitadas
-    let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
-
-    function applySidesToUI(){
-      // deshabilitar/activar radios en el modal
-      document.querySelectorAll('#friesOptionsInline .pill').forEach(label=>{
-        const input = label.querySelector('input[name="fries"]');
-        if(!input) return;
-        const val = input.value;
-        const enabled = SIDES_STATE[val] !== false; // undefined => true
-        input.disabled = !enabled;
-        label.classList.toggle('disabled', !enabled);
-      });
-      // nota con variantes deshabilitadas
-      const noteEl = document.getElementById('friesStateNote');
-      const disabled = Object.entries(SIDES_STATE).filter(([k,v])=>v===false).map(([k])=>k);
-      if(disabled.length){
-        const human = disabled.map(k => {
-          if(k==='con_sazon') return 'Sazonadas';
-          if(k==='con_sal') return 'Con sal';
-          if(k==='sin_sal') return 'Sin sal';
-          return k;
-        }).join(', ');
-        noteEl.textContent = 'Variantes deshabilitadas: ' + human;
-        noteEl.classList.add('side-disabled-note');
-      } else {
-        noteEl.textContent = '';
-        noteEl.classList.remove('side-disabled-note');
+    // try to auto-select first available
+    if(!selectedPickup){
+      const first = pickupSlots.find(s=> s.available !== false && (typeof s.capacity!=='number' || (typeof s.booked==='number' && s.booked < s.capacity)));
+      if(first){
+        const radios = container.querySelectorAll('input[name="pickup_slot_radio"]');
+        for(const r of radios){ if(r.value === String(first.id)){ r.checked=true; selectedPickup = { pickup_slot:first.id, pickup_time:first.label||first.id }; break; } }
       }
     }
 
+    // show note about disabled slots if any
+    const disabled = pickupSlots.filter(s => s.available===false || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity));
+    if(disabled.length){
+      stateNote.textContent = `Algunos horarios están completos o inhabilitados.`;
+      stateNote.classList.add('side-disabled-note');
+    } else {
+      stateNote.textContent = '';
+      stateNote.classList.remove('side-disabled-note');
+    }
+  }
+
+  // subscribe to config/pickup doc
+  async function loadPickupSlots(){
     try{
-      // escucha en tiempo real a config/sides
-      db.collection('config').doc('sides').onSnapshot(snap=>{
+      pickupDocRef.onSnapshot(snap=>{
         const data = snap.exists ? (snap.data()||{}) : {};
-        SIDES_STATE = {
-          con_sazon: data.con_sazon !== false,
-          con_sal:   data.con_sal   !== false,
-          sin_sal:   data.sin_sal   !== false
-        };
-        applySidesToUI();
+        if(Array.isArray(data.slots) && data.slots.length){
+          // normalize to expected shape
+          pickupSlots = (data.slots||[]).map(s=>{
+            return {
+              id: (s.id || s.slot || s.slot_id || s.hhmm || ''),
+              label: (s.label || s.label_text || s.slot_label || s.hhmm || s.id || s.slot || s.slot_id || ''),
+              capacity: (typeof s.capacity === 'number' ? s.capacity : (typeof s.cap === 'number' ? s.cap : undefined)),
+              booked: (typeof s.booked === 'number' ? s.booked : 0),
+              available: s.available === false ? false : true
+            };
+          });
+        } else {
+          // no slots configured => fallback to empty array (renderPickupSelector will show nextOpen)
+          pickupSlots = [];
+        }
+        renderPickupSelector();
       }, err=>{
-        console.warn('sides onSnapshot err', err);
-        applySidesToUI();
+        console.warn('pickup onSnapshot err', err);
+        pickupSlots = [];
+        renderPickupSelector();
       });
     }catch(e){
-      console.warn('subscribe sides failed', e);
-      applySidesToUI();
+      console.warn('subscribe pickup failed', e);
+      pickupSlots = [];
+      renderPickupSelector();
     }
+  }
 
-    /* ===== Carrito ===== */
-    let cart=loadCart();
-    function loadCart(){ try{return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{}};}catch{return {burger:{},drink:{}}} }
-    function saveCart(){ localStorage.setItem(CART_KEY,JSON.stringify(cart)); }
-    function cartCount(){ let n=0; for(const b of Object.values(cart.burger||{})) n+=b.qty; for(const d of Object.values(cart.drink||{})) n+=d.qty; return n; }
-    function calcTotal(){
-      let t=0;
-      for(const obj of Object.values(cart.burger||{})){
-        const base=(obj.item?.price||0);
-        const ep=(obj.extras?.patty||0)*(obj.extras?.EXTRA_PRICE_PATTY??EXTRA_PRICE_PATTY);
-        const ec=(obj.extras?.cheddar||0)*(obj.extras?.EXTRA_PRICE_CHEDDAR??EXTRA_PRICE_CHEDDAR);
-        t+=(base+ep+ec)*(obj.qty||0);
-      }
-      for(const d of Object.values(cart.drink||{})) t+=(d.item?.price||0)*(d.qty||0);
-      return t;
+  // helper to get selected slot or null
+  function getSelectedSlotForPayload(){
+    if(selectedPickup) return selectedPickup;
+    // try read radio if user changed but selectedPickup not set
+    const r = document.querySelector('input[name="pickup_slot_radio"]:checked');
+    if(r){
+      const found = pickupSlots.find(s=> String(s.id) === String(r.value));
+      if(found) return { pickup_slot: found.id, pickup_time: found.label || found.id };
+      return { pickup_slot: r.value, pickup_time: r.value };
     }
+    return null;
+  }
 
-    const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
-    function cantOrderAlert(){ const nx = nextOpen(new Date()); alert(`Estamos cerrados por ahora.\nPodés ver la carta y los precios, pero los pedidos abren ${nx?nx:''}.`); }
+  /* ===== Carrito & UI ===== */
+  const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
+  const cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
 
-    function renderCard(item,type){
-      const ok = isAvailable(item.id);
-      const card=document.createElement("div");
-      card.className="card"; card.setAttribute('data-id', item.id);
-      card.setAttribute('data-soldout', ok ? '0' : '1');
-      card.innerHTML=`
-        <div class="imgwrap">
-          <img src="${encodeURI(item.img)}" alt="${item.name}" onerror="this.onerror=null;this.src='${FALLBACK_IMG}'">
-          ${ok ? '' : '<div class="soldout-badge">SIN STOCK</div>'}
+  // CART: ahora las hamburguesas se guardan como entradas independientes (key único por unidad)
+  let cart = { burger:{}, drink:{} };
+
+  function friesName(v){
+    if(!v) return "—";
+    if(v === "con_sazon") return "Sazonadas";
+    if(v === "con_sal") return "Con sal";
+    if(v === "sin_sal") return "Sin sal";
+    const s = v.toString().toLowerCase();
+    if(s.includes("sazon")) return "Sazonadas";
+    if(s.includes("sin") && s.includes("sal")) return "Sin sal";
+    if(s.includes("sal")) return "Con sal";
+    return v;
+  }
+
+  function calcTotal(){
+    let t=0;
+    for(const b of Object.values(cart.burger)){
+      const base=(b.item?.price||0),
+            ep=(b.extras?.patty||0)*EXTRA_PRICE_PATTY,
+            ec=(b.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR;
+      t+=(base+ep+ec)*(b.qty||0);
+    }
+    for(const d of Object.values(cart.drink)){ t+=(d.item?.price||0)*(d.qty||0); }
+    return t;
+  }
+
+  function renderCart(){
+    const parts=[];
+    for(const [key,obj] of Object.entries(cart.burger)){
+      const unit=obj.item.price+(obj.extras?.patty||0)*EXTRA_PRICE_PATTY+(obj.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR;
+      const extras=[]; if(obj.extras?.patty) extras.push(`+${obj.extras.patty} medallón`); if(obj.extras?.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`);
+      parts.push(`<div class="item">
+        <div>
+          <strong>${obj.item.name}</strong>
+          <div class="muted">Papas: ${friesName(obj.fries)}</div>
+          ${extras.length?`<div class="muted">${extras.join(" · ")}</div>`:""}
+          ${obj.notes?`<div class="muted">Nota: ${obj.notes}</div>`:""}
         </div>
-        <div class="content">
-          <h3>${item.name}</h3>
-          ${item.desc?`<p class="muted" style="margin:4px 0 0">${item.desc}</p>`:""}
-          <div class="row">
-            <span class="price">${money(item.price)}</span>
-            <div class="actions">
-              <button class="btn" data-add ${ok?'':'disabled'}>Agregar</button>
-            </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="qtybtn" onclick="changeQty('burger','${encodeURIComponent(key)}',-1)">-</button>
+          <span>${obj.qty}</span>
+          <button class="qtybtn" onclick="changeQty('burger','${encodeURIComponent(key)}',1)">+</button>
+          <span>${money(unit*(obj.qty||0))}</span>
+        </div>
+      </div>`);
+    }
+    for(const [key,obj] of Object.entries(cart.drink)){
+      parts.push(`<div class="item">
+        <div><strong>${obj.item.name}</strong></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="qtybtn" onclick="changeQty('drink','${encodeURIComponent(key)}',-1)">-</button>
+          <span>${obj.qty}</span>
+          <button class="qtybtn" onclick="changeQty('drink','${encodeURIComponent(key)}',1)">+</button>
+          <span>${money((obj.item.price||0)*(obj.qty||0))}</span>
+        </div>
+      </div>`);
+    }
+    cartItems.innerHTML = parts.length ? parts.join("") : "Sin ítems.";
+    cartTotal.textContent = money(calcTotal());
+  }
+
+  window.changeQty=function(type,encKey,delta){
+    const key = decodeURIComponent(encKey);
+    const bucket = cart[type];
+    if(!bucket) return;
+    const cur = bucket[key]?.qty || 0;
+    const next = Math.max(0, cur+delta);
+    if(next === 0) delete bucket[key];
+    else bucket[key].qty = next;
+    renderCart();
+  }
+
+  function renderCard(item,type){
+    const ok = isAvailable(item.id);
+    const card=document.createElement("div"); card.className="card"; card.setAttribute('data-id', item.id); card.setAttribute('data-soldout', ok ? '0' : '1');
+    card.innerHTML=`
+      <div class="imgwrap">
+        <img src="${encodeURI(item.img)}" alt="${item.name}" onerror="this.onerror=null;this.src='${FALLBACK_IMG}'">
+        ${ok? '' : '<div class="soldout-badge">SIN STOCK</div>'}
+      </div>
+      <div class="content">
+        <h3 style="margin:4px 0 6px">${item.name}</h3>
+        ${item.desc?`<div class="muted">${item.desc}</div>`:""}
+        <div class="row">
+          <span class="price">${money(item.price)}</span>
+          <div class="actions">
+            <button class="btn" data-add ${ok?'':'disabled'}>Agregar</button>
           </div>
-        </div>`;
-      const addBtn = card.querySelector("[data-add]");
-      if(type==="drink"){
-        addBtn.onclick=()=>{ if(!orderable) return cantOrderAlert(); if(!isAvailable(item.id)) return; addDrink(item); };
-      }else{
-        addBtn.onclick=()=>{ if(!orderable) return cantOrderAlert(); if(!isAvailable(item.id)) return; openCustomize(item); };
-      }
-      return card;
+        </div>
+      </div>`;
+    const addBtn = card.querySelector("[data-add]");
+    if(type==="drink"){
+      addBtn.onclick=()=>{ if(!isAvailable(item.id)) return; const b=cart.drink; if(!b[item.id]) b[item.id]={qty:0,item}; b[item.id].qty+=1; renderCart(); };
+    }else{
+      addBtn.onclick=()=>{ if(!isAvailable(item.id)) return; openCustomize(item); };
     }
+    return card;
+  }
 
-    function mount(){
-      gridBurgers.innerHTML=""; BURGERS.forEach(b=>gridBurgers.appendChild(renderCard(b,"burger")));
-      gridDrinks.innerHTML="";  DRINKS.forEach(d=>gridDrinks.appendChild(renderCard(d,"drink")));
-      renderCart();
-      setOrderable(orderable);
-      refreshAvailabilityUI();
-      applySidesToUI(); // aplicar configuración de papas al iniciar
+  function mount(){
+    gridBurgers.innerHTML=""; BURGERS.forEach(b=>gridBurgers.appendChild(renderCard(b,"burger")));
+    gridDrinks.innerHTML="";  DRINKS.forEach(d=>drinksGrid.appendChild(renderCard(d,"drink")));
+    renderCart(); refreshAvailabilityUI();
+    applySidesToUI();
+    loadPickupSlots();
+  }
+
+  // ===== Modal =====
+  const overlay=$("#overlay"), modTitle=$("#modTitle");
+  const rowPatties=$("#rowPatties"), rowCheddar=$("#rowCheddar");
+  const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
+  const cheVal=$("#cheVal"), cheInc=$("#cheInc"), cheDec=$("#cheDec");
+  const unitPreview=$("#unitPreview");
+  const notes=$("#notes"), btnAdd=$("#btnAdd"), btnCancel=$("#btnCancel");
+  let currentItem=null;
+
+  function unitPricePreview(base){
+    const pat = (+patVal.textContent||0) * EXTRA_PRICE_PATTY;
+    const che = (+cheVal.textContent||0) * EXTRA_PRICE_CHEDDAR;
+    unitPreview.textContent = money(base + pat + che);
+  }
+
+  function resetFries(){ document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false); }
+  function openCustomize(item){
+    if(!isAvailable(item.id)) return;
+    currentItem=item; modTitle.textContent="Personalizar: "+item.name;
+    notes.value=""; autoGrow(notes); updateCount(notes);
+    resetFries(); patVal.textContent="0"; cheVal.textContent="0";
+    if(item.kind==="double"){ rowPatties.style.display="flex"; rowCheddar.style.display="flex"; }
+    else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; }
+    else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; }
+    unitPricePreview(item.price);
+    applySidesToUI();
+    overlay.classList.add("open");
+  }
+  btnCancel.onclick=()=> overlay.classList.remove("open");
+  patInc.onclick=()=>{const v=+patVal.textContent||0;if(v<2)patVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
+  patDec.onclick=()=>{const v=+patVal.textContent||0;if(v>0)patVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
+  cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
+  cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
+
+  function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
+  function updateCount(el){ const c=document.getElementById('notesCount'); if(c) c.textContent=`${el.value.length}/${el.maxLength||200}`; }
+
+  // Agregar: nueva entrada única por hamburguesa (cada unidad su nota)
+  btnAdd.onclick=()=> {
+    if(!currentItem || !isAvailable(currentItem.id)) return;
+    const friesEl=document.querySelector('input[name="fries"]:checked');
+    if(!friesEl){ alert("Elegí el tipo de papas."); return; }
+    if(SIDES_STATE[friesEl.value] === false){
+      alert("La variante de papas elegida no está disponible. Elegí otra.");
+      return;
     }
+    const extras={patty:0,cheddar:0,EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY,EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR};
+    if(currentItem.kind==="double"){ extras.patty=+patVal.textContent||0; extras.cheddar=+cheVal.textContent||0; }
+    else if(currentItem.kind==="chicken"){ extras.cheddar=+cheVal.textContent||0; }
+    const notesVal = notes.value.trim();
+    const baseKey = `${currentItem.id}::fries=${friesEl.value}::patty=${extras.patty}::cheddar=${extras.cheddar}`;
+    const uid = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+    const uniqueKey = baseKey + '::uid=' + uid;
 
-    const drawer=$("#drawer"), cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
-    function openDrawer(){ drawer.classList.add("open"); }
-    function closeDrawer(){ drawer.classList.remove("open"); }
-    document.getElementById("btnCart").onclick=openDrawer;
-    document.getElementById("closeDrawer").onclick=closeDrawer;
-    document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
-
-    // 👉 Redirección directa a pedido_cliente.html
-    document.getElementById("btnPagar").onclick = ()=>{
-      if(!orderable) return cantOrderAlert();
-      if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
-      window.location.href = 'pedido_cliente.html';
+    const bucket = cart.burger;
+    bucket[uniqueKey] = {
+      qty: 1,
+      item: currentItem,
+      fries: friesEl.value,
+      extras,
+      ...(notesVal ? { notes: notesVal } : {}),
+      _label: `${currentItem.name} — Papas: ${friesName(friesEl.value)}${extras.patty?(' · +'+extras.patty+' medallón(es)'):''}${extras.cheddar?(' · +'+extras.cheddar+' cheddar'):''}${notesVal?(' · Nota: '+notesVal):''}`
     };
 
-    // ===== Nuevas utilidades: clave única y label legible =====
-    function makeItemKey(item, fries, extras, notes){
-      const parts = [
-        item.id || '',
-        'fries:' + (fries || ''),
-        'patty:' + ((extras && extras.patty) || 0),
-        'cheddar:' + ((extras && extras.cheddar) || 0),
-        'notes:' + (notes ? String(notes).trim().slice(0,120) : '')
-      ];
-      return parts.join('|'); // guardamos la key tal cual (no encode en storage)
-    }
-    function escapeHtml(s){
-      return (s||'').toString()
-        .replace(/&/g,'&amp;')
-        .replace(/</g,'&lt;')
-        .replace(/>/g,'&gt;')
-        .replace(/"/g,'&quot;')
-        .replace(/'/g,'&#39;');
-    }
-    function readableKeyLabel(item, fries, extras, notes){
-      const ex = [];
-      if(extras?.patty) ex.push(`+${extras.patty} medallón(es)`);
-      if(extras?.cheddar) ex.push(`+${extras.cheddar} cheddar`);
-      const extrasText = ex.length ? ' · ' + ex.join(' · ') : '';
-      const notesText = notes ? ` · Nota: ${escapeHtml(notes)}` : '';
-      const friesText = (fries === 'con_sazon' ? 'Sazonadas' : (fries === 'con_sal' ? 'Con sal' : (fries === 'sin_sal' ? 'Sin sal' : (fries || '—'))));
-      return `${item.name} — Papas: ${friesText}${extrasText}${notesText}`;
+    overlay.classList.remove("open");
+    renderCart();
+  };
+
+  // ===== TICKET: REUTILIZO EXACTAMENTE EL HTML/CSS DEL PEDIDO_LOCAL PERO CAMBIO TEXTO "RETIRA A LAS:" =====
+  function escapeHtml(s){
+    return (s||'').toString()
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+ function buildTicketHTMLFromPayload(orderId, payload){
+  const o = payload;
+  const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+  const escapeHtml = s => (s||'').toString()
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+  const orderDisplay = (()=>{ const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+    for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; } return `#${(orderId||'').slice(-5).toUpperCase()}`; })();
+
+  let dt = new Date();
+  if(o.createdAt && typeof o.createdAt.toDate === 'function') dt = o.createdAt.toDate();
+  else if(o.createdAt && typeof o.createdAt === 'string') { const d=new Date(o.createdAt); if(!isNaN(d)) dt=d; }
+  else if(o.createdAt instanceof Date) dt = o.createdAt;
+  const dateStr = dt.toLocaleDateString('es-AR');
+  const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
+
+  const items = Array.isArray(o.items)?o.items:[];
+
+  const linesHTML = items.map(it=>{
+    const qty = it.qty||1;
+    const name = (it.name||'').toString();
+    const base = (it.price||0);
+    const pattyCount = it.extras?.patty||0;
+    const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY;
+    const pattySum   = qty * pattyCount * pattyUnit;
+    const cheddarCount = it.extras?.cheddar||0;
+    const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR;
+    const cheddarSum   = qty * cheddarCount * cheddarUnit;
+    const baseSubtotal = base * qty;
+    const lineTotal    = baseSubtotal + pattySum + cheddarSum;
+
+    const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
+    let friesLabel = '';
+    if(friesRaw){
+      const s = String(friesRaw).toLowerCase();
+      if(/\bcon sazon\b|\bconsazon\b|\bcon_sazon\b|\bcon-sazon\b|\bsazon\b/.test(s) && !/\bsin\b/.test(s)) friesLabel = 'Sazonadas';
+      else if(/\bcon sal\b|\bconsal\b|\bcon_sal\b|\bcon-sal\b|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) friesLabel = 'Con sal';
+      else if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s) || /\bsin_sazon\b/.test(s))) friesLabel = 'Sin sal';
     }
 
-    /* ===== Modal Personalizar ===== */
-    const overlay=$("#overlay"),modTitle=$("#modTitle");
-    const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar");
-    const patVal=$("#patVal"),patInc=$("#patInc"),patDec=$("#patDec");
-    const cheVal=$("#cheVal"),cheInc=$("#cheInc"),cheDec=$("#cheDec");
-    const notes=$("#notes"),btnAdd=$("#btnAdd"),btnCancel=$("#btnCancel");
-    const pricePreview=$("#pricePreview");
-    let currentItem=null;
+    return `
+      <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
+      ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
+      <div class="row amount"><div class="l"></div><div class="r">${moneyFn(baseSubtotal)}</div></div>
+      ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${moneyFn(cheddarSum)}</div>` : ''}
+      ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${moneyFn(pattySum)}</div>` : ''}
+      ${it.notes ? `<div class="sub">• Nota: ${escapeHtml(it.notes)}</div>` : ''}
+      <div class="row amount final"><div class="l"></div><div class="r">${moneyFn(lineTotal)}</div></div>
+      <div class="sep"></div>
+    `;
+  }).join('') || '<div class="sub">Sin ítems.</div>';
 
-    function calcUnitPrice(item, extras){
-      return (item?.price||0)
-        + (extras?.patty||0) * EXTRA_PRICE_PATTY
-        + (extras?.cheddar||0) * EXTRA_PRICE_CHEDDAR;
-    }
-    function updatePreview(){
-      if(!currentItem) return;
-      const extras={ patty: +patVal.textContent||0, cheddar: +cheVal.textContent||0 };
-      const unit = calcUnitPrice(currentItem, extras);
-      pricePreview.textContent = money(unit);
-      btnAdd.textContent = `Agregar al carrito — ${money(unit)}`;
-    }
+  const total = (()=>{ if(typeof o.total === 'number') return o.total;
+    return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR)*qty; return t + base + patty + cheddar; },0);
+  })();
 
-    function resetFries(){ document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false); }
-    btnCancel.onclick=()=>overlay.classList.remove("open");
-    function openCustomize(item){
-      if(!isAvailable(item.id)) return;
-      currentItem=item; modTitle.textContent="Personalizar: "+item.name;
-      notes.value=""; resetFries(); patVal.textContent="0"; cheVal.textContent="0";
-      if(item.kind==="double"){ rowPatties.style.display="flex"; rowCheddar.style.display="flex"; }
-      else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; }
-      else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; }
-      updatePreview();
-      applySidesToUI(); // asegurarnos de estado reciente cuando abrimos modal
-      overlay.classList.add("open");
-    }
-    patInc.onclick=()=>{const v=+patVal.textContent||0;if(v<2)patVal.textContent=v+1;updatePreview();};
-    patDec.onclick=()=>{const v=+patVal.textContent||0;if(v>0)patVal.textContent=v-1;updatePreview();};
-    cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1;updatePreview();};
-    cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1;updatePreview();};
+  // AÑADO aquí el bloque de comentario general si existe (campo comment)
+  const commentBlock = o.comment ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(o.comment)}</div></div><div class="hr"></div>` : '';
 
-    // ===== btnAdd: ahora valida SIDES_STATE y crea key única =====
-    btnAdd.onclick = ()=>{
-      if(!orderable){ cantOrderAlert(); return; }
-      if(!currentItem || !isAvailable(currentItem.id)) return;
-      const friesEl = document.querySelector('input[name="fries"]:checked');
-      if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
-      const friesVal = friesEl.value;
-      // validar que la variante esté habilitada desde config
-      if(SIDES_STATE[friesVal] === false){
-        alert("La variante de papas elegida no está disponible. Elegí otra.");
-        return;
-      }
-      const notesTxt = notes.value.trim();
-      const extras = {
-        patty: 0,
-        cheddar: 0,
-        EXTRA_PRICE_PATTY: EXTRA_PRICE_PATTY,
-        EXTRA_PRICE_CHEDDAR: EXTRA_PRICE_CHEDDAR
-      };
-      if(currentItem.kind === "double"){ extras.patty = +patVal.textContent || 0; extras.cheddar = +cheVal.textContent || 0; }
-      else if(currentItem.kind === "chicken"){ extras.cheddar = +cheVal.textContent || 0; }
-      const key = makeItemKey(currentItem, friesVal, extras, notesTxt);
-      const bucket = cart.burger = (cart.burger || {});
-      if(bucket[key]){
-        bucket[key].qty = (bucket[key].qty || 0) + 1;
-      } else {
-        bucket[key] = {
-          qty: 1,
-          item: currentItem,
-          fries: friesVal,
-          extras: extras,
-          notes: notesTxt,
-          _label: readableKeyLabel(currentItem, friesVal, extras, notesTxt)
-        };
-      }
-      saveCart();
-      renderCart();
-      overlay.classList.remove("open");
-    };
-
-    // ===== renderCart: muestra cada entry (clave única) =====
-    function renderCart(){
-      cartItems.innerHTML = "";
-      for(const [key, obj] of Object.entries(cart.burger || {})){
-        const extras = [];
-        if(obj.extras){
-          if(obj.extras.patty) extras.push(`+${obj.extras.patty} medallón(es)`);
-          if(obj.extras.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`);
+  // formatear pickup_time si existe
+  let pickupPretty = null;
+  try{
+    const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
+    if(raw){
+      if(typeof raw.toDate === 'function'){ pickupPretty = raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+      else if(raw && typeof raw.seconds === 'number'){ pickupPretty = new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+      else if(typeof raw === 'string'){
+        const d = new Date(raw);
+        if(!isNaN(d)) pickupPretty = d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        else {
+          const m = raw.match(/(\d{2})(\d{2})$/);
+          if(m) pickupPretty = m[1]+':'+m[2];
+          else pickupPretty = raw;
         }
-        const unit = (obj.item?.price || 0)
-          + (obj.extras?.patty || 0) * (obj.extras?.EXTRA_PRICE_PATTY ?? EXTRA_PRICE_PATTY)
-          + (obj.extras?.cheddar || 0) * (obj.extras?.EXTRA_PRICE_CHEDDAR ?? EXTRA_PRICE_CHEDDAR);
-
-        const label = obj._label || `${obj.item.name} · Papas: ${obj.fries || '—'}${extras.length?(' · '+extras.join(' · ')) : ''}${obj.notes ? ' · Nota: '+escapeHtml(obj.notes) : ''}`;
-
-        const ek = encodeURIComponent(key);
-
-        cartItems.innerHTML += `
-          <div class="item">
-            <div>
-              <strong>${escapeHtml(label)}</strong>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px">
-              <button class="btn ghost" onclick="changeQty('burger','${ek}',-1)">-</button>
-              <span>${obj.qty}</span>
-              <button class="btn ghost" onclick="changeQty('burger','${ek}',1)">+</button>
-              <span>${money(unit * (obj.qty || 0))}</span>
-            </div>
-          </div>`;
-      }
-
-      for(const dKey of Object.keys(cart.drink || {})){
-        const d = cart.drink[dKey];
-        const ek = encodeURIComponent(dKey);
-        cartItems.innerHTML += `
-          <div class="item">
-            <div><strong>${escapeHtml(d.item.name)}</strong></div>
-            <div style="display:flex;align-items:center;gap:10px">
-              <button class="btn ghost" onclick="changeQty('drink','${ek}',-1)">-</button>
-              <span>${d.qty}</span>
-              <button class="btn ghost" onclick="changeQty('drink','${ek}',1)">+</button>
-              <span>${money((d.item.price||0)*(d.qty||0))}</span>
-            </div>
-          </div>`;
-      }
-
-      cartTotal.textContent = money(calcTotal());
-      document.getElementById("cartBubble").textContent = `(${cartCount()})`;
-    }
-
-    window.changeQty = function(type, encodedKey, delta){
-      const key = decodeURIComponent(encodedKey);
-      const bucket = cart[type];
-      if(!bucket) return;
-      const cur = bucket[key]?.qty || 0;
-      const next = Math.max(0, cur + delta);
-      if(next === 0){
-        delete bucket[key];
+      } else if(raw instanceof Date) {
+        pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
       } else {
-        bucket[key].qty = next;
+        pickupPretty = String(raw);
       }
-      if(type === 'burger' && Object.keys(cart.burger || {}).length === 0) cart.burger = {};
-      if(type === 'drink' && Object.keys(cart.drink || {}).length === 0) cart.drink = {};
-      saveCart();
+    }
+  }catch(e){ pickupPretty = null; }
+
+  // Si tenemos pickupPretty, mostraremos "Retira a las:" en grande entre cliente y medio de pago
+  const pickupLargeBlock = pickupPretty ? `<div class="blk" style="text-align:center"><div class="lbl">Retira a las:</div><div style="font-size:20px;font-weight:900">${escapeHtml(pickupPretty)}</div></div>` : '';
+
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Ticket ${escapeHtml(orderDisplay)}</title>
+<style>
+  @page{ size:58mm auto; margin:0; }
+  html,body{margin:0;padding:0;color:#000;}
+  *{-webkit-print-color-adjust:exact; print-color-adjust:exact; -webkit-text-size-adjust:100%;}
+  body{ font-family: Arial, sans-serif; font-size:13px; font-weight:700; line-height:1.45; }
+  .ticket{ width:48mm; margin:0 auto; padding:2mm 3mm 10mm 2mm; box-sizing:border-box; }
+  .c{text-align:center}
+  .brand{ font-size:16px; }
+  .orderNo{ font-size:14px; margin:1mm 0 }
+  .hr{ border-top:1px solid #000; margin:4px 0 }
+  .lbl{ font-size:11px; text-transform:uppercase; }
+  .blk{ margin:2px 0 2mm 0; }
+  .row{ display:flex; justify-content:space-between; gap:4px; }
+  .row .l{ flex:1 1 auto; min-width:0; }
+  .row .r{ flex:0 0 auto; text-align:right; min-width:18mm; padding-left:1.5mm; white-space:nowrap; }
+  .row.name .r{ display:none; }
+  .row.amount .l{ display:block; }
+  .row.amount.final{ margin-top:3px; }
+  .sub{ font-size:11px; margin:1px 0 0 2mm; }
+  .sub.ex{ white-space:nowrap; }
+  .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
+  .subtotal{ margin-top:2mm; }
+  .total{ font-size:16px; margin-top:3mm; }
+  .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
+</style>
+</head>
+<body>
+  <div class="ticket">
+    <div class="c brand">Rhodes Burgers</div>
+    <div class="orderNo c">${escapeHtml(orderDisplay)}</div>
+
+    <div class="hr"></div>
+
+    ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ''}
+    ${pickupLargeBlock}
+    ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml((o.pago||o.payment_method)||'')}</div></div>` : ''}
+
+    ${commentBlock}
+
+    <div class="hr"></div>
+    ${linesHTML}
+    <div class="hr"></div>
+
+    <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${moneyFn(total)}</div></div>
+    <div class="row total"><div class="l">TOTAL</div><div class="r">${moneyFn(total)}</div></div>
+
+    <div class="foot">
+      ${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}
+      ${pickupPretty ? `<div>Retira a las: ${escapeHtml(pickupPretty)}</div>` : ''}
+    </div>
+  </div>
+  <script>
+    window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 60); });
+  <\/script>
+</body>
+</html>`;
+  return html;
+}
+
+  // Imprime HTML en iframe oculto (sin popup)
+  function printHtmlInIframe(html){
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.setAttribute('aria-hidden','true');
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+
+    const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
+    // onafterprint puede no funcionar en todos los browsers, ponemos fallback cleanup
+    try{ iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150); }catch(e){}
+    setTimeout(cleanup, 15000);
+  }
+
+  // ===== Imprimir y cargar (transacción que reserva slot en config/pickup) =====
+  let inFlight = false;
+  const btnPrintAndLoad = document.getElementById('btnPrintAndLoad');
+
+  btnPrintAndLoad.addEventListener('click', async ()=>{
+    if(inFlight) return;
+    inFlight = true;
+    btnPrintAndLoad.setAttribute('disabled','');
+    btnPrintAndLoad.classList.add('disabled');
+
+    try{
+      const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
+      if(!hasItems){ alert("Agregá al menos un producto."); throw new Error('empty'); }
+
+      const nombreRaw = ($("#inpNombre").value||"").trim();
+      if(!nombreRaw){ alert("Ingresá el nombre."); throw new Error('no-name'); }
+      const nombre = `${nombreRaw} (mostrador)`;
+      const telefono = ($("#inpTel").value||"").trim();
+      const pago = $("#selPago").value;
+      const comentario = ($("#inpComentario").value||"").trim();
+
+      // validar horario seleccionado
+      const sel = getSelectedSlotForPayload();
+      if(!sel){ alert("Seleccioná un horario de retiro."); throw new Error('no-slot'); }
+
+      // Construyo items legibles para Firestore
+      const items=[];
+      for(const o of Object.values(cart.burger)){
+        items.push({
+          id:o.item.id,
+          name:o.item.name,
+          price:o.item.price,
+          qty:o.qty,
+          fries:o.fries,
+          notes:o.notes||'',
+          extras:{ patty:o.extras?.patty||0, cheddar:o.extras?.cheddar||0, EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR }
+        });
+      }
+      for(const o of Object.values(cart.drink)){
+        items.push({
+          id:o.item.id,
+          name:o.item.name,
+          price:o.item.price,
+          qty:o.qty,
+          fries:'',
+          notes:'',
+          extras:{}
+        });
+      }
+
+      const total = calcTotal();
+
+      // Vamos a crear la orden y reservar el slot en una transacción atómica.
+      const newOrderRef = db.collection('orders').doc();
+
+      await db.runTransaction(async tx => {
+        // 1) contador global
+        const countersRef = globalCounterRef();
+        const countersSnap = await tx.get(countersRef);
+        const curNum = countersSnap.exists ? (Number(countersSnap.data().orderNumber)||0) : 0;
+        const nextNum = curNum + 1;
+        tx.set(countersRef, { orderNumber: nextNum, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+
+        // 2) pickup doc (slots)
+        const pickupRef = db.collection('config').doc('pickup');
+        const pickupSnap = await tx.get(pickupRef);
+        const pickupData = pickupSnap.exists ? (pickupSnap.data() || {}) : {};
+        const slotsArr = Array.isArray(pickupData.slots) ? (pickupData.slots.slice()) : [];
+
+        // buscar slot por id (sel.pickup_slot)
+        const selId = normalizeSlotId(sel.pickup_slot || sel.pickup_time || '');
+        let slotIndex = -1;
+        for(let i=0;i<slotsArr.length;i++){
+          const s = slotsArr[i];
+          const sid = normalizeSlotId(s.id || s.slot || s.slot_id || s.hhmm || '');
+          if(sid === selId){ slotIndex = i; break; }
+        }
+
+        if(slotIndex === -1){
+          // no hay slot en config/pickup con ese id -> no tocamos pickup doc (permitimos crear pedido sin incrementar booked)
+        } else {
+          const slotObjRaw = slotsArr[slotIndex] || {};
+          const slotObj = Object.assign({}, slotObjRaw);
+          const cap = typeof slotObj.capacity === 'number' ? slotObj.capacity : (typeof slotObj.cap === 'number' ? slotObj.cap : Infinity);
+          const booked = typeof slotObj.booked === 'number' ? slotObj.booked : 0;
+          if(booked + 1 > cap){
+            throw new Error('slot-full'); // abortar transacción
+          }
+          slotObj.booked = booked + 1;
+          slotsArr[slotIndex] = slotObj;
+          tx.set(pickupRef, { slots: slotsArr, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+        }
+
+        // 3) crear order con orderNumber y pickup fields
+        const payload = {
+          orderNumber: nextNum,
+          number: nextNum,
+          nombre,
+          telefono,
+          pago,
+          comment: comentario,
+          items,
+          total,
+          status: "accepted",
+          payment_status: "paid",
+          source: "mostrador",
+          pickup_time: sel.pickup_time,
+          pickup_slot: sel.pickup_slot,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        tx.set(newOrderRef, payload);
+
+        // 4) crear resumen público
+        const pubId = newOrderRef.id.slice(0,22);
+        const pubRef = db.collection('order_public').doc(pubId);
+        tx.set(pubRef, {
+          orderId: newOrderRef.id,
+          orderNumber: nextNum,
+          status: 'accepted',
+          entrega: 'retira',
+          pago,
+          nombre,
+          pickup_time: sel.pickup_time,
+          pickup_slot: sel.pickup_slot,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge:true });
+
+      }); // end runTransaction
+
+      // Si llegamos acá la transacción fue exitosa: leemos el documento para imprimir
+      let savedDoc = null;
+      try{ savedDoc = await db.collection('orders').doc(newOrderRef.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
+      const docData = savedDoc ? savedDoc.data() : { orderNumber: '??', createdAt: new Date(), items, total, nombre, pago, comment: comentario, pickup_time: sel.pickup_time, pickup_slot: sel.pickup_slot };
+
+      const html = buildTicketHTMLFromPayload(newOrderRef.id, docData);
+      printHtmlInIframe(html);
+
+      // Limpiar carrito y UI
+      cart={burger:{},drink:{}};
       renderCart();
+      $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
+      alert(`Pedido cargado y horario reservado (${sel.pickup_time}).`);
+    }catch(err){
+      if(err && err.message === 'slot-full'){
+        alert('El horario seleccionado está completo. Elegí otro por favor.');
+      } else if(err && err.message && err.message !== 'empty' && err.message !== 'no-name' && err.message !== 'no-slot'){
+        console.error(err);
+        alert('Error al cargar el pedido. Reintentá.');
+      }
+    }finally{
+      // evita doble-click inmediato; re-habilitamos en 2s
+      setTimeout(()=>{
+        inFlight = false;
+        btnPrintAndLoad.removeAttribute('disabled');
+        btnPrintAndLoad.classList.remove('disabled');
+      }, 2000);
     }
+  });
 
-    function addDrink(item){
-      const bucket=cart.drink||(cart.drink={});
-      if(!bucket[item.id]) bucket[item.id]={qty:0,item};
-      bucket[item.id].qty+=1; saveCart(); renderCart();
-    }
-
-    /* Montar UI */
-    mount();
+  // Inicio: renderizar menú
+  const drinksGrid = document.getElementById('drinksGrid');
+  const burgersGrid = document.getElementById('burgersGrid');
+  mount();
   </script>
 </body>
 </html>
