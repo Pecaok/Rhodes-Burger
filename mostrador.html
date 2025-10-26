@@ -135,13 +135,18 @@
     .preview{font-weight:800}
     .side-disabled-note{ color:#b33; font-size:13px; margin-top:6px }
 
-    /* Pickup selector pills (estilo similar al ejemplo) */
-    .pickup-pills{display:flex;flex-direction:column;gap:8px;margin-top:8px}
-    .slot-pill{display:flex;align-items:center;gap:10px;border:1px solid var(--ring);border-radius:12px;padding:8px 10px;cursor:pointer}
-    .slot-pill.disabled{opacity:.55;pointer-events:none}
-    .slot-pill input{accent-color:var(--primary);margin-right:6px}
-    .slot-label{font-weight:800}
-    .slot-sub{font-size:12px;color:var(--muted)}
+    /* Pickup selector estilo solicitado */
+    .pickup-row{display:flex;align-items:center;gap:8px;margin-top:10px}
+    .pickup-arrow{width:42px;height:42px;border-radius:10px;border:1px solid var(--ring);display:flex;align-items:center;justify-content:center;cursor:pointer;font-weight:800;background:#fff}
+    .pickup-time{min-width:120px;height:42px;border-radius:12px;border:1px solid var(--ring);display:flex;align-items:center;justify-content:center;font-weight:900;background:#fff;cursor:pointer}
+    .pickup-time.disabled{opacity:.5;cursor:not-allowed}
+    .pickup-mini{width:36px;height:36px;border-radius:8px;border:1px solid var(--ring);display:flex;align-items:center;justify-content:center;cursor:pointer;background:#fff}
+    .pickup-cap{font-weight:800;margin-left:8px}
+    .pickup-desc{font-size:12px;color:var(--muted);margin-top:6px}
+    /* modal list for quick choose */
+    .slots-list{display:flex;flex-wrap:wrap;gap:8px}
+    .slot-quick{padding:8px 10px;border-radius:999px;border:1px solid var(--ring);cursor:pointer}
+    .slot-quick.disabled{opacity:.5;pointer-events:none}
   </style>
 </head>
 <body>
@@ -184,11 +189,19 @@
         </select>
       </div>
 
-      <!-- PICKUP selector: aquí se renderizan los slots -->
+      <!-- PICKUP selector: VERSION estilo con flechas + pill central -->
       <div style="margin-top:10px">
-        <div style="font-weight:700">Horario de retiro</div>
-        <div id="pickupSelector" class="pickup-pills"></div>
-        <div id="pickupStateNote" class="muted" style="margin-top:6px"></div>
+        <div style="font-weight:700">Horario de retiro (solo hoy)</div>
+
+        <div class="pickup-row" id="pickupControls">
+          <div id="btnPrev" class="pickup-arrow" title="Anterior">◀</div>
+          <div id="pickupTime" class="pickup-time">--:--</div>
+          <div id="btnNext" class="pickup-arrow" title="Siguiente">▶</div>
+          <div id="btnQuick" class="pickup-mini" title="Ver lista">▦</div>
+          <div id="pickupCupos" class="pickup-cap muted">— cupos</div>
+        </div>
+
+        <div id="pickupDesc" class="pickup-desc">Mostrando turnos cada 10 minutos, desde 19:10. (Max 4 pedidos/turno)</div>
       </div>
 
       <div class="field"><textarea id="inpComentario" placeholder="Comentario"></textarea></div>
@@ -197,6 +210,17 @@
       <button id="btnPrintAndLoad" class="btn primary" style="width:100%;margin-top:10px">Imprimir y cargar</button>
     </aside>
   </main>
+
+  <!-- quick list modal -->
+  <div class="overlay" id="slotsOverlay">
+    <div class="modal" style="width:520px;max-width:92vw">
+      <h3>Elegir horario</h3>
+      <div id="slotsQuickList" class="slots-list" style="margin-top:8px"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px">
+        <button class="btn ghost" id="closeSlots">Cerrar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal Personalizar (se usa al tocar Agregar) -->
   <div class="overlay" id="overlay">
@@ -278,11 +302,10 @@
 
   // ===== Contador GLOBAL (misma referencia que pedido_cliente: config/counters.orderNumber) =====
   function globalCounterRef(){ return db.collection('config').doc('counters'); }
-  // NOTA: nextOrderNumber se usa dentro de una transacción más abajo (reserveAndNextOrder)
 
   // ===== Menú =====
   const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
-  const BURGERS=[
+  const BURGERS=[ /* ... mismo listado que antes ... */
     { id:"cheese_simple", name:"Cheeseburger Simple", price:10100,  img:"images/cheeseburger simple.jpg", kind:"simple", desc:"Medallón con doble cheddar. Incluye papas." },
     { id:"cheese_doble",  name:"Cheeseburger Doble",  price:12500, img:"images/cheeseburger doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar. Incluye papas." },
     { id:"cheesebacon_simple", name:"CheeseBacon Simple", price:10600, img:"images/CheeseBacon Simple.jpg", kind:"simple", desc:"Medallón con doble cheddar y bacon. Incluye papas." },
@@ -297,7 +320,7 @@
     { id:"burguesa_doble",  name:"Burguesa Doble",  price:14500, img:"images/Burguesa Doble.jpg",  kind:"double", desc:"Doble medallón con doble cheddar, mostaza y miel, cebolla caramelizada. Incluye papas." },
     { id:"pollo_crispy", name:"Pollo Crispy", price:9100, img:"images/Pollo crispy.jpg", kind:"chicken", desc:"Pechuga crispy con lechuga y mayo. Incluye papas." }
   ];
-  const DRINKS=[
+  const DRINKS=[ /* ... */ 
     { id:"andes_rubia", name:"Andes Origen Rubia 473ml", price:3800, img:"images/Andes Rubia.png" },
     { id:"andes_roja",  name:"Andes Origen Roja 473ml",  price:3800, img:"images/Andes Roja.png" },
     { id:"coca_org",    name:"Coca-Cola Original 500ml", price:2500, img:"images/Coca.png" },
@@ -309,7 +332,7 @@
     { id:"agua_sg",     name:"Agua sin gas 500ml",       price:1500, img:"images/Agua.png" }
   ];
 
-  /* ===== Disponibilidad ===== */
+  /* ===== Disponibilidad (productos) — se mantiene igual) ===== */
   const availability = new Map();
   const isAvailable = id => availability.has(id) ? !!availability.get(id) : true;
   function refreshAvailabilityUI(){
@@ -335,7 +358,6 @@
 
   /* ===== SIDES CONFIG (nuevo: leer desde config/sides) ===== */
   let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
-
   function applySidesToUI(){
     document.querySelectorAll('#friesOptions .pill').forEach(label=>{
       const input = label.querySelector('input[name="fries"]');
@@ -361,7 +383,6 @@
       noteEl.classList.remove('side-disabled-note');
     }
   }
-
   try{
     db.collection('config').doc('sides').onSnapshot(snap=>{
       const data = snap.exists ? (snap.data()||{}) : {};
@@ -380,88 +401,112 @@
     applySidesToUI();
   }
 
-  /* ===== PICKUP (slots) =====
-     Detecta collection 'slots' o doc 'slots' / 'config/pickup' / 'config/slots'.
-     Normaliza a pickupSlots[] y renderiza selector en #pickupSelector.
-  */
-  let pickupSlots = []; // normalizados
+  /* ===== PICKUP / SLOTS (colección o doc) ===== */
+  let pickupSlots = []; // array de {id,label,capacity,booked,available,__docId|__arrIdx}
+  let PICKUP_SOURCE = null;
+  let currentSlotIdx = 0; // índice visible en el control
   let selectedPickup = null;
-  let PICKUP_SOURCE = null; // {type:'collection'|'doc', ref:..., path:...}
 
-  function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-  function normalizeSlotId(v){ return String(v||'').replace(/\s+/g,'').toLowerCase(); }
+  function normId(v){ return String(v||'').trim().toLowerCase(); }
 
-  function renderPickupSelector(){
-    const container = document.getElementById('pickupSelector');
-    const stateNote = document.getElementById('pickupStateNote');
-    container.innerHTML = '';
+  function renderPickupControls(){
+    const timeEl = $("#pickupTime");
+    const cuposEl = $("#pickupCupos");
+    const descEl = $("#pickupDesc");
 
-    if(!pickupSlots || pickupSlots.length===0){
-      container.innerHTML = `<div class="muted">No hay slots configurados.</div>`;
-      stateNote.textContent = '';
+    if(!pickupSlots.length){
+      timeEl.textContent = '--:--';
+      timeEl.classList.add('disabled');
+      cuposEl.textContent = '— cupos';
+      descEl.textContent = 'No hay turnos configurados.';
+      selectedPickup = null;
       return;
     }
 
-    pickupSlots.forEach(slot=>{
-      const pill = document.createElement('label');
-      const isFull = (typeof slot.capacity==='number' && typeof slot.booked==='number' && slot.booked >= slot.capacity);
-      const disabled = slot.available === false || isFull;
-      pill.className = 'slot-pill' + (disabled ? ' disabled' : '');
-      pill.innerHTML = `<input type="radio" name="pickup_slot_radio" value="${escapeHtml(slot.id)}" ${disabled ? 'disabled' : ''}>
-                        <div style="display:flex;flex-direction:column">
-                          <span class="slot-label">${escapeHtml(slot.label||slot.id)}</span>
-                          <span class="slot-sub">${(typeof slot.capacity==='number' ? `cupos: ${Math.max(0, (slot.capacity - (slot.booked||0)))}` : '')}</span>
-                        </div>`;
-      const input = pill.querySelector('input');
-      input.addEventListener('change', ()=>{
-        if(input.checked){
-          selectedPickup = { pickup_slot: slot.id, pickup_time: slot.label || slot.id };
-        }
-      });
-      container.appendChild(pill);
-    });
+    // clamp index
+    if(currentSlotIdx < 0) currentSlotIdx = 0;
+    if(currentSlotIdx >= pickupSlots.length) currentSlotIdx = pickupSlots.length - 1;
+    const s = pickupSlots[currentSlotIdx];
 
-    // auto-seleccionar primer disponible
-    if(!selectedPickup){
-      const first = pickupSlots.find(s=> s.available !== false && (typeof s.capacity!=='number' || (typeof s.booked==='number' && s.booked < s.capacity)));
-      if(first){
-        const radios = container.querySelectorAll('input[name="pickup_slot_radio"]');
-        for(const r of radios){ if(r.value === String(first.id)){ r.checked=true; selectedPickup = { pickup_slot:first.id, pickup_time:first.label||first.id }; break; } }
-      }
-    }
+    // mostrar label (hora)
+    timeEl.textContent = s.label || s.id || ('slot ' + currentSlotIdx);
+    timeEl.classList.toggle('disabled', s.available === false || (typeof s.capacity === 'number' && typeof s.booked === 'number' && s.booked >= s.capacity));
 
-    const disabled = pickupSlots.filter(s => s.available===false || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity));
-    if(disabled.length){
-      stateNote.textContent = `Algunos horarios están completos o inhabilitados.`;
-      stateNote.classList.add('side-disabled-note');
+    // mostrar cupos disponibles si capacity definido
+    if(typeof s.capacity === 'number'){
+      const free = Math.max(0, s.capacity - (s.booked||0));
+      cuposEl.textContent = `${free} cupos`;
     } else {
-      stateNote.textContent = '';
-      stateNote.classList.remove('side-disabled-note');
+      cuposEl.textContent = (typeof s.booked === 'number') ? `${s.booked} reservas` : '— cupos';
     }
+
+    // descripción: si los slots vienen con intervalo o meta info, no lo modificamos; intentamos inferir
+    descEl.textContent = s.hint || s.desc || (pickupSlots.length>1 ? `Mostrando ${pickupSlots.length} turnos` : 'Turno único');
+
+    // si disponible, lo seleccionamos por defecto (pero no reservamos aún)
+    if(s.available !== false && !(typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity)){
+      selectedPickup = { pickup_slot: s.id, pickup_time: s.label || s.id };
+    } else {
+      selectedPickup = null;
+    }
+
+    // Prev/next enable/disable
+    $("#btnPrev").style.visibility = (currentSlotIdx>0) ? 'visible' : 'hidden';
+    $("#btnNext").style.visibility = (currentSlotIdx < pickupSlots.length-1) ? 'visible' : 'hidden';
   }
 
-  function subscribeToPickupSources(){
-    // 1) intentar colección 'slots'
+  function openSlotsQuick(){
+    const overlay = $("#slotsOverlay");
+    const list = $("#slotsQuickList");
+    list.innerHTML = '';
+    pickupSlots.forEach((s, idx)=>{
+      const btn = document.createElement('div');
+      btn.className = 'slot-quick' + ((s.available===false || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity)) ? ' disabled' : '');
+      btn.textContent = s.label || s.id;
+      btn.onclick = ()=>{
+        if(btn.classList.contains('disabled')) return;
+        currentSlotIdx = idx;
+        renderPickupControls();
+        overlay.classList.remove('open');
+      };
+      list.appendChild(btn);
+    });
+    overlay.classList.add('open');
+  }
+
+  // subscribe flexible: collection 'slots' preferred, otherwise doc candidates
+  function subscribeSlots(){
     try{
-      const colRef = db.collection('slots');
-      colRef.onSnapshot(snap=>{
+      const col = db.collection('slots');
+      col.onSnapshot(snap=>{
         if(!snap.empty){
-          PICKUP_SOURCE = { type:'collection', ref: colRef, path:'slots' };
+          PICKUP_SOURCE = { type:'collection', ref: col, path:'slots' };
           pickupSlots = [];
           snap.forEach(doc=>{
-            const d = doc.data() || {};
+            const d = doc.data()||{};
             pickupSlots.push({
-              id: (d.id || doc.id || d.slot || d.hhmm || doc.id),
-              label: (d.label || d.hhmm || d.slot_label || d.id || doc.id),
-              capacity: typeof d.capacity === 'number' ? d.capacity : (typeof d.cap === 'number' ? d.cap : undefined),
-              booked: typeof d.booked === 'number' ? d.booked : 0,
+              id: d.id || doc.id,
+              label: d.label || d.hhmm || d.id || doc.id,
+              capacity: (typeof d.capacity==='number') ? d.capacity : (typeof d.cap==='number' ? d.cap : undefined),
+              booked: (typeof d.booked==='number') ? d.booked : 0,
               available: d.available === false ? false : true,
-              __docId: doc.id
+              __docId: doc.id,
+              hint: d.hint
             });
           });
-          renderPickupSelector();
+          // ordenar por label si parece hh:mm
+          pickupSlots.sort((a,b)=>{
+            const A = a.label || a.id, B = b.label || b.id;
+            if(/\d{1,2}:\d{2}/.test(A) && /\d{1,2}:\d{2}/.test(B)){
+              return A.localeCompare(B);
+            }
+            return 0;
+          });
+          // intentar seleccionar primer disponible
+          currentSlotIdx = pickupSlots.findIndex(s=> s.available !== false && (typeof s.capacity!=='number' || (s.booked||0) < s.capacity));
+          if(currentSlotIdx === -1) currentSlotIdx = 0;
+          renderPickupControls();
         } else {
-          // colección vacía -> probar docs
           tryDocCandidates();
         }
       }, err=>{
@@ -469,102 +514,64 @@
         tryDocCandidates();
       });
       return;
-    }catch(e){ console.warn('subscribe slots collection failed', e); tryDocCandidates(); }
+    }catch(e){ console.warn('subscribe collection failed', e); tryDocCandidates(); }
 
     function tryDocCandidates(){
-      const candidates = ['slots','config/pickup','config/slots'];
-      candidates.forEach(p=>{
+      const cand = ['slots','config/pickup','config/slots'];
+      cand.forEach(path=>{
         try{
-          const docRef = db.doc(p);
+          const docRef = db.doc(path);
           docRef.onSnapshot(snap=>{
-            if(snap.exists){
-              const data = snap.data() || {};
-              if(Array.isArray(data.slots) && data.slots.length){
-                PICKUP_SOURCE = { type:'doc', ref: docRef, path: p };
-                pickupSlots = (data.slots||[]).map((s, idx) => ({
-                  id: (s.id || s.slot || s.slot_id || s.hhmm || ('slot_'+idx)),
-                  label: (s.label || s.slot_label || s.hhmm || s.id),
-                  capacity: typeof s.capacity === 'number' ? s.capacity : (typeof s.cap === 'number' ? s.cap : undefined),
-                  booked: typeof s.booked === 'number' ? s.booked : 0,
+            if(!snap.exists) return;
+            const data = snap.data()||{};
+            // document style: array 'slots'
+            if(Array.isArray(data.slots) && data.slots.length){
+              PICKUP_SOURCE = { type:'doc', ref: docRef, path };
+              pickupSlots = data.slots.map((s, i)=>{
+                return {
+                  id: s.id || s.slot || s.hhmm || ('slot_'+i),
+                  label: s.label || s.hhmm || s.slot || s.id,
+                  capacity: (typeof s.capacity==='number') ? s.capacity : (typeof s.cap === 'number' ? s.cap : undefined),
+                  booked: (typeof s.booked === 'number') ? s.booked : 0,
                   available: s.available === false ? false : true,
-                  __arrIdx: idx
-                }));
-                renderPickupSelector();
-              } else {
-                // si doc existe pero no array, ignorar
-              }
+                  __arrIdx: i,
+                  hint: s.hint
+                };
+              });
+              currentSlotIdx = pickupSlots.findIndex(s=> s.available !== false && (typeof s.capacity!=='number' || (s.booked||0) < s.capacity));
+              if(currentSlotIdx === -1) currentSlotIdx = 0;
+              renderPickupControls();
             }
-          }, err=>{ console.warn(`${p} doc err`, err); });
-        }catch(e){ console.warn('doc candidate subscribe failed', e); }
+          }, err=>console.warn('doc path err', path, err));
+        }catch(e){ console.warn('subscribe candidate failed', e); }
       });
     }
   }
+  subscribeSlots();
 
-  // inicial
-  subscribeToPickupSources();
-
-  /* ===== reserveAndNextOrder: en una transacción:
-        - incrementa orderNumber
-        - reserva un slot (si PICKUP_SOURCE detectado), incrementando booked
-     devuelve { orderNumber }
-     Lanza error 'slot-full' si slot lleno o 'slot-not-found' si no existe.
-  */
-  async function reserveAndNextOrder(selectedSlotId){
-    return await db.runTransaction(async tx=>{
-      // 1) contador
-      const ref = globalCounterRef();
-      const snap = await tx.get(ref);
-      const cur = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
-      const nxt = cur + 1;
-      tx.set(ref, { orderNumber: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-
-      // 2) reservar slot si hay selección y origen detectado
-      if(selectedSlotId && PICKUP_SOURCE){
-        if(PICKUP_SOURCE.type === 'collection'){
-          // buscar doc con mismo id en pickupSlots
-          const found = pickupSlots.find(s => normalizeSlotId(s.id) === normalizeSlotId(selectedSlotId));
-          if(!found || !found.__docId) throw new Error('slot-not-found');
-          const docRef = PICKUP_SOURCE.ref.doc(found.__docId);
-          const sSnap = await tx.get(docRef);
-          if(!sSnap.exists) throw new Error('slot-not-found');
-          const data = sSnap.data() || {};
-          const booked = typeof data.booked === 'number' ? data.booked : 0;
-          const capacity = typeof data.capacity === 'number' ? data.capacity : (typeof data.cap === 'number' ? data.cap : Infinity);
-          if(booked + 1 > capacity) throw new Error('slot-full');
-          tx.update(docRef, { booked: booked + 1, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-        } else if(PICKUP_SOURCE.type === 'doc'){
-          const docRef = PICKUP_SOURCE.ref;
-          const docSnap = await tx.get(docRef);
-          const data = docSnap.exists ? (docSnap.data()||{}) : {};
-          const slotsArr = Array.isArray(data.slots) ? data.slots.slice() : [];
-          let idx = -1;
-          for(let i=0;i<slotsArr.length;i++){
-            const s = slotsArr[i];
-            const sid = (s.id || s.slot || s.slot_id || s.hhmm || ('slot_'+i));
-            if(normalizeSlotId(sid) === normalizeSlotId(selectedSlotId)){ idx = i; break; }
-          }
-          if(idx === -1) throw new Error('slot-not-found');
-          const s = slotsArr[idx];
-          const booked = typeof s.booked === 'number' ? s.booked : 0;
-          const capacity = typeof s.capacity === 'number' ? s.capacity : (typeof s.cap === 'number' ? s.cap : Infinity);
-          if(booked + 1 > capacity) throw new Error('slot-full');
-          const newSlot = Object.assign({}, s, { booked: booked + 1 });
-          slotsArr[idx] = newSlot;
-          tx.set(docRef, { slots: slotsArr, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-        } else {
-          // origen desconocido: no reservar
-        }
-      }
-
-      return { orderNumber: nxt };
-    });
-  }
+  // NAV controls
+  $("#btnPrev").addEventListener('click', ()=>{ if(currentSlotIdx>0){ currentSlotIdx--; renderPickupControls(); }});
+  $("#btnNext").addEventListener('click', ()=>{ if(currentSlotIdx < pickupSlots.length-1){ currentSlotIdx++; renderPickupControls(); }});
+  $("#pickupTime").addEventListener('click', ()=>{
+    const s = pickupSlots[currentSlotIdx];
+    if(!s) return;
+    // if disabled, show alert
+    const isFull = (s.available===false) || (typeof s.capacity==='number' && typeof s.booked==='number' && s.booked >= s.capacity);
+    if(isFull){ alert('El horario está completo o inhabilitado.'); return; }
+    selectedPickup = { pickup_slot: s.id, pickup_time: s.label || s.id };
+    // visual feedback brief
+    $("#pickupTime").style.boxShadow = '0 0 0 3px rgba(100,90,70,0.12)';
+    setTimeout(()=>{ $("#pickupTime").style.boxShadow=''; }, 300);
+  });
+  $("#btnQuick").addEventListener('click', openSlotsQuick);
+  $("#closeSlots").addEventListener('click', ()=>$("#slotsOverlay").classList.remove('open'));
+  // close overlay click outside
+  $("#slotsOverlay").addEventListener('click', e=>{ if(e.target === $("#slotsOverlay")) $("#slotsOverlay").classList.remove('open'); });
 
   /* ===== Carrito & UI ===== */
   const gridBurgers=$("#burgersGrid"), gridDrinks=$("#drinksGrid");
   const cartItems=$("#cartItems"), cartTotal=$("#cartTotal");
 
-  // CART: ahora las hamburguesas se guardan como entradas independientes (key único por unidad)
   let cart = { burger:{}, drink:{} };
 
   function friesName(v){
@@ -669,10 +676,10 @@
     gridDrinks.innerHTML="";  DRINKS.forEach(d=>drinksGrid.appendChild(renderCard(d,"drink")));
     renderCart(); refreshAvailabilityUI();
     applySidesToUI();
-    renderPickupSelector();
+    renderPickupControls();
   }
 
-  // ===== Modal =====
+  // ===== Modal Personalizar (igual que antes) =====
   const overlay=$("#overlay"), modTitle=$("#modTitle");
   const rowPatties=$("#rowPatties"), rowCheddar=$("#rowCheddar");
   const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
@@ -740,6 +747,55 @@
     renderCart();
   };
 
+  /* ===== reserveAndNextOrder (transacción) ===== */
+  async function reserveAndNextOrder(selectedSlotId){
+    return await db.runTransaction(async tx=>{
+      // incrementar contador
+      const ref = globalCounterRef();
+      const snap = await tx.get(ref);
+      const cur = snap.exists ? (Number(snap.data().orderNumber)||0) : 0;
+      const nxt = cur + 1;
+      tx.set(ref, { orderNumber: nxt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+
+      // reservar slot si corresponde
+      if(selectedSlotId && PICKUP_SOURCE){
+        if(PICKUP_SOURCE.type === 'collection'){
+          const found = pickupSlots.find(s => normId(s.id) === normId(selectedSlotId));
+          if(!found || !found.__docId) throw new Error('slot-not-found');
+          const docRef = PICKUP_SOURCE.ref.doc(found.__docId);
+          const sSnap = await tx.get(docRef);
+          if(!sSnap.exists) throw new Error('slot-not-found');
+          const data = sSnap.data() || {};
+          const booked = typeof data.booked === 'number' ? data.booked : 0;
+          const capacity = typeof data.capacity === 'number' ? data.capacity : (typeof data.cap === 'number' ? data.cap : Infinity);
+          if(booked + 1 > capacity) throw new Error('slot-full');
+          tx.update(docRef, { booked: booked + 1, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        } else if(PICKUP_SOURCE.type === 'doc'){
+          const docRef = PICKUP_SOURCE.ref;
+          const docSnap = await tx.get(docRef);
+          const data = docSnap.exists ? (docSnap.data()||{}) : {};
+          const slotsArr = Array.isArray(data.slots) ? data.slots.slice() : [];
+          let idx = -1;
+          for(let i=0;i<slotsArr.length;i++){
+            const s = slotsArr[i];
+            const sid = (s.id || s.slot || s.slot_id || s.hhmm || ('slot_'+i));
+            if(normId(sid) === normId(selectedSlotId)){ idx = i; break; }
+          }
+          if(idx === -1) throw new Error('slot-not-found');
+          const s = slotsArr[idx];
+          const booked = typeof s.booked === 'number' ? s.booked : 0;
+          const capacity = typeof s.capacity === 'number' ? s.capacity : (typeof s.cap === 'number' ? s.cap : Infinity);
+          if(booked + 1 > capacity) throw new Error('slot-full');
+          const newSlot = Object.assign({}, s, { booked: booked + 1 });
+          slotsArr[idx] = newSlot;
+          tx.set(docRef, { slots: slotsArr, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+        }
+      }
+
+      return { orderNumber: nxt };
+    });
+  }
+
   // ===== TICKET builder (igual que antes) =====
   function escapeTicket(s){
     return (s||'').toString()
@@ -750,91 +806,91 @@
       .replace(/'/g,'&#39;');
   }
 
- function buildTicketHTMLFromPayload(orderId, payload){
-  const o = payload;
-  const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-  const escapeHtml = s => (s||'').toString()
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  function buildTicketHTMLFromPayload(orderId, payload){
+    const o = payload;
+    const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const escapeHtml = s => (s||'').toString()
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
-  const orderDisplay = (()=>{ const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
-    for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; } return `#${(orderId||'').slice(-5).toUpperCase()}`; })();
+    const orderDisplay = (()=>{ const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+      for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; } return `#${(orderId||'').slice(-5).toUpperCase()}`; })();
 
-  let dt = new Date();
-  if(o.createdAt && typeof o.createdAt.toDate === 'function') dt = o.createdAt.toDate();
-  else if(o.createdAt && typeof o.createdAt === 'string') { const d=new Date(o.createdAt); if(!isNaN(d)) dt=d; }
-  else if(o.createdAt instanceof Date) dt = o.createdAt;
-  const dateStr = dt.toLocaleDateString('es-AR');
-  const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
+    let dt = new Date();
+    if(o.createdAt && typeof o.createdAt.toDate === 'function') dt = o.createdAt.toDate();
+    else if(o.createdAt && typeof o.createdAt === 'string') { const d=new Date(o.createdAt); if(!isNaN(d)) dt=d; }
+    else if(o.createdAt instanceof Date) dt = o.createdAt;
+    const dateStr = dt.toLocaleDateString('es-AR');
+    const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
-  const items = Array.isArray(o.items)?o.items:[];
+    const items = Array.isArray(o.items)?o.items:[];
 
-  const linesHTML = items.map(it=>{
-    const qty = it.qty||1;
-    const name = (it.name||'').toString();
-    const base = (it.price||0);
-    const pattyCount = it.extras?.patty||0;
-    const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY;
-    const pattySum   = qty * pattyCount * pattyUnit;
-    const cheddarCount = it.extras?.cheddar||0;
-    const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR;
-    const cheddarSum   = qty * cheddarCount * cheddarUnit;
-    const baseSubtotal = base * qty;
-    const lineTotal    = baseSubtotal + pattySum + cheddarSum;
+    const linesHTML = items.map(it=>{
+      const qty = it.qty||1;
+      const name = (it.name||'').toString();
+      const base = (it.price||0);
+      const pattyCount = it.extras?.patty||0;
+      const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY;
+      const pattySum   = qty * pattyCount * pattyUnit;
+      const cheddarCount = it.extras?.cheddar||0;
+      const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR;
+      const cheddarSum   = qty * cheddarCount * cheddarUnit;
+      const baseSubtotal = base * qty;
+      const lineTotal    = baseSubtotal + pattySum + cheddarSum;
 
-    const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
-    let friesLabel = '';
-    if(friesRaw){
-      const s = String(friesRaw).toLowerCase();
-      if(/\bcon sazon\b|\bconsazon\b|\bcon_sazon\b|\bcon-sazon\b|\bsazon\b/.test(s) && !/\bsin\b/.test(s)) friesLabel = 'Sazonadas';
-      else if(/\bcon sal\b|\bconsal\b|\bcon_sal\b|\bcon-sal\b|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) friesLabel = 'Con sal';
-      else if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s) || /\bsin_sazon\b/.test(s))) friesLabel = 'Sin sal';
-    }
-
-    return `
-      <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
-      ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
-      <div class="row amount"><div class="l"></div><div class="r">${moneyFn(baseSubtotal)}</div></div>
-      ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${moneyFn(cheddarSum)}</div>` : ''}
-      ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${moneyFn(pattySum)}</div>` : ''}
-      ${it.notes ? `<div class="sub">• Nota: ${escapeHtml(it.notes)}</div>` : ''}
-      <div class="row amount final"><div class="l"></div><div class="r">${moneyFn(lineTotal)}</div></div>
-      <div class="sep"></div>
-    `;
-  }).join('') || '<div class="sub">Sin ítems.</div>';
-
-  const total = (()=>{ if(typeof o.total === 'number') return o.total;
-    return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR)*qty; return t + base + patty + cheddar; },0);
-  })();
-
-  const commentBlock = o.comment ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(o.comment)}</div></div><div class="hr"></div>` : '';
-
-  // formatear pickup_time si existe
-  let pickupPretty = null;
-  try{
-    const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
-    if(raw){
-      if(typeof raw.toDate === 'function'){ pickupPretty = raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
-      else if(raw && typeof raw.seconds === 'number'){ pickupPretty = new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
-      else if(typeof raw === 'string'){
-        const d = new Date(raw);
-        if(!isNaN(d)) pickupPretty = d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-        else {
-          const m = raw.match(/(\d{2})(\d{2})$/);
-          if(m) pickupPretty = m[1]+':'+m[2];
-          else pickupPretty = raw;
-        }
-      } else if(raw instanceof Date) {
-        pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-      } else {
-        pickupPretty = String(raw);
+      const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
+      let friesLabel = '';
+      if(friesRaw){
+        const s = String(friesRaw).toLowerCase();
+        if(/\bcon sazon\b|\bconsazon\b|\bcon_sazon\b|\bcon-sazon\b|\bsazon\b/.test(s) && !/\bsin\b/.test(s)) friesLabel = 'Sazonadas';
+        else if(/\bcon sal\b|\bconsal\b|\bcon_sal\b|\bcon-sal\b|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) friesLabel = 'Con sal';
+        else if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s) || /\bsin_sazon\b/.test(s))) friesLabel = 'Sin sal';
       }
-    }
-  }catch(e){ pickupPretty = null; }
 
-  const pickupLargeBlock = pickupPretty ? `<div class="blk" style="text-align:center"><div class="lbl">Retira a las:</div><div style="font-size:20px;font-weight:900">${escapeHtml(pickupPretty)}</div></div>` : '';
+      return `
+        <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
+        ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
+        <div class="row amount"><div class="l"></div><div class="r">${moneyFn(baseSubtotal)}</div></div>
+        ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${moneyFn(cheddarSum)}</div>` : ''}
+        ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${moneyFn(pattySum)}</div>` : ''}
+        ${it.notes ? `<div class="sub">• Nota: ${escapeHtml(it.notes)}</div>` : ''}
+        <div class="row amount final"><div class="l"></div><div class="r">${moneyFn(lineTotal)}</div></div>
+        <div class="sep"></div>
+      `;
+    }).join('') || '<div class="sub">Sin ítems.</div>';
 
-  const html = `<!doctype html>
+    const total = (()=>{ if(typeof o.total === 'number') return o.total;
+      return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR)*qty; return t + base + patty + cheddar; },0);
+    })();
+
+    const commentBlock = o.comment ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(o.comment)}</div></div><div class="hr"></div>` : '';
+
+    // formatear pickup_time si existe
+    let pickupPretty = null;
+    try{
+      const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
+      if(raw){
+        if(typeof raw.toDate === 'function'){ pickupPretty = raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+        else if(raw && typeof raw.seconds === 'number'){ pickupPretty = new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+        else if(typeof raw === 'string'){
+          const d = new Date(raw);
+          if(!isNaN(d)) pickupPretty = d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+          else {
+            const m = raw.match(/(\d{2})(\d{2})$/);
+            if(m) pickupPretty = m[1]+':'+m[2];
+            else pickupPretty = raw;
+          }
+        } else if(raw instanceof Date) {
+          pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        } else {
+          pickupPretty = String(raw);
+        }
+      }
+    }catch(e){ pickupPretty = null; }
+
+    const pickupLargeBlock = pickupPretty ? `<div class="blk" style="text-align:center"><div class="lbl">Retira a las:</div><div style="font-size:20px;font-weight:900">${escapeHtml(pickupPretty)}</div></div>` : '';
+
+    const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Ticket ${escapeHtml(orderDisplay)}</title>
 <style>
   @page{ size:58mm auto; margin:0; }
@@ -892,8 +948,8 @@
   <\/script>
 </body>
 </html>`;
-  return html;
-}
+    return html;
+  }
 
   // Imprime HTML en iframe oculto (sin popup)
   function printHtmlInIframe(html){
@@ -911,7 +967,6 @@
     doc.open(); doc.write(html); doc.close();
 
     const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
-    // onafterprint puede no funcionar en todos los browsers, ponemos fallback cleanup
     try{ iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150); }catch(e){}
     setTimeout(cleanup, 15000);
   }
@@ -937,12 +992,8 @@
       const pago = $("#selPago").value;
       const comentario = ($("#inpComentario").value||"").trim();
 
-      // obtener selección de slot
-      const picked = selectedPickup || (function(){
-        const r = document.querySelector('input[name="pickup_slot_radio"]:checked');
-        if(r) return { pickup_slot: r.value };
-        return null;
-      })();
+      // obtener selección (selectedPickup actualizado por control)
+      const picked = selectedPickup || null;
 
       // Construyo items legibles para Firestore
       const items=[];
@@ -985,7 +1036,6 @@
           throw txErr;
         } else {
           console.error('transaction err', txErr);
-          // decidimos no abortar por contador; avisamos y re-lanzamos
           throw txErr;
         }
       }
@@ -1002,14 +1052,13 @@
       if(picked){
         if(picked.pickup_slot) payload.pickup_slot = picked.pickup_slot;
         if(picked.pickup_time) payload.pickup_time = picked.pickup_time;
-        // para compatibilidad, incluir también pickup: label
         if(picked.pickup_time && !payload.pickup) payload.pickup = picked.pickup_time;
       }
 
       // Guardar en orders
       const ref = await db.collection("orders").add(payload);
 
-      // Guardar resumen público (agrego pickup fields si existen)
+      // Guardar resumen público
       const pubId = ref.id.slice(0,22);
       const pubDoc = {
         orderId: ref.id, orderNumber, status:'accepted',
@@ -1027,7 +1076,7 @@
 
       const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt: new Date() };
 
-      // Generar HTML del ticket (con "Retira a las:")
+      // Generar HTML del ticket
       const html = buildTicketHTMLFromPayload(ref.id, docData);
 
       // Imprimir en iframe oculto
@@ -1046,7 +1095,6 @@
         }
       }
     }finally{
-      // evita doble-click inmediato; re-habilitamos en 2s
       setTimeout(()=>{
         inFlight = false;
         btnPrintAndLoad.removeAttribute('disabled');
