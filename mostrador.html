@@ -89,6 +89,12 @@
     .field input,.field select,.field textarea{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
     textarea{min-height:84px;border-radius:12px;resize:vertical}
 
+    /* Horario selector */
+    .slot-picker{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:8px}
+    .slot-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:999px;border:1px solid var(--ring);background:#fff;cursor:pointer;font-weight:800}
+    .slot-display{flex:1;text-align:center;font-weight:900;font-size:16px}
+    .slot-unavailable{opacity:.45}
+    .slot-note{font-size:12px;color:var(--muted);margin-top:6px}
     /* Modal */
     .overlay{position:fixed;inset:0;background:rgba(0,0,0,.32);display:none;align-items:center;justify-content:center;z-index:40}
     .overlay.open{display:flex}
@@ -167,6 +173,18 @@
 
       <div class="field"><input id="inpNombre" type="text" placeholder="Nombre (requerido)"></div>
       <div class="field"><input id="inpTel" type="tel" placeholder="Teléfono (opcional)"></div>
+
+      <!-- Selector de horario con flechitas -->
+      <div class="field" id="slotField">
+        <label style="font-weight:700;display:block;margin-bottom:6px">Retira a las</label>
+        <div class="slot-picker" id="slotPicker">
+          <button type="button" class="slot-btn" id="slotPrev" title="Anterior">◀</button>
+          <div class="slot-display" id="slotLabel">—</div>
+          <button type="button" class="slot-btn" id="slotNext" title="Siguiente">▶</button>
+        </div>
+        <div class="slot-note" id="slotNote">Cargando horarios…</div>
+      </div>
+
       <div class="field">
         <select id="selPago">
           <option value="efectivo">Efectivo</option>
@@ -482,6 +500,7 @@
     gridDrinks.innerHTML="";  DRINKS.forEach(d=>drinksGrid.appendChild(renderCard(d,"drink")));
     renderCart(); refreshAvailabilityUI();
     applySidesToUI();
+    loadPickupSlots(); // inicializar selector de horarios
   }
 
   // ===== Modal =====
@@ -551,6 +570,153 @@
     overlay.classList.remove("open");
     renderCart();
   };
+
+  // ===== PICKUP SLOTS (selector con flechitas) =====
+  let pickupSlots = []; // [{id:"1900", label:"19:00", available:true, capacity:10, booked:3}, ...]
+  let selectedSlotIdx = -1;
+
+  const slotLabel = document.getElementById('slotLabel');
+  const slotNote = document.getElementById('slotNote');
+  const slotPrev = document.getElementById('slotPrev');
+  const slotNext = document.getElementById('slotNext');
+
+  // Helper: format HHMM -> "HH:MM"
+  function hhmmToLabel(hhmm){
+    const s = String(hhmm);
+    if(s.length===3) return '0'+s.slice(0,1)+':'+s.slice(1);
+    if(s.length===4) return s.slice(0,2)+':'+s.slice(2);
+    return hhmm;
+  }
+
+  // Genera slots por defecto cada 10 minutos desde +10min hasta +2horas
+  function generateDefaultSlots(){
+    const now = new Date();
+    const start = new Date(now.getTime() + 10*60000); // +10 min
+    const end = new Date(now.getTime() + 2*60*60000); // +2h
+    const slots = [];
+    let cur = new Date(start.getTime());
+    while(cur <= end){
+      const hh = String(cur.getHours()).padStart(2,'0');
+      const mm = String(cur.getMinutes()).padStart(2,'0');
+      const id = hh+mm;
+      slots.push({ id, label: hh+":"+mm, available:true, capacity:9999, booked:0 });
+      cur = new Date(cur.getTime() + 10*60000);
+    }
+    return slots;
+  }
+
+  // Carga slots desde Firestore config/pickup si existe, si no, usa generados
+  function loadPickupSlots(){
+    const note = slotNote;
+    try{
+      db.collection('config').doc('pickup').onSnapshot(doc=>{
+        const data = doc.exists ? doc.data() : null;
+        if(data && Array.isArray(data.slots) && data.slots.length){
+          // Normalize incoming slots
+          pickupSlots = data.slots.map(s=>{
+            return {
+              id: String(s.id || s.slot || s.slot_id || s.hhmm || '').replace(/[^0-9]/g,''),
+              label: s.label || (s.id ? hhmmToLabel(String(s.id)) : (s.slot || '')),
+              available: s.available !== false,
+              capacity: typeof s.capacity === 'number' ? s.capacity : (typeof s.cap === 'number' ? s.cap : 9999),
+              booked: typeof s.booked === 'number' ? s.booked : 0
+            };
+          }).filter(s=>s.id);
+        }else{
+          pickupSlots = generateDefaultSlots();
+        }
+        // sort by id ascending
+        pickupSlots.sort((a,b)=>a.id.localeCompare(b.id));
+        // set initial selection to first available
+        selectedSlotIdx = pickupSlots.findIndex(s=>s.available && (s.booked < (s.capacity||9999)));
+        if(selectedSlotIdx === -1 && pickupSlots.length) selectedSlotIdx = 0;
+        renderSlotPicker();
+      }, err=>{
+        console.warn('pickup config onSnapshot failed', err);
+        pickupSlots = generateDefaultSlots();
+        selectedSlotIdx = pickupSlots.findIndex(s=>s.available) || 0;
+        renderSlotPicker();
+      });
+    }catch(e){
+      console.warn('loadPickupSlots err', e);
+      pickupSlots = generateDefaultSlots();
+      selectedSlotIdx = pickupSlots.findIndex(s=>s.available) || 0;
+      renderSlotPicker();
+    }
+  }
+
+  function isSlotEnabled(slot){
+    if(!slot) return false;
+    if(slot.available === false) return false;
+    if(typeof slot.capacity === 'number' && typeof slot.booked === 'number') return slot.booked < slot.capacity;
+    return true;
+  }
+
+  function renderSlotPicker(){
+    if(!pickupSlots || !pickupSlots.length){
+      slotLabel.textContent = '—';
+      slotNote.textContent = 'No hay horarios configurados.';
+      slotLabel.classList.add('slot-unavailable');
+      return;
+    }
+    // clamp selectedSlotIdx
+    if(selectedSlotIdx < 0) selectedSlotIdx = 0;
+    if(selectedSlotIdx >= pickupSlots.length) selectedSlotIdx = pickupSlots.length - 1;
+
+    // ensure selected is enabled, otherwise find next/prev enabled
+    if(!isSlotEnabled(pickupSlots[selectedSlotIdx])){
+      // try forward then backward
+      let found = -1;
+      for(let i=selectedSlotIdx+1;i<pickupSlots.length;i++) if(isSlotEnabled(pickupSlots[i])){ found = i; break; }
+      if(found === -1){
+        for(let i=selectedSlotIdx-1;i>=0;i--) if(isSlotEnabled(pickupSlots[i])){ found = i; break; }
+      }
+      if(found !== -1) selectedSlotIdx = found;
+    }
+
+    const slot = pickupSlots[selectedSlotIdx];
+    slotLabel.textContent = slot ? slot.label : '—';
+    slotLabel.classList.toggle('slot-unavailable', !isSlotEnabled(slot));
+
+    // note: capacity/booked info
+    if(slot){
+      if(slot.available === false) slotNote.textContent = 'Horario deshabilitado';
+      else if(typeof slot.capacity === 'number' && typeof slot.booked === 'number'){
+        slotNote.textContent = slot.booked >= slot.capacity ? 'Horario completo' : `${slot.capacity - slot.booked} lugares disponibles`;
+      } else slotNote.textContent = '';
+    } else {
+      slotNote.textContent = '';
+    }
+  }
+
+  // Move selection delta (-1 || +1), skipping unavailable/full slots
+  function moveSlot(delta){
+    if(!pickupSlots || !pickupSlots.length) return;
+    let i = selectedSlotIdx;
+    const N = pickupSlots.length;
+    for(let steps=0; steps < N; steps++){
+      i = (i + delta + N) % N;
+      if(isSlotEnabled(pickupSlots[i])){ selectedSlotIdx = i; renderSlotPicker(); return; }
+    }
+    // if none enabled, keep index and render
+    renderSlotPicker();
+  }
+
+  slotPrev.addEventListener('click', ()=> moveSlot(-1));
+  slotNext.addEventListener('click', ()=> moveSlot(1));
+
+  // helper to read selected slot values for payload
+  function getSelectedSlotForPayload(){
+    if(!pickupSlots || !pickupSlots.length) return null;
+    const s = pickupSlots[selectedSlotIdx];
+    if(!s) return null;
+    // pickup_time: "HH:MM", pickup_slot: "HHMM"
+    const label = s.label || hhmmToLabel(s.id || '');
+    const hhmm = (s.id || '').padStart(4,'0');
+    const pickup_time = label;
+    const pickup_slot = hhmm;
+    return { pickup_time, pickup_slot, slotObj: s };
+  }
 
   // ===== TICKET: REUTILIZO EXACTAMENTE EL HTML/CSS DEL PEDIDO_LOCAL PERO CAMBIO TEXTO "RETIRA A LAS:" =====
   function escapeHtml(s){
@@ -635,6 +801,7 @@
         else {
           const m = raw.match(/(\d{2})(\d{2})$/);
           if(m) pickupPretty = m[1]+':'+m[2];
+          else pickupPretty = raw; // maybe already "HH:MM"
         }
       } else if(raw instanceof Date) {
         pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
@@ -748,6 +915,12 @@
       const pago = $("#selPago").value;
       const comentario = ($("#inpComentario").value||"").trim();
 
+      // validar horario seleccionado
+      const sel = getSelectedSlotForPayload();
+      if(!sel){ alert("Seleccioná un horario de retiro."); throw new Error('no-slot'); }
+      // si el slot está marcado no disponible o completo, bloquear
+      if(!sel.slotObj || !isSlotEnabled(sel.slotObj)){ alert("El horario seleccionado no está disponible. Elegí otro."); throw new Error('slot-unavailable'); }
+
       // Construyo items legibles para Firestore
       const items=[];
       for(const o of Object.values(cart.burger)){
@@ -776,32 +949,36 @@
       const total = calcTotal();
       const orderNumber = await nextOrderNumber();
 
+      // añadimos pickup_time y pickup_slot al payload
       const payload = {
         orderNumber, number: orderNumber, nombre, telefono, pago, comment: comentario,
         items, total, status:"accepted", payment_status:"paid",
-        source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        pickup_time: sel.pickup_time,   // string "HH:MM"
+        pickup_slot: sel.pickup_slot    // string "HHMM"
       };
 
       // Guardar en orders
       const ref = await db.collection("orders").add(payload);
 
-      // Guardar resumen público (agrego pickup fields si existen)
+      // Guardar resumen público (agrego pickup fields)
       const pubId = ref.id.slice(0,22);
       await db.collection('order_public').doc(pubId).set({
         orderId: ref.id, orderNumber, status:'accepted',
         entrega:'retira', pago, nombre,
+        pickup_time: sel.pickup_time, pickup_slot: sel.pickup_slot,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, {merge:true});
 
-      // Para el ticket necesitamos un `createdAt` legible en payload:
-      // intentamos leer de Firestore el doc recientemente creado (para obtener Timestamp)
+      // Opcional: **no** hacemos decremento capacity/booked aquí; si querés control estricto hay que reservar con transacción.
+      // Para ticket necesitamos un `createdAt` legible en payload:
       let savedDoc = null;
       try{ savedDoc = await db.collection('orders').doc(ref.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
 
       const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt: new Date() };
 
-      // Generar HTML del ticket exactamente igual que en pedido_local (con "Retira a las:")
+      // Generar HTML del ticket
       const html = buildTicketHTMLFromPayload(ref.id, docData);
 
       // Imprimir en iframe oculto
@@ -813,7 +990,7 @@
       $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
       alert(`Pedido #${orderNumber} cargado e impresión solicitada.`);
     }catch(err){
-      if(err && err.message && err.message !== 'empty' && err.message !== 'no-name'){
+      if(err && err.message && err.message !== 'empty' && err.message !== 'no-name' && err.message !== 'no-slot' && err.message !== 'slot-unavailable'){
         console.error(err);
         alert('Error al cargar el pedido. Reintentá.');
       }
