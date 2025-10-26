@@ -21,18 +21,20 @@
     location.replace('login.html'); // <-- página de login
   }
 
+  // Requerir sesión en páginas internas
   (function requireSession(){
     if (!sessionValid()){
       const next = encodeURIComponent(
         (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
         (location.search || '') + (location.hash || '')
       );
-      location.replace('login.html?next=' + next);
+      location.replace('login.html?next=' + next); // <-- login con ?next=
     } else {
       bumpSession();
     }
   })();
 
+  // Mantener viva la sesión mientras se usa
   ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
     window.addEventListener(evt, bumpSession, {passive:true});
   });
@@ -60,7 +62,7 @@
     .btn.ghost{background:#fff}
     .btn:disabled,.btn.disabled{opacity:.55;cursor:not-allowed}
 
-    .container{max-width:1200px;margin:20px auto;padding:0 12px;display:grid;grid-template-columns:1fr 420px;gap:18px}
+    .container{max-width:1200px;margin:20px auto;padding:0 12px;display:grid;grid-template-columns:1fr 380px;gap:18px}
     @media (max-width:980px){ .container{grid-template-columns:1fr} }
 
     h1{font-size:26px;margin:8px 0 12px}
@@ -132,13 +134,6 @@
     .field-foot { display:flex; justify-content:flex-end; margin-top:6px; font-size:12px; color:#8a8a8a; }
     .preview{font-weight:800}
     .side-disabled-note{ color:#b33; font-size:13px; margin-top:6px }
-
-    /* NEW: slots with arrows */
-    .slot-chooser{display:flex;align-items:center;gap:8px}
-    .slot-arrow{width:40px;height:40px;border-radius:8px;border:1px solid var(--ring);background:#fff;font-weight:900;display:flex;align-items:center;justify-content:center;cursor:pointer}
-    .slot-arrow[disabled]{opacity:.4;cursor:not-allowed}
-    .slot-display{min-width:120px;text-align:center;padding:8px 12px;border-radius:12px;border:1px solid var(--ring);background:#fff;font-weight:800}
-    .slot-info{font-size:13px;color:var(--muted);margin-top:6px;text-align:center}
   </style>
 </head>
 <body>
@@ -146,9 +141,12 @@
     <div class="topbar">
       <a class="brand" href="#"><img src="images/logo.png" alt="Rhodes Burgers">Rhodes Burgers</a>
       <div class="spacer"></div>
+
+      <!-- Nav agregado -->
       <a class="btn" href="pedido_local.html" title="Ver pedidos">📦 Pedidos</a>
       <a class="btn" href="finanzas.html" title="Ver finanzas">📈 Finanzas</a>
       <a class="btn" href="admin.html" title="Panel admin">⚙️ Admin</a>
+
       <strong>Mostrador</strong>
     </div>
   </header>
@@ -177,22 +175,7 @@
           <option value="transferencia">Transferencia</option>
         </select>
       </div>
-
-      <div class="field" style="margin-top:10px">
-        <label style="font-weight:700;display:block;margin-bottom:6px">Horario de retiro (seleccioná)</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <div id="slotsContainer" class="slot-chooser" aria-live="polite">
-            <!-- flechitas + display -->
-            <div id="slotPrev" class="slot-arrow" title="Anterior">◀</div>
-            <div id="slotDisplay" class="slot-display">Cargando...</div>
-            <div id="slotNext" class="slot-arrow" title="Siguiente">▶</div>
-          </div>
-          <button id="btnRefreshSlots" class="btn ghost" title="Actualizar turnos">🔁</button>
-        </div>
-        <div id="slotNote" class="slot-info">Cargando turnos...</div>
-      </div>
-
-      <div class="field" style="margin-top:10px"><textarea id="inpComentario" placeholder="Comentario"></textarea></div>
+      <div class="field"><textarea id="inpComentario" placeholder="Comentario"></textarea></div>
 
       <!-- Botón modificado: Imprimir y cargar -->
       <button id="btnPrintAndLoad" class="btn primary" style="width:100%;margin-top:10px">Imprimir y cargar</button>
@@ -207,6 +190,7 @@
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <div class="muted" style="font-weight:600">Papas (obligatorio)</div>
         <div class="pills" id="friesOptions">
+          <!-- Valores: con_sazon, con_sal, sin_sal -->
           <label class="pill"><span>Sazonadas</span> <input type="radio" name="fries" value="con_sazon"></label>
           <label class="pill"><span>Con sal</span>  <input type="radio" name="fries" value="con_sal"></label>
           <label class="pill"><span>Sin sal</span>  <input type="radio" name="fries" value="sin_sal"></label>
@@ -233,11 +217,13 @@
         </div>
       </div>
 
+      <!-- Preview de precio unitario -->
       <div class="rowx" id="rowPreview" style="justify-content:flex-end">
         <span class="muted">Subtotal unitario:</span>
         <span class="preview" id="unitPreview">$0</span>
       </div>
 
+      <!-- Notas mejoradas -->
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <label style="font-weight:600">Notas (opcional)</label>
         <textarea id="notes" class="textarea" maxlength="200"
@@ -462,8 +448,6 @@
     if(next === 0) delete bucket[key];
     else bucket[key].qty = next;
     renderCart();
-    // si cambió la cantidad, refrescamos slots (porque intervalo depende de cantidad de hamburguesas)
-    refreshSlotsUI().catch(()=>{});
   }
 
   function renderCard(item,type){
@@ -498,11 +482,9 @@
     gridDrinks.innerHTML="";  DRINKS.forEach(d=>drinksGrid.appendChild(renderCard(d,"drink")));
     renderCart(); refreshAvailabilityUI();
     applySidesToUI();
-    // inicializa slots
-    refreshSlotsUI().catch(()=>{});
   }
 
-  // ===== Modal (igual que antes) =====
+  // ===== Modal =====
   const overlay=$("#overlay"), modTitle=$("#modTitle");
   const rowPatties=$("#rowPatties"), rowCheddar=$("#rowCheddar");
   const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
@@ -568,192 +550,9 @@
 
     overlay.classList.remove("open");
     renderCart();
-    // refresh slots because number of burgers changed
-    refreshSlotsUI().catch(()=>{});
   };
 
-  // ===== SLOTS (flechas) =====
-  const MAX_PER_SLOT = 4;
-  const MINUTES_AHEAD = 5;
-  const OPEN_TIME = "12:00";
-  const CLOSE_TIME = "23:59";
-  const START_10 = "19:10";
-  const START_20 = "19:20";
-
-  function parseHHMM(s){ if(!s) return null; var parts = s.split(':'); if(parts.length<2) return null; return { h: parseInt(parts[0],10), m: parseInt(parts[1],10) }; }
-  function pad(n){ return String(n).padStart(2,'0'); }
-  function dateTodayAt(hhmm){ var p = parseHHMM(hhmm); var now = new Date(); return new Date(now.getFullYear(), now.getMonth(), now.getDate(), p.h, p.m, 0, 0); }
-  function slotKeyFromDate(d){ return ''+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes()); }
-  function slotPretty(d){ return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
-  function genSlots(startAt, intervalMin){
-    var open = dateTodayAt(OPEN_TIME), close = dateTodayAt(CLOSE_TIME);
-    var start = startAt > open ? startAt : open;
-    var slots = [];
-    var cur = new Date(start.getTime());
-    while(cur.getTime() <= close.getTime() - intervalMin*60*1000){
-      slots.push(new Date(cur.getTime()));
-      cur = new Date(cur.getTime() + intervalMin*60*1000);
-    }
-    return slots;
-  }
-
-  // state for slots chooser
-  let slotListeners = [];
-  let allSlots = [];            // [{date, key}]
-  let slotState = new Map();    // key -> {count, full, tooSoon}
-  let availableKeys = [];       // keys that are not full/tooSoon, ordered as allSlots
-  let selectedIdx = -1;         // index in availableKeys
-
-  function clearSlotListeners(){
-    slotListeners.forEach(fn => { try{ fn(); }catch(e){} });
-    slotListeners = [];
-    allSlots = [];
-    slotState.clear();
-    availableKeys = [];
-    selectedIdx = -1;
-  }
-
-  async function subscribeAndRenderSlots(){
-    // reset listeners
-    clearSlotListeners();
-
-    // compute slots intervals depending on burgers in cart
-    const burgersCount = Object.values(cart.burger).reduce((s,b)=>s + (b.qty||0),0);
-    const interval = (burgersCount <= 2) ? 10 : 20;
-    const startStr = (burgersCount <= 2) ? START_10 : START_20;
-    const startAt = dateTodayAt(startStr);
-    const slots = genSlots(startAt, interval);
-
-    allSlots = slots.map(d => ({ date: d, key: slotKeyFromDate(d) }));
-
-    // placeholder UI while subscribe
-    $("#slotDisplay").textContent = 'Cargando...';
-    $("#slotNote").textContent = 'Mostrando turnos cada ' + interval + ' minutos, desde ' + startStr + '. (Max ' + MAX_PER_SLOT + ' pedidos/turno)';
-
-    // attach listeners to each slot doc
-    allSlots.forEach(sObj=>{
-      (function(s){
-        const ref = db.collection('slots').doc(s.key);
-        const unsub = ref.onSnapshot(snap=>{
-          try{
-            const now = new Date();
-            const minTime = now.getTime() + MINUTES_AHEAD*60*1000;
-            const count = snap.exists ? (Number(snap.data().count||0)) : 0;
-            const full = count >= MAX_PER_SLOT;
-            const tooSoon = (new Date(s.date)).getTime() <= minTime;
-            slotState.set(s.key, { count, full, tooSoon, date: s.date });
-            rebuildAvailableKeysAndRefreshUI();
-          }catch(e){ console.warn('slot onSnapshot err', e); }
-        }, err=>{ console.warn('slot snap err', err); });
-        slotListeners.push(unsub);
-      })(sObj);
-    });
-
-    // initial rebuild (in case no snapshot fired yet)
-    setTimeout(rebuildAvailableKeysAndRefreshUI, 100);
-  }
-
-  function rebuildAvailableKeysAndRefreshUI(){
-    // recompute availableKeys in order of allSlots
-    const keys = [];
-    const now = new Date();
-    const minTime = now.getTime() + MINUTES_AHEAD*60*1000;
-    allSlots.forEach(s=>{
-      const st = slotState.get(s.key);
-      const count = st ? st.count : 0;
-      const full = st ? st.full : false;
-      const tooSoon = st ? st.tooSoon : (s.date.getTime() <= minTime);
-      if(!full && !tooSoon){
-        keys.push(s.key);
-      }
-    });
-    // if nothing available, keep availableKeys empty
-    availableKeys = keys;
-
-    // adjust selectedIdx if needed
-    if(availableKeys.length === 0){
-      selectedIdx = -1;
-      $("#slotDisplay").textContent = 'No hay turnos';
-      $("#slotPrev").setAttribute('disabled','');
-      $("#slotNext").setAttribute('disabled','');
-      // clear selectedSlot marker
-      delete $("#slotsContainer").selectedSlot;
-      return;
-    }
-    // if previous selection exists but its key is no longer available, try to find nearest index
-    const prevKey = $("#slotsContainer").selectedSlot?.key;
-    if(prevKey && availableKeys.includes(prevKey)){
-      selectedIdx = availableKeys.indexOf(prevKey);
-    } else {
-      // clamp selectedIdx
-      if(selectedIdx < 0 || selectedIdx >= availableKeys.length) selectedIdx = 0;
-    }
-    updateSlotDisplay();
-  }
-
-  function updateSlotDisplay(){
-    if(availableKeys.length === 0){
-      $("#slotDisplay").textContent = 'No hay turnos';
-      $("#slotPrev").setAttribute('disabled','');
-      $("#slotNext").setAttribute('disabled','');
-      delete $("#slotsContainer").selectedSlot;
-      return;
-    }
-    // ensure selectedIdx in bounds
-    if(selectedIdx < 0) selectedIdx = 0;
-    if(selectedIdx >= availableKeys.length) selectedIdx = availableKeys.length - 1;
-
-    const key = availableKeys[selectedIdx];
-    const st = slotState.get(key) || { count:0, date: null };
-    const date = st.date || (allSlots.find(s=>s.key===key)?.date) || null;
-    const pretty = date ? slotPretty(date) : key;
-    const remaining = Math.max(0, MAX_PER_SLOT - (st.count || 0));
-    $("#slotDisplay").textContent = pretty + (remaining ? (" — " + remaining + " cupo" + (remaining>1?"s":"")) : "");
-    // navigation buttons enabled/disabled
-    if(selectedIdx <= 0) $("#slotPrev").setAttribute('disabled',''); else $("#slotPrev").removeAttribute('disabled');
-    if(selectedIdx >= availableKeys.length - 1) $("#slotNext").setAttribute('disabled',''); else $("#slotNext").removeAttribute('disabled');
-
-    // set selectedSlot metadata
-    $("#slotsContainer").selectedSlot = { key: key, iso: (date?date.toISOString():null), pretty: pretty };
-  }
-
-  // prev / next handlers
-  $("#slotPrev")?.addEventListener('click', ()=>{ if(availableKeys.length===0) return; if(selectedIdx>0) selectedIdx--; updateSlotDisplay(); });
-  $("#slotNext")?.addEventListener('click', ()=>{ if(availableKeys.length===0) return; if(selectedIdx<availableKeys.length-1) selectedIdx++; updateSlotDisplay(); });
-  $("#btnRefreshSlots")?.addEventListener('click', ()=> refreshSlotsUI());
-
-  async function refreshSlotsUI(){
-    try{
-      await subscribeAndRenderSlots();
-    }catch(e){
-      console.warn('refreshSlotsUI error', e);
-      $("#slotNote").textContent = 'Error al cargar turnos.';
-    }
-  }
-
-  // Reserve slot transaction + decrement helper (reutilizable)
-  function reserveSlotTransactional(slotKey){
-    var ref = db.collection('slots').doc(slotKey);
-    return db.runTransaction(async function(tx){
-      var snap = await tx.get(ref);
-      var cur = snap.exists ? (Number(snap.data().count||0)) : 0;
-      if(cur >= MAX_PER_SLOT) throw new Error('FULL');
-      tx.set(ref, { count: cur+1, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-      return true;
-    });
-  }
-  function decrementSlot(slotKey){
-    var ref = db.collection('slots').doc(slotKey);
-    return db.runTransaction(async function(tx){
-      var snap = await tx.get(ref);
-      if(!snap.exists) return;
-      var cur = Number(snap.data().count||0);
-      var next = Math.max(0,cur-1);
-      tx.set(ref, { count: next, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
-    });
-  }
-
-  // ===== TICKET builder (mismo que antes, con pickup grande) =====
+  // ===== TICKET: REUTILIZO EXACTAMENTE EL HTML/CSS DEL PEDIDO_LOCAL PERO CAMBIO TEXTO "RETIRA A LAS:" =====
   function escapeHtml(s){
     return (s||'').toString()
       .replace(/&/g,'&amp;')
@@ -763,100 +562,90 @@
       .replace(/'/g,'&#39;');
   }
 
-  function buildTicketHTMLFromPayload(orderId, payload){
-    const o = payload;
-    const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const escapeHtml = s => (s||'').toString()
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+ function buildTicketHTMLFromPayload(orderId, payload){
+  const o = payload;
+  const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+  const escapeHtml = s => (s||'').toString()
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
-    const orderDisplay = (()=>{ const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
-      for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; } return `#${(orderId||'').slice(-5).toUpperCase()}`; })();
+  const orderDisplay = (()=>{ const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+    for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; } return `#${(orderId||'').slice(-5).toUpperCase()}`; })();
 
-    let dt = new Date();
-    if(o.createdAt && typeof o.createdAt.toDate === 'function') dt = o.createdAt.toDate();
-    else if(o.createdAt && typeof o.createdAt === 'string') { const d=new Date(o.createdAt); if(!isNaN(d)) dt=d; }
-    else if(o.createdAt instanceof Date) dt = o.createdAt;
-    const dateStr = dt.toLocaleDateString('es-AR');
-    const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
+  let dt = new Date();
+  if(o.createdAt && typeof o.createdAt.toDate === 'function') dt = o.createdAt.toDate();
+  else if(o.createdAt && typeof o.createdAt === 'string') { const d=new Date(o.createdAt); if(!isNaN(d)) dt=d; }
+  else if(o.createdAt instanceof Date) dt = o.createdAt;
+  const dateStr = dt.toLocaleDateString('es-AR');
+  const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
-    const items = Array.isArray(o.items)? o.items : [];
+  const items = Array.isArray(o.items)?o.items:[];
 
-    // format pickup pretty (try best effort)
-    let pickupPretty = null;
-    try{
-      const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
-      if(raw){
-        if(typeof raw.toDate === 'function'){ pickupPretty = raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
-        else if(raw && typeof raw.seconds === 'number'){ pickupPretty = new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
-        else if(typeof raw === 'string'){
-          const d = new Date(raw);
-          if(!isNaN(d)) pickupPretty = d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-          else {
-            const m = raw.match(/(\d{2})(\d{2})$/);
-            if(m) pickupPretty = m[1]+':'+m[2];
-            else pickupPretty = raw;
-          }
-        } else if(raw instanceof Date){ pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
-      }
-      if(!pickupPretty && o.pickup_slot){
-        const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
-        if(m) pickupPretty = m[1]+':'+m[2];
-      }
-    }catch(e){ pickupPretty = null; }
+  const linesHTML = items.map(it=>{
+    const qty = it.qty||1;
+    const name = (it.name||'').toString();
+    const base = (it.price||0);
+    const pattyCount = it.extras?.patty||0;
+    const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY;
+    const pattySum   = qty * pattyCount * pattyUnit;
+    const cheddarCount = it.extras?.cheddar||0;
+    const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR;
+    const cheddarSum   = qty * cheddarCount * cheddarUnit;
+    const baseSubtotal = base * qty;
+    const lineTotal    = baseSubtotal + pattySum + cheddarSum;
 
-    const linesHTML = items.map(it=>{
-      const qty = it.qty||1;
-      const name = (it.name||'').toString();
-      const base = (it.price||0);
-      const pattyCount = it.extras?.patty||0;
-      const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY;
-      const pattySum   = qty * pattyCount * pattyUnit;
-      const cheddarCount = it.extras?.cheddar||0;
-      const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR;
-      const cheddarSum   = qty * cheddarCount * cheddarUnit;
-      const baseSubtotal = base * qty;
-      const lineTotal    = baseSubtotal + pattySum + cheddarSum;
+    const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
+    let friesLabel = '';
+    if(friesRaw){
+      const s = String(friesRaw).toLowerCase();
+      if(/\bcon sazon\b|\bconsazon\b|\bcon_sazon\b|\bcon-sazon\b|\bsazon\b/.test(s) && !/\bsin\b/.test(s)) friesLabel = 'Sazonadas';
+      else if(/\bcon sal\b|\bconsal\b|\bcon_sal\b|\bcon-sal\b|\bsal\b/.test(s) && !/\bsazon\b/.test(s)) friesLabel = 'Con sal';
+      else if(/\bsin\b/.test(s) && (/\bsazon\b/.test(s) || /\bsal\b/.test(s) || /\bsin_sazon\b/.test(s))) friesLabel = 'Sin sal';
+    }
 
-      const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
-      let friesLabel = '';
-      if(friesRaw){
-        const s = String(friesRaw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
-        if(/\b(sin)\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) {
-          friesLabel = 'Sin sal';
-        } else if(/\bsazon\b/.test(s) || s.includes('sazonadas') || s.includes('sazonada')) {
-          friesLabel = 'Sazonadas';
-        } else if(/\bsal\b/.test(s)) {
-          friesLabel = 'Con sal';
-        } else {
-          if(s.includes('sazon')) friesLabel = 'Sazonadas';
-          else if(s.includes('sin') && s.includes('sal')) friesLabel = 'Sin sal';
-          else if(s.includes('sal')) friesLabel = 'Con sal';
-          else friesLabel = '';
+    return `
+      <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
+      ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
+      <div class="row amount"><div class="l"></div><div class="r">${moneyFn(baseSubtotal)}</div></div>
+      ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${moneyFn(cheddarSum)}</div>` : ''}
+      ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${moneyFn(pattySum)}</div>` : ''}
+      ${it.notes ? `<div class="sub">• Nota: ${escapeHtml(it.notes)}</div>` : ''}
+      <div class="row amount final"><div class="l"></div><div class="r">${moneyFn(lineTotal)}</div></div>
+      <div class="sep"></div>
+    `;
+  }).join('') || '<div class="sub">Sin ítems.</div>';
+
+  const total = (()=>{ if(typeof o.total === 'number') return o.total;
+    return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR)*qty; return t + base + patty + cheddar; },0);
+  })();
+
+  // AÑADO aquí el bloque de comentario general si existe (campo comment)
+  const commentBlock = o.comment ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(o.comment)}</div></div><div class="hr"></div>` : '';
+
+  // formatear pickup_time si existe
+  let pickupPretty = null;
+  try{
+    const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
+    if(raw){
+      if(typeof raw.toDate === 'function'){ pickupPretty = raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+      else if(raw && typeof raw.seconds === 'number'){ pickupPretty = new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+      else if(typeof raw === 'string'){
+        const d = new Date(raw);
+        if(!isNaN(d)) pickupPretty = d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        else {
+          const m = raw.match(/(\d{2})(\d{2})$/);
+          if(m) pickupPretty = m[1]+':'+m[2];
         }
+      } else if(raw instanceof Date) {
+        pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
       }
+    }
+  }catch(e){ pickupPretty = null; }
 
-      return `
-        <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
-        ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
-        <div class="row amount"><div class="l"></div><div class="r">${moneyFn(baseSubtotal)}</div></div>
-        ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${moneyFn(cheddarSum)}</div>` : ''}
-        ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${moneyFn(pattySum)}</div>` : ''}
-        ${it.notes ? `<div class="sub">• Nota: ${escapeHtml(it.notes)}</div>` : ''}
-        <div class="row amount final"><div class="l"></div><div class="r">${moneyFn(lineTotal)}</div></div>
-        <div class="sep"></div>
-      `;
-    }).join('') || '<div class="sub">Sin ítems.</div>';
+  // Si tenemos pickupPretty, mostraremos "Retira a las:" en grande entre cliente y medio de pago
+  const pickupLargeBlock = pickupPretty ? `<div class="blk" style="text-align:center"><div class="lbl">Retira a las:</div><div style="font-size:20px;font-weight:900">${escapeHtml(pickupPretty)}</div></div>` : '';
 
-    const total = (()=>{ if(typeof o.total==='number') return o.total;
-      return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||EXTRA_PRICE_PATTY)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||EXTRA_PRICE_CHEDDAR)*qty; return t + base + patty + cheddar; },0);
-    })();
-
-    const commentBlock = o.comment ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(o.comment)}</div></div><div class="hr"></div>` : '';
-
-    const pickupBlock = pickupPretty ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">${escapeHtml(pickupPretty)}</div>` : '';
-
-    const html = `<!doctype html>
+  const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Ticket ${escapeHtml(orderDisplay)}</title>
 <style>
   @page{ size:58mm auto; margin:0; }
@@ -892,7 +681,7 @@
     <div class="hr"></div>
 
     ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ''}
-    ${pickupBlock}
+    ${pickupLargeBlock}
     ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml((o.pago||o.payment_method)||'')}</div></div>` : ''}
 
     ${commentBlock}
@@ -904,15 +693,18 @@
     <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${moneyFn(total)}</div></div>
     <div class="row total"><div class="l">TOTAL</div><div class="r">${moneyFn(total)}</div></div>
 
-    <div class="foot">${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}</div>
+    <div class="foot">
+      ${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}
+      ${pickupPretty ? `<div>Retira a las: ${escapeHtml(pickupPretty)}</div>` : ''}
+    </div>
   </div>
   <script>
     window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 60); });
   <\/script>
 </body>
 </html>`;
-    return html;
-  }
+  return html;
+}
 
   // Imprime HTML en iframe oculto (sin popup)
   function printHtmlInIframe(html){
@@ -930,6 +722,7 @@
     doc.open(); doc.write(html); doc.close();
 
     const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
+    // onafterprint puede no funcionar en todos los browsers, ponemos fallback cleanup
     try{ iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150); }catch(e){}
     setTimeout(cleanup, 15000);
   }
@@ -954,9 +747,6 @@
       const telefono = ($("#inpTel").value||"").trim();
       const pago = $("#selPago").value;
       const comentario = ($("#inpComentario").value||"").trim();
-
-      const cont = $("#slotsContainer");
-      if(!cont || !cont.selectedSlot){ alert("Elegí un horario de retiro."); throw new Error('no-slot'); }
 
       // Construyo items legibles para Firestore
       const items=[];
@@ -989,82 +779,58 @@
       const payload = {
         orderNumber, number: orderNumber, nombre, telefono, pago, comment: comentario,
         items, total, status:"accepted", payment_status:"paid",
-        source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        pickup_slot: cont.selectedSlot.key || null,
-        pickup_time: cont.selectedSlot.iso || null
+        source:"mostrador", createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
 
-      // reservar slot primero (transactional)
-      try{
-        await reserveSlotTransactional(payload.pickup_slot);
-      }catch(e){
-        if(e && e.message === 'FULL'){ alert('El horario se llenó. Elegí otro.'); await refreshSlotsUI(); throw e; }
-        throw e;
-      }
-
       // Guardar en orders
-      let ref = null;
-      try{
-        ref = await db.collection("orders").add(payload);
-      }catch(err){
-        // revertir slot si falla
-        try{ await decrementSlot(payload.pickup_slot); }catch(_){}
-        throw err;
-      }
+      const ref = await db.collection("orders").add(payload);
 
-      // Guardar resumen público
+      // Guardar resumen público (agrego pickup fields si existen)
       const pubId = ref.id.slice(0,22);
-      try{
-        await db.collection('order_public').doc(pubId).set({
-          orderId: ref.id, orderNumber, status:'accepted',
-          entrega:'retira', pago, nombre,
-          pickup_slot: payload.pickup_slot, pickup_time: payload.pickup_time,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, {merge:true});
-      }catch(_){}
+      await db.collection('order_public').doc(pubId).set({
+        orderId: ref.id, orderNumber, status:'accepted',
+        entrega:'retira', pago, nombre,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true});
 
-      // Traer doc creado para obtener createdAt timestamp legible
+      // Para el ticket necesitamos un `createdAt` legible en payload:
+      // intentamos leer de Firestore el doc recientemente creado (para obtener Timestamp)
       let savedDoc = null;
       try{ savedDoc = await db.collection('orders').doc(ref.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
 
       const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt: new Date() };
 
-      // Generar HTML del ticket exactamente igual que en pedido_local, y con pickup grande
+      // Generar HTML del ticket exactamente igual que en pedido_local (con "Retira a las:")
       const html = buildTicketHTMLFromPayload(ref.id, docData);
 
       // Imprimir en iframe oculto
       printHtmlInIframe(html);
 
-      // Imprimir y limpiar
-      cart={burger:{},drink:{}}; renderCart();
+      // Limpiar carrito y UI
+      cart={burger:{},drink:{}};
+      renderCart();
       $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
-      if($("#slotsContainer")){ delete $("#slotsContainer").selectedSlot; $("#slotDisplay").textContent = 'Seleccione un turno'; }
       alert(`Pedido #${orderNumber} cargado e impresión solicitada.`);
     }catch(err){
-      if(err && err.message && ['empty','no-name','no-slot'].includes(err.message)) {
-        // mensaje mostrado arriba
-      } else {
+      if(err && err.message && err.message !== 'empty' && err.message !== 'no-name'){
         console.error(err);
         alert('Error al cargar el pedido. Reintentá.');
       }
     }finally{
+      // evita doble-click inmediato; re-habilitamos en 2s
       setTimeout(()=>{
         inFlight = false;
         btnPrintAndLoad.removeAttribute('disabled');
         btnPrintAndLoad.classList.remove('disabled');
-      }, 1200);
+      }, 2000);
     }
   });
 
-  // Inicio: renderizar menú y slots
+  // Inicio: renderizar menú
   const drinksGrid = document.getElementById('drinksGrid');
   const burgersGrid = document.getElementById('burgersGrid');
   mount();
-
-  // limpiar listeners si el usuario se va de la página
-  window.addEventListener('beforeunload', function(){ clearSlotListeners(); });
-
   </script>
 </body>
 </html>
