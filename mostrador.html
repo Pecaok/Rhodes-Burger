@@ -86,7 +86,7 @@
     .total{display:flex;align-items:center;justify-content:space-between;font-weight:800;font-size:18px;margin:8px 0 10px}
     .item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #efefef}
     .muted{color:var(--muted);font-size:13px}
-    .qtybtn{border:1px solid #ddd;background:#fff;border-radius:10px;padding:4px 8px;font-weight:800;cursor:pointer}
+    .qtybtn{border:1px solid var(--ring);background:#fff;border-radius:10px;padding:4px 8px;font-weight:800;cursor:pointer}
     .field{margin-top:8px}
     .field input,.field select,.field textarea{width:100%;padding:10px;border:1px solid var(--ring);border-radius:12px}
     textarea{min-height:84px;border-radius:12px;resize:vertical}
@@ -649,7 +649,7 @@
     cartItems.innerHTML = parts.length ? parts.join("") : "Sin ítems.";
     cartTotal.textContent = money(calcTotal());
 
-    // IMPORTANT: al cambiar carrito, refrescamos slots (para 10'/20')
+    // Al cambiar carrito, refrescamos slots (para 10'/20')
     refreshSlotsUI();
   }
 
@@ -765,6 +765,58 @@
   if(patDec) patDec.onclick=()=>{const v=+patVal.textContent||0;if(v>0)patVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
   if(cheInc) cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
   if(cheDec) cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
+
+  // === Agregar hamburguesa desde el modal al carrito (FIX) ===
+  if (btnAdd) {
+    btnAdd.onclick = () => {
+      if (!currentItem) return;
+
+      // Papas obligatorias
+      const friesInput = document.querySelector('input[name="fries"]:checked');
+      if (!friesInput) {
+        alert("Elegí el tipo de papas (Sazonadas / Con sal / Sin sal).");
+        return;
+      }
+      const fries = friesInput.value;
+
+      // Extras con límites según tipo
+      const isDouble  = currentItem.kind === 'double';
+      const isChicken = currentItem.kind === 'chicken';
+
+      const pat = isDouble ? Math.min(2, (+patVal.textContent || 0)) : 0;
+      const che = (isDouble || isChicken) ? Math.min(3, (+cheVal.textContent || 0)) : 0;
+
+      const extras = { patty: pat, cheddar: che };
+
+      // Notas
+      const noteTxt = (notes.value || '').trim();
+
+      // Clave única por ítem agregado (permitimos líneas separadas)
+      const key = [
+        currentItem.id,
+        fries,
+        extras.patty,
+        extras.cheddar,
+        noteTxt.slice(0, 20).replace(/\|/g,'/'),
+        Date.now()
+      ].join('|');
+
+      if (!cart.burger[key]) {
+        cart.burger[key] = {
+          qty: 0,
+          item: currentItem,
+          fries,
+          extras,
+          notes: noteTxt
+        };
+      }
+      cart.burger[key].qty += 1;
+
+      // Cerrar modal y refrescar UI
+      overlay.classList.remove('open');
+      renderCart();
+    };
+  }
 
   if(typeof window !== 'undefined'){ window.autoGrow = autoGrow; window.updateCount = updateCount; }
 
@@ -896,7 +948,7 @@
           throw err;
         }
 
-        // publicar order_public (para seguimiento si lo usás)
+        // publicar order_public
         const pubId = ref.id.slice(0,22);
         await db.collection('order_public').doc(pubId).set({
           orderId: ref.id, orderNumber, status: payload.status==='pending_payment'?'pending_payment':'accepted',
