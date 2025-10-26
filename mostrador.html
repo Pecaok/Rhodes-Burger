@@ -367,15 +367,14 @@
     applySidesToUI();
   }
 
-  /* ===== PICKUP / SLOTS — configuración igual al otro archivo ===== */
+  /* ===== PICKUP / SLOTS — igual que confirmar pedido ===== */
   const MAX_PER_SLOT   = 4;
-  const MINUTES_AHEAD  = 5;        // no mostrar slots dentro de los próximos X'
-  const OPEN_TIME      = "12:00";  // fallback
-  const CLOSE_TIME     = "23:59";  // fallback
-  const START_10       = "19:10";  // inicio serie 10'
-  const START_20       = "19:20";  // inicio serie 20'
+  const MINUTES_AHEAD  = 5;
+  const OPEN_TIME      = "12:00";
+  const CLOSE_TIME     = "23:59";
+  const START_10       = "19:10";
+  const START_20       = "19:20";
 
-  // helpers tiempo
   function parseHHMM(s){ if(!s) return null; const p=s.split(':'); if(p.length<2) return null; return { h:parseInt(p[0],10), m:parseInt(p[1],10) }; }
   function pad(n){ return String(n).padStart(2,'0'); }
   function slotKeyFromDate(d){ return ''+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes()); }
@@ -393,7 +392,6 @@
     return res;
   }
 
-  // estado de carousel (como en confirmar pedido)
   let slotListeners = [];
   let allSlots = [];       // { date, key, count, full, tooSoon, unsub }
   let visibleSlots = [];   // filtrados
@@ -404,7 +402,6 @@
     slotListeners=[]; allSlots=[]; visibleSlots=[];
   }
 
-  // carrito — contamos hamburguesas para decidir 10' vs 20'
   function totalBurgersInCart(){
     let s=0;
     for(const k in cart.burger) s += Number(cart.burger[k].qty||0);
@@ -422,12 +419,10 @@
 
     allSlots = slots.map(d => ({ date:d, key:slotKeyFromDate(d), count:0, full:false, tooSoon:false, unsub:null }));
 
-    // UI placeholders
     $("#pickupTime").textContent = "Cargando...";
     $("#pickupCupos").style.display = "none";
     $("#pickupDesc").textContent = `Mostrando turnos cada ${interval} minutos, desde ${startStr}. (Max ${MAX_PER_SLOT} pedidos/turno)`;
 
-    // suscribir a cada doc slots/{key}
     allSlots.forEach(sObj=>{
       (function(slotObj){
         const ref = db.collection('slots').doc(slotObj.key);
@@ -464,7 +459,7 @@
       $("#btnPrev").classList.add('disabled');
       $("#btnNext").classList.add('disabled');
       window._selectedSlot = null;
-      renderQuickList(); // lista vacía
+      renderQuickList();
       return;
     }
 
@@ -499,7 +494,6 @@
     capEl.textContent = remaining>0 ? (remaining + ' cupo' + (remaining>1?'s':'')) : 'último cupo';
     capEl.style.display = 'inline';
 
-    // Arrows
     (currentVisibleIndex<=0) ? prevBtn.classList.add('disabled') : prevBtn.classList.remove('disabled');
     (currentVisibleIndex>=visibleSlots.length-1) ? nextBtn.classList.add('disabled') : nextBtn.classList.remove('disabled');
 
@@ -533,7 +527,6 @@
     try{ await subscribeAndRenderSlots(); }catch(e){ console.warn('refreshSlotsUI error', e); $("#pickupDesc").textContent='Error al cargar turnos.'; }
   }
 
-  // reserva transaccional (igual que confirmar pedido)
   function reserveSlotTransactional(slotKey){
     const ref = db.collection('slots').doc(slotKey);
     return db.runTransaction(async function(tx){
@@ -766,12 +759,11 @@
   if(cheInc) cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
   if(cheDec) cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
 
-  // === Agregar hamburguesa desde el modal al carrito (FIX) ===
+  // === Agregar hamburguesa desde el modal al carrito ===
   if (btnAdd) {
     btnAdd.onclick = () => {
       if (!currentItem) return;
 
-      // Papas obligatorias
       const friesInput = document.querySelector('input[name="fries"]:checked');
       if (!friesInput) {
         alert("Elegí el tipo de papas (Sazonadas / Con sal / Sin sal).");
@@ -779,7 +771,6 @@
       }
       const fries = friesInput.value;
 
-      // Extras con límites según tipo
       const isDouble  = currentItem.kind === 'double';
       const isChicken = currentItem.kind === 'chicken';
 
@@ -787,11 +778,8 @@
       const che = (isDouble || isChicken) ? Math.min(3, (+cheVal.textContent || 0)) : 0;
 
       const extras = { patty: pat, cheddar: che };
-
-      // Notas
       const noteTxt = (notes.value || '').trim();
 
-      // Clave única por ítem agregado (permitimos líneas separadas)
       const key = [
         currentItem.id,
         fries,
@@ -812,7 +800,6 @@
       }
       cart.burger[key].qty += 1;
 
-      // Cerrar modal y refrescar UI
       overlay.classList.remove('open');
       renderCart();
     };
@@ -820,40 +807,186 @@
 
   if(typeof window !== 'undefined'){ window.autoGrow = autoGrow; window.updateCount = updateCount; }
 
-  // ===== TICKET builder =====
-  function buildTicketHTMLFromPayload(orderId, payload){
-    const moneyFn = n=> (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    const title = `Pedido #${payload.orderNumber || orderId || ''}`;
-    const items = Array.isArray(payload.items) ? payload.items.map(it=>{
-      const ex = [];
-      if(it.extras?.patty)   ex.push(`+${it.extras.patty} medallón(es)`);
-      if(it.extras?.cheddar) ex.push(`+${it.extras.cheddar} cheddar`);
-      return `${(it.qty||1)} × ${it.name} ${ex.length?('('+ex.join(', ')+')'):''} ${it.notes?('- '+it.notes):''}`;
-    }).join('<br>') : '';
-    const pickup = payload.pickup_time ? `<div>Retira: ${new Date(payload.pickup_time).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false})}</div>` : '';
-
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
-    <style>
-      @media print { @page { size:auto; margin:0 } body{ margin:6mm } }
-      body{font-family:Arial, sans-serif;font-weight:700;padding:10px}
-      .c{text-align:center}
-    </style>
-    </head><body><div class="c"><h2>Rhodes Burgers</h2><h3>${title}</h3></div>
-    <div><strong>Cliente:</strong> ${payload.nombre||''}</div>
-    ${pickup}
-    <hr>
-    <div>${items}</div>
-    <hr>
-    <div><strong>Total:</strong> ${moneyFn(payload.total||0)}</div>
-    <div style="margin-top:8px;font-size:12px;color:#666">${new Date().toLocaleString()}</div>
-    <script>
-      window.addEventListener('load', function(){ setTimeout(function(){ window.print(); }, 80); });
-    <\/script>
-    </body></html>`;
-    return html;
+  /* ====== Helpers de ticket (idénticos a pedido_local) ====== */
+  function normalizeFriesLabel(raw){
+    if(!raw && raw !== 0) return '';
+    let s = String(raw).toLowerCase();
+    s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+    if(!s) return '';
+    if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s) || s.includes('sin sal') || s.includes('sin sazon'))) return 'Sin sal';
+    if(/\bsazon\b/.test(s) || s.includes('sazonadas') || s.includes('sazonada')) return 'Sazonadas';
+    if(/\bsal\b/.test(s) || s.includes('con sal')) return 'Con sal';
+    if(s.includes('sazon')) return 'Sazonadas';
+    if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
+    if(s.includes('sal')) return 'Con sal';
+    return '';
   }
 
-  function printHtmlInIframe(html){
+  // === Ticket: buildTicketHTML (MISMO que pedido_local) ===
+  function buildTicketHTML(docSnap){
+    const o = docSnap.data();
+    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const escapeHtml = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+    const orderDisplay = (()=>{ 
+      const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+      for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
+      return `#${(docSnap.id||'').slice(-5).toUpperCase()}`;
+    })();
+
+    const dt = (()=>{ const k=['createdAt','created_at','timestamp','date','fecha','time'];
+      for(const kk of k){ const v=o[kk]; if(v?.toDate) return v.toDate(); if(typeof v==='number') return new Date(v); if(typeof v==='string'){const d=new Date(v); if(!isNaN(d)) return d;} }
+      return new Date();
+    })();
+    const dateStr = dt.toLocaleDateString('es-AR');
+    const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
+
+    const items = Array.isArray(o.items)?o.items:[];
+
+    const linesHTML = items.map(it=>{
+      const qty = it.qty||1;
+      const name = (it.name||'').toString();
+      const base = (it.price||0);
+      const pattyCount = it.extras?.patty||0;
+      const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||0;
+      const pattySum   = qty * pattyCount * pattyUnit;
+      const cheddarCount = it.extras?.cheddar||0;
+      const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||0;
+      const cheddarSum   = qty * cheddarCount * cheddarUnit;
+      const baseSubtotal = base * qty;
+      const lineTotal    = baseSubtotal + pattySum + cheddarSum;
+
+      const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
+      const friesLabel = normalizeFriesLabel(friesRaw);
+
+      let perUnitNotes = null;
+      if (Array.isArray(it.notes)) perUnitNotes = it.notes;
+      else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
+      else if (Array.isArray(it.comment)) perUnitNotes = it.comment;
+
+      let commentPart = '';
+      if (perUnitNotes && perUnitNotes.length){
+        commentPart = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${escapeHtml(c)}</div>`).join('');
+      } else {
+        const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
+                     : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
+                     : null;
+        if (single){
+          if (qty > 1){
+            commentPart = `<div class="sub">• Nota: ${escapeHtml(single)} (aplica a las ${qty} unidades)</div>`;
+          } else {
+            commentPart = `<div class="sub">• Nota: ${escapeHtml(single)}</div>`;
+          }
+        }
+      }
+
+      return `
+        <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
+        ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
+        ${commentPart}
+        <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
+        ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>` : ''}
+        ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>` : ''}
+        <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
+        <div class="sep"></div>
+      `;
+    }).join('') || '<div class="sub">Sin ítems.</div>';
+
+    const total = (()=>{ if(typeof o.total === 'number') return o.total;
+      return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty; return t + base + patty + cheddar; },0);
+    })();
+
+    const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
+    const commentBlock = generalNote ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(generalNote)}</div></div><div class="hr"></div>` : '';
+
+    let pickupPretty = null;
+    try{
+      const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
+      if(raw){
+        if(typeof raw.toDate === 'function'){ pickupPretty = raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+        else if(raw && typeof raw.seconds === 'number'){ pickupPretty = new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
+        else if(typeof raw === 'string'){
+          const d = new Date(raw);
+          if(!isNaN(d)) pickupPretty = d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+          else {
+            const m = raw.match(/(\d{2})(\d{2})$/);
+            if(m) pickupPretty = m[1]+':'+m[2];
+          }
+        } else if(raw instanceof Date) {
+          pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        }
+      }
+      if(!pickupPretty && o.pickup_slot){
+        const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
+        if(m) pickupPretty = m[1]+':'+m[2];
+      }
+    }catch(e){ pickupPretty = null; }
+
+    const pickupBlockLarge = pickupPretty ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">${escapeHtml(pickupPretty)}</div>` : '';
+
+    return `
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Ticket ${escapeHtml(orderDisplay)}</title>
+<style>
+  @page{ size:58mm auto; margin:0; }
+  html,body{margin:0;padding:0;color:#000;}
+  *{-webkit-print-color-adjust:exact; print-color-adjust:exact; -webkit-text-size-adjust:100%;}
+  body{ font-family: Arial, sans-serif; font-size:13px; font-weight:700; line-height:1.45; }
+  .ticket{ width:48mm; margin:0 auto; padding:2mm 3mm 10mm 2mm; box-sizing:border-box; }
+  .c{text-align:center}
+  .brand{ font-size:16px; }
+  .orderNo{ font-size:14px; margin:1mm 0 }
+  .hr{ border-top:1px solid #000; margin:4px 0 }
+  .lbl{ font-size:11px; text-transform:uppercase; }
+  .blk{ margin:2px 0 2mm 0; }
+  .row{ display:flex; justify-content:space-between; gap:4px; }
+  .row .l{ flex:1 1 auto; min-width:0; }
+  .row .r{ flex:0 0 auto; text-align:right; min-width:18mm; padding-left:1.5mm; white-space:nowrap; }
+  .row.name .r{ display:none; }
+  .row.amount .l{ display:block; }
+  .row.amount.final{ margin-top:3px; }
+  .sub{ font-size:11px; margin:1px 0 0 2mm; }
+  .sub.ex{ white-space:nowrap; }
+  .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
+  .subtotal{ margin-top:2mm; }
+  .total{ font-size:16px; margin-top:3mm; }
+  .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
+</style>
+</head>
+<body>
+  <div class="ticket">
+    <div class="c brand">Rhodes Burgers</div>
+    <div class="orderNo c">${escapeHtml(orderDisplay)}</div>
+
+    <div class="hr"></div>
+
+    ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ''}
+    ${pickupBlockLarge}
+    ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml((o.pago||o.payment_method)||'')}</div></div>` : ''}
+
+    ${commentBlock}
+
+    <div class="hr"></div>
+    ${linesHTML}
+    <div class="hr"></div>
+
+    <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${money(total)}</div></div>
+    <div class="row total"><div class="l">TOTAL</div><div class="r">${money(total)}</div></div>
+
+    <div class="foot">
+      ${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}
+      ${pickupPretty ? `<div>Horario de retiro: ${escapeHtml(pickupPretty)}</div>` : ''}
+    </div>
+  </div>
+  <script>
+    window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 30); });
+  <\/script>
+</body>
+</html>`;
+  }
+
+  function printInIframe(docSnap){
+    const html = buildTicketHTML(docSnap);
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
     iframe.style.right = '0';
@@ -872,7 +1005,7 @@
     setTimeout(cleanup, 15000);
   }
 
-  // ===== Imprimir y cargar (con reserva de slot igual al otro archivo) =====
+  // ===== Imprimir y cargar =====
   let inFlight = false;
   const btnPrintAndLoad = document.getElementById('btnPrintAndLoad');
 
@@ -894,18 +1027,14 @@
         const pago = $("#selPago").value;
         const comentario = ($("#inpComentario").value||"").trim();
 
-        // slot seleccionado
         const selected = window._selectedSlot || null;
         if(!selected){ alert("Elegí un horario de retiro."); throw new Error('no-slot'); }
 
-        // verificar que el seleccionado sigue visible/válido
         const still = visibleSlots.find(s=> s.key === selected.key);
         if(!still){ alert("El horario elegido ya no está disponible. Elegí otro."); await refreshSlotsUI(); throw new Error('slot-gone'); }
 
-        // número de pedido
         const orderNumber = await getNextOrderNumber();
 
-        // construir items
         const items=[];
         for(const o of Object.values(cart.burger)){
           items.push({
@@ -920,7 +1049,6 @@
 
         const total = calcTotal();
 
-        // reservar slot (transacción count++)
         try{
           await reserveSlotTransactional(selected.key);
         }catch(e){
@@ -928,7 +1056,6 @@
           throw e;
         }
 
-        // guardar orden
         const payload = {
           orderNumber, number:orderNumber, nombre, telefono, pago, comment: comentario,
           items, total, status:(pago==='mercado_pago'?'pending_payment':'accepted'),
@@ -943,12 +1070,11 @@
         try{
           ref = await db.collection("orders").add(payload);
         }catch(err){
-          // revertir reserva si falla
           try{ await decrementSlot(selected.key); }catch(_){}
           throw err;
         }
 
-        // publicar order_public
+        // order_public
         const pubId = ref.id.slice(0,22);
         await db.collection('order_public').doc(pubId).set({
           orderId: ref.id, orderNumber, status: payload.status==='pending_payment'?'pending_payment':'accepted',
@@ -958,12 +1084,11 @@
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, {merge:true});
 
-        // imprimir
+        // === Imprimir con el MISMO ticket que pedido_local ===
         let savedDoc = null;
         try{ savedDoc = await db.collection('orders').doc(ref.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
-        const docData = savedDoc ? savedDoc.data() : { ...payload, createdAt:new Date() };
-        const html = buildTicketHTMLFromPayload(ref.id, docData);
-        printHtmlInIframe(html);
+        const snapForPrint = savedDoc || { id: ref.id, data: () => ({...payload, createdAt: new Date()}) };
+        printInIframe(snapForPrint);
 
         // limpiar UI
         cart={burger:{},drink:{}}; renderCart();
