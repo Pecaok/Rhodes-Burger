@@ -324,7 +324,7 @@
       return null;
     }
 
-    /* ========== renderOrder + buildTicketHTML corregidas (MUESTRA NOTAS POR UNIDADES) ========== */
+    /* ========== renderOrder + buildTicketHTML corregidas (MUESTRA NOTAS POR UNIDADES y pickup grande) ========== */
 
     function renderOrder(doc){
       const o = doc.data(); const dt = pickDocDate(o);
@@ -346,7 +346,6 @@
         const friesText = normalizeFriesLabel(friesRaw) || '—';
 
         // ---------- Comentarios: robusto para varios formatos ----------
-        // posibles campos: it.notes (string|array), it.comment, it.comments (array)
         let perUnitNotes = null;
         if (Array.isArray(it.notes)) perUnitNotes = it.notes;
         else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
@@ -354,10 +353,8 @@
 
         let commentHtml = '';
         if (perUnitNotes && perUnitNotes.length){
-          // listar por unidad
           commentHtml = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${c}</div>`).join('');
         } else {
-          // un único string de nota
           const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
                        : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
                        : (typeof it.notes === 'number' ? String(it.notes) : null);
@@ -373,7 +370,7 @@
 
         return `<div class="item">
           <div>• <strong>${qty}× ${it.name||''}</strong></div>
-          <div class="sub">Papas: ${friesText}${extrasLine ? (' · '+extrasLine.replace(/^ · /,'') ) : ''}${it.notes && typeof it.notes === 'string' && !Array.isArray(it.notes) ? '' : ''}</div>
+          <div class="sub">Papas: ${friesText}${extrasLine ? (' · '+extrasLine.replace(/^ · /,'') ) : ''}</div>
           ${commentHtml}
           <div class="sub">Subtotal: ${money(subtotal)}</div>
         </div>`;
@@ -388,7 +385,7 @@
       // nuevo: si existe pickup_time o pickup_slot mostramos chip
       let pickupChip = '';
       const pickTimeRaw = o.pickup_time || o.pickupTime || o.pickup || null;
-      const pickupPretty = formatSlotTime(pickTimeRaw);
+      let pickupPretty = formatSlotTime(pickTimeRaw);
       if(!pickupPretty && o.pickup_slot) {
         const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
         if(m) pickupPretty = m[1] + ':' + m[2];
@@ -479,7 +476,6 @@
 
         let commentPart = '';
         if (perUnitNotes && perUnitNotes.length){
-          // mostrar enumeradas
           commentPart = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${escapeHtml(c)}</div>`).join('');
         } else {
           const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
@@ -513,7 +509,7 @@
       const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
       const commentBlock = generalNote ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(generalNote)}</div></div><div class="hr"></div>` : '';
 
-      // formatear pickup_time si existe
+      // formatear pickup_time si existe (para mostrar en grande)
       let pickupPretty = null;
       try{
         const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
@@ -531,7 +527,14 @@
             pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
           }
         }
+        if(!pickupPretty && o.pickup_slot){
+          const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
+          if(m) pickupPretty = m[1]+':'+m[2];
+        }
       }catch(e){ pickupPretty = null; }
+
+      // SI pickupPretty existe, lo mostramos en grande entre CLIENTE y MEDIO DE PAGO
+      const pickupBlockLarge = pickupPretty ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">${escapeHtml(pickupPretty)}</div>` : '';
 
       return `
 <!doctype html>
@@ -570,6 +573,7 @@
     <div class="hr"></div>
 
     ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ''}
+    ${pickupBlockLarge}
     ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml((o.pago||o.payment_method)||'')}</div></div>` : ''}
 
     ${commentBlock}
