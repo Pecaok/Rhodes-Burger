@@ -160,7 +160,7 @@
     </div>
   </aside>
 
-  <!-- Modal (sin botón "Personalizar", lo abre “Agregar” en burgers) -->
+  <!-- Modal -->
   <div class="overlay" id="overlay">
     <div class="modal">
       <h3 id="modTitle">Personalizar</h3>
@@ -168,7 +168,6 @@
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
         <div class="muted" style="font-weight:600">Papas (obligatorio)</div>
         <div class="inline" id="friesOptionsInline">
-          <!-- CORREGIDO: tres opciones distintas -->
           <label class="pill"><input type="radio" name="fries" value="con_sazon"> Sazonadas</label>
           <label class="pill"><input type="radio" name="fries" value="con_sal"> Con sal</label>
           <label class="pill"><input type="radio" name="fries" value="sin_sal"> Sin sal</label>
@@ -223,7 +222,7 @@
       3: [[19,0, 24,0]], 4: [[19,0, 24,0]], 5: [[19,0, 24,0]], 6: [[19,0, 24,0]]
     };
 
-    // ➜ NUEVO: formateador que convierte 24:00 -> "00"
+    // Convierte 24:00 -> "00"
     function fmtHM(h, m){
       const H = Number(h);
       const M = Number(m);
@@ -234,7 +233,10 @@
     function isOpenNow(d=new Date()){
       const curMin = d.getHours()*60 + d.getMinutes();
       const blocks = HOURS[d.getDay()] || [];
-      for(const [h1,m1,h2,m2] of blocks){ const a=h1*60+m1, b=h2*60+m2; if(curMin>=a && curMin<b) return {open:true, until:[h2,m2]}; }
+      for(const [h1,m1,h2,m2] of blocks){
+        const a=h1*60+m1, b=h2*60+m2;
+        if(curMin>=a && curMin<b) return {open:true, until:[h2,m2]};
+      }
       return {open:false};
     }
     function nextOpen(d=new Date()){
@@ -256,10 +258,13 @@
         else { btn.classList.add('disabled'); btn.setAttribute('aria-disabled','true'); btn.setAttribute('disabled',''); }
       });
       const pagar = document.getElementById('btnPagar');
-      if(pagar){ if(orderable){ pagar.classList.remove('disabled'); pagar.removeAttribute('aria-disabled'); pagar.removeAttribute('disabled'); } else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); pagar.setAttribute('disabled',''); } }
+      if(pagar){
+        if(orderable){ pagar.classList.remove('disabled'); pagar.removeAttribute('aria-disabled'); pagar.removeAttribute('disabled'); }
+        else { pagar.classList.add('disabled'); pagar.setAttribute('aria-disabled','true'); pagar.setAttribute('disabled',''); }
+      }
     }
 
-    // ===== Forzar abierto (config/store) - ahora con forceOpenUntil =====
+    // Forzar abierto
     let FORCE_OPEN = false;
     let FORCE_MSG  = "";
     let FORCE_UNTIL = null; // Date or null
@@ -268,9 +273,7 @@
       const pill=document.getElementById('statusPill');
       const main=pill.querySelector('.status-main');
       const sub=pill.querySelector('.status-sub');
-      const now=new Date();
 
-      // si forceUntil definido y futuro -> consideramos abierto
       const until = FORCE_UNTIL instanceof Date ? FORCE_UNTIL : (FORCE_UNTIL ? new Date(FORCE_UNTIL) : null);
       const untilActive = until && (until.getTime() > Date.now());
 
@@ -286,17 +289,16 @@
         return;
       }
 
-      const st=isOpenNow(now);
+      const st=isOpenNow(new Date());
       if(st.open){
         const [h,m]=st.until;
         pill.classList.remove('status-closed'); pill.classList.add('status-open');
         main.textContent='Abierto';
-        // ➜ USAMOS fmtHM AQUÍ
         sub.textContent=`hasta ${fmtHM(h, m)}`;
         setOrderable(true);
       }else{
         pill.classList.remove('status-open'); pill.classList.add('status-closed');
-        const nx = nextOpen(now);
+        const nx = nextOpen(new Date());
         main.textContent='Cerrado';
         sub.textContent=`abrimos ${nx?nx:'pronto'}`;
         setOrderable(false);
@@ -304,7 +306,7 @@
     }
     renderStatus(); setInterval(renderStatus, 60*1000);
 
-    /* ===== Helpers & Datos ===== */
+    /* ===== Datos ===== */
     const EXTRA_PRICE_PATTY=2400, EXTRA_PRICE_CHEDDAR=300;
     const BURGERS=[
       { id:"cheese_simple", name:"Cheeseburger Simple", price:10100, img:"images/cheeseburger simple.jpg", kind:"simple", desc:"Medallón con doble cheddar en pan brioche. Incluye papas fritas." },
@@ -350,7 +352,7 @@
     const db = firebase.firestore();
     try{ db.settings({ experimentalAutoDetectLongPolling:true, merge:true }); }catch(_){}
 
-    // Suscripción a forzar abierto (ahora lee forceOpenUntil también)
+    // Config forzado
     try{
       db.collection('config').doc('store').onSnapshot(s=>{
         const d=s.exists?(s.data()||{}):{};
@@ -395,21 +397,18 @@
       }, console.warn);
     }catch(e){ console.warn('No se pudo suscribir a products:', e); }
 
-    /* ===== SIDES CONFIG (nuevo: leer desde config/sides) ===== */
-    // por defecto todas habilitadas
+    /* ===== SIDES CONFIG ===== */
     let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
 
     function applySidesToUI(){
-      // deshabilitar/activar radios en el modal
       document.querySelectorAll('#friesOptionsInline .pill').forEach(label=>{
         const input = label.querySelector('input[name="fries"]');
         if(!input) return;
         const val = input.value;
-        const enabled = SIDES_STATE[val] !== false; // undefined => true
+        const enabled = SIDES_STATE[val] !== false;
         input.disabled = !enabled;
         label.classList.toggle('disabled', !enabled);
       });
-      // nota con variantes deshabilitadas
       const noteEl = document.getElementById('friesStateNote');
       const disabled = Object.entries(SIDES_STATE).filter(([k,v])=>v===false).map(([k])=>k);
       if(disabled.length){
@@ -428,7 +427,6 @@
     }
 
     try{
-      // escucha en tiempo real a config/sides
       db.collection('config').doc('sides').onSnapshot(snap=>{
         const data = snap.exists ? (snap.data()||{}) : {};
         SIDES_STATE = {
@@ -501,24 +499,22 @@
       renderCart();
       setOrderable(orderable);
       refreshAvailabilityUI();
-      applySidesToUI(); // aplicar configuración de papas al iniciar
+      applySidesToUI();
     }
 
-    const drawer=$("#drawer"), cartItems=$("#cartItems"), cartTotal=$("#cartTotal"]);
+    const drawer=$("#drawer"), cartItems=$("#cartItems"), cartTotal=$("#cartTotal"); /* <- corregido */
     function openDrawer(){ drawer.classList.add("open"); }
     function closeDrawer(){ drawer.classList.remove("open"); }
     document.getElementById("btnCart").onclick=openDrawer;
     document.getElementById("closeDrawer").onclick=closeDrawer;
     document.getElementById("btnVaciar").onclick=()=>{ cart={burger:{},drink:{}}; saveCart(); renderCart(); };
 
-    // 👉 Redirección directa a pedido_cliente.html
     document.getElementById("btnPagar").onclick = ()=>{
       if(!orderable) return cantOrderAlert();
       if(cartCount()===0){ alert('Tu carrito está vacío'); return; }
       window.location.href = 'pedido_cliente.html';
     };
 
-    // ===== Nuevas utilidades: clave única y label legible =====
     function makeItemKey(item, fries, extras, notes){
       const parts = [
         item.id || '',
@@ -527,15 +523,11 @@
         'cheddar:' + ((extras && extras.cheddar) || 0),
         'notes:' + (notes ? String(notes).trim().slice(0,120) : '')
       ];
-      return parts.join('|'); // guardamos la key tal cual (no encode en storage)
+      return parts.join('|');
     }
     function escapeHtml(s){
-      return (s||'').toString()
-        .replace(/&/g,'&amp;')
-        .replace(/</g,'&lt;')
-        .replace(/>/g,'&gt;')
-        .replace(/"/g,'&quot;')
-        .replace(/'/g,'&#39;');
+      return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
     function readableKeyLabel(item, fries, extras, notes){
       const ex = [];
@@ -547,7 +539,7 @@
       return `${item.name} — Papas: ${friesText}${extrasText}${notesText}`;
     }
 
-    /* ===== Modal Personalizar ===== */
+    /* ===== Modal ===== */
     const overlay=$("#overlay"),modTitle=$("#modTitle");
     const rowPatties=$("#rowPatties"),rowCheddar=$("#rowCheddar");
     const patVal=$("#patVal"),patInc=$("#patInc"),patDec=$("#patDec");
@@ -579,7 +571,7 @@
       else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; }
       else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; }
       updatePreview();
-      applySidesToUI(); // asegurarnos de estado reciente cuando abrimos modal
+      applySidesToUI();
       overlay.classList.add("open");
     }
     patInc.onclick=()=>{const v=+patVal.textContent||0;if(v<2)patVal.textContent=v+1;updatePreview();};
@@ -587,14 +579,12 @@
     cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1;updatePreview();};
     cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1;updatePreview();};
 
-    // ===== btnAdd: ahora valida SIDES_STATE y crea key única =====
     btnAdd.onclick = ()=>{
       if(!orderable){ cantOrderAlert(); return; }
       if(!currentItem || !isAvailable(currentItem.id)) return;
       const friesEl = document.querySelector('input[name="fries"]:checked');
       if(!friesEl){ alert("Elegí el tipo de papas para esta hamburguesa."); return; }
       const friesVal = friesEl.value;
-      // validar que la variante esté habilitada desde config
       if(SIDES_STATE[friesVal] === false){
         alert("La variante de papas elegida no está disponible. Elegí otra.");
         return;
@@ -627,7 +617,7 @@
       overlay.classList.remove("open");
     };
 
-    // ===== renderCart: muestra cada entry (clave única) =====
+    /* ===== Render carrito ===== */
     function renderCart(){
       cartItems.innerHTML = "";
       for(const [key, obj] of Object.entries(cart.burger || {})){
