@@ -42,19 +42,15 @@
     .cupon-ok{color:green;font-weight:700}
     .cupon-err{color:#b00020;font-weight:700}
     .payment-hint-box{margin-top:8px;font-weight:700;color:var(--primary)}
+    .discount-row{font-weight:800}
 
     /* carousel UI */
-    .carousel{
-      display:flex;align-items:center;gap:12px;margin-top:8px;
-    }
-    .arrow{
-      width:44px;height:44px;border-radius:10px;border:1px solid var(--ring);display:inline-grid;place-items:center;cursor:pointer;background:#fff;
-    }
+    .carousel{display:flex;align-items:center;gap:12px;margin-top:8px}
+    .arrow{width:44px;height:44px;border-radius:10px;border:1px solid var(--ring);display:inline-grid;place-items:center;cursor:pointer;background:#fff}
     .arrow.disabled{opacity:.5;cursor:not-allowed}
     .slot-display{min-width:180px;padding:10px 14px;border-radius:10px;background:#fff;border:1px solid var(--ring);text-align:center;font-weight:800}
     .slot-sub{font-size:13px;color:var(--muted);margin-top:6px}
     .no-slots{color:#b00020;font-weight:700}
-
     .slot-meta{font-size:13px;color:#666;margin-top:8px}
   </style>
 </head>
@@ -104,7 +100,7 @@
         <div class="muted" style="margin-top:6px">* Solo retiro por el local.</div>
       </div>
 
-      <!-- CAROUSEL DE SLOTS: flechitas -->
+      <!-- CAROUSEL DE SLOTS -->
       <div class="group">
         <label>Horario de retiro (solo hoy)</label>
         <div style="display:flex;gap:8px;align-items:center">
@@ -271,12 +267,11 @@
         })(slotObj);
       });
 
-      // initial rebuild (in case some slots had no snap change yet)
+      // initial rebuild
       setTimeout(rebuildVisibleSlotsAndKeepSelection, 200);
     }
 
-    // recompute visibleSlots from allSlots (exclude full & tooSoon), keep chronological order
-    // keep currently selected index pointing to same key if still present, otherwise try nearest
+    // recompute visibleSlots and keep selection
     var currentVisibleIndex = 0;
     function rebuildVisibleSlotsAndKeepSelection(){
       var prevSelectedKey = null;
@@ -291,12 +286,10 @@
         return;
       }
 
-      // try keep previous selection
       var idx = visibleSlots.findIndex(s => s.key === prevSelectedKey);
       if(idx >= 0){
         currentVisibleIndex = idx;
       } else {
-        // if previous selected not present, try to find first slot after now
         var now = Date.now();
         var nearIdx = visibleSlots.findIndex(s => s.date.getTime() >= now);
         currentVisibleIndex = (nearIdx >= 0) ? nearIdx : 0;
@@ -321,7 +314,6 @@
         return;
       }
 
-      // clamp index
       if(currentVisibleIndex < 0) currentVisibleIndex = 0;
       if(currentVisibleIndex >= visibleSlots.length) currentVisibleIndex = visibleSlots.length - 1;
 
@@ -330,32 +322,19 @@
       var remaining = Math.max(0, MAX_PER_SLOT - (Number(s.count||0)));
       countEl.textContent = remaining > 0 ? (remaining + ' cupo' + (remaining>1?'s':'')) : 'último cupo';
 
-      // enable/disable arrows
       if(currentVisibleIndex <= 0) prevBtn.classList.add('disabled'); else prevBtn.classList.remove('disabled');
       if(currentVisibleIndex >= visibleSlots.length - 1) nextBtn.classList.add('disabled'); else nextBtn.classList.remove('disabled');
 
-      // store selection on carousel element (to be read by buildOrderObject / renderResumen)
       carousel.selectedSlot = { key: s.key, iso: s.date.toISOString(), pretty: slotPretty(s.date) };
     }
 
-    // arrow handlers
-    function goPrevSlot(){
-      if(!visibleSlots || visibleSlots.length===0) return;
-      if(currentVisibleIndex > 0){ currentVisibleIndex--; updateCarouselUI(); renderResumen(); }
-    }
-    function goNextSlot(){
-      if(!visibleSlots || visibleSlots.length===0) return;
-      if(currentVisibleIndex < visibleSlots.length - 1){ currentVisibleIndex++; updateCarouselUI(); renderResumen(); }
-    }
+    // arrows
+    function goPrevSlot(){ if(!visibleSlots.length) return; if(currentVisibleIndex>0){ currentVisibleIndex--; updateCarouselUI(); renderResumen(); } }
+    function goNextSlot(){ if(!visibleSlots.length) return; if(currentVisibleIndex<visibleSlots.length-1){ currentVisibleIndex++; updateCarouselUI(); renderResumen(); } }
 
-    /* === REFRESH (re-genera slots y re-suscribe) === */
     async function refreshSlotsUI(){
-      try{
-        await subscribeAndRenderSlots();
-      }catch(e){
-        console.warn('refreshSlotsUI error', e);
-        $("#slotNote").textContent = 'Error al cargar turnos.';
-      }
+      try{ await subscribeAndRenderSlots(); }
+      catch(e){ console.warn('refreshSlotsUI error', e); $("#slotNote").textContent = 'Error al cargar turnos.'; }
     }
 
     /* === Reserva de slot (transacción) === */
@@ -364,9 +343,7 @@
       return db.runTransaction(async function(tx){
         var snap = await tx.get(ref);
         var cur = snap.exists ? (Number(snap.data().count||0)) : 0;
-        if(cur >= MAX_PER_SLOT){
-          throw new Error('FULL');
-        }
+        if(cur >= MAX_PER_SLOT){ throw new Error('FULL'); }
         tx.set(ref, { count: cur+1, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
         return true;
       });
@@ -383,8 +360,8 @@
     }
 
     /* === resto de lógica (cupones, resumen, order creation) === */
-    var appliedCoupon = null;
-    var appliedDiscount = 0;
+    var appliedCoupon = null; // {id, code, type, value}
+    var appliedDiscount = 0;  // number (percent or fixed)
 
     function friesName(v){
       if(!v) return "—";
@@ -409,10 +386,18 @@
       for(k in cart.drink){obj=cart.drink[k]; t += ((obj.item&&obj.item.price)||0)*(obj.qty||0)}
       return t;
     }
+
+    /* === TOTAL con descuento desde admin (percent | fixed) === */
     function calcTotalWithDiscount(){
-      var raw = calcRawTotal();
-      if(appliedDiscount && appliedDiscount>0){
-        return Math.round(raw * (1 - (appliedDiscount/100)));
+      const raw = calcRawTotal();
+      if (!appliedCoupon) return raw;
+
+      if (appliedCoupon.type === "percent"){
+        const p = Math.min(Math.max(Number(appliedCoupon.value)||0, 0), 100);
+        return Math.round(raw * (1 - p/100));
+      } else if (appliedCoupon.type === "fixed"){
+        const f = Math.max(Number(appliedCoupon.value)||0, 0);
+        return Math.max(0, raw - f);
       }
       return raw;
     }
@@ -420,6 +405,8 @@
     function renderResumen(){
       var resumen=$("#resumen"),resTotal=$("#resTotal");resumen.innerHTML="";
       function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+      // items
       for(var k in cart.burger){
         var obj=cart.burger[k];
         var extras=[];
@@ -441,74 +428,111 @@
         var html2 = '<div class="row"><div><strong>' + (obj2.qty||0) + '× ' + (obj2.item?escapeHtml(obj2.item.name):"") + '</strong></div><div>' + money(line2) + '</div></div>';
         resumen.insertAdjacentHTML("beforeend", html2);
       }
+
+      // nota general
       var notaGeneral = $("#inpNotas").value ? $("#inpNotas").value.trim() : "";
       if(notaGeneral){
         var notaEsc = escapeHtml(notaGeneral);
         resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Nota del pedido</strong><div class="muted">' + notaEsc + '</div></div>');
       }
-      if(appliedCoupon){
-        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Cupon</strong><div class="muted">Código: '+escapeHtml(appliedCoupon.codigo)+' — '+escapeHtml(String(appliedCoupon.descuento))+'% off</div></div>');
+
+      // cupón (desde admin)
+      if (appliedCoupon){
+        const label = appliedCoupon.type === "percent" ? (appliedCoupon.value + "% off") : ("$" + appliedCoupon.value + " descuento");
+        resumen.insertAdjacentHTML("beforeend",
+          `<div style="margin-top:8px">
+            <strong>Cupón</strong>
+            <div class="muted">Código: ${escapeHtml(appliedCoupon.code)} — ${escapeHtml(label)}</div>
+          </div>`);
       }
-      // mostrar slot seleccionado
+
+      // horario seleccionado
       var carousel = $("#slotsCarousel");
       if(carousel && carousel.selectedSlot){
-        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' + escapeHtml(carousel.selectedSlot.pretty || carousel.selectedSlot.iso || '') + '</div></div>');
+        resumen.insertAdjacentHTML("beforeend", '<div style="margin-top:8px"><strong>Horario de retiro</strong><div class="muted">' +
+          escapeHtml(carousel.selectedSlot.pretty || carousel.selectedSlot.iso || '') + '</div></div>');
       }
-      resTotal.textContent = money(calcTotalWithDiscount());
+
+      // Totales
+      const raw = calcRawTotal();
+      const tot = calcTotalWithDiscount();
+      if (appliedCoupon && tot !== raw){
+        resumen.insertAdjacentHTML("beforeend",
+          `<div class="row discount-row"><div>Subtotal</div><div>${money(raw)}</div></div>`);
+      }
+      resTotal.textContent = money(tot);
     }
 
-    /* === CUPÓN (igual que antes) === */
+    /* === CUPÓN (lee estructura de admin: code, type, value, enabled, validFrom, validTo) === */
     async function applyCouponCode(){
-      var code = $("#inpCupon") ? $("#inpCupon").value.trim().toUpperCase() : "";
-      var msg = $("#cuponMsg");
+      const code = $("#inpCupon")?.value.trim().toUpperCase() || "";
+      const msg = $("#cuponMsg");
       msg.textContent = "";
       msg.className = "muted-small";
       appliedCoupon = null;
       appliedDiscount = 0;
-      if(!code){ msg.textContent = "Ingresá un código de cupón."; msg.classList.add("cupon-err"); renderResumen(); return; }
+
+      if (!code){
+        msg.textContent = "Ingresá un código de cupón.";
+        msg.classList.add("cupon-err");
+        renderResumen();
+        return;
+      }
+
       try{
-        const docRef = db.collection("coupons").doc(code);
-        const docSnap = await docRef.get();
-        if(!docSnap.exists){
-          const q = await db.collection("coupons").where("codigo","==", code).limit(1).get();
-          if(q.empty){
-            msg.textContent = "Cupón inválido.";
-            msg.classList.add("cupon-err");
-            renderResumen();
-            return;
-          } else {
-            var data = q.docs[0].data();
-            var docId = q.docs[0].id;
-            if(data.active === false || data.activo === false){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
-            if(data.expiresAt || data.expireAt){
-              let exp = data.expiresAt || data.expireAt;
-              let expDate = exp.toDate ? exp.toDate() : new Date(exp);
-              if(Date.now() > expDate.getTime()){ msg.textContent = "Cupón vencido."; msg.classList.add("cupon-err"); renderResumen(); return; }
-            }
-            var discount = Number(data.discount || data.descuento || 0) || 0;
-            appliedCoupon = { id: docId, codigo: data.codigo||code, descuento: discount, raw: data };
-            appliedDiscount = discount;
-            msg.textContent = "Cupón aplicado: " + appliedDiscount + "%";
-            msg.classList.add("cupon-ok");
-            renderResumen();
-            return;
-          }
-        } else {
-          var data2 = docSnap.data();
-          if((data2.active === false) || (data2.activo === false)){ msg.textContent = "Cupón inactivo."; msg.classList.add("cupon-err"); renderResumen(); return; }
-          if(data2.expiresAt || data2.expireAt){
-            let exp = data2.expiresAt || data2.expireAt;
-            let expDate = exp.toDate ? exp.toDate() : new Date(exp);
-            if(Date.now() > expDate.getTime()){ msg.textContent = "Cupón vencido."; msg.classList.add("cupon-err"); renderResumen(); return; }
-          }
-          var discount2 = Number(data2.discount || data2.descuento || 0) || 0;
-          appliedCoupon = { id: docSnap.id, codigo: data2.codigo || code, descuento: discount2, raw: data2 };
-          appliedDiscount = discount2;
-          msg.textContent = "Cupón aplicado: " + appliedDiscount + "%";
-          msg.classList.add("cupon-ok");
+        const ref = db.collection("coupons").doc(code);
+        const snap = await ref.get();
+
+        if (!snap.exists){
+          msg.textContent = "Cupón inválido.";
+          msg.classList.add("cupon-err");
           renderResumen();
           return;
         }
+
+        const c = snap.data();
+
+        if (!c.enabled){
+          msg.textContent = "Cupón inactivo.";
+          msg.classList.add("cupon-err");
+          renderResumen();
+          return;
+        }
+
+        // Validar vigencia
+        const now = new Date();
+        if (c.validFrom){
+          const fromDate = c.validFrom.toDate ? c.validFrom.toDate() : new Date(c.validFrom);
+          if (now < fromDate){
+            msg.textContent = "Cupón aún no vigente.";
+            msg.classList.add("cupon-err");
+            renderResumen();
+            return;
+          }
+        }
+        if (c.validTo){
+          const toDate = c.validTo.toDate ? c.validTo.toDate() : new Date(c.validTo);
+          if (now > toDate){
+            msg.textContent = "Cupón vencido.";
+            msg.classList.add("cupon-err");
+            renderResumen();
+            return;
+          }
+        }
+
+        // Aplicar descuento desde admin
+        appliedCoupon = {
+          id: snap.id,
+          code: c.code,
+          type: c.type,      // "percent" | "fixed"
+          value: Number(c.value)||0
+        };
+
+        appliedDiscount = appliedCoupon.value;
+
+        msg.textContent = `Cupón aplicado: ${c.type === "percent" ? appliedDiscount + "% off" : "$" + appliedDiscount + " de descuento"}`;
+        msg.classList.add("cupon-ok");
+        renderResumen();
       }catch(err){
         console.error("Error al validar cupón:", err);
         msg.textContent = "Error al validar el cupón.";
@@ -596,9 +620,10 @@
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
 
+      // adjuntar cupón aplicado (si hay)
       if(appliedCoupon){
-        order.cupon = appliedCoupon.codigo;
-        order.discount = appliedDiscount;
+        order.cupon   = appliedCoupon.code;
+        order.discount = appliedCoupon.type === "percent" ? appliedCoupon.value : { type:"fixed", value: appliedCoupon.value };
         order.cuponId = appliedCoupon.id;
       }
       return order;
@@ -639,7 +664,7 @@
         var carousel = $("#slotsCarousel");
         if(!carousel || !carousel.selectedSlot){ alert("Elegí un horario de retiro."); btn.disabled=false; btn.classList.remove('disabled'); return; }
 
-        // verify selected slot still in visibleSlots and not full
+        // verify selected slot still available
         var selKey = carousel.selectedSlot.key;
         var selObj = visibleSlots.find(s => s.key === selKey);
         if(!selObj){ alert("El horario elegido ya no está disponible. Elegí otro."); await refreshSlotsUI(); btn.disabled=false; btn.classList.remove('disabled'); return; }
@@ -668,7 +693,7 @@
             }, { merge:true });
           }catch(_){}
 
-          // abrir WhatsApp si aplica
+          // WhatsApp
           if(orderObj.pago==="efectivo"||orderObj.pago==="mercado_pago"){
             var txt = (function buildWhatsappText(order){
               try{
@@ -678,7 +703,13 @@
                 lines.push("Retiro: Take Away");
                 if(order.pickup_time) lines.push("Horario de retiro: " + (new Date(order.pickup_time)).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}));
                 lines.push("Medio de pago: "+pagoLabel);
-                if(order.cupon){ lines.push("Cupón: "+order.cupon+" — "+(order.discount||0)+"% off"); }
+                if(order.cupon){ 
+                  if(typeof order.discount === 'object' && order.discount && order.discount.type === 'fixed'){
+                    lines.push("Cupón: "+order.cupon+" — $"+(order.discount.value||0)+" off");
+                  }else{
+                    lines.push("Cupón: "+order.cupon+" — "+(order.discount||0)+"% off");
+                  }
+                }
                 lines.push("------------------------------");
                 for(var i=0;i<order.items.length;i++){
                   var it=order.items[i];
@@ -742,7 +773,6 @@
 
     // limpiar listeners si el usuario se va de la página
     window.addEventListener('beforeunload', function(){ clearSlotListeners(); });
-
   </script>
 </body>
 </html>
