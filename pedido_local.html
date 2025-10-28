@@ -161,6 +161,11 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
+    function chooseDateField(obj){
+      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
+      for(const k of cand){ if(obj && obj[k] != null) return k; }
+      return null;
+    }
     function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
@@ -169,11 +174,6 @@
         if (typeof v === 'number') return new Date(v);
         if (typeof v === 'string'){ const d=new Date(v); if(!isNaN(d)) return d; }
       }
-      return null;
-    }
-    function chooseDateField(obj){
-      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
-      for(const k of cand){ if(obj && obj[k] != null) return k; }
       return null;
     }
     function displayOrderNumber(doc){
@@ -242,23 +242,12 @@
     }
     const btnStateClass=st=>`state-btn state-${st}`;
 
-    function pickDocDate(obj){
-      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
-      for(const k of cand){
-        const v=obj[k];
-        if(v?.toDate) return v.toDate();
-        if(typeof v==='number') return new Date(v);
-        if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d; }
-      }
-      return null;
-    }
-
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
     const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
     const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
 
-    const computeOrderTotal = o => {
-      if (typeof o.total === "number") return o.total;
+    const computeRawSubtotal = o => {
+      if (typeof o.rawTotal === "number") return o.rawTotal;
       const items = Array.isArray(o.items)?o.items:[];
       return items.reduce((t,it)=>{
         const qty = it.qty||1;
@@ -268,64 +257,38 @@
         return t + base + patty + cheddar;
       },0);
     };
+    const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ====== Helper: normalizar etiqueta de papas ====== */
+    /* ====== Helpers de UI ====== */
     function normalizeFriesLabel(raw){
       if(!raw && raw !== 0) return '';
       let s = String(raw).toLowerCase();
-      // sustituir guiones/underscores por espacio, colapsar espacios
       s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
-
       if(!s) return '';
-
-      // reglas
-      // si contiene 'sin' y 'sal' o 'sazon' => Sin sal
-      if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s) || s.includes('sin sal') || s.includes('sin sazon'))) {
-        return 'Sin sal';
-      }
-      // si tiene 'sazon' -> Sazonadas (prioritario antes de 'sal')
-      if(/\bsazon\b/.test(s) || s.includes('sazonadas') || s.includes('sazonada')) {
-        return 'Sazonadas';
-      }
-      // si contiene 'sal' -> Con sal
-      if(/\bsal\b/.test(s) || s.includes('con sal')) {
-        return 'Con sal';
-      }
-      // fallbacks
+      if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) return 'Sin sal';
+      if(/\bsazon\b/.test(s)) return 'Sazonadas';
+      if(/\bsal\b/.test(s)) return 'Con sal';
       if(s.includes('sazon')) return 'Sazonadas';
       if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
       if(s.includes('sal')) return 'Con sal';
       return '';
     }
-
-    /* ====== Helper: formatear pickup_time ====== */
     function formatSlotTime(raw){
       if(!raw) return null;
       try{
-        // Firestore Timestamp
-        if(typeof raw.toDate === 'function') {
-          const d = raw.toDate(); return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-        }
-        // object with seconds
-        if(raw && typeof raw.seconds === 'number') {
-          const d = new Date(raw.seconds * 1000); return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-        }
-        // ISO string
+        if(typeof raw.toDate === 'function') return raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        if(raw && typeof raw.seconds === 'number') return new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
         if(typeof raw === 'string'){
           const d = new Date(raw);
           if(!isNaN(d)) return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-          // maybe pickup_slot like "20251004_1910" -> try parse last 4 digits HHMM
-          const m = raw.match(/(\d{2})(\d{2})$/);
-          if(m) return m[1]+':'+m[2];
+          const m = raw.match(/(\d{2})(\d{2})$/); if(m) return m[1]+':'+m[2];
         }
-        // Date instance
         if(raw instanceof Date) return raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
       }catch(e){}
       return null;
     }
 
-    /* ========== renderOrder + buildTicketHTML corregidas (MUESTRA NOTAS POR UNIDADES y pickup grande) ========== */
-
+    /* ========== renderOrder con chip de CUPÓN ========== */
     function renderOrder(doc){
       const o = doc.data(); const dt = pickDocDate(o);
       const dtText = dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
@@ -341,11 +304,9 @@
         if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
         const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
 
-        // NUEVA detección/normalización de papas
         const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
         const friesText = normalizeFriesLabel(friesRaw) || '—';
 
-        // ---------- Comentarios: robusto para varios formatos ----------
         let perUnitNotes = null;
         if (Array.isArray(it.notes)) perUnitNotes = it.notes;
         else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
@@ -359,14 +320,9 @@
                        : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
                        : (typeof it.notes === 'number' ? String(it.notes) : null);
           if (single){
-            if (qty > 1){
-              commentHtml = `<div class="sub">• Nota: ${single} <small style="color:#666"> (aplica a las ${qty} unidades)</small></div>`;
-            } else {
-              commentHtml = `<div class="sub">• Nota: ${single}</div>`;
-            }
+            commentHtml = `<div class="sub">• Nota: ${single}${qty>1?' <small style="color:#666">(aplica a todas)</small>':''}</div>`;
           }
         }
-        // ----------------------------------------------------------------
 
         return `<div class="item">
           <div>• <strong>${qty}× ${it.name||''}</strong></div>
@@ -382,11 +338,23 @@
       const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
       const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
 
-      // nuevo: si existe pickup_time o pickup_slot mostramos chip
+      // cupón chip
+      let couponChip = '';
+      if (o.cupon){
+        if (typeof o.discount === 'object' && o.discount?.type === 'fixed'){
+          couponChip = `<span class="chip">Cupón ${o.cupon}: -$${Number(o.discount.value||0)}</span>`;
+        } else if (typeof o.discount === 'number'){
+          couponChip = `<span class="chip">Cupón ${o.cupon}: -${o.discount}%</span>`;
+        } else {
+          couponChip = `<span class="chip">Cupón ${o.cupon}</span>`;
+        }
+      }
+
+      // pickup
       let pickupChip = '';
       const pickTimeRaw = o.pickup_time || o.pickupTime || o.pickup || null;
       let pickupPretty = formatSlotTime(pickTimeRaw);
-      if(!pickupPretty && o.pickup_slot) {
+      if(!pickupPretty && o.pickup_slot){
         const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
         if(m) pickupPretty = m[1] + ':' + m[2];
       }
@@ -403,8 +371,8 @@
       const paymentPaid = (o.payment_status==='paid' || o.paid);
       const payLine = `<div class="pay-line">
         <span class="chip">Pago: ${o.pago||'—'}</span>
-        <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PAGADO':'✓ Marcar PENDIENTE'}</button>
-        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PENDIENTE DE PAGO':'PAGADO'}</span>
+        <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'⏳ Marcar PENDIENTE':'✓ Marcar PAGADO'}</button>
+        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PAGADO':'PENDIENTE'}</span>
         <button class="btn" data-print>🖨 Imprimir</button>
       </div>`;
 
@@ -417,7 +385,7 @@
               <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
               <span class="chip">Estado: ${st}</span>
               <span class="chip">Retiro: ${o.entrega||'—'}</span>
-              ${telChip}${srcChip}${pickupChip}${cmtChip}
+              ${telChip}${srcChip}${pickupChip}${cmtChip}${couponChip}
             </div>
             ${stateBtns}
           </div>
@@ -431,10 +399,11 @@
       </div>`;
     }
 
+    /* ========== Ticket 58mm con SUBTOTAL, DESCUENTO y TOTAL ========== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
+      const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-      const escapeHtml = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
       const orderDisplay = (()=>{ 
         const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
@@ -450,25 +419,25 @@
       const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
       const items = Array.isArray(o.items)?o.items:[];
-
       const linesHTML = items.map(it=>{
         const qty = it.qty||1;
         const name = (it.name||'').toString();
         const base = (it.price||0);
         const pattyCount = it.extras?.patty||0;
         const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||0;
-        const pattySum   = qty * pattyCount * pattyUnit;
         const cheddarCount = it.extras?.cheddar||0;
         const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||0;
-        const cheddarSum   = qty * cheddarCount * cheddarUnit;
-        const baseSubtotal = base * qty;
-        const lineTotal    = baseSubtotal + pattySum + cheddarSum;
 
-        // NORMALIZO el valor raw de papas
+        const baseSubtotal = base * qty;
+        const pattySum   = qty * pattyCount * pattyUnit;
+        const cheddarSum = qty * cheddarCount * cheddarUnit;
+        const lineTotal  = baseSubtotal + pattySum + cheddarSum;
+
+        // Papas
         const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
         const friesLabel = normalizeFriesLabel(friesRaw);
 
-        // Comentarios: soporte array o string (si qty>1 dice que aplica a todas las unidades)
+        // Notas
         let perUnitNotes = null;
         if (Array.isArray(it.notes)) perUnitNotes = it.notes;
         else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
@@ -476,40 +445,55 @@
 
         let commentPart = '';
         if (perUnitNotes && perUnitNotes.length){
-          commentPart = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${escapeHtml(c)}</div>`).join('');
+          commentPart = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${esc(c)}</div>`).join('');
         } else {
           const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
                        : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
                        : null;
           if (single){
-            if (qty > 1){
-              commentPart = `<div class="sub">• Nota: ${escapeHtml(single)} (aplica a las ${qty} unidades)</div>`;
-            } else {
-              commentPart = `<div class="sub">• Nota: ${escapeHtml(single)}</div>`;
-            }
+            commentPart = `<div class="sub">• Nota: ${esc(single)}${qty>1?' (todas)':''}</div>`;
           }
         }
 
         return `
-          <div class="row name"><div class="l">${qty} × ${escapeHtml(name)}</div></div>
-          ${friesLabel ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>` : ''}
+          <div class="row name"><div class="l">${qty} × ${esc(name)}</div></div>
+          ${friesLabel ? `<div class="sub">• Papas: ${esc(friesLabel)}</div>` : ''}
           ${commentPart}
           <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
-          ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(cheddarSum)}</div>` : ''}
-          ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón extra — ${money(pattySum)}</div>` : ''}
+          ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(qty*cheddarCount*cheddarUnit)}</div>` : ''}
+          ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón — ${money(qty*pattyCount*pattyUnit)}</div>` : ''}
           <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
           <div class="sep"></div>
         `;
       }).join('') || '<div class="sub">Sin ítems.</div>';
 
-      const total = (()=>{ if(typeof o.total === 'number') return o.total;
-        return items.reduce((t,it)=>{ const qty = it.qty||1; const base = (it.price||0)*qty; const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty; const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty; return t + base + patty + cheddar; },0);
-      })();
+      // Totales
+      const subtotal = computeRawSubtotal(o);
+      const total    = computeOrderTotal(o);
+      let discountLine = '';
+      if (o.cupon){
+        if (typeof o.discount === 'object' && o.discount?.type === 'fixed'){
+          const off = Number(o.discount.value||0);
+          discountLine = `<div class="row"><div class="l">DESCUENTO (${esc(o.cupon)})</div><div class="r">-${money(off)}</div></div>`;
+        } else if (typeof o.discount === 'number'){
+          const p = Math.min(Math.max(o.discount,0),100);
+          const off = Math.max(0, subtotal - total);
+          discountLine = `<div class="row"><div class="l">DESCUENTO ${p}% (${esc(o.cupon)})</div><div class="r">-${money(off)}</div></div>`;
+        } else {
+          // si no viene detalle, igual mostrar diferencia
+          const off = Math.max(0, subtotal - total);
+          if (off>0) discountLine = `<div class="row"><div class="l">DESCUENTO (${esc(o.cupon)})</div><div class="r">-${money(off)}</div></div>`;
+        }
+      } else {
+        // si no hay cupón pero hay diferencia raw vs total, mostrarla como desc genérico
+        const off = Math.max(0, subtotal - total);
+        if (off>0) discountLine = `<div class="row"><div class="l">DESCUENTO</div><div class="r">-${money(off)}</div></div>`;
+      }
 
       const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
-      const commentBlock = generalNote ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(generalNote)}</div></div><div class="hr"></div>` : '';
+      const commentBlock = generalNote ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${esc(generalNote)}</div></div><div class="hr"></div>` : '';
 
-      // formatear pickup_time si existe (para mostrar en grande)
+      // Pickup grande
       let pickupPretty = null;
       try{
         const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
@@ -519,28 +503,18 @@
           else if(typeof raw === 'string'){
             const d = new Date(raw);
             if(!isNaN(d)) pickupPretty = d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-            else {
-              const m = raw.match(/(\d{2})(\d{2})$/);
-              if(m) pickupPretty = m[1]+':'+m[2];
-            }
-          } else if(raw instanceof Date) {
-            pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-          }
-        }
-        if(!pickupPretty && o.pickup_slot){
-          const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
-          if(m) pickupPretty = m[1]+':'+m[2];
+            else { const m = raw.match(/(\d{2})(\d{2})$/); if(m) pickupPretty = m[1]+':'+m[2]; }
+          } else if(raw instanceof Date) { pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
         }
       }catch(e){ pickupPretty = null; }
 
-      // SI pickupPretty existe, lo mostramos en grande entre CLIENTE y MEDIO DE PAGO
       const pickupBlockLarge = pickupPretty
-  ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira a las: ${escapeHtml(pickupPretty)}</div>`
-  : '';
+        ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira a las: ${esc(pickupPretty)}</div>`
+        : '';
 
       return `
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Ticket ${escapeHtml(orderDisplay)}</title>
+<html><head><meta charset="utf-8"><title>Ticket ${esc(orderDisplay)}</title>
 <style>
   @page{ size:58mm auto; margin:0; }
   html,body{margin:0;padding:0;color:#000;}
@@ -570,13 +544,15 @@
 <body>
   <div class="ticket">
     <div class="c brand">Rhodes Burgers</div>
-    <div class="orderNo c">${escapeHtml(orderDisplay)}</div>
+    <div class="orderNo c">${esc(orderDisplay)}</div>
 
     <div class="hr"></div>
 
-    ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ''}
+    ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${esc(o.nombre)}</div></div>` : ''}
     ${pickupBlockLarge}
-    ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml((o.pago||o.payment_method)||'')}</div></div>` : ''}
+    ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${esc((o.pago||o.payment_method)||'')}</div></div>` : ''}
+
+    ${o.cupon ? `<div class="blk"><div class="lbl">CUPÓN</div><div>${esc(o.cupon)}</div></div>` : ''}
 
     ${commentBlock}
 
@@ -584,12 +560,13 @@
     ${linesHTML}
     <div class="hr"></div>
 
-    <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${money(total)}</div></div>
+    <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${money(subtotal)}</div></div>
+    ${discountLine}
     <div class="row total"><div class="l">TOTAL</div><div class="r">${money(total)}</div></div>
 
     <div class="foot">
-      ${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}
-      ${pickupPretty ? `<div>Horario de retiro: ${escapeHtml(pickupPretty)}</div>` : ''}
+      ${esc(dateStr)} — ${esc(timeStr)}
+      ${pickupPretty ? `<div>Horario de retiro: ${esc(pickupPretty)}</div>` : ''}
     </div>
   </div>
   <script>
