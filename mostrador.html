@@ -1,4 +1,4 @@
-<!doctype html>
+<!doctype html> 
 <html lang="es">
 <head>
   <meta charset="utf-8" />
@@ -150,6 +150,9 @@
     .slot-quick{padding:8px 10px;border-radius:999px;border:1px solid var(--ring);cursor:pointer}
     .slot-quick.disabled{opacity:.5;pointer-events:none}
     .no-slots{color:#b00020;font-weight:700}
+
+    /* Badge falta papas */
+    .badge-warn{display:inline-block;background:#ffe9a8;border:1px solid #e2c460;color:#7a5b00;border-radius:999px;padding:2px 8px;font-weight:800;font-size:11px;margin-left:6px}
   </style>
 </head>
 <body>
@@ -223,20 +226,20 @@
     </div>
   </div>
 
-  <!-- Modal Personalizar -->
+  <!-- Modal Personalizar / Editar -->
   <div class="overlay" id="overlay">
     <div class="modal">
       <h3 id="modTitle">Personalizar</h3>
 
       <div class="rowx" style="align-items:flex-start;flex-direction:column">
-        <div class="muted" style="font-weight:600">Papas (obligatorio)</div>
+        <div class="muted" style="font-weight:600">Papas (podés elegir ahora o al final)</div>
         <div class="pills" id="friesOptions">
           <label class="pill"><span>Sazonadas</span> <input type="radio" name="fries" value="con_sazon"></label>
           <label class="pill"><span>Con sal</span>  <input type="radio" name="fries" value="con_sal"></label>
           <label class="pill"><span>Sin sal</span>  <input type="radio" name="fries" value="sin_sal"></label>
         </div>
         <div id="friesStateNote" class="micro"></div>
-        <div class="micro">Se toma lo que elijas acá por cada hamburguesa.</div>
+        <div class="micro">Si no elegís, te lo pedimos antes de cargar el pedido.</div>
       </div>
 
       <div class="rowx" id="rowPatties" style="display:none">
@@ -272,7 +275,7 @@
 
       <div class="rowx" style="justify-content:flex-end">
         <button class="btn ghost" id="btnCancel">Cancelar</button>
-        <button class="btn primary" id="btnAdd">Agregar al carrito</button>
+        <button class="btn primary" id="btnAdd">Guardar</button>
       </div>
     </div>
   </div>
@@ -608,17 +611,20 @@
     return t;
   }
 
+  // ====== RENDER CARRITO con botón EDITAR ======
   function renderCart(){
     const parts=[];
     for(const [key,obj] of Object.entries(cart.burger)){
       const unit=obj.item.price+(obj.extras?.patty||0)*EXTRA_PRICE_PATTY+(obj.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR;
       const extras=[]; if(obj.extras?.patty) extras.push(`+${obj.extras.patty} medallón`); if(obj.extras?.cheddar) extras.push(`+${obj.extras.cheddar} cheddar`);
+      const needsFries = !obj.fries;
       parts.push(`<div class="item">
         <div>
           <strong>${obj.item.name}</strong>
-          <div class="muted">Papas: ${friesName(obj.fries)}</div>
+          <div class="muted">Papas: ${friesName(obj.fries)}${needsFries?'<span class="badge-warn">Elegir</span>':''}</div>
           ${extras.length?`<div class="muted">${extras.join(" · ")}</div>`:""}
           ${obj.notes?`<div class="muted">Nota: ${obj.notes}</div>`:""}
+          <button class="btn" style="margin-top:6px" onclick="editItem('burger','${encodeURIComponent(key)}')">✏️ Editar</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <button class="qtybtn" onclick="changeQty('burger','${encodeURIComponent(key)}',-1)">-</button>
@@ -679,7 +685,8 @@
     if(type==="drink"){
       addBtn.onclick=()=>{ if(!isAvailable(item.id)) return; const b=cart.drink; if(!b[item.id]) b[item.id]={qty:0,item}; b[item.id].qty+=1; renderCart(); };
     }else{
-      addBtn.onclick=()=>{ if(!isAvailable(item.id)) return; openCustomize(item); };
+      // Abrir modal "agregar" (papas opcional aquí)
+      addBtn.onclick=()=>{ if(!isAvailable(item.id)) return; openCustomize(item, null); };
     }
     return card;
   }
@@ -722,7 +729,7 @@
     });
   }catch(e){ console.warn(e); }
 
-  // ===== Modal Personalizar =====
+  // ===== Modal Personalizar / Editar =====
   const overlay=$("#overlay"), modTitle=$("#modTitle");
   const rowPatties=$("#rowPatties"), rowCheddar=$("#rowCheddar");
   const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
@@ -730,6 +737,9 @@
   const unitPreview=$("#unitPreview");
   const notes=$("#notes"), btnAdd=$("#btnAdd"), btnCancel=$("#btnCancel");
   let currentItem=null;
+  let CUSTOMIZE_MODE = 'add'; // 'add' | 'edit' | 'checkout'
+  let editingKey = null;      // key del carrito cuando editamos
+  let resolveCheckoutStep = null; // para el flujo "al final"
 
   function unitPricePreview(base){
     const pat = (+patVal.textContent||0) * EXTRA_PRICE_PATTY;
@@ -739,38 +749,75 @@
 
   function autoGrow(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
   function updateCount(el){ const c=document.getElementById('notesCount'); if(c) c.textContent=`${el.value.length}/${el.maxLength||200}`; }
-  function resetFries(){ document.querySelectorAll('input[name="fries"]').forEach(r=>r.checked=false); }
+  function resetFries(){ document.querySelectorAll('input[name="fries"]').forEach(r=>{ r.checked=false; }); }
+  function setFries(val){
+    const r = document.querySelector(`input[name="fries"][value="${val}"]`);
+    if(r && !r.disabled){ r.checked = true; }
+  }
+  function getSelectedFries(){
+    const e = document.querySelector('input[name="fries"]:checked');
+    return e ? e.value : null;
+  }
 
-  function openCustomize(item){
+  function openCustomize(item, keyForEdit, mode='add'){
     if(!isAvailable(item.id)) return;
-    currentItem=item; modTitle.textContent="Personalizar: "+item.name;
-    notes.value=""; autoGrow(notes); updateCount(notes);
-    resetFries(); patVal.textContent="0"; cheVal.textContent="0";
+    CUSTOMIZE_MODE = mode;
+    editingKey = keyForEdit;
+    currentItem=item; modTitle.textContent=(mode==='edit'?'Editar: ':'Personalizar: ')+item.name;
+
+    // Prefill
+    notes.value=""; resetFries();
+    let pat=0, che=0, noteTxt='', fries=null;
+
+    if(mode!=='add' && keyForEdit){
+      const obj = cart.burger[keyForEdit];
+      if(obj){
+        fries = obj.fries || null;
+        pat = obj.extras?.patty||0;
+        che = obj.extras?.cheddar||0;
+        noteTxt = obj.notes||'';
+      }
+    }
+
+    if(fries) setFries(fries);
+    patVal.textContent=String(pat);
+    cheVal.textContent=String(che);
+    notes.value = noteTxt;
+    autoGrow(notes); updateCount(notes);
+
+    // Reglas por tipo
     if(item.kind==="double"){ rowPatties.style.display="flex"; rowCheddar.style.display="flex"; }
     else if(item.kind==="chicken"){ rowPatties.style.display="none"; rowCheddar.style.display="flex"; }
     else{ rowPatties.style.display="none"; rowCheddar.style.display="none"; }
+
     unitPricePreview(item.price);
     applySidesToUI();
     overlay.classList.add("open");
   }
-  if(btnCancel) btnCancel.onclick=()=> overlay.classList.remove("open");
+
+  if(btnCancel) btnCancel.onclick=()=> {
+    overlay.classList.remove("open");
+    if(CUSTOMIZE_MODE==='checkout' && typeof resolveCheckoutStep === 'function'){
+      // Si estaba en el flujo final y cancelan, no avanzamos.
+      resolveCheckoutStep(false);
+    }
+  };
   if(patInc) patInc.onclick=()=>{const v=+patVal.textContent||0;if(v<2)patVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
   if(patDec) patDec.onclick=()=>{const v=+patVal.textContent||0;if(v>0)patVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
   if(cheInc) cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
   if(cheDec) cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
 
-  // === Agregar hamburguesa desde el modal al carrito ===
+  // Generar clave "estable" para mezclar items iguales
+  function buildKey(itemId, fries, extras, noteSample){
+    return [itemId, fries||'', extras.patty||0, extras.cheddar||0, (noteSample||'').slice(0,20).replace(/\|/g,'/')].join('|');
+  }
+
+  // Guardar (agregar o editar)
   if (btnAdd) {
     btnAdd.onclick = () => {
       if (!currentItem) return;
 
-      const friesInput = document.querySelector('input[name="fries"]:checked');
-      if (!friesInput) {
-        alert("Elegí el tipo de papas (Sazonadas / Con sal / Sin sal).");
-        return;
-      }
-      const fries = friesInput.value;
-
+      const chosenFries = getSelectedFries(); // puede ser null si decide hacerlo al final
       const isDouble  = currentItem.kind === 'double';
       const isChicken = currentItem.kind === 'chicken';
 
@@ -780,30 +827,59 @@
       const extras = { patty: pat, cheddar: che };
       const noteTxt = (notes.value || '').trim();
 
-      const key = [
-        currentItem.id,
-        fries,
-        extras.patty,
-        extras.cheddar,
-        noteTxt.slice(0, 20).replace(/\|/g,'/'),
-        Date.now()
-      ].join('|');
-
-      if (!cart.burger[key]) {
-        cart.burger[key] = {
-          qty: 0,
-          item: currentItem,
-          fries,
-          extras,
-          notes: noteTxt
-        };
+      if(CUSTOMIZE_MODE==='add'){
+        // agregar nuevo (qty=1) — papas opcional
+        const key = buildKey(currentItem.id, chosenFries, extras, noteTxt) + '|' + Date.now(); // mantener unicidad
+        cart.burger[key] = { qty: 1, item: currentItem, fries: chosenFries, extras, notes: noteTxt };
+      }else if(CUSTOMIZE_MODE==='edit' || CUSTOMIZE_MODE==='checkout'){
+        // editar existente
+        const prev = cart.burger[editingKey];
+        if(prev){
+          const newKeyBase = buildKey(prev.item.id, chosenFries ?? prev.fries, extras, noteTxt);
+          // Buscar si existe otro con misma firma (fusionar cantidades)
+          let targetKey = Object.keys(cart.burger).find(k=>{
+            if(k===editingKey) return false;
+            const other = cart.burger[k];
+            const compBase = buildKey(other.item.id, other.fries, other.extras||{}, other.notes||'');
+            return compBase === newKeyBase;
+          });
+          if(!targetKey){
+            // reusar misma key (o renombrar base manteniendo timestamp original)
+            targetKey = editingKey;
+          }else{
+            // fusionar qty y borrar el viejo
+            cart.burger[targetKey].qty += prev.qty;
+            delete cart.burger[editingKey];
+          }
+          // setear valores en el destino
+          cart.burger[targetKey] = {
+            ...(cart.burger[targetKey]||prev),
+            item: prev.item,
+            qty: (cart.burger[targetKey]?.qty ?? prev.qty),
+            fries: chosenFries ?? prev.fries ?? null,
+            extras,
+            notes: noteTxt
+          };
+        }
       }
-      cart.burger[key].qty += 1;
 
       overlay.classList.remove('open');
       renderCart();
+
+      if(CUSTOMIZE_MODE==='checkout' && typeof resolveCheckoutStep === 'function'){
+        resolveCheckoutStep(true); // avanzamos al siguiente que falte
+      }
     };
   }
+
+  // Expuesto para botón "✏️ Editar"
+  window.editItem = function(type, encKey){
+    if(type!=='burger') return;
+    const key = decodeURIComponent(encKey);
+    const obj = cart.burger[key];
+    if(!obj) return;
+    openCustomize(obj.item, key, 'edit');
+  };
 
   if(typeof window !== 'undefined'){ window.autoGrow = autoGrow; window.updateCount = updateCount; }
 
@@ -1007,6 +1083,28 @@
     setTimeout(cleanup, 15000);
   }
 
+  // ====== Flujo: asegurar PAPAS antes de cargar ======
+  async function ensureFriesForAll(){
+    // devuelve true si todo OK, false si canceló
+    while(true){
+      const missingEntry = Object.entries(cart.burger).find(([k,o])=>!o.fries);
+      if(!missingEntry) return true; // todo listo
+      const [key, obj] = missingEntry;
+
+      // abrimos modal en modo "checkout" para ese ítem
+      await new Promise(res=>{
+        resolveCheckoutStep = res;
+        openCustomize(obj.item, key, 'checkout');
+      });
+      // si el usuario canceló en el modal:
+      if(!cart.burger[key] || !cart.burger[key].fries){
+        // aún falta, preguntamos si quiere salir
+        const cont = confirm('Falta elegir papas para alguna hamburguesa. ¿Querés seguir eligiendo?');
+        if(!cont) return false;
+      }
+    }
+  }
+
   // ===== Imprimir y cargar =====
   let inFlight = false;
   const btnPrintAndLoad = document.getElementById('btnPrintAndLoad');
@@ -1021,6 +1119,9 @@
       try{
         const hasItems = Object.keys(cart.burger).length || Object.keys(cart.drink).length;
         if(!hasItems){ alert("Agregá al menos un producto."); throw new Error('empty'); }
+
+        const okFries = await ensureFriesForAll();
+        if(!okFries){ throw new Error('cancelled-fries'); }
 
         const nombreRaw = ($("#inpNombre").value||"").trim();
         if(!nombreRaw){ alert("Ingresá el nombre."); throw new Error('no-name'); }
@@ -1041,7 +1142,7 @@
         for(const o of Object.values(cart.burger)){
           items.push({
             id:o.item.id, name:o.item.name, price:o.item.price, qty:o.qty,
-            fries:o.fries, notes:o.notes||'',
+            fries:o.fries||'', notes:o.notes||'',
             extras:{ patty:o.extras?.patty||0, cheddar:o.extras?.cheddar||0, EXTRA_PRICE_PATTY:EXTRA_PRICE_PATTY, EXTRA_PRICE_CHEDDAR:EXTRA_PRICE_CHEDDAR }
           });
         }
@@ -1086,7 +1187,7 @@
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, {merge:true});
 
-        // === Imprimir con el MISMO ticket que pedido_local ===
+        // imprimir
         let savedDoc = null;
         try{ savedDoc = await db.collection('orders').doc(ref.id).get(); }catch(e){ console.warn('no pudo leer doc recien guardado', e); }
         const snapForPrint = savedDoc || { id: ref.id, data: () => ({...payload, createdAt: new Date()}) };
@@ -1097,8 +1198,8 @@
         $("#inpNombre").value=""; $("#inpTel").value=""; $("#inpComentario").value="";
         alert(`Pedido #${orderNumber} cargado e impresión solicitada.`);
       }catch(err){
-        if(err && ['empty','no-name','no-slot','slot-gone','SLOT_FULL'].includes(err.message)) {
-          // mensajes ya mostrados
+        if(err && ['empty','no-name','no-slot','slot-gone','SLOT_FULL','cancelled-fries'].includes(err.message)) {
+          // mensajes ya mostrados o canceló
         }else{
           console.error(err);
           alert('Error al cargar el pedido. Reintentá.');
