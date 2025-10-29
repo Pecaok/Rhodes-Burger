@@ -90,9 +90,21 @@
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(98,90,69,.18);
     }
-    .field-foot { display:flex; justify-content:space-between; margin-top:6px; font-size:12px; color:#8a8a8a; }
+    .field-foot { display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:12px; color:#8a8a8a; }
     .right-actions{display:flex;gap:8px;align-items:center}
     .bordered{border:1.5px solid var(--ring);padding:10px;border-radius:12px;background:#fff}
+
+    /* Estrellas */
+    .stars{display:inline-flex;gap:6px;align-items:center}
+    .star{
+      width:34px;height:34px;border-radius:8px;border:1.5px solid var(--ring);
+      display:inline-flex;align-items:center;justify-content:center;
+      font-size:18px; cursor:pointer; background:#fff; user-select:none;
+      transition:transform .05s ease,border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .star:hover{ transform:scale(1.04); box-shadow:0 0 0 3px rgba(98,90,69,.1); }
+    .star.on{ background:var(--primary); color:#fff; border-color:var(--primary); }
+    .star:focus{ outline:none; box-shadow:0 0 0 3px rgba(98,90,69,.2); }
 
     html, body { min-height: 100%; }
     body { position: relative; }
@@ -159,10 +171,21 @@
       <div class="small muted" style="margin-top:10px">Si necesitás modificar algo, escribinos por WhatsApp con tu número de pedido.</div>
     </aside>
 
-    <!-- NUEVA tarjeta: comentarios -->
+    <!-- Tarjeta: comentarios + rating -->
     <section class="card">
       <h2>Dejanos tu comentario</h2>
       <div class="bordered">
+        <div class="row" style="justify-content:flex-start;gap:10px">
+          <div class="small" style="font-weight:800">Calificación:</div>
+          <div id="stars" class="stars" role="radiogroup" aria-label="Calificación de 1 a 5">
+            <button class="star" data-val="1" role="radio" aria-checked="false" aria-label="1 estrella">★</button>
+            <button class="star" data-val="2" role="radio" aria-checked="false" aria-label="2 estrellas">★</button>
+            <button class="star" data-val="3" role="radio" aria-checked="false" aria-label="3 estrellas">★</button>
+            <button class="star" data-val="4" role="radio" aria-checked="false" aria-label="4 estrellas">★</button>
+            <button class="star" data-val="5" role="radio" aria-checked="false" aria-label="5 estrellas">★</button>
+          </div>
+        </div>
+
         <textarea id="fbText" class="textarea" maxlength="300" placeholder="¿Cómo estuvo tu experiencia? (máx. 300 caracteres)"></textarea>
         <div class="field-foot">
           <span id="fbCount">0/300</span>
@@ -326,7 +349,6 @@
       $("#resTotal").textContent = money(total || order.total || 0);
     }
 
-    // Saca un número de pedido desde el doc privado si no existe en el público
     function extractOrderNumberFromPrivate(d, id){
       const fields = [d.orderNumber,d.number,d.numero,d.num,d.nro,d.seq,d.orderNo,d.pedidoNumber,d.pedido];
       for(const v of fields){
@@ -375,7 +397,6 @@
         if(!doc.exists){ return; }
         var d = doc.data();
 
-        // Si el token no coincide, ocultamos detalle
         if(d.trackToken && token && d.trackToken !== token){
           $("#items").innerHTML = '<div class="small error">Por seguridad no mostramos el detalle porque el token no coincide.</div>';
           $("#resTotal").textContent = money(0);
@@ -402,12 +423,14 @@
       });
     }
 
-    // ===== Comentarios de cliente =====
+    /* ===== Feedback (comentario + rating) ===== */
     const fbText = ()=>$("#fbText");
     const fbCount = ()=>$("#fbCount");
     const fbMsg = ()=>$("#fbMsg");
     const fbBtn = ()=>$("#btnSendFb");
     const FB_MAX = 300;
+
+    let rating = 0;
 
     function updateCounter(){
       const val = (fbText().value||'');
@@ -418,16 +441,19 @@
       if(message!=null){
         fbMsg().textContent = message;
         fbMsg().className = "small " + (ok ? "success" : "error");
+      }else{
+        fbMsg().textContent = "";
+        fbMsg().className = "small muted";
       }
     }
     function alreadySentKey(){
-      // marca por token si existe, o por orderId
       return token ? `rb_fb_sent_${token}` : (orderId ? `rb_fb_sent_${orderId}` : `rb_fb_sent_unknown`);
     }
     function tryDisableIfAlreadySent(){
       try{
         if(localStorage.getItem(alreadySentKey())==='1'){
           fbText().setAttribute('disabled','');
+          document.querySelectorAll('.star').forEach(s=>s.setAttribute('disabled',''));
           setFbState(true, "¡Gracias! Ya recibimos tu comentario.", true);
           return true;
         }
@@ -435,15 +461,49 @@
       return false;
     }
 
+    function renderStars(){
+      document.querySelectorAll('.star').forEach(btn=>{
+        const val = Number(btn.dataset.val||0);
+        const on = val <= rating;
+        btn.classList.toggle('on', on);
+        btn.setAttribute('aria-checked', on && val===rating ? 'true' : 'false');
+      });
+    }
+
+    function setupStars(){
+      const cont = document.getElementById('stars');
+      if(!cont) return;
+      cont.addEventListener('click', (e)=>{
+        const b = e.target.closest('.star');
+        if(!b || b.disabled) return;
+        rating = Number(b.dataset.val||0);
+        renderStars();
+      });
+      cont.addEventListener('keydown', (e)=>{
+        if(e.key==='ArrowRight' || e.key==='ArrowUp'){ rating = Math.min(5, rating+1||1); renderStars(); e.preventDefault(); }
+        if(e.key==='ArrowLeft'  || e.key==='ArrowDown'){ rating = Math.max(1, rating-1||1); renderStars(); e.preventDefault(); }
+        if(e.key==='Home'){ rating = 1; renderStars(); e.preventDefault(); }
+        if(e.key==='End'){ rating = 5; renderStars(); e.preventDefault(); }
+      });
+      renderStars();
+    }
+
     async function sendFeedback(){
       const txt = (fbText().value||'').trim();
-      if(!txt){ setFbState(false, "Escribí un comentario antes de enviar.", false); return; }
-      if(txt.length > FB_MAX){ setFbState(false, "Tu comentario es muy largo.", false); return; }
+      if(!txt && !rating){
+        setFbState(false, "Dejanos un comentario o elegí una calificación para enviar.", false);
+        return;
+      }
+      if(txt.length > FB_MAX){
+        setFbState(false, "Tu comentario es muy largo.", false);
+        return;
+      }
 
       setFbState(true, "Enviando…", true);
 
       const payload = {
-        comment: txt,
+        comment: txt || null,
+        rating: rating || null,
         orderId: orderId || null,
         token: token || null,
         orderNumber: UI.orderNumber || null,
@@ -458,6 +518,7 @@
         await db.collection("feedback").add(payload);
         try{ localStorage.setItem(alreadySentKey(),'1'); }catch(_){}
         fbText().setAttribute('disabled','');
+        document.querySelectorAll('.star').forEach(s=>s.setAttribute('disabled',''));
         setFbState(true, "¡Gracias! Tu comentario fue enviado.", true);
       }catch(e){
         console.error(e);
@@ -466,7 +527,6 @@
     }
 
     (async function boot(){
-      // Bloque principal (igual que antes)
       if(!orderId && !token){
         $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
         return;
@@ -484,7 +544,7 @@
       if(token) attachPublicListener();
       attachPrivateListener();
 
-      // Comentarios: listeners
+      // Feedback UI
       if(fbText()){
         fbText().addEventListener('input', updateCounter);
         updateCounter();
@@ -492,6 +552,7 @@
       if(fbBtn()){
         fbBtn().addEventListener('click', sendFeedback);
       }
+      setupStars();
       tryDisableIfAlreadySent();
     })();
   </script>
