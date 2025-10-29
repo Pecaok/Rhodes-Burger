@@ -29,6 +29,7 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:2px solid var(--primary);background:#fff;color:var(--primary);padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;text-decoration:none}
     .btn.primary{background:var(--primary);color:#fff}
     .btn.ghost{border-color:#e7e7e7;color:#333}
+    .btn[disabled]{opacity:.6;cursor:not-allowed}
 
     main{max-width:1100px;margin:24px auto;padding:0 12px;display:grid;grid-template-columns:1fr 420px;gap:18px}
     @media (max-width:900px){ main{grid-template-columns:1fr} }
@@ -58,6 +59,7 @@
 
     .small{font-size:13px}
     .error{color:#b00020}
+    .success{color:#2E7D32;font-weight:700}
     .items .line{display:flex;align-items:flex-start;justify-content:space-between;margin:10px 0;gap:12px}
     .items .muted{font-size:13px}
 
@@ -66,6 +68,31 @@
     .pay-pending{background:var(--pay-pending)}
 
     .meta{display:flex;gap:8px;flex-wrap:wrap}
+
+    /* Comentarios */
+    .textarea {
+      width: 100%;
+      min-height: 96px;
+      max-height: 220px;
+      padding: 12px 14px;
+      border: 1px solid var(--ring);
+      border-radius: 14px;
+      background: #faf9f7;
+      resize: vertical;
+      font-size: 15px;
+      line-height: 1.35;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .textarea::placeholder { color:#9a9a9a; }
+    .textarea:focus {
+      outline: 0;
+      background:#fff;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(98,90,69,.18);
+    }
+    .field-foot { display:flex; justify-content:space-between; margin-top:6px; font-size:12px; color:#8a8a8a; }
+    .right-actions{display:flex;gap:8px;align-items:center}
+    .bordered{border:1.5px solid var(--ring);padding:10px;border-radius:12px;background:#fff}
 
     html, body { min-height: 100%; }
     body { position: relative; }
@@ -131,6 +158,21 @@
       </div>
       <div class="small muted" style="margin-top:10px">Si necesitás modificar algo, escribinos por WhatsApp con tu número de pedido.</div>
     </aside>
+
+    <!-- NUEVA tarjeta: comentarios -->
+    <section class="card">
+      <h2>Dejanos tu comentario</h2>
+      <div class="bordered">
+        <textarea id="fbText" class="textarea" maxlength="300" placeholder="¿Cómo estuvo tu experiencia? (máx. 300 caracteres)"></textarea>
+        <div class="field-foot">
+          <span id="fbCount">0/300</span>
+          <div class="right-actions">
+            <button id="btnSendFb" class="btn primary">Enviar</button>
+          </div>
+        </div>
+        <div id="fbMsg" class="small muted" style="margin-top:6px"></div>
+      </div>
+    </section>
   </main>
 
   <!-- Firebase compat -->
@@ -209,7 +251,8 @@
     const UI = {
       orderNumber: null,
       pago: null,
-      entrega: null
+      entrega: null,
+      nombre: null
     };
     function setNum(n){
       if(!n) return;
@@ -291,7 +334,6 @@
         const n = typeof v==="string" ? parseInt(v,10) : v;
         if(Number.isFinite(n)) return n;
       }
-      // fallback a hash del id (últimos 5)
       return null;
     }
 
@@ -308,13 +350,12 @@
         var d = snap.data();
 
         $("#greet").textContent = d && d.nombre ? `, ${d.nombre}` : "";
+        if (d && d.nombre) UI.nombre = d.nombre;
 
-        // 🔢 Número, pago, entrega (solo setean si traen valor)
         if (d.orderNumber) setNum(d.orderNumber);
         if (d.pago)        setPago(d.pago);
         if (d.entrega)     setEntrega(d.entrega);
 
-        // paid/status
         var paidFlag = (d.payment_status === 'paid') || !!d.paid;
         updateStatusUI(
           d.status,
@@ -341,16 +382,14 @@
           return;
         }
 
-        // Detalle de ítems
         renderItems(d);
 
-        // Completar METADATOS si faltaban en público
         const maybeNum = extractOrderNumberFromPrivate(d, doc.id);
         if (maybeNum && !UI.orderNumber) setNum(maybeNum);
         if (d.pago && !UI.pago) setPago(d.pago);
         if (d.entrega && !UI.entrega) setEntrega(d.entrega);
+        if (!UI.nombre && d.nombre) UI.nombre = d.nombre;
 
-        // Estado/pago
         var pub = toPublic(d.status || 'accepted');
         var paidFlag = (d.payment_status === 'paid') || !!d.paid;
         updateStatusUI(
@@ -363,12 +402,75 @@
       });
     }
 
+    // ===== Comentarios de cliente =====
+    const fbText = ()=>$("#fbText");
+    const fbCount = ()=>$("#fbCount");
+    const fbMsg = ()=>$("#fbMsg");
+    const fbBtn = ()=>$("#btnSendFb");
+    const FB_MAX = 300;
+
+    function updateCounter(){
+      const val = (fbText().value||'');
+      fbCount().textContent = `${val.length}/${FB_MAX}`;
+    }
+    function setFbState(disabled, message, ok){
+      fbBtn().disabled = !!disabled;
+      if(message!=null){
+        fbMsg().textContent = message;
+        fbMsg().className = "small " + (ok ? "success" : "error");
+      }
+    }
+    function alreadySentKey(){
+      // marca por token si existe, o por orderId
+      return token ? `rb_fb_sent_${token}` : (orderId ? `rb_fb_sent_${orderId}` : `rb_fb_sent_unknown`);
+    }
+    function tryDisableIfAlreadySent(){
+      try{
+        if(localStorage.getItem(alreadySentKey())==='1'){
+          fbText().setAttribute('disabled','');
+          setFbState(true, "¡Gracias! Ya recibimos tu comentario.", true);
+          return true;
+        }
+      }catch(_){}
+      return false;
+    }
+
+    async function sendFeedback(){
+      const txt = (fbText().value||'').trim();
+      if(!txt){ setFbState(false, "Escribí un comentario antes de enviar.", false); return; }
+      if(txt.length > FB_MAX){ setFbState(false, "Tu comentario es muy largo.", false); return; }
+
+      setFbState(true, "Enviando…", true);
+
+      const payload = {
+        comment: txt,
+        orderId: orderId || null,
+        token: token || null,
+        orderNumber: UI.orderNumber || null,
+        nombre: UI.nombre || null,
+        pago: UI.pago || null,
+        entrega: UI.entrega || null,
+        userAgent: navigator.userAgent || "",
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+
+      try{
+        await db.collection("feedback").add(payload);
+        try{ localStorage.setItem(alreadySentKey(),'1'); }catch(_){}
+        fbText().setAttribute('disabled','');
+        setFbState(true, "¡Gracias! Tu comentario fue enviado.", true);
+      }catch(e){
+        console.error(e);
+        setFbState(false, "No se pudo enviar. Intentá nuevamente.", false);
+      }
+    }
+
     (async function boot(){
+      // Bloque principal (igual que antes)
       if(!orderId && !token){
         $("#info").innerHTML = '<span class="error">Link inválido: faltan parámetros.</span>';
         return;
       }
-      // Si viene sólo id, tratamos de descubrir el token para que también escuche el público
       if(!token && orderId){
         try{
           var snap = await db.collection("orders").doc(orderId).get();
@@ -381,6 +483,16 @@
 
       if(token) attachPublicListener();
       attachPrivateListener();
+
+      // Comentarios: listeners
+      if(fbText()){
+        fbText().addEventListener('input', updateCounter);
+        updateCounter();
+      }
+      if(fbBtn()){
+        fbBtn().addEventListener('click', sendFeedback);
+      }
+      tryDisableIfAlreadySent();
     })();
   </script>
 </body>
