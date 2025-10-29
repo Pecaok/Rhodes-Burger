@@ -11,7 +11,7 @@
       --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.08); --ring:#eaeaea;
       --st-accepted:#FBC02D; --st-preparing:#FB8C00; --st-ready:#00ACC1; --st-completed:#2E7D32; --st-cancelled:#D32F2F;
       --pay-pending:#FFA000; --pay-paid:#625A45;
-      --star-off:#DDDDDD; --star-on:#F5A524;
+      --star-off:#DDD; --star-on:#F5A524;
     }
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
@@ -76,14 +76,19 @@
     .right-actions{display:flex;gap:8px;align-items:center}
     .bordered{border:1.5px solid var(--ring);padding:12px;border-radius:12px;background:#fff}
 
-    /* Estrellas (pintado por JS) */
+    /* Estrellas con botones */
     .rating-wrap{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-    .rating{display:inline-flex;gap:8px}
-    .rating input{position:absolute;left:-9999px}
-    .rating label{cursor:pointer;font-size:40px;line-height:1;color:var(--star-off);transition:color .12s ease, transform .06s ease; user-select:none}
-    .rating label.on{color:var(--star-on)}
-    .rating label.preview{color:var(--star-on)}
-    .rating label:active{transform:scale(.96)}
+    .stars{display:inline-flex;gap:8px}
+    .star{
+      -webkit-appearance:none; appearance:none;
+      border:0; background:none; padding:0; margin:0;
+      cursor:pointer; font-size:40px; line-height:1; color:var(--star-off);
+      transition:color .12s ease, transform .06s ease;
+    }
+    .star.on, .star.preview{ color:var(--star-on); }
+    .star:active{ transform:scale(.96) }
+    .star:focus{ outline:3px solid rgba(98,90,69,.35); border-radius:6px }
+
     .score{display:flex;align-items:baseline;gap:8px;font-weight:800}
     .score .big{font-size:22px}
     .score .tag{font-size:12px;padding:4px 8px;border:1px solid var(--ring);border-radius:999px;background:#fff;color:#333}
@@ -147,14 +152,13 @@
       <div class="bordered">
         <div class="rating-wrap">
           <div class="score"><span class="big" id="scoreVal">0/5</span><span class="tag" id="scoreLabel">Sin calificar</span></div>
-          <fieldset class="rating" id="ratingStars" aria-label="Calificación de 1 a 5">
-            <!-- Orden natural 1→5 para simplificar -->
-            <input type="radio" name="stars" id="star1" value="1"><label for="star1" data-val="1" title="Malo">★</label>
-            <input type="radio" name="stars" id="star2" value="2"><label for="star2" data-val="2" title="Regular">★</label>
-            <input type="radio" name="stars" id="star3" value="3"><label for="star3" data-val="3" title="Bueno">★</label>
-            <input type="radio" name="stars" id="star4" value="4"><label for="star4" data-val="4" title="Muy bueno">★</label>
-            <input type="radio" name="stars" id="star5" value="5"><label for="star5" data-val="5" title="Excelente">★</label>
-          </fieldset>
+          <div class="stars" id="ratingStars" role="radiogroup" aria-label="Calificación de 1 a 5">
+            <button type="button" class="star" data-val="1" aria-label="1 estrella" aria-checked="false">★</button>
+            <button type="button" class="star" data-val="2" aria-label="2 estrellas" aria-checked="false">★</button>
+            <button type="button" class="star" data-val="3" aria-label="3 estrellas" aria-checked="false">★</button>
+            <button type="button" class="star" data-val="4" aria-label="4 estrellas" aria-checked="false">★</button>
+            <button type="button" class="star" data-val="5" aria-label="5 estrellas" aria-checked="false">★</button>
+          </div>
         </div>
 
         <textarea id="fbText" class="textarea" maxlength="300" placeholder="¿Cómo estuvo tu experiencia? (máx. 300 caracteres)"></textarea>
@@ -273,39 +277,35 @@
     function labelFor(n){return{1:"Malo",2:"Regular",3:"Bueno",4:"Muy bueno",5:"Excelente"}[n]||"Sin calificar";}
     function alreadySentKey(){return token?`rb_fb_sent_${token}`:(orderId?`rb_fb_sent_${orderId}`:`rb_fb_sent_unknown`);}
 
-    // Pintado manual de estrellas (sin CSS tricky)
-    let currentRating = 0;
-    const starLabels = [];
+    let currentRating=0;
+    const starsContainer = document.getElementById('ratingStars');
+    const stars = Array.from(document.querySelectorAll('#ratingStars .star'));
+
     function paintStars(n, preview){
-      starLabels.forEach(l=>{
-        const v = Number(l.dataset.val||0);
-        l.classList.toggle('on', v <= n);
-        l.classList.toggle('preview', preview && v <= n);
+      stars.forEach(btn=>{
+        const v=Number(btn.dataset.val||0);
+        btn.classList.toggle('on', v<=n);
+        btn.classList.toggle('preview', preview && v<=n);
+        btn.setAttribute('aria-checked', String(v===n));
       });
       if(!preview){
-        scoreVal().textContent = (n||0) + "/5";
-        scoreLabel().textContent = labelFor(n||0);
+        scoreVal().textContent=(n||0)+"/5";
+        scoreLabel().textContent=labelFor(n||0);
       }
     }
-    function setRating(n){
-      currentRating = n;
-      const radio = document.getElementById('star'+n);
-      if(radio){ radio.checked = true; }
-      paintStars(n, false);
-    }
+    function setRating(n){ currentRating=n; paintStars(n,false); }
 
     function updateCounter(){ fbCount().textContent = `${(fbText().value||'').length}/${FB_MAX}`; }
-    function setFbState(disabled, message, ok){
-      fbBtn().disabled = !!disabled;
-      if(message!=null){ fbMsg().textContent = message; fbMsg().className = "small " + (ok?"success":"error"); }
-      else{ fbMsg().textContent = ""; fbMsg().className = "small muted"; }
+    function setFbState(disabled,message,ok){
+      fbBtn().disabled=!!disabled;
+      if(message!=null){ fbMsg().textContent=message; fbMsg().className="small "+(ok?"success":"error"); }
+      else{ fbMsg().textContent=""; fbMsg().className="small muted"; }
     }
     function tryDisableIfAlreadySent(){
       try{
         if(localStorage.getItem(alreadySentKey())==='1'){
           fbText().disabled=true;
-          document.querySelectorAll('.rating input').forEach(i=>i.disabled=true);
-          starLabels.forEach(l=>l.style.cursor='default');
+          stars.forEach(b=>{ b.disabled=true; b.style.cursor='default'; });
           setFbState(true,"¡Gracias! Ya recibimos tu comentario.",true);
           return true;
         }
@@ -323,9 +323,7 @@
       try{
         await db.collection("feedback").add(payload);
         localStorage.setItem(alreadySentKey(),'1');
-        fbText().disabled = true;
-        document.querySelectorAll('.rating input').forEach(i=>i.disabled=true);
-        starLabels.forEach(l=>l.style.cursor='default');
+        fbText().disabled=true; stars.forEach(b=>{b.disabled=true; b.style.cursor='default';});
         setFbState(true,"¡Gracias! Tu comentario fue enviado.",true);
       }catch(e){
         console.error(e);
@@ -334,7 +332,6 @@
     }
 
     (async function boot(){
-      // IDs
       if(!orderId && !token){ $("#info").innerHTML='<span class="error">Link inválido: faltan parámetros.</span>'; return; }
       if(!token && orderId){
         try{
@@ -348,32 +345,28 @@
       if(token) attachPublicListener();
       attachPrivateListener();
 
-      // Feedback UI
+      // feedback UI
       if($("#fbText")){ $("#fbText").addEventListener('input',updateCounter); updateCounter(); }
       if($("#btnSendFb")){ $("#btnSendFb").addEventListener('click',sendFeedback); }
 
-      // Stars setup (sin CSS row-reverse)
-      document.querySelectorAll('#ratingStars label').forEach(l=>{
-        starLabels.push(l);
-        const v = Number(l.dataset.val||0);
-
-        l.addEventListener('mouseenter', ()=>paintStars(v,true));
-        l.addEventListener('mouseleave', ()=>paintStars(currentRating,false));
-        l.addEventListener('click', ()=>setRating(v));
-      });
-      document.querySelectorAll('#ratingStars input').forEach(inp=>{
-        inp.addEventListener('change', ()=>setRating(Number(inp.value||0)));
-        inp.addEventListener('keydown', e=>{
+      // estrellas (hover/click/teclado)
+      stars.forEach(btn=>{
+        const v=Number(btn.dataset.val||0);
+        btn.addEventListener('mouseenter', ()=>paintStars(v,true));
+        btn.addEventListener('mouseleave', ()=>paintStars(currentRating,false));
+        btn.addEventListener('click', ()=>setRating(v));
+        btn.addEventListener('keydown', e=>{
           if(['ArrowRight','ArrowUp'].includes(e.key)){ setRating(Math.min(5,(currentRating||0)+1||1)); e.preventDefault(); }
           if(['ArrowLeft','ArrowDown'].includes(e.key)){ setRating(Math.max(1,(currentRating||0)-1||1)); e.preventDefault(); }
           if(e.key==='Home'){ setRating(1); e.preventDefault(); }
           if(e.key==='End'){ setRating(5); e.preventDefault(); }
         });
+        btn.setAttribute('tabindex','0');
+        btn.setAttribute('role','radio');
+        btn.setAttribute('aria-checked','false');
       });
-      // Estado inicial: 0/5, todas grises
       paintStars(0,false);
 
-      // Si ya envió, bloquear
       tryDisableIfAlreadySent();
     })();
   </script>
