@@ -44,6 +44,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Pedidos • Rhodes Burgers</title>
   <link rel="icon" href="images/logo.png" />
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#625A45" />
+
   <style>
     :root{
       --primary:#625A45; --text:#111; --muted:#444; --bg:#f6f6f6; --card:#fff;
@@ -104,7 +109,7 @@
 
     @media print{
       @page{size:A4 portrait;margin:12mm}
-      header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"],[title="Panel admin"],[title="Abrir mostrador"]{display:none!important}
+      header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"],[title="Panel admin"],[title="Abrir mostrador"],#btnInstall{display:none!important}
       .order{break-inside:avoid;box-shadow:none;border:1px solid #eee}
     }
   </style>
@@ -122,6 +127,9 @@
         <a href="mostrador.html" class="btn" title="Mostrador">🧾 Mostrador</a>
         <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
       </nav>
+
+      <!-- Botón para instalar la PWA -->
+      <button id="btnInstall" class="btn" style="display:none" title="Instalar app">➕ Instalar app</button>
 
       <button id="btnBell" class="btn" title="Activar/desactivar sonido">🔔 Sonido</button>
       <button id="btnLogout" class="btn danger" title="Cerrar sesión">⏻ Cerrar sesión</button>
@@ -433,11 +441,21 @@
         const cheddarSum = qty * cheddarCount * cheddarUnit;
         const lineTotal  = baseSubtotal + pattySum + cheddarSum;
 
-        // Papas
         const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
-        const friesLabel = normalizeFriesLabel(friesRaw);
+        const friesLabel = (function normalizeFriesLabel(raw){
+          if(!raw && raw !== 0) return '';
+          let s = String(raw).toLowerCase();
+          s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+          if(!s) return '';
+          if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) return 'Sin sal';
+          if(/\bsazon\b/.test(s)) return 'Sazonadas';
+          if(/\bsal\b/.test(s)) return 'Con sal';
+          if(s.includes('sazon')) return 'Sazonadas';
+          if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
+          if(s.includes('sal')) return 'Con sal';
+          return '';
+        })(friesRaw);
 
-        // Notas
         let perUnitNotes = null;
         if (Array.isArray(it.notes)) perUnitNotes = it.notes;
         else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
@@ -467,25 +485,32 @@
         `;
       }).join('') || '<div class="sub">Sin ítems.</div>';
 
-      // Totales
-      const subtotal = computeRawSubtotal(o);
-      const total    = computeOrderTotal(o);
+      const subtotal = (function computeRawSubtotal(o){
+        if (typeof o.rawTotal === "number") return o.rawTotal;
+        const items = Array.isArray(o.items)?o.items:[];
+        return items.reduce((t,it)=>{
+          const qty = it.qty||1;
+          const base = (it.price||0)*qty;
+          const patty = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty;
+          const cheddar = (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
+          return t + base + patty + cheddar;
+        },0);
+      })(o);
+      const total    = (typeof o.total === "number") ? o.total : subtotal;
+
       let discountLine = '';
       if (o.cupon){
         if (typeof o.discount === 'object' && o.discount?.type === 'fixed'){
           const off = Number(o.discount.value||0);
           discountLine = `<div class="row"><div class="l">DESCUENTO (${esc(o.cupon)})</div><div class="r">-${money(off)}</div></div>`;
         } else if (typeof o.discount === 'number'){
-          const p = Math.min(Math.max(o.discount,0),100);
           const off = Math.max(0, subtotal - total);
-          discountLine = `<div class="row"><div class="l">DESCUENTO ${p}% (${esc(o.cupon)})</div><div class="r">-${money(off)}</div></div>`;
+          discountLine = `<div class="row"><div class="l">DESCUENTO ${o.discount}% (${esc(o.cupon)})</div><div class="r">-${money(off)}</div></div>`;
         } else {
-          // si no viene detalle, igual mostrar diferencia
           const off = Math.max(0, subtotal - total);
           if (off>0) discountLine = `<div class="row"><div class="l">DESCUENTO (${esc(o.cupon)})</div><div class="r">-${money(off)}</div></div>`;
         }
       } else {
-        // si no hay cupón pero hay diferencia raw vs total, mostrarla como desc genérico
         const off = Math.max(0, subtotal - total);
         if (off>0) discountLine = `<div class="row"><div class="l">DESCUENTO</div><div class="r">-${money(off)}</div></div>`;
       }
@@ -493,7 +518,6 @@
       const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
       const commentBlock = generalNote ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${esc(generalNote)}</div></div><div class="hr"></div>` : '';
 
-      // Pickup grande
       let pickupPretty = null;
       try{
         const raw = o.pickup_time || o.pickupTime || o.pickup || o.pickup_slot || null;
@@ -507,10 +531,6 @@
           } else if(raw instanceof Date) { pickupPretty = raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
         }
       }catch(e){ pickupPretty = null; }
-
-      const pickupBlockLarge = pickupPretty
-        ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira a las: ${esc(pickupPretty)}</div>`
-        : '';
 
       return `
 <!doctype html>
@@ -549,7 +569,6 @@
     <div class="hr"></div>
 
     ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${esc(o.nombre)}</div></div>` : ''}
-    ${pickupBlockLarge}
     ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${esc((o.pago||o.payment_method)||'')}</div></div>` : ''}
 
     ${o.cupon ? `<div class="blk"><div class="lbl">CUPÓN</div><div>${esc(o.cupon)}</div></div>` : ''}
@@ -566,7 +585,6 @@
 
     <div class="foot">
       ${esc(dateStr)} — ${esc(timeStr)}
-      ${pickupPretty ? `<div>Horario de retiro: ${esc(pickupPretty)}</div>` : ''}
     </div>
   </div>
   <script>
@@ -648,5 +666,8 @@
 
   });
   </script>
+
+  <!-- PWA loader (registra SW + botón instalar) -->
+  <script src="pwa.js"></script>
 </body>
 </html>
