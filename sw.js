@@ -1,47 +1,72 @@
-const STATIC_CACHE = 'rb-static-v1';
-const ASSETS = [
-  '/', '/index.html', '/login.html', '/pedido_local.html', '/finanzas.html',
-  '/images/logo.png', '/images/icon-192.png', '/images/icon-512.png'
+// Rhodes Burgers - Mostrador (PWA)
+// Estrategia:
+// - HTML: network-first con fallback a cache.
+// - Assets estáticos: cache-first.
+// - Fallback offline: pedido_local.html.
+
+const VERSION = "rb-mostrador-v1";
+const APP_SHELL = [
+  "pedido_local.html",
+  "manifest.json",
+  "images/logo.png"
+  // Agregá acá CSS/JS propios si están en archivos separados, ej:
+  // "styles.css",
+  // "app.js",
 ];
 
-self.addEventListener('install', e => {
-  e.waitUntil(caches.open(STATIC_CACHE).then(c => c.addAll(ASSETS)));
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll(APP_SHELL)));
 });
 
-self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== STATIC_CACHE).map(k => caches.delete(k)))
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.map((k) => (k === VERSION ? null : caches.delete(k))))
     )
   );
 });
 
-self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
+function isNavigationRequest(request) {
+  return request.mode === "navigate" || (request.method === "GET" && request.headers.get("accept")?.includes("text/html"));
+}
 
-  // Sólo para tu propio dominio
-  if (url.origin !== location.origin) return;
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  const url = new URL(req.url);
 
-  // HTML => network-first
-  if (url.pathname.endsWith('.html') || url.pathname === '/') {
-    e.respondWith(
-      fetch(e.request).then(r => {
-        const copy = r.clone();
-        caches.open(STATIC_CACHE).then(c => c.put(e.request, copy));
-        return r;
-      }).catch(() => caches.match(e.request))
+  // 1) Navegación/HTML: network-first
+  if (isNavigationRequest(req)) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(VERSION).then((cache) => cache.put(req, copy));
+          return res;
+        })
+        .catch(() => caches.match(req).then((r) => r || caches.match("pedido_local.html")))
     );
     return;
   }
 
-  // Otros => cache-first
-  e.respondWith(
-    caches.match(e.request).then(r =>
-      r || fetch(e.request).then(res => {
-        const copy = res.clone();
-        caches.open(STATIC_CACHE).then(c => c.put(e.request, copy));
-        return res;
+  // 2) Assets estáticos: cache-first
+  if (/\.(png|jpg|jpeg|gif|webp|svg|ico|css|js|woff2?)$/i.test(url.pathname)) {
+    event.respondWith(
+      caches.match(req).then((cached) => {
+        if (cached) return cached;
+        return fetch(req).then((res) => {
+          const copy = res.clone();
+          caches.open(VERSION).then((cache) => cache.put(req, copy));
+          return res;
+        });
       })
-    )
-  );
+    );
+    return;
+  }
+
+  // 3) Otros: network con fallback a cache
+  event.respondWith(fetch(req).catch(() => caches.match(req)));
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data === "skipWaiting") self.skipWaiting();
 });
