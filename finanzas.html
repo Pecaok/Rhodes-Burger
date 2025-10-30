@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="es">
-   <script>
+  <script>
   /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
   const TTL_HOURS = 20;
   const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
@@ -39,7 +39,7 @@
   ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
     window.addEventListener(evt, bumpSession, {passive:true});
   });
-</script>
+  </script>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -85,7 +85,7 @@
     .muted{color:var(--muted)}
     .badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ring);border-radius:999px;padding:6px 10px;background:#fff;font-weight:700}
 
-    /* Heatmap */
+    /* Heatmaps */
     .heatmap{
       display:grid;
       border:1px solid var(--ring);
@@ -140,7 +140,7 @@
 
       <div class="spacer"></div>
 
-      <!-- Navegación cruzada: Pedidos - Finanzas - Mostrador -->
+      <!-- Navegación cruzada -->
       <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <a href="pedido_local.html" class="btn" title="Ver pedidos">📦 Pedidos</a>
         <a href="finanzas.html" class="btn primary" title="Finanzas (estás aquí)">📈 Finanzas</a>
@@ -200,7 +200,7 @@
           </div>
         </div>
 
-        <!-- Heatmap -->
+        <!-- Heatmap semana × día del mes -->
         <div class="card" style="margin-top:12px">
           <strong>Heatmap de demanda (semana × día del mes)</strong>
           <div id="heatmap" class="heatmap" style="margin-top:8px"></div>
@@ -214,6 +214,21 @@
           </div>
         </div>
 
+        <!-- Heatmap por horas (19–00) -->
+        <div class="card" style="margin-top:12px">
+          <strong>Heatmap por horas (19 → 00)</strong>
+          <div id="hourmap" class="heatmap" style="margin-top:8px"></div>
+          <div class="hm-legend">
+            <span class="muted">Bajo</span>
+            <span class="swatch" style="background:#e8f5e9"></span>
+            <span class="swatch" style="background:#a5d6a7"></span>
+            <span class="swatch" style="background:#66bb6a"></span>
+            <span class="swatch" style="background:#2e7d32"></span>
+            <span class="muted">Alto</span>
+          </div>
+          <div id="hourSummary" class="muted" style="margin-top:8px">—</div>
+        </div>
+
         <!-- Proyección -->
         <div class="card" style="margin-top:12px">
           <strong>Proyección del mes</strong>
@@ -223,7 +238,7 @@
 
         <div id="kpiError" class="err" style="display:none;margin-top:8px"></div>
 
-        <!-- ============== NUEVO: HAMBURGUESAS POR MES ============== -->
+        <!-- HAMBURGUESAS POR MES -->
         <div class="card" style="margin-top:12px">
           <strong>Hamburguesas por mes</strong>
           <div class="inline" style="margin:8px 0">
@@ -240,7 +255,7 @@
             <tfoot><tr><th>Total hamburguesas</th><th id="bmTotal">0</th><th>Ingresos del mes</th><th id="bmRevenue">$0</th></tr></tfoot>
           </table>
         </div>
-        <!-- ============== /HAMBURGUESAS POR MES ============== -->
+        <!-- /HAMBURGUESAS POR MES -->
       </section>
     </div>
   </main>
@@ -340,7 +355,7 @@
     }
   }
 
-  // Charts (colores actualizados a #625A45)
+  // Charts
   let ordersChart, payChart, statusChart;
   function ensureOrdersChart(labels, orders, revenue){
     const ctx = document.getElementById("ordersChart").getContext("2d");
@@ -377,7 +392,71 @@
     });
   }
 
-  // KPI + Proyección + Heatmap
+  /* ============== HEATMAP POR HORAS (19 → 00) ============== */
+  const HOUR_START = 19;  // inclusive
+  const HOUR_END   = 24;  // exclusivo (24 ~ 00)
+  const HOUR_COUNT = HOUR_END - HOUR_START;
+
+  function buildDateLabels(from, to){
+    const labels=[], keys=[];
+    if(!from || !to) return {labels, keys};
+    const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    while(d <= to){
+      const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+      labels.push(day);
+      keys.push(`${y}-${m}-${day}`);
+      d.setDate(d.getDate()+1);
+    }
+    return {labels, keys};
+  }
+  function renderHourHeatmap(matrix, colLabels){
+    const host=document.getElementById("hourmap");
+    if(!host) return;
+    host.innerHTML='';
+    host.style.gridTemplateColumns=`72px repeat(${colLabels.length},1fr)`;
+
+    host.insertAdjacentHTML('beforeend','<div class="hm-cell hm-head"></div>');
+    for(const lbl of colLabels){
+      host.insertAdjacentHTML('beforeend',`<div class="hm-cell hm-head">${lbl}</div>`);
+    }
+
+    let max=0;
+    matrix.forEach(r=>r.forEach(v=>{if(v>max)max=v;}));
+
+    for(let hr=HOUR_START; hr<HOUR_END; hr++){
+      const label=`${String(hr).padStart(2,'0')}:00`;
+      host.insertAdjacentHTML('beforeend',`<div class="hm-cell hm-day">${label}</div>`);
+      for(let c=0;c<colLabels.length;c++){
+        const v=matrix[hr-HOUR_START][c]||0;
+        const bg=colorFor(v,max);
+        host.insertAdjacentHTML('beforeend',`<div class="hm-cell" title="${v} pedidos" style="background:${bg}">${v? v:''}</div>`);
+      }
+    }
+  }
+  function summarizeHourMatrix(matrix, daysCount){
+    // promedio por hora (suma de columnas / cantidad de columnas con datos)
+    const cols = matrix[0]?.length || 0;
+    const effectiveCols = Math.max(1, daysCount || cols);
+    const avgs = matrix.map(row=>{
+      const sum = row.reduce((a,b)=>a+(b||0),0);
+      return sum / effectiveCols;
+    });
+    // encontrar hora pico
+    let peakIdx = 0; let peakVal = -1;
+    avgs.forEach((v,i)=>{ if(v>peakVal){ peakVal=v; peakIdx=i; } });
+    return {avgs, peakHour: (HOUR_START + peakIdx), peakVal};
+  }
+  function printHourSummary(matrix, colLabels){
+    const {avgs, peakHour, peakVal} = summarizeHourMatrix(matrix, colLabels.length);
+    const fmtHour = h => `${String(h).padStart(2,'0')}:00`;
+    const avgText = avgs.map((v,i)=> `${fmtHour(HOUR_START+i)}: ${v.toFixed(2)}`).join(' · ');
+    const peakText = `Hora pico: <strong>${fmtHour(peakHour)}</strong> (prom. ${peakVal.toFixed(2)} pedidos)`;
+    const el = document.getElementById('hourSummary');
+    if(el) el.innerHTML = `${peakText}<br><span class="muted">${avgText}</span>`;
+  }
+  /* ============== /HEATMAP POR HORAS ============== */
+
+  // KPI + Proyección + Heatmaps
   async function loadKPI(){
     const err = $("#kpiError"); err.style.display='none'; err.textContent='';
     try{
@@ -400,8 +479,24 @@
       const dayOrders = useRange ? [] : Array(days).fill(0);
       const dayRevenue = useRange ? [] : Array(days).fill(0);
 
-      const hmMatrix = Array.from({length:7}, ()=> Array(days).fill(0));
-      const hmLabels = Array.from({length:days}, (_,i)=> String(i+1).padStart(2,'0'));
+      const hmMatrix = Array.from({length:7}, ()=> Array(useRange?0:days).fill(0));
+      const hmLabels = useRange ? [] : Array.from({length:days}, (_,i)=> String(i+1).padStart(2,'0'));
+
+      // === estructuras del mapa horario (19→00)
+      let hourColLabels=[], dateKeyIndex=null;
+      let hourMatrix;
+
+      if(!useRange){
+        hourColLabels = Array.from({length:days},(_,i)=>String(i+1).padStart(2,'0'));
+        hourMatrix = Array.from({length:HOUR_COUNT},()=>Array(days).fill(0));
+      }else{
+        const fromClean=from?new Date(from.getFullYear(),from.getMonth(),from.getDate()):null;
+        const toClean=to?new Date(to.getFullYear(),to.getMonth(),to.getDate()):null;
+        const built=buildDateLabels(fromClean,toClean);
+        hourColLabels=built.labels;
+        dateKeyIndex=new Map(built.keys.map((k,i)=>[k,i]));
+        hourMatrix=Array.from({length:HOUR_COUNT},()=>Array(hourColLabels.length).fill(0));
+      }
 
       let count=0, revenue=0, pendingTotal=0;
       const payCount = new Map();
@@ -432,9 +527,27 @@
         if(!useRange){
           const dayIdx = dt.getDate()-1;
           const weekRow= dt.getDay();
-          dayOrders[dayIdx]  += 1;
-          dayRevenue[dayIdx] += tot;
-          if(dayIdx>=0 && dayIdx<days) hmMatrix[weekRow][dayIdx] += 1;
+          if(dayIdx>=0 && dayIdx<days){
+            dayOrders[dayIdx]  += 1;
+            dayRevenue[dayIdx] += tot;
+            hmMatrix[weekRow][dayIdx] = (hmMatrix[weekRow][dayIdx]||0)+1;
+          }
+        }
+
+        // === sumar al mapa horario si está entre 19 y 23 (00 es 24 excluido)
+        const hr = dt.getHours();
+        if(hr>=HOUR_START && hr<HOUR_END){
+          if(!useRange){
+            if (dt.getFullYear()===y && (dt.getMonth()+1)===m){
+              const c = dt.getDate()-1;
+              if(c>=0 && c<days) hourMatrix[hr-HOUR_START][c] += 1;
+            }
+          }else{
+            const y2=dt.getFullYear(), m2=String(dt.getMonth()+1).padStart(2,'0'), d2=String(dt.getDate()).padStart(2,'0');
+            const key=`${y2}-${m2}-${d2}`;
+            const col=dateKeyIndex.get(key);
+            if(col!=null) hourMatrix[hr-HOUR_START][col] += 1;
+          }
         }
       });
 
@@ -454,7 +567,11 @@
       const sVals   = sLabels.map(k=>statusCount.get(k));
       ensureStatusChart(sLabels, sVals.length? sVals : [0]);
 
-      renderHeatmapWeekByDay(hmMatrix, hmLabels);
+      renderHeatmapWeekByDay(hmMatrix, useRange?[]:hmLabels);
+
+      // === renderizar heatmap horario + resumen
+      renderHourHeatmap(hourMatrix, hourColLabels);
+      printHourSummary(hourMatrix, hourColLabels);
 
       const projBox = $("#projText");
       const alertBox = $("#pendingAlert");
@@ -483,6 +600,9 @@
         projBox.textContent = 'Proyección disponible sólo con selección mensual.';
       }
 
+      // guardar para Gastos/Neto si lo usás más abajo
+      window.__lastRevenue = revenue;
+
     }catch(e){
       console.error(e);
       err.textContent = "No se pudo cargar el resumen.";
@@ -508,30 +628,20 @@
       return ym2;
     }
 
-    // Helper: decide si un item corresponde a hamburguesa (tolerante a distintos esquemas)
     function isBurgerItem(it){
       if(!it) return false;
-      // 1) type explícito
       if(typeof it.type === 'string' && it.type.toLowerCase() === 'burger') return true;
       if(it.item && typeof it.item.type === 'string' && it.item.type.toLowerCase() === 'burger') return true;
-
-      // 2) buscar palabras clave en name/id
       const name = (it.name || it.item?.name || it.item?.title || '').toString().toLowerCase();
       const id   = (it.id   || it.item?.id || it.sku || '').toString().toLowerCase();
-
-      // palabras que cubren tu menú (ajustá si agregás nuevos nombres)
       const burgerKeywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|bacon)/i;
       if(name && burgerKeywords.test(name)) return true;
       if(id && burgerKeywords.test(id)) return true;
-
-      // 3) categoría fallback
       if(it.category && typeof it.category === 'string' && it.category.toLowerCase().includes('burg')) return true;
       if(it.item && it.item.category && typeof it.item.category === 'string' && it.item.category.toLowerCase().includes('burg')) return true;
-
       return false;
     }
 
-    // Evita inyección/HTML inesperado en nombres mostrados
     function escapeHtml(s){
       return (s||'').toString()
         .replace(/&/g,'&amp;')
@@ -541,11 +651,9 @@
         .replace(/'/g,'&#39;');
     }
 
-    // Extrae precio unitario de un item (tolerante a varios campos).
     function getUnitPrice(it){
       if(!it) return 0;
       const n = v => (typeof v === 'number' ? v : (typeof v === 'string' && v.trim()!=='' ? Number(v) : NaN));
-      // Campos comunes
       const candidates = [
         it.unit_price, it.unitPrice, it.price, it.prize, it.amount, it.value,
         it.item?.price, it.item?.unit_price, it.item?.amount, it.line_price, it.line_total,
@@ -555,7 +663,6 @@
         const v = n(c);
         if(!isNaN(v) && isFinite(v)) return v;
       }
-      // Si existe total de línea y qty, derivar unitario
       const lineTotal = n(it.total) || n(it.line_total) || n(it.amount) || n(it.subtotal);
       const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
       if(!isNaN(lineTotal) && qty>0) return lineTotal/qty;
@@ -580,7 +687,6 @@
 
         const ym = $("#burgMonth").value || (new Date().toISOString().slice(0,7));
         const {start,end} = monthRange(ym);
-        // mostrar rango (end-1ms)
         const endDisplay = new Date(end.getTime() - 1);
         range.textContent = `${start.toLocaleDateString('es-AR')} → ${endDisplay.toLocaleDateString('es-AR')}`;
 
@@ -591,7 +697,6 @@
 
         const snap = await q.get();
 
-        // Map name -> { qty, revenue }
         const counter = new Map();
         let totalQty = 0;
         let totalRevenue = 0;
@@ -599,15 +704,10 @@
         snap.forEach(doc=>{
           const o = doc.data();
           const items = Array.isArray(o.items)? o.items : [];
-
           items.forEach(rawItem=>{
             const it = rawItem || {};
-            // qty tolerante
             const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
-
-            if(!isBurgerItem(it)){
-              return;
-            }
+            if(!isBurgerItem(it)) return;
 
             const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || 'Hamburguesa').toString().trim();
             const key = name || 'Hamburguesa';
