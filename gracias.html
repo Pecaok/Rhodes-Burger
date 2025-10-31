@@ -93,12 +93,26 @@
     .star:active{ transform:scale(.92) }
     .star:focus{ outline:3px solid rgba(98,90,69,.35) }
 
+    /* Marca de agua */
     html,body{min-height:100%}
     body{position:relative}
     body::before{
       content:""; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
       width:clamp(240px,48vmin,560px); background:url("images/logo.png") center/contain no-repeat;
       opacity:.08; pointer-events:none; z-index:5;
+    }
+
+    /* ===== Caja Transferencia ===== */
+    .transfer{
+      margin-top:12px; padding:12px; border:1.5px solid #ffe09a; border-radius:12px;
+      background:#fff9e6;
+    }
+    .transfer .title{font-weight:900; margin-bottom:6px}
+    .transfer .kv{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:4px 0}
+    .transfer .kv .k{min-width:80px; color:#6b5d3c}
+    .mini{
+      border:1px solid var(--ring); background:#fff; border-radius:999px; padding:4px 8px;
+      font-weight:700; font-size:12px; cursor:pointer;
     }
   </style>
 </head>
@@ -143,6 +157,25 @@
       <div id="items" class="items"></div>
       <div class="row total"><div>Total</div><div id="resTotal">$ 0</div></div>
       <div style="margin-top:6px"><span id="payPill" class="pay-pill pay-pending">PENDIENTE DE PAGO</span></div>
+
+      <!-- Caja Transferencia (aparece solo si el pago es transferencia) -->
+      <div id="transferInfo" class="transfer" style="display:none">
+        <div class="title">Datos para transferencia</div>
+        <div class="kv"><span class="k">Alias:</span>
+          <strong id="tfAlias">RhodesBurgers</strong>
+          <button class="mini" data-copy="#tfAlias">Copiar</button>
+        </div>
+        <div class="kv"><span class="k">CVU:</span>
+          <strong id="tfCVU">0000003100138491469854</strong>
+          <button class="mini" data-copy="#tfCVU">Copiar</button>
+        </div>
+        <div class="kv"><span class="k">Nombre:</span>
+          <strong id="tfNombre">Marco Leonardi</strong>
+          <button class="mini" data-copy="#tfNombre">Copiar</button>
+        </div>
+        <div class="small muted" style="margin-top:4px">Enviá el comprobante por WhatsApp con tu número de pedido 😊</div>
+      </div>
+
       <div class="small muted" style="margin-top:10px">Si necesitás modificar algo, escribinos por WhatsApp con tu número de pedido.</div>
     </aside>
 
@@ -205,10 +238,60 @@
     }
     function toPublic(s){return({accepted:'accepted',pending_payment:'pending_payment',in_prep:'preparing',preparing:'preparing',ready:'ready_for_pickup',ready_for_pickup:'ready_for_pickup',delivered:'completed',completed:'completed',cancelled:'cancelled'})[s]||s||'accepted'}
 
+    /* ===== Transfer info (constantes) ===== */
+    const TRANSFER_DATA = {
+      alias: "RhodesBurgers",
+      cvu: "0000003100138491469854",
+      nombre: "Marco Leonardi"
+    };
+    function shouldShowTransfer(v){
+      if(!v) return false;
+      const s = String(v).toLowerCase();
+      return s.includes('transfer') || s.includes('cvu') || s.includes('banc') || s === 'transferencia';
+    }
+    function updateTransferVisibility(){
+      const show = shouldShowTransfer(UI.pago);
+      const box = $("#transferInfo");
+      if(!box) return;
+      if(show){
+        $("#tfAlias").textContent = TRANSFER_DATA.alias;
+        $("#tfCVU").textContent   = TRANSFER_DATA.cvu;
+        $("#tfNombre").textContent= TRANSFER_DATA.nombre;
+        box.style.display = "block";
+      }else{
+        box.style.display = "none";
+      }
+    }
+    // Copiar al portapapeles
+    document.addEventListener('click', (e)=>{
+      const btn = e.target.closest('[data-copy]');
+      if(!btn) return;
+      const sel = btn.getAttribute('data-copy');
+      const el  = document.querySelector(sel);
+      const text = el ? el.textContent.trim() : '';
+      if(!text) return;
+      navigator.clipboard?.writeText(text).then(()=>{
+        const old = btn.textContent;
+        btn.textContent = 'Copiado';
+        setTimeout(()=>btn.textContent=old,1200);
+      }).catch(()=>{
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try{ document.execCommand('copy'); }catch(_){}
+        document.body.removeChild(ta);
+      });
+    });
+
     /* ===== Estado fusionado/UI ===== */
     const UI={orderNumber:null,pago:null,entrega:null,nombre:null};
     function setNum(n){if(!n)return;UI.orderNumber=n;$("#num").textContent="#"+n}
-    function setPago(v){if(!v)return;UI.pago=v;$("#pay").textContent=(v==='efectivo'?'Efectivo':v)}
+    function setPago(v){
+      if(!v)return;
+      UI.pago=v;
+      $("#pay").textContent=(v==='efectivo'?'Efectivo':v);
+      updateTransferVisibility();
+    }
     function setEntrega(v){if(!v)return;UI.entrega=v;$("#deliv").textContent=(v==='take_away'?'Take Away':v)}
     function updateStatusUI(pub,updatedAt,paid){
       const info=$("#info"); if(info) info.textContent="";
@@ -371,6 +454,8 @@
 
       paintStars(0,false);
       tryDisableIfAlreadySent();
+      // Mostrar/ocultar caja transferencia si ya conocemos el método
+      updateTransferVisibility();
     })();
   </script>
 </body>
