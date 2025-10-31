@@ -93,7 +93,6 @@
     .star:active{ transform:scale(.92) }
     .star:focus{ outline:3px solid rgba(98,90,69,.35) }
 
-    /* Marca de agua */
     html,body{min-height:100%}
     body{position:relative}
     body::before{
@@ -102,18 +101,13 @@
       opacity:.08; pointer-events:none; z-index:5;
     }
 
-    /* ===== Caja Transferencia ===== */
-    .transfer{
-      margin-top:12px; padding:12px; border:1.5px solid #ffe09a; border-radius:12px;
-      background:#fff9e6;
-    }
-    .transfer .title{font-weight:900; margin-bottom:6px}
-    .transfer .kv{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:4px 0}
-    .transfer .kv .k{min-width:80px; color:#6b5d3c}
-    .mini{
-      border:1px solid var(--ring); background:#fff; border-radius:999px; padding:4px 8px;
-      font-weight:700; font-size:12px; cursor:pointer;
-    }
+    /* Transferencia */
+    .tf-box{border:1.5px solid var(--ring); border-radius:14px; padding:12px; background:#fff; margin-top:10px}
+    .tf-row{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px dashed #eee}
+    .tf-row:last-child{border-bottom:0}
+    .tf-label{font-weight:800; color:#333}
+    .tf-value{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
+    .copy-btn{border:1px solid var(--ring); background:#f9f9f9; padding:6px 10px; border-radius:10px; cursor:pointer; font-weight:700}
   </style>
 </head>
 <body>
@@ -158,23 +152,26 @@
       <div class="row total"><div>Total</div><div id="resTotal">$ 0</div></div>
       <div style="margin-top:6px"><span id="payPill" class="pay-pill pay-pending">PENDIENTE DE PAGO</span></div>
 
-      <!-- Caja Transferencia (aparece solo si el pago es transferencia) -->
-      <div id="transferInfo" class="transfer" style="display:none">
-        <div class="title">Datos para transferencia</div>
-        <div class="kv"><span class="k">Alias:</span>
-          <strong id="tfAlias">RhodesBurgers</strong>
-          <button class="mini" data-copy="#tfAlias">Copiar</button>
+      <!-- BLOQUE TRANSFERENCIA -->
+      <div id="transferInfo" class="tf-box" style="display:none">
+        <div class="small" style="font-weight:800;margin-bottom:6px">Si elegís abonar mediante <span style="font-weight:900">transferencia</span>, nuestros datos son:</div>
+        <div class="tf-row">
+          <div class="tf-label">Alias</div>
+          <div class="tf-value" id="tfAlias">—</div>
+          <button class="copy-btn" data-copy="#tfAlias">Copiar</button>
         </div>
-        <div class="kv"><span class="k">CVU:</span>
-          <strong id="tfCVU">0000003100138491469854</strong>
-          <button class="mini" data-copy="#tfCVU">Copiar</button>
+        <div class="tf-row">
+          <div class="tf-label">CVU</div>
+          <div class="tf-value" id="tfCVU">—</div>
+          <button class="copy-btn" data-copy="#tfCVU">Copiar</button>
         </div>
-        <div class="kv"><span class="k">Nombre:</span>
-          <strong id="tfNombre">Marco Leonardi</strong>
-          <button class="mini" data-copy="#tfNombre">Copiar</button>
+        <div class="tf-row">
+          <div class="tf-label">Nombre</div>
+          <div class="tf-value" id="tfNombre">—</div>
+          <button class="copy-btn" data-copy="#tfNombre">Copiar</button>
         </div>
-        <div class="small muted" style="margin-top:4px">Enviá el comprobante por WhatsApp con tu número de pedido 😊</div>
       </div>
+      <!-- /BLOQUE TRANSFERENCIA -->
 
       <div class="small muted" style="margin-top:10px">Si necesitás modificar algo, escribinos por WhatsApp con tu número de pedido.</div>
     </aside>
@@ -238,49 +235,57 @@
     }
     function toPublic(s){return({accepted:'accepted',pending_payment:'pending_payment',in_prep:'preparing',preparing:'preparing',ready:'ready_for_pickup',ready_for_pickup:'ready_for_pickup',delivered:'completed',completed:'completed',cancelled:'cancelled'})[s]||s||'accepted'}
 
-    /* ===== Transfer info (constantes) ===== */
+    /* ===== Transferencia: datos + utilidades ===== */
     const TRANSFER_DATA = {
       alias: "RhodesBurgers",
       cvu: "0000003100138491469854",
       nombre: "Marco Leonardi"
     };
+    function readPayFrom(d){
+      const candidates = [
+        d?.pago, d?.payment_method, d?.paymentMethod, d?.payment, d?.pay,
+        d?.medioPago, d?.metodoPago, d?.metodo_de_pago, d?.method
+      ].filter(v => v!=null);
+      for (const v of candidates){
+        const s = String(v).trim();
+        if (s) return s;
+      }
+      return null;
+    }
     function shouldShowTransfer(v){
+      const force = new URLSearchParams(location.search).get('forceTransfer');
+      if (force === '1') return true;
       if(!v) return false;
       const s = String(v).toLowerCase();
-      return s.includes('transfer') || s.includes('cvu') || s.includes('banc') || s === 'transferencia';
+      return s.includes('transfer') || s.includes('cvu') || s.includes('banc');
     }
     function updateTransferVisibility(){
-      const show = shouldShowTransfer(UI.pago);
       const box = $("#transferInfo");
       if(!box) return;
+      const show = shouldShowTransfer(UI.pago);
       if(show){
-        $("#tfAlias").textContent = TRANSFER_DATA.alias;
-        $("#tfCVU").textContent   = TRANSFER_DATA.cvu;
-        $("#tfNombre").textContent= TRANSFER_DATA.nombre;
+        $("#tfAlias").textContent  = TRANSFER_DATA.alias;
+        $("#tfCVU").textContent    = TRANSFER_DATA.cvu;
+        $("#tfNombre").textContent = TRANSFER_DATA.nombre;
         box.style.display = "block";
       }else{
         box.style.display = "none";
       }
     }
-    // Copiar al portapapeles
+    function copyFrom(sel){
+      try{
+        const el = document.querySelector(sel);
+        const txt = el ? el.textContent.trim() : '';
+        if(!txt) return;
+        navigator.clipboard.writeText(txt);
+      }catch(_){}
+    }
     document.addEventListener('click', (e)=>{
-      const btn = e.target.closest('[data-copy]');
-      if(!btn) return;
-      const sel = btn.getAttribute('data-copy');
-      const el  = document.querySelector(sel);
-      const text = el ? el.textContent.trim() : '';
-      if(!text) return;
-      navigator.clipboard?.writeText(text).then(()=>{
-        const old = btn.textContent;
-        btn.textContent = 'Copiado';
-        setTimeout(()=>btn.textContent=old,1200);
-      }).catch(()=>{
-        // Fallback
-        const ta = document.createElement('textarea');
-        ta.value = text; document.body.appendChild(ta); ta.select();
-        try{ document.execCommand('copy'); }catch(_){}
-        document.body.removeChild(ta);
-      });
+      const b = e.target.closest('[data-copy]');
+      if(!b) return;
+      copyFrom(b.getAttribute('data-copy'));
+      b.textContent = 'Copiado';
+      setTimeout(()=>{ b.textContent = 'Copiar'; }, 1200);
     });
 
     /* ===== Estado fusionado/UI ===== */
@@ -289,7 +294,7 @@
     function setPago(v){
       if(!v)return;
       UI.pago=v;
-      $("#pay").textContent=(v==='efectivo'?'Efectivo':v);
+      $("#pay").textContent=(String(v).toLowerCase()==='efectivo'?'Efectivo':v);
       updateTransferVisibility();
     }
     function setEntrega(v){if(!v)return;UI.entrega=v;$("#deliv").textContent=(v==='take_away'?'Take Away':v)}
@@ -334,7 +339,9 @@
         if(!snap.exists){$("#info").innerHTML='<span class="error">No encontramos este pedido público. Verificá el link.</span>'; return;}
         const d=snap.data();
         $("#greet").textContent=d&&d.nombre?`, ${d.nombre}`:""; if(d&&d.nombre) UI.nombre=d.nombre;
-        if(d.orderNumber) setNum(d.orderNumber); if(d.pago) setPago(d.pago); if(d.entrega) setEntrega(d.entrega);
+        if(d.orderNumber) setNum(d.orderNumber);
+        const pv = readPayFrom(d); if (pv) setPago(pv);
+        if(d.entrega) setEntrega(d.entrega);
         updateStatusUI(d.status, d.updatedAt||d.createdAt, (d.payment_status==='paid')||!!d.paid);
       }, err=>{$("#info").innerHTML='<span class="error">Error de conexión al estado público: '+(err&&err.message?err.message:err)+'</span>';});
     }
@@ -352,7 +359,7 @@
         }
         renderItems(d);
         const maybe=extractOrderNumberFromPrivate(d); if(maybe && !UI.orderNumber) setNum(maybe);
-        if(d.pago && !UI.pago) setPago(d.pago);
+        const pv = readPayFrom(d); if (pv && !UI.pago) setPago(pv);
         if(d.entrega && !UI.entrega) setEntrega(d.entrega);
         if(!UI.nombre && d.nombre) UI.nombre=d.nombre;
         updateStatusUI(toPublic(d.status||'accepted'), d.updatedAt||d.createdAt, (d.payment_status==='paid')||!!d.paid);
@@ -368,7 +375,6 @@
 
     function alreadySentKey(){return token?`rb_fb_sent_${token}`:(orderId?`rb_fb_sent_${orderId}`:`rb_fb_sent_unknown`);}
 
-    // Estrellas
     let currentRating = 0;
     const stars = Array.from(document.querySelectorAll("#ratingStars .star"));
     function paintStars(n, preview=false){
@@ -379,7 +385,6 @@
       });
     }
     function setRating(n){ currentRating=n; paintStars(n,false); }
-
     function updateCounter(){ fbCount().textContent = `${(fbText().value||'').length}/${FB_MAX}`; }
     function setFbState(disabled,message,ok){
       fbBtn().disabled=!!disabled;
@@ -416,9 +421,8 @@
     }
 
     (async function boot(){
-      // Parámetros
       if(!orderId && !token){ $("#info").innerHTML='<span class="error">Link inválido: faltan parámetros.</span>'; return; }
-      // Si llega solo id, buscar token para autocompletar URL
+
       if(!token && orderId){
         try{
           const snap=await db.collection("orders").doc(orderId).get();
@@ -431,11 +435,9 @@
       if(token) attachPublicListener();
       attachPrivateListener();
 
-      // Feedback UI
       if($("#fbText")){ $("#fbText").addEventListener('input',updateCounter); updateCounter(); }
       if($("#btnSendFb")){ $("#btnSendFb").addEventListener('click',sendFeedback); }
 
-      // Estrellas (hover/click/teclado)
       stars.forEach(btn=>{
         const v=Number(btn.dataset.val||0);
         btn.addEventListener('mouseenter', ()=>paintStars(v,true));
@@ -454,7 +456,7 @@
 
       paintStars(0,false);
       tryDisableIfAlreadySent();
-      // Mostrar/ocultar caja transferencia si ya conocemos el método
+      // Si se forzó por URL antes de que llegue el dato de pago, mostrar cuando llegue:
       updateTransferVisibility();
     })();
   </script>
