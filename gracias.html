@@ -108,6 +108,12 @@
     .tf-label{font-weight:800; color:#333}
     .tf-value{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
     .copy-btn{border:1px solid var(--ring); background:#f9f9f9; padding:6px 10px; border-radius:10px; cursor:pointer; font-weight:700}
+
+    /* WhatsApp */
+    .wa-btn{
+      display:inline-flex;align-items:center;gap:8px;margin-top:10px;
+      border:0;background:#25D366;color:#fff;padding:10px 14px;border-radius:999px;font-weight:800;cursor:pointer
+    }
   </style>
 </head>
 <body>
@@ -154,22 +160,27 @@
 
       <!-- BLOQUE TRANSFERENCIA -->
       <div id="transferInfo" class="tf-box" style="display:none">
-        <div class="small" style="font-weight:800;margin-bottom:6px">Si elegís abonar mediante <span style="font-weight:900">transferencia</span>, nuestros datos son:</div>
+        <div class="small" style="font-weight:800;margin-bottom:6px">
+          Si elegís abonar mediante <span style="font-weight:900">transferencia</span> o <span style="font-weight:900">en local / efectivo</span>, nuestros datos son:
+        </div>
         <div class="tf-row">
           <div class="tf-label">Alias</div>
-          <div class="tf-value" id="tfAlias">—</div>
+          <div class="tf-value" id="tfAlias">RhodesBurgers</div>
           <button class="copy-btn" data-copy="#tfAlias">Copiar</button>
         </div>
         <div class="tf-row">
           <div class="tf-label">CVU</div>
-          <div class="tf-value" id="tfCVU">—</div>
+          <div class="tf-value" id="tfCVU">0000003100138491469854</div>
           <button class="copy-btn" data-copy="#tfCVU">Copiar</button>
         </div>
         <div class="tf-row">
           <div class="tf-label">Nombre</div>
-          <div class="tf-value" id="tfNombre">—</div>
+          <div class="tf-value" id="tfNombre">Marco Leonardi</div>
           <button class="copy-btn" data-copy="#tfNombre">Copiar</button>
         </div>
+
+        <button id="btnWA" class="wa-btn">💬 Enviar por WhatsApp</button>
+        <div class="small muted" style="margin-top:6px">Compartí o enviá el comprobante con tu número de pedido.</div>
       </div>
       <!-- /BLOQUE TRANSFERENCIA -->
 
@@ -236,6 +247,7 @@
     function toPublic(s){return({accepted:'accepted',pending_payment:'pending_payment',in_prep:'preparing',preparing:'preparing',ready:'ready_for_pickup',ready_for_pickup:'ready_for_pickup',delivered:'completed',completed:'completed',cancelled:'cancelled'})[s]||s||'accepted'}
 
     /* ===== Transferencia: datos + utilidades ===== */
+    const WHATSAPP_NUMBER = "54911XXXXXXXX"; // <-- CAMBIAR
     const TRANSFER_DATA = {
       alias: "RhodesBurgers",
       cvu: "0000003100138491469854",
@@ -257,12 +269,15 @@
       if (force === '1') return true;
       if(!v) return false;
       const s = String(v).toLowerCase();
-      return s.includes('transfer') || s.includes('cvu') || s.includes('banc');
+      // ✅ Mostrar tanto para transferencia como para pago en local/efectivo
+      if(s.includes('transfer')) return true;
+      if(s.includes('efectivo') || s.includes('en local') || s.includes('local')) return true;
+      return false;
     }
     function updateTransferVisibility(){
       const box = $("#transferInfo");
       if(!box) return;
-      const show = shouldShowTransfer(UI.pago);
+      const show = shouldShowTransfer(UI.pago || qs('pay'));
       if(show){
         $("#tfAlias").textContent  = TRANSFER_DATA.alias;
         $("#tfCVU").textContent    = TRANSFER_DATA.cvu;
@@ -284,8 +299,38 @@
       const b = e.target.closest('[data-copy]');
       if(!b) return;
       copyFrom(b.getAttribute('data-copy'));
+      const old=b.textContent;
       b.textContent = 'Copiado';
-      setTimeout(()=>{ b.textContent = 'Copiar'; }, 1200);
+      setTimeout(()=>{ b.textContent = old || 'Copiar'; }, 1200);
+    });
+
+    // WhatsApp
+    function buildWALink(orderNumber, payValue){
+      const alias  = $('#tfAlias').textContent.trim();
+      const cvu    = $('#tfCVU').textContent.trim();
+      const nombre = $('#tfNombre').textContent.trim();
+      const payTxt = payValue ? String(payValue) : 'transferencia';
+      const nro    = orderNumber ? `#${orderNumber}` : '(sin número)';
+      const msg =
+`Hola, Rhodes Burgers 👋
+Soy el pedido ${nro}.
+Método: ${payTxt}
+
+Datos para transferencia:
+• Alias: ${alias}
+• CVU: ${cvu}
+• Nombre: ${nombre}
+
+Te envío el comprobante por acá. ¡Gracias!`;
+      return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
+    }
+    document.addEventListener('click', (e)=>{
+      const btn = e.target.closest('#btnWA');
+      if(!btn) return;
+      const pay = $('#pay').textContent.trim() || qs('pay') || 'transferencia';
+      const orderNum = ($('#num').textContent.replace('#','').trim()) || qs('order') || '';
+      const link = buildWALink(orderNum, pay);
+      window.open(link, '_blank');
     });
 
     /* ===== Estado fusionado/UI ===== */
@@ -421,8 +466,11 @@
     }
 
     (async function boot(){
-      if(!orderId && !token){ $("#info").innerHTML='<span class="error">Link inválido: faltan parámetros.</span>'; return; }
+      if(!orderId && !token){
+        $("#info").innerHTML='<span class="error">Link inválido: faltan parámetros.</span>';
+      }
 
+      // Completar token desde la privada si llegó sólo ?id
       if(!token && orderId){
         try{
           const snap=await db.collection("orders").doc(orderId).get();
@@ -432,12 +480,22 @@
           }
         }catch(e){}
       }
+
+      // Listeners
       if(token) attachPublicListener();
       attachPrivateListener();
 
+      // Si vino ?order o ?pay por URL, mostrarlos tempranamente
+      const orderParam = qs('order');
+      if(orderParam && !UI.orderNumber) setNum(orderParam);
+      const payParam = qs('pay');
+      if(payParam && !UI.pago) setPago(payParam);
+
+      // Feedback UI
       if($("#fbText")){ $("#fbText").addEventListener('input',updateCounter); updateCounter(); }
       if($("#btnSendFb")){ $("#btnSendFb").addEventListener('click',sendFeedback); }
 
+      // Estrellas accesibles
       stars.forEach(btn=>{
         const v=Number(btn.dataset.val||0);
         btn.addEventListener('mouseenter', ()=>paintStars(v,true));
@@ -456,7 +514,8 @@
 
       paintStars(0,false);
       tryDisableIfAlreadySent();
-      // Si se forzó por URL antes de que llegue el dato de pago, mostrar cuando llegue:
+
+      // Mostrar/ocultar transferencia por si aún no llegó dato
       updateTransferVisibility();
     })();
   </script>
