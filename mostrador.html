@@ -370,11 +370,11 @@
     applySidesToUI();
   }
 
-  /* ===== PICKUP / SLOTS — SIN LÍMITE DE CUPO ===== */
-  const MAX_PER_SLOT   = Infinity;         // << sin tope
-  const MINUTES_AHEAD  = 5;
-  const OPEN_TIME      = "12:00";
-  const CLOSE_TIME     = "3:00";
+  /* ===== PICKUP / SLOTS — SIN LÍMITE DE CUPO — HASTA 02:00 AM ===== */
+  const MAX_PER_SLOT   = Infinity;         // sin tope
+  const MINUTES_AHEAD  = 5;                // evitar slots demasiado pronto
+  const OPEN_TIME      = "12:00";          // hora base del día
+  const CLOSE_TIME     = "02:00";          // hasta las 02:00 del día siguiente
   const START_10       = "19:10";
   const START_20       = "19:20";
 
@@ -383,12 +383,19 @@
   function slotKeyFromDate(d){ return ''+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes()); }
   function slotPretty(d){ return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); }
   function dateTodayAt(hhmm){ const p=parseHHMM(hhmm); const now=new Date(); return new Date(now.getFullYear(),now.getMonth(),now.getDate(),p.h,p.m,0,0); }
+
+  // Genera slots desde "startAt" hasta las 02:00 (cruza de día si hace falta) e INCLUYE el de 02:00
   function genSlots(startAt, intervalMin){
-    const open = dateTodayAt(OPEN_TIME), close = dateTodayAt(CLOSE_TIME);
+    const open = dateTodayAt(OPEN_TIME);
+    let close = dateTodayAt(CLOSE_TIME);
+    // si el cierre es “menor” que la apertura, sumamos un día (cruzamos medianoche)
+    if (close.getTime() <= open.getTime()){
+      close = new Date(close.getTime() + 24*60*60*1000);
+    }
     const start = startAt > open ? startAt : open;
     const res = [];
     let cur = new Date(start.getTime());
-    while(cur.getTime() <= close.getTime() - intervalMin*60*1000){
+    while(cur.getTime() <= close.getTime()){
       res.push(new Date(cur.getTime()));
       cur = new Date(cur.getTime() + intervalMin*60*1000);
     }
@@ -424,7 +431,7 @@
 
     $("#pickupTime").textContent = "Cargando...";
     $("#pickupCupos").style.display = "none";
-    $("#pickupDesc").textContent = `Turnos cada ${interval} minutos desde ${startStr}. Cupos: sin límite.`;
+    $("#pickupDesc").textContent = `Turnos cada ${interval} minutos (desde ${startStr}) · Cupos: sin límite · Hasta 02:00.`;
 
     // Suscripciones solo para info (no bloquean)
     allSlots.forEach(sObj=>{
@@ -434,7 +441,7 @@
           try{
             const count = snap.exists ? Number(snap.data().count||0) : 0;
             slotObj.count = count;
-            slotObj.full  = false; // << nunca se marca full
+            slotObj.full  = false; // nunca se marca full
             const now = Date.now();
             slotObj.tooSoon = (new Date(slotObj.date)).getTime() <= (now + MINUTES_AHEAD*60*1000);
             rebuildVisibleSlotsAndKeepSelection();
@@ -458,7 +465,7 @@
 
     if(visibleSlots.length===0){
       currentVisibleIndex = -1;
-      timeEl.innerHTML = '<span class="no-slots">A la brevedad</span>'; // << permite seguir
+      timeEl.innerHTML = '<span class="no-slots">A la brevedad</span>';
       timeEl.classList.add('disabled');
       capEl.style.display='none';
       $("#btnPrev").classList.add('disabled');
@@ -787,15 +794,17 @@
   if(cheInc) cheInc.onclick=()=>{const v=+cheVal.textContent||0;if(v<3)cheVal.textContent=v+1; if(currentItem) unitPricePreview(currentItem.price);};
   if(cheDec) cheDec.onclick=()=>{const v=+cheVal.textContent||0;if(v>0)cheVal.textContent=v-1; if(currentItem) unitPricePreview(currentItem.price);};
 
+  // Generar clave "estable" para mezclar items iguales
   function buildKey(itemId, fries, extras, noteSample){
     return [itemId, fries||'', extras.patty||0, extras.cheddar||0, (noteSample||'').slice(0,20).replace(/\|/g,'/')].join('|');
-  }
+    }
 
+  // Guardar (agregar o editar)
   if (btnAdd) {
     btnAdd.onclick = () => {
       if (!currentItem) return;
 
-      const chosenFries = getSelectedFries();
+      const chosenFries = getSelectedFries(); // puede ser null si decide hacerlo al final
       const isDouble  = currentItem.kind === 'double';
       const isChicken = currentItem.kind === 'chicken';
 
@@ -806,12 +815,15 @@
       const noteTxt = (notes.value || '').trim();
 
       if(CUSTOMIZE_MODE==='add'){
-        const key = buildKey(currentItem.id, chosenFries, extras, noteTxt) + '|' + Date.now();
+        // agregar nuevo (qty=1) — papas opcional
+        const key = buildKey(currentItem.id, chosenFries, extras, noteTxt) + '|' + Date.now(); // mantener unicidad
         cart.burger[key] = { qty: 1, item: currentItem, fries: chosenFries, extras, notes: noteTxt };
       }else if(CUSTOMIZE_MODE==='edit' || CUSTOMIZE_MODE==='checkout'){
+        // editar existente
         const prev = cart.burger[editingKey];
         if(prev){
           const newKeyBase = buildKey(prev.item.id, chosenFries ?? prev.fries, extras, noteTxt);
+          // Buscar si existe otro con misma firma (fusionar cantidades)
           let targetKey = Object.keys(cart.burger).find(k=>{
             if(k===editingKey) return false;
             const other = cart.burger[k];
@@ -819,11 +831,14 @@
             return compBase === newKeyBase;
           });
           if(!targetKey){
+            // reusar misma key (o renombrar base manteniendo timestamp original)
             targetKey = editingKey;
           }else{
+            // fusionar qty y borrar el viejo
             cart.burger[targetKey].qty += prev.qty;
             delete cart.burger[editingKey];
           }
+          // setear valores en el destino
           cart.burger[targetKey] = {
             ...(cart.burger[targetKey]||prev),
             item: prev.item,
@@ -839,11 +854,12 @@
       renderCart();
 
       if(CUSTOMIZE_MODE==='checkout' && typeof resolveCheckoutStep === 'function'){
-        resolveCheckoutStep(true);
+        resolveCheckoutStep(true); // avanzamos al siguiente que falte
       }
     };
   }
 
+  // Expuesto para botón "✏️ Editar"
   window.editItem = function(type, encKey){
     if(type!=='burger') return;
     const key = decodeURIComponent(encKey);
