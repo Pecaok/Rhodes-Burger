@@ -97,12 +97,9 @@
 
     /* Línea de pago */
     .pay-line{margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
-    .pay-pill{display:inline-block;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}
-    .pay-paid{background:var(--pay-paid);color:#fff}
-    .pay-pending{background:var(--pay-pending);color:#fff}
-    .pay-line .btn{min-width:180px; text-align:center}
-    .pay-line .chip,
-    .pay-line .pay-pill{min-width:160px; text-align:center}
+    /* Botón único de pago (toggle) */
+    .pay-toggle.is-paid{ background:var(--pay-paid); color:#fff; border-color:var(--pay-paid); }
+    .pay-toggle.is-pending{ background:var(--pay-pending); color:#fff; border-color:var(--pay-pending); }
 
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
@@ -300,7 +297,7 @@
       return null;
     }
 
-    /* ========== renderOrder con chip de CUPÓN ========== */
+    /* ========== renderOrder con botón único de PAGO ========== */
     function renderOrder(doc){
       const o = doc.data(); const dt = pickDocDate(o);
       const dtText = dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
@@ -380,11 +377,13 @@
         ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${DISPLAY_LABEL(key)}</button>`).join('')}
       </div>`;
 
-      const paymentPaid = (o.payment_status==='paid' || o.paid);
+      // --- BOTÓN ÚNICO DE PAGO (toggle) ---
+      const isPaid = (o.payment_status==='paid' || o.paid);
       const payLine = `<div class="pay-line">
         <span class="chip">Pago: ${o.pago||'—'}</span>
-        <button class="btn" data-pay="${paymentPaid?'pending':'paid'}">${paymentPaid?'PAGADO ✓':'⏳ Marcar PENDIENTE'}</button>
-        <span class="pay-pill ${paymentPaid?'pay-paid':'pay-pending'}">${paymentPaid?'PENDIENTE DE PAGO':'PAGADO'}</span>
+        <button class="btn pay-toggle ${isPaid?'is-paid':'is-pending'}" data-pay-toggle="${isPaid?'paid':'pending'}">
+          ${isPaid?'PAGADO ✓':'PENDIENTE DE PAGO'}
+        </button>
         <button class="btn" data-print>🖨 Imprimir</button>
       </div>`;
 
@@ -618,8 +617,33 @@
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
         card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
-        const payBtn=card.querySelector("[data-pay]");
-        if(payBtn) payBtn.addEventListener("click",()=>setPaymentStatus(id,payBtn.dataset.pay==="paid"));
+
+        // Toggle único de pago
+        const payToggle=card.querySelector("[data-pay-toggle]");
+        if(payToggle){
+          payToggle.addEventListener("click", async ()=>{
+            const wasPaid = payToggle.dataset.payToggle === "paid";
+            // feedback optimista
+            payToggle.disabled = true;
+            payToggle.classList.toggle("is-paid", !wasPaid);
+            payToggle.classList.toggle("is-pending", wasPaid);
+            payToggle.textContent = !wasPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO";
+            payToggle.dataset.payToggle = !wasPaid ? "paid" : "pending";
+            try{
+              await setPaymentStatus(id, !wasPaid);
+            }catch(e){
+              // revertir si falla
+              payToggle.classList.toggle("is-paid", wasPaid);
+              payToggle.classList.toggle("is-pending", !wasPaid);
+              payToggle.textContent = wasPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO";
+              payToggle.dataset.payToggle = wasPaid ? "paid" : "pending";
+              alert("No se pudo actualizar el pago: " + (e?.message||e));
+            }finally{
+              payToggle.disabled = false;
+            }
+          });
+        }
+
         const pr=card.querySelector("[data-print]");
         if(pr) pr.addEventListener("click",()=> trySilentPrint(idToDoc.get(id)));
       });
