@@ -105,24 +105,6 @@
     .order.cancelled{opacity:.7}
     .order.cancelled .order-title{text-decoration:line-through}
 
-    /* ======= NUEVO: Horario de retiro grande ======= */
-    .pickup-big{
-      font-size: 28px;
-      line-height: 1.1;
-      font-weight: 900;
-      letter-spacing: .5px;
-      text-align: right;
-      margin: 2px 0 10px 0;
-      padding: 6px 12px;
-      border-radius: 14px;
-      background: #fff8e1;
-      border: 1px solid #ffe0a3;
-      display: inline-block;
-    }
-    @media (max-width: 640px){
-      .pickup-big{ font-size: 22px; }
-    }
-
     @media print{
       @page{size:A4 portrait;margin:12mm}
       header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"],[title="Panel admin"],[title="Abrir mostrador"],#btnInstall,#btnAutoPrint{display:none!important}
@@ -314,7 +296,7 @@
       return null;
     }
 
-    /* ========== renderOrder con BOTÓN ÚNICO DE PAGO y HORARIO GRANDE ========== */
+    /* ========== renderOrder (SIN horario de retiro en la página) ========== */
     function renderOrder(doc){
       const o = doc.data(); const dt = pickDocDate(o);
       const dtText = dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
@@ -325,6 +307,7 @@
         const subtotal = (it.price||0)*qty
           + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
           + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
+
         const extras = [];
         if (it.extras?.patty) extras.push(`+${it.extras.patty} medallón(es)`);
         if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
@@ -364,6 +347,9 @@
       const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
       const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
 
+      // (Quitado de la página) — ya no mostramos "Horario retiro" como chip ni grande
+      const pickupChip = ''; // eliminado de la UI
+
       // cupón chip
       let couponChip = '';
       if (o.cupon){
@@ -376,22 +362,6 @@
         }
       }
 
-      // pickup
-      let pickupChip = '';
-      const pickTimeRaw = o.pickup_time || o.pickupTime || o.pickup || null;
-      let pickupPretty = formatSlotTime(pickTimeRaw);
-      if(!pickupPretty && o.pickup_slot){
-        const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
-        if(m) pickupPretty = m[1] + ':' + m[2];
-      }
-      if(pickupPretty){
-        pickupChip = `<span class="chip">Horario retiro: ${pickupPretty}</span>`;
-      }
-      // NUEVO bloque grande
-      const pickupBig = pickupPretty
-        ? `<div class="pickup-big">Retiro: ${pickupPretty}</div>`
-        : '';
-
       const st = o.status ?? "accepted";
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const stateBtns = `<div class="stateBtns">
@@ -399,12 +369,10 @@
       </div>`;
 
       // --- BOTÓN ÚNICO DE PAGO (toggle) ---
-      const forcePaidInDeliveredTab = (currentFilter === 'entregados'); // forzar pago en esa pestaña
+      const forcePaidInDeliveredTab = (currentFilter === 'entregados');
       const isPaid = forcePaidInDeliveredTab || ((o.payment_status==='paid' || o.paid) === true);
-
       const payBtnAttrs = forcePaidInDeliveredTab ? 'disabled' : '';
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
-
       const payLine = `<div class="pay-line">
         <span class="chip">Pago: ${o.pago||'—'}</span>
         <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}" ${payBtnAttrs}>
@@ -428,7 +396,6 @@
           </div>
           <div>
             <div class="right-total">${money(computeOrderTotal(o))}</div>
-            ${pickupBig}
             ${payLine}
           </div>
         </div>
@@ -437,22 +404,48 @@
       </div>`;
     }
 
-    /* ========== Ticket 58mm (DETALLADO) ========== */
+    /* ========== Ticket 58mm (DETALLADO) — CON horario de retiro ========== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
       const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
       const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+
       const orderDisplay = (()=>{ 
         const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
         for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
         return `#${(docSnap.id||'').slice(-5).toUpperCase()}`;
       })();
+
       const dt = (()=>{ const k=['createdAt','created_at','timestamp','date','fecha','time'];
         for(const kk of k){ const v=o[kk]; if(v?.toDate) return v.toDate(); if(typeof v==='number') return new Date(v); if(typeof v==='string'){const d=new Date(v); if(!isNaN(d)) return d;} }
         return new Date();
       })();
       const dateStr = dt.toLocaleDateString('es-AR');
       const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
+
+      // === horario de retiro (solo ticket) ===
+      function formatSlotTime(raw){
+        if(!raw) return null;
+        try{
+          if(typeof raw?.toDate === 'function') return raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+          if(typeof raw?.seconds === 'number')   return new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+          if(typeof raw === 'string'){
+            const d = new Date(raw);
+            if(!isNaN(d)) return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+            const m = raw.match(/(\d{2})(\d{2})$/); if(m) return m[1]+':'+m[2];
+          }
+          if(raw instanceof Date) return raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        }catch(_){}
+        return null;
+      }
+      let pickupPretty = formatSlotTime(o.pickup_time || o.pickupTime || o.pickup || null);
+      if(!pickupPretty && o.pickup_slot){
+        const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
+        if(m) pickupPretty = m[1]+':'+m[2];
+      }
+      const pickupBlock = pickupPretty
+        ? `<div class="blk bigPickup"><div class="lbl">RETIRO</div><div class="time">${esc(pickupPretty)}</div></div>`
+        : '';
 
       const items = Array.isArray(o.items)?o.items:[];
       const linesHTML = items.map(it=>{
@@ -470,10 +463,9 @@
         const lineTotal  = baseSubtotal + pattySum + cheddarSum;
 
         const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
-        const friesLabel = (function normalizeFriesLabel(raw){
+        function normalizeFriesLabel(raw){
           if(!raw && raw !== 0) return '';
-          let s = String(raw).toLowerCase();
-          s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+          let s = String(raw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
           if(!s) return '';
           if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) return 'Sin sal';
           if(/\bsazon\b/.test(s)) return 'Sazonadas';
@@ -482,9 +474,9 @@
           if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
           if(s.includes('sal')) return 'Con sal';
           return '';
-        })(friesRaw);
+        }
+        const friesLabel = normalizeFriesLabel(friesRaw);
 
-        // notas
         let perUnitNotes = null;
         if (Array.isArray(it.notes)) perUnitNotes = it.notes;
         else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
@@ -509,12 +501,11 @@
           <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
           ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(qty*cheddarCount*cheddarUnit)}</div>` : ''}
           ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón — ${money(qty*pattyCount*pattyUnit)}</div>` : ''}
-          <div class="row amount final"><div class="l"></div><div class="r">${money(lineTotal)}</div></div>
+          <div class="row amount final"><div class="l"></div><div class="r">${money(baseSubtotal+pattySum+cheddarSum)}</div></div>
           <div class="sep"></div>
         `;
       }).join('') || '<div class="sub">Sin ítems.</div>';
 
-      // Totales
       const subtotal = (function computeRawSubtotal(o){
         if (typeof o.rawTotal === "number") return o.rawTotal;
         const items = Array.isArray(o.items)?o.items:[];
@@ -575,6 +566,9 @@
   .subtotal{ margin-top:2mm; }
   .total{ font-size:16px; margin-top:3mm; }
   .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
+
+  /* Estilo del horario de retiro en el ticket */
+  .bigPickup .time{ font-size:18px; text-align:center; margin:2px 0 2mm 0; }
 </style>
 </head>
 <body>
@@ -585,6 +579,9 @@
     <div class="hr"></div>
 
     ${o.nombre? `<div class="blk"><div class="lbl">CLIENTE</div><div>${esc(o.nombre)}</div></div>` : ''}
+
+    ${pickupBlock}  <!-- ENTRE CLIENTE Y MEDIO DE PAGO -->
+
     ${(o.pago||o.payment_method)? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${esc((o.pago||o.payment_method)||'')}</div></div>` : ''}
 
     ${o.cupon ? `<div class="blk"><div class="lbl">CUPÓN</div><div>${esc(o.cupon)}</div></div>` : ''}
@@ -645,10 +642,9 @@
 
         // Botón único de pago (toggle)
         const payToggle=card.querySelector("[data-pay-toggle]");
-        if(payToggle && currentFilter!=="entregados"){   // en Entregados no se permite cambiar (forzado a pagado)
+        if(payToggle && currentFilter!=="entregados"){
           payToggle.addEventListener("click", async ()=>{
             const wasPaid = payToggle.dataset.payToggle === "paid";
-            // UI optimista
             payToggle.disabled = true;
             payToggle.classList.toggle("is-paid", !wasPaid);
             payToggle.classList.toggle("is-pending", wasPaid);
@@ -657,7 +653,6 @@
             try{
               await setPaymentStatus(id, !wasPaid);
             }catch(e){
-              // revertir si falla
               payToggle.classList.toggle("is-paid", wasPaid);
               payToggle.classList.toggle("is-pending", !wasPaid);
               payToggle.textContent = wasPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO";
@@ -693,7 +688,6 @@
         let q=db.collection("orders");
         q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
 
-        // AUMENTO DE LÍMITE (antes 100)
         q.limit(500).onSnapshot(async snap=>{
           lastSnap = snap;
           document.getElementById("ordersError").style.display="none";
