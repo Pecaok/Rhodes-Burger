@@ -37,7 +37,7 @@
   ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
     window.addEventListener(evt, bumpSession, {passive:true});
   });
-</script>
+  </script>
 
 <head>
   <meta charset="utf-8" />
@@ -95,9 +95,9 @@
     .state-delivered.on{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-cancelled.on{background:var(--st-cancelled);border-color:var(--st-cancelled);color:#fff}
 
-    /* Línea de pago */
+    /* Línea de pago: botón único (toggle) */
     .pay-line{margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
-    /* Botón único de pago (toggle) */
+    .pay-toggle{min-width:200px;text-align:center}
     .pay-toggle.is-paid{ background:var(--pay-paid); color:#fff; border-color:var(--pay-paid); }
     .pay-toggle.is-pending{ background:var(--pay-pending); color:#fff; border-color:var(--pay-pending); }
 
@@ -125,11 +125,8 @@
         <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
       </nav>
 
-      <!-- Botón para instalar la PWA -->
       <button id="btnInstall" class="btn" style="display:none" title="Instalar app">➕ Instalar app</button>
-
       <button id="btnBell" class="btn" title="Activar/desactivar sonido">🔔 Sonido</button>
-      <!-- 🔽 NUEVO: Autoimprimir -->
       <button id="btnAutoPrint" class="btn" title="Autoimprimir nuevos pedidos">🖨️ Autoimprimir</button>
       <button id="btnLogout" class="btn danger" title="Cerrar sesión">⏻ Cerrar sesión</button>
     </div>
@@ -168,6 +165,7 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
+    /* ===== helpers fecha/orden ===== */
     function chooseDateField(obj){
       const cand=['createdAt','created_at','timestamp','date','fecha','time'];
       for(const k of cand){ if(obj && obj[k] != null) return k; }
@@ -195,8 +193,8 @@
     let audioCtx = null, audioReady = false;
     function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
     async function ensureAudioReady(){ try{ const ctx=getAudioCtx(); if(ctx.state==='suspended') await ctx.resume(); audioReady=(ctx.state==='running'); }catch(e){ audioReady=false; } return audioReady; }
-    function beepOnce(ctx, d=0.28, f=880, g=0.7){ const o=ctx.createOscillator(), ga=ctx.createGain(); o.type="square"; o.frequency.value=f; o.connect(ga); ga.connect(ctx.destination); ga.gain.setValueAtTime(0.0001, ctx.currentTime); ga.gain.exponentialRampToValueAtTime(g, ctx.currentTime+0.02); ga.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+d); o.start(); o.stop(ctx.currentTime+d+0.02); }
-    async function playBeepTriple(){ if(!soundEnabled) return; const ok=await ensureAudioReady(); if(!ok) return; const ctx=getAudioCtx(); beepOnce(ctx,0.28,900,0.8); setTimeout(()=>beepOnce(ctx,0.28,900,0.8),350); setTimeout(()=>beepOnce(ctx,0.28,900,0.8),700); }
+    function beepOnce(ctx, d=0.22, f=900, g=0.7){ const o=ctx.createOscillator(), ga=ctx.createGain(); o.type="square"; o.frequency.value=f; o.connect(ga); ga.connect(ctx.destination); ga.gain.setValueAtTime(0.0001, ctx.currentTime); ga.gain.exponentialRampToValueAtTime(g, ctx.currentTime+0.02); ga.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+d); o.start(); o.stop(ctx.currentTime+d+0.02); }
+    async function playBeepTriple(){ if(!soundEnabled) return; const ok=await ensureAudioReady(); if(!ok) return; const ctx=getAudioCtx(); beepOnce(ctx); setTimeout(()=>beepOnce(ctx),320); setTimeout(()=>beepOnce(ctx),640); }
     ['click','touchstart','keydown'].forEach(evt=> window.addEventListener(evt, ()=>{ if(!audioReady) ensureAudioReady(); }, {passive:true}));
 
     const btnBell=$("#btnBell");
@@ -206,7 +204,7 @@
 
     $("#btnLogout").onclick=()=>{ logout(); };
 
-    /* ====== Filtros tabs ====== */
+    /* ====== Filtros ====== */
     const tabs=$("#tabs");
     let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
 
@@ -232,6 +230,7 @@
       return true;
     };
 
+    /* ====== acciones ====== */
     async function setOrderStatus(id,next){
       try{
         await db.collection("orders").doc(id).update({
@@ -249,8 +248,8 @@
         });
       }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
     }
-    const btnStateClass=st=>`state-btn state-${st}`;
 
+    const btnStateClass=st=>`state-btn state-${st}`;
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
     const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
     const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
@@ -268,7 +267,6 @@
     };
     const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ====== Helpers de UI ====== */
     function normalizeFriesLabel(raw){
       if(!raw && raw !== 0) return '';
       let s = String(raw).toLowerCase();
@@ -297,7 +295,7 @@
       return null;
     }
 
-    /* ========== renderOrder con botón único de PAGO ========== */
+    /* ========== renderOrder con BOTÓN ÚNICO DE PAGO ========== */
     function renderOrder(doc){
       const o = doc.data(); const dt = pickDocDate(o);
       const dtText = dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
@@ -618,12 +616,12 @@
         const id=card.dataset.id;
         card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
 
-        // Toggle único de pago
+        // Botón único de pago (toggle)
         const payToggle=card.querySelector("[data-pay-toggle]");
         if(payToggle){
           payToggle.addEventListener("click", async ()=>{
             const wasPaid = payToggle.dataset.payToggle === "paid";
-            // feedback optimista
+            // UI optimista
             payToggle.disabled = true;
             payToggle.classList.toggle("is-paid", !wasPaid);
             payToggle.classList.toggle("is-pending", wasPaid);
@@ -649,7 +647,7 @@
       });
     }
 
-    /* ========= NUEVO: Toggle Autoimprimir ========= */
+    /* ========= Toggle Autoimprimir ========= */
     let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
     const btnAutoPrint = document.getElementById("btnAutoPrint");
     const updateAP = ()=> btnAutoPrint.classList.toggle("active", autoPrint);
@@ -667,21 +665,38 @@
         if(!probe.empty) dateField = chooseDateField(probe.docs[0].data());
         let q=db.collection("orders");
         q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
-        q.limit(100).onSnapshot(snap=>{
+        q.limit(100).onSnapshot(async snap=>{
           lastSnap = snap;
           document.getElementById("ordersError").style.display="none";
           document.getElementById("ordersError").textContent="";
           renderList(snap);
 
-          snap.docChanges().forEach(ch=>{
-            if(ch.type==='added' && initialLoaded){
-              playBeepTriple();
-              if (autoPrint) {
-                const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
-                trySilentPrint(snapDoc); // con --kiosk-printing no muestra diálogo
+          // Fuerza "pendiente de pago" en NUEVOS docs
+          for (const ch of snap.docChanges()){
+            if(ch.type==='added'){
+              const d = ch.doc.data();
+              if (d.payment_status !== 'pending_payment' || d.paid !== false){
+                try{
+                  await db.collection('orders').doc(ch.doc.id).update({
+                    paid:false,
+                    payment_status:'pending_payment',
+                    statusHistory:firebase.firestore.FieldValue.arrayUnion({
+                      to:'pending_payment',
+                      at:new Date().toISOString(),
+                      reason:'auto-set-on-arrival'
+                    })
+                  });
+                }catch(e){ console.warn('No se pudo forzar pendiente:', e); }
+              }
+              if(initialLoaded){
+                playBeepTriple();
+                if (autoPrint) {
+                  const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
+                  trySilentPrint(snapDoc);
+                }
               }
             }
-          });
+          }
           initialLoaded = true;
         }, err=>{
           console.error(err);
