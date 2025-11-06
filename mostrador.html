@@ -370,7 +370,7 @@
     applySidesToUI();
   }
 
-  /* ===== PICKUP / SLOTS — SIN LÍMITE DE CUPO ===== */
+  /* ===== PICKUP / SLOTS — SIEMPRE HABILITADO ===== */
   const MAX_PER_SLOT   = Infinity;         // sin tope
   const MINUTES_AHEAD  = 5;
   const OPEN_TIME      = "12:00";
@@ -387,7 +387,7 @@
     const open = dateTodayAt(OPEN_TIME), close = dateTodayAt(CLOSE_TIME);
     const start = startAt > open ? startAt : open;
 
-    // Hasta las 02:00 inclusive (último seleccionable) => generamos slots hasta 02:00
+    // Hasta las 02:00 inclusive (último seleccionable)
     const lastSelectable = new Date(open.getFullYear(), open.getMonth(), open.getDate(), 2, 0, 0, 0);
 
     const res = [];
@@ -401,7 +401,7 @@
 
   let slotListeners = [];
   let allSlots = [];       // { date, key, count, full:false, tooSoon, unsub }
-  let visibleSlots = [];   // filtrados por “demasiado pronto”
+  let visibleSlots = [];   // ahora: TODOS los slots
   let currentVisibleIndex = 0;
 
   function clearSlotListeners(){
@@ -430,7 +430,7 @@
     $("#pickupCupos").style.display = "none";
     $("#pickupDesc").textContent = `Turnos cada ${interval} minutos desde ${startStr}. Cupos: sin límite. (Último: 02:00)`;
 
-    // Suscripciones solo para info (no bloquean)
+    // Suscripciones: solo informativas
     allSlots.forEach(sObj=>{
       (function(slotObj){
         const ref = db.collection('slots').doc(slotObj.key);
@@ -452,17 +452,19 @@
     setTimeout(rebuildVisibleSlotsAndKeepSelection, 200);
   }
 
+  /* >>> CAMBIO: usar TODOS los slots (sin filtrar tooSoon) */
   function rebuildVisibleSlotsAndKeepSelection(){
     const timeEl = $("#pickupTime");
     const capEl  = $("#pickupCupos");
 
     const prevKey = (window._selectedSlot && window._selectedSlot.key) ? window._selectedSlot.key : null;
-    // Filtramos SOLO “tooSoon”, no por cupo
-    visibleSlots = allSlots.filter(s=>!s.tooSoon).sort((a,b)=>a.date-b.date);
+
+    // Antes: allSlots.filter(s=>!s.tooSoon)
+    visibleSlots = allSlots.slice().sort((a,b)=>a.date-b.date);
 
     if(visibleSlots.length===0){
       currentVisibleIndex = -1;
-      timeEl.innerHTML = '<span class="no-slots">A la brevedad</span>'; // permite seguir
+      timeEl.innerHTML = '<span class="no-slots">A la brevedad</span>';
       timeEl.classList.add('disabled');
       capEl.style.display='none';
       $("#btnPrev").classList.add('disabled');
@@ -1100,12 +1102,12 @@
           items, total, status:(pago==='mercado_pago'?'pending_payment':'accepted'),
           payment_status:(pago==='mercado_pago'?'pending_payment':'paid'),
           source:"mostrador",
-          // si hay slot elegido lo guardamos, sino se guarda ASAP
+          // si hay slot elegido lo guardamos, sino ASAP
           pickup_slot: selected ? selected.key : null,
           pickup_time: selected ? selected.iso : null,
           pickup_time_pretty: selected ? selected.pretty : null,
           pickup_asap: !selected,
-          printedAt: null,  /* <<<<<< CLAVE PARA AUTOIMPRESIÓN */
+          printedAt: null,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         };
 
