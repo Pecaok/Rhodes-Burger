@@ -452,87 +452,61 @@
     setTimeout(rebuildVisibleSlotsAndKeepSelection, 200);
   }
 
-  /* >>> CAMBIO: usar TODOS los slots (sin filtrar tooSoon) */
-  function rebuildVisibleSlotsAndKeepSelection(){
-    const timeEl = $("#pickupTime");
-    const capEl  = $("#pickupCupos");
+ function rebuildVisibleSlotsAndKeepSelection(){
+  const timeEl = $("#pickupTime");
+  const capEl  = $("#pickupCupos");
 
-    const prevKey = (window._selectedSlot && window._selectedSlot.key) ? window._selectedSlot.key : null;
+  const prevKey = (window._selectedSlot && window._selectedSlot.key) ? window._selectedSlot.key : null;
 
-    // Antes: allSlots.filter(s=>!s.tooSoon)
-    visibleSlots = allSlots.slice().sort((a,b)=>a.date-b.date);
+  // Generar slots entre 19:10 y 02:00, siempre visibles
+  const now = new Date();
+  const startAt = dateTodayAt("19:10");
+  const slots = genSlots(startAt, 10); // cada 10 min
+  visibleSlots = slots.map(d => ({ date:d, key:slotKeyFromDate(d) }));
 
-    if(visibleSlots.length===0){
-      currentVisibleIndex = -1;
-      timeEl.innerHTML = '<span class="no-slots">A la brevedad</span>';
-      timeEl.classList.add('disabled');
-      capEl.style.display='none';
-      $("#btnPrev").classList.add('disabled');
-      $("#btnNext").classList.add('disabled');
-      window._selectedSlot = null;
-      renderQuickList();
-      return;
-    }
-
-    const idx = visibleSlots.findIndex(s=>s.key===prevKey);
-    if(idx>=0) currentVisibleIndex = idx;
-    else {
-      const now = Date.now();
-      const near = visibleSlots.findIndex(s=>s.date.getTime()>=now);
-      currentVisibleIndex = (near>=0)?near:0;
-    }
-
-    updatePickupUI();
+  if(visibleSlots.length===0){
+    timeEl.textContent = "Sin horarios";
+    timeEl.classList.add("disabled");
+    capEl.style.display='none';
+    $("#btnPrev").classList.add("disabled");
+    $("#btnNext").classList.add("disabled");
+    window._selectedSlot = null;
+    return;
   }
 
-  function updatePickupUI(){
-    const timeEl = $("#pickupTime");
-    const capEl  = $("#pickupCupos");
-    const prevBtn = $("#btnPrev");
-    const nextBtn = $("#btnNext");
+  const idx = visibleSlots.findIndex(s=>s.key===prevKey);
+  if(idx>=0) currentVisibleIndex = idx;
+  else currentVisibleIndex = 0;
 
-    if(currentVisibleIndex<0 || currentVisibleIndex>=visibleSlots.length){
-      timeEl.textContent='A la brevedad';
-      timeEl.classList.add('disabled');
-      capEl.style.display='none';
-      prevBtn.classList.add('disabled'); nextBtn.classList.add('disabled');
-      window._selectedSlot=null; renderQuickList(); return;
-    }
+  updatePickupUI();
+}
 
-    const s = visibleSlots[currentVisibleIndex];
-    timeEl.textContent = slotPretty(s.date);
-    timeEl.classList.remove('disabled');
+function updatePickupUI(){
+  const timeEl = $("#pickupTime");
+  const capEl  = $("#pickupCupos");
+  const prevBtn = $("#btnPrev");
+  const nextBtn = $("#btnNext");
 
-    capEl.textContent = 'sin límite';
-    capEl.style.display = 'inline';
-
-    (currentVisibleIndex<=0) ? prevBtn.classList.add('disabled') : prevBtn.classList.remove('disabled');
-    (currentVisibleIndex>=visibleSlots.length-1) ? nextBtn.classList.add('disabled') : nextBtn.classList.remove('disabled');
-
-    window._selectedSlot = { key:s.key, iso:s.date.toISOString(), pretty:slotPretty(s.date) };
-
-    renderQuickList();
+  if(currentVisibleIndex<0 || currentVisibleIndex>=visibleSlots.length){
+    timeEl.textContent='Sin horarios';
+    timeEl.classList.add('disabled');
+    capEl.style.display='none';
+    prevBtn.classList.add('disabled'); nextBtn.classList.add('disabled');
+    window._selectedSlot=null;
+    return;
   }
 
-  function renderQuickList(){
-    const list = $("#slotsQuickList");
-    if(!list) return;
-    list.innerHTML = '';
-    if(!visibleSlots.length){
-      const div = document.createElement('div');
-      div.className='muted';
-      div.textContent = 'No hay horarios visibles. Se cargará “A la brevedad”.';
-      list.appendChild(div);
-      return;
-    }
-    visibleSlots.forEach((s, i)=>{
-      const btn = document.createElement('div');
-      btn.className = 'slot-quick';
-      btn.textContent = `${slotPretty(s.date)} · sin límite`;
-      btn.onclick = ()=>{ currentVisibleIndex = i; updatePickupUI(); $("#slotsOverlay").classList.remove('open'); };
-      list.appendChild(btn);
-    });
-  }
+  const s = visibleSlots[currentVisibleIndex];
+  timeEl.textContent = slotPretty(s.date);
+  timeEl.classList.remove('disabled');
+  capEl.textContent = 'sin límite';
+  capEl.style.display = 'inline';
+
+  prevBtn.classList.toggle('disabled', currentVisibleIndex<=0);
+  nextBtn.classList.toggle('disabled', currentVisibleIndex>=visibleSlots.length-1);
+
+  window._selectedSlot = { key:s.key, iso:s.date.toISOString(), pretty:slotPretty(s.date) };
+}
 
   async function refreshSlotsUI(){
     try{ await subscribeAndRenderSlots(); }catch(e){ console.warn('refreshSlotsUI error', e); $("#pickupDesc").textContent='Error al cargar turnos. Podés continuar: se guardará “A la brevedad”.'; }
