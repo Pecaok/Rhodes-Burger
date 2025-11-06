@@ -695,32 +695,42 @@
           renderList(snap);
 
           // Fuerza "pendiente de pago" en NUEVOS docs
-          for (const ch of snap.docChanges()){
-            if(ch.type==='added'){
-              const d = ch.doc.data();
-              if (d.payment_status !== 'pending_payment' || d.paid !== false){
-                try{
-                  await db.collection('orders').doc(ch.doc.id).update({
-                    paid:false,
-                    payment_status:'pending_payment',
-                    statusHistory:firebase.firestore.FieldValue.arrayUnion({
-                      to:'pending_payment',
-                      at:new Date().toISOString(),
-                      reason:'auto-set-on-arrival'
-                    })
-                  });
-                }catch(e){ console.warn('No se pudo forzar pendiente:', e); }
-              }
-              if(initialLoaded){
-                playBeepTriple();
-                if (autoPrint) {
-                  const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
-                  trySilentPrint(snapDoc);
-                }
-              }
-            }
-          }
-          initialLoaded = true;
+         // detecta pedidos nuevos luego de la carga inicial
+for (const ch of snap.docChanges()){
+  if (ch.type === 'added') {
+    const d = ch.doc.data();
+
+    // fuerza pago pendiente si viene distinto
+    if (d.payment_status !== 'pending_payment' || d.paid !== false) {
+      try {
+        await db.collection('orders').doc(ch.doc.id).update({
+          paid: false,
+          payment_status: 'pending_payment',
+          statusHistory: firebase.firestore.FieldValue.arrayUnion({
+            to: 'pending_payment',
+            at: new Date().toISOString(),
+            reason: 'auto-set-on-arrival'
+          })
+        });
+      } catch (e) {
+        console.warn('No se pudo forzar pendiente:', e);
+      }
+    }
+
+    // 🔊 solo sonar si la carga inicial ya ocurrió
+    if (initialLoaded) {
+      playBeepTriple();
+      if (autoPrint) {
+        const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
+        trySilentPrint(snapDoc);
+      }
+    }
+  }
+}
+
+// 🔇 marcar carga inicial solo la primera vez que llega un snapshot
+if (!initialLoaded) initialLoaded = true;
+
         }, err=>{
           console.error(err);
           document.getElementById("ordersError").textContent="No se pudo cargar la lista de pedidos.";
