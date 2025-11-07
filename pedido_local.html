@@ -697,47 +697,55 @@
         let q=db.collection("orders");
         q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
 
-        q.limit(500).onSnapshot(async snap=>{
-          lastSnap = snap;
-          document.getElementById("ordersError").style.display="none";
-          document.getElementById("ordersError").textContent="";
-          renderList(snap);
+       let firstSnapshot = true;
 
-          // detecta pedidos nuevos luego de la carga inicial
-          for (const ch of snap.docChanges()){
-            if (ch.type === 'added') {
-              const d = ch.doc.data();
+q.limit(500).onSnapshot(async snap=>{
+  lastSnap = snap;
+  document.getElementById("ordersError").style.display="none";
+  document.getElementById("ordersError").textContent="";
+  renderList(snap);
 
-              // fuerza pago pendiente si viene distinto
-              if (d.payment_status !== 'pending_payment' || d.paid !== false) {
-                try {
-                  await db.collection('orders').doc(ch.doc.id).update({
-                    paid: false,
-                    payment_status: 'pending_payment',
-                    statusHistory: firebase.firestore.FieldValue.arrayUnion({
-                      to: 'pending_payment',
-                      at: new Date().toISOString(),
-                      reason: 'auto-set-on-arrival'
-                    })
-                  });
-                } catch (e) {
-                  console.warn('No se pudo forzar pendiente:', e);
-                }
-              }
+  // en el primer snapshot solo marcamos loaded sin hacer nada
+  if (firstSnapshot) {
+    firstSnapshot = false;
+    initialLoaded = true;
+    return; // 🚫 no procesar cambios en la carga inicial
+  }
 
-              // 🔊 solo sonar si la carga inicial ya ocurrió
-              if (initialLoaded) {
-                playBeepTriple();
-                if (autoPrint) {
-                  const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
-                  trySilentPrint(snapDoc);
-                }
-              }
-            }
-          }
+  // detecta pedidos nuevos después de la carga inicial
+  for (const ch of snap.docChanges()){
+    if (ch.type === 'added') {
+      const d = ch.doc.data();
 
-          // 🔇 marcar carga inicial solo la primera vez que llega un snapshot
-          if (!initialLoaded) initialLoaded = true;
+      if (d.payment_status !== 'pending_payment' || d.paid !== false) {
+        try {
+          await db.collection('orders').doc(ch.doc.id).update({
+            paid: false,
+            payment_status: 'pending_payment',
+            statusHistory: firebase.firestore.FieldValue.arrayUnion({
+              to: 'pending_payment',
+              at: new Date().toISOString(),
+              reason: 'auto-set-on-arrival'
+            })
+          });
+        } catch (e) {
+          console.warn('No se pudo forzar pendiente:', e);
+        }
+      }
+
+      // 🔊 ahora sí, suena solo en nuevos pedidos reales
+      playBeepTriple();
+      if (autoPrint) {
+        const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
+        trySilentPrint(snapDoc);
+      }
+    }
+  }
+}, err=>{
+  console.error(err);
+  document.getElementById("ordersError").textContent="No se pudo cargar la lista de pedidos.";
+  document.getElementById("ordersError").style.display="block";
+});
 
         }, err=>{
           console.error(err);
