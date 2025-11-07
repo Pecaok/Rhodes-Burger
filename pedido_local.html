@@ -438,11 +438,21 @@
         }catch(_){}
         return null;
       }
-      let pickupPretty = formatSlotTime(o.pickup_time || o.pickupTime || o.pickup || null);
+
+      // Preferir el pretty calculado por cliente/mostrador si existe
+      let pickupPretty =
+        (o.pickup_time_pretty && String(o.pickup_time_pretty)) ||
+        formatSlotTime(o.pickup_time || o.pickupTime || o.pickup || null);
+
+      // Fallback a slot HHMM
       if(!pickupPretty && o.pickup_slot){
         const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
         if(m) pickupPretty = m[1]+':'+m[2];
       }
+
+      // Si es ASAP
+      if(!pickupPretty && (o.pickup_asap === true)) pickupPretty = 'A la brevedad';
+
       const pickupBlock = pickupPretty
         ? `<div class="blk bigPickup"><div class="lbl">RETIRO</div><div class="time">${esc(pickupPretty)}</div></div>`
         : '';
@@ -460,7 +470,6 @@
         const baseSubtotal = base * qty;
         const pattySum   = qty * pattyCount * pattyUnit;
         const cheddarSum = qty * cheddarCount * cheddarUnit;
-        const lineTotal  = baseSubtotal + pattySum + cheddarSum;
 
         const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
         function normalizeFriesLabel(raw){
@@ -694,42 +703,41 @@
           document.getElementById("ordersError").textContent="";
           renderList(snap);
 
-          // Fuerza "pendiente de pago" en NUEVOS docs
-         // detecta pedidos nuevos luego de la carga inicial
-for (const ch of snap.docChanges()){
-  if (ch.type === 'added') {
-    const d = ch.doc.data();
+          // detecta pedidos nuevos luego de la carga inicial
+          for (const ch of snap.docChanges()){
+            if (ch.type === 'added') {
+              const d = ch.doc.data();
 
-    // fuerza pago pendiente si viene distinto
-    if (d.payment_status !== 'pending_payment' || d.paid !== false) {
-      try {
-        await db.collection('orders').doc(ch.doc.id).update({
-          paid: false,
-          payment_status: 'pending_payment',
-          statusHistory: firebase.firestore.FieldValue.arrayUnion({
-            to: 'pending_payment',
-            at: new Date().toISOString(),
-            reason: 'auto-set-on-arrival'
-          })
-        });
-      } catch (e) {
-        console.warn('No se pudo forzar pendiente:', e);
-      }
-    }
+              // fuerza pago pendiente si viene distinto
+              if (d.payment_status !== 'pending_payment' || d.paid !== false) {
+                try {
+                  await db.collection('orders').doc(ch.doc.id).update({
+                    paid: false,
+                    payment_status: 'pending_payment',
+                    statusHistory: firebase.firestore.FieldValue.arrayUnion({
+                      to: 'pending_payment',
+                      at: new Date().toISOString(),
+                      reason: 'auto-set-on-arrival'
+                    })
+                  });
+                } catch (e) {
+                  console.warn('No se pudo forzar pendiente:', e);
+                }
+              }
 
-    // 🔊 solo sonar si la carga inicial ya ocurrió
-    if (initialLoaded) {
-      playBeepTriple();
-      if (autoPrint) {
-        const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
-        trySilentPrint(snapDoc);
-      }
-    }
-  }
-}
+              // 🔊 solo sonar si la carga inicial ya ocurrió
+              if (initialLoaded) {
+                playBeepTriple();
+                if (autoPrint) {
+                  const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
+                  trySilentPrint(snapDoc);
+                }
+              }
+            }
+          }
 
-// 🔇 marcar carga inicial solo la primera vez que llega un snapshot
-if (!initialLoaded) initialLoaded = true;
+          // 🔇 marcar carga inicial solo la primera vez que llega un snapshot
+          if (!initialLoaded) initialLoaded = true;
 
         }, err=>{
           console.error(err);
