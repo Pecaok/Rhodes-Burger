@@ -1,4 +1,4 @@
-<!doctype html>
+<!doctype html> 
 <html lang="es">
   <script>
   /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
@@ -189,6 +189,34 @@
       return `#${doc.id.slice(-5).toUpperCase()}`;
     }
 
+    /* ===== Horario de retiro (único para página + ticket) ===== */
+    function formatSlotTime(raw){
+      if(!raw) return null;
+      try{
+        if(typeof raw?.toDate === 'function') return raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        if(typeof raw?.seconds === 'number') return new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+        if(typeof raw === 'string'){
+          const d = new Date(raw);
+          if(!isNaN(d)) return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+          const m = raw.match(/(\d{2})(\d{2})$/); if(m) return m[1]+':'+m[2];
+        }
+        if(raw instanceof Date) return raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+      }catch(e){}
+      return null;
+    }
+    function getPickupPretty(o){
+      // Prioridad: pretty explícito > timestamps/strings > slot HHMM > ASAP
+      let pretty = (o.pickup_time_pretty && String(o.pickup_time_pretty)) ||
+                   formatSlotTime(o.pickup_time || o.pickupTime || o.pickup || null);
+
+      if(!pretty && o.pickup_slot){
+        const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
+        if(m) pretty = m[1]+':'+m[2];
+      }
+      if(!pretty && (o.pickup_asap === true)) pretty = 'A la brevedad';
+      return pretty || null;
+    }
+
     /* ===== sonido ===== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let audioCtx = null, audioReady = false;
@@ -281,26 +309,14 @@
       if(s.includes('sal')) return 'Con sal';
       return '';
     }
-    function formatSlotTime(raw){
-      if(!raw) return null;
-      try{
-        if(typeof raw.toDate === 'function') return raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-        if(raw && typeof raw.seconds === 'number') return new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-        if(typeof raw === 'string'){
-          const d = new Date(raw);
-          if(!isNaN(d)) return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-          const m = raw.match(/(\d{2})(\d{2})$/); if(m) return m[1]+':'+m[2];
-        }
-        if(raw instanceof Date) return raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-      }catch(e){}
-      return null;
-    }
 
-    /* ========== renderOrder (SIN horario de retiro en la página) ========== */
+    /* ========== renderOrder: ahora muestra HORARIO en el chip ========== */
     function renderOrder(doc){
       const o = doc.data(); const dt = pickDocDate(o);
       const dtText = dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
       const items = Array.isArray(o.items) ? o.items : [];
+
+      const pickupPretty = getPickupPretty(o);   // <<<<<<<<<<<<<<
 
       const lines = items.map(it=>{
         const qty = it.qty||1;
@@ -373,7 +389,8 @@
             <div class="chips">
               <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
               <span class="chip">Estado: ${st}</span>
-              <span class="chip">Retiro: ${o.entrega||'—'}</span>
+              <span class="chip">Retiro: ${o.entrega || 'mostrador'}</span>
+              <span class="chip">Horario: ${pickupPretty || '—'}</span>
               ${telChip}${srcChip}${cmtChip}
             </div>
             ${stateBtns}
@@ -388,7 +405,7 @@
       </div>`;
     }
 
-    /* ========== Ticket 58mm (DETALLADO) — CON horario de retiro ========== */
+    /* ========== Ticket 58mm — usa el mismo getPickupPretty() ========== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
       const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -407,31 +424,7 @@
       const dateStr = dt.toLocaleDateString('es-AR');
       const timeStr = dt.toLocaleTimeString('es-AR',{hour12:false});
 
-      function formatSlotTime(raw){
-        if(!raw) return null;
-        try{
-          if(typeof raw?.toDate === 'function') return raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-          if(typeof raw?.seconds === 'number')   return new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-          if(typeof raw === 'string'){
-            const d = new Date(raw);
-            if(!isNaN(d)) return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-            const m = raw.match(/(\d{2})(\d{2})$/); if(m) return m[1]+':'+m[2];
-          }
-          if(raw instanceof Date) return raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-        }catch(_){}
-        return null;
-      }
-
-      // Preferir pretty si existe, fallback a HH:MM o ASAP
-      let pickupPretty =
-        (o.pickup_time_pretty && String(o.pickup_time_pretty)) ||
-        formatSlotTime(o.pickup_time || o.pickupTime || o.pickup || null);
-
-      if(!pickupPretty && o.pickup_slot){
-        const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
-        if(m) pickupPretty = m[1]+':'+m[2];
-      }
-      if(!pickupPretty && (o.pickup_asap === true)) pickupPretty = 'A la brevedad';
+      const pickupPretty = getPickupPretty(o);  // <<<<<<<<<<<<<<
 
       const pickupBlock = pickupPretty
         ? `<div class="blk bigPickup"><div class="lbl">RETIRO</div><div class="time">${esc(pickupPretty)}</div></div>`
@@ -555,7 +548,6 @@
   .subtotal{ margin-top:2mm; }
   .total{ font-size:16px; margin-top:3mm; }
   .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
-
   .bigPickup .time{ font-size:18px; text-align:center; margin:2px 0 2mm 0; }
 </style>
 </head>
@@ -685,14 +677,12 @@
           document.getElementById("ordersError").textContent="";
           renderList(snap);
 
-          // en el primer snapshot solo marcamos loaded sin hacer nada
           if (firstSnapshot) {
             firstSnapshot = false;
             initialLoaded = true;
-            return; // no procesar cambios en la carga inicial
+            return;
           }
 
-          // detecta pedidos nuevos después de la carga inicial
           for (const ch of snap.docChanges()){
             if (ch.type === 'added') {
               const d = ch.doc.data();
@@ -713,7 +703,6 @@
                 }
               }
 
-              // suena solo en nuevos pedidos reales
               try{ playBeepTriple(); }catch(_){}
               if (autoPrint) {
                 const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
