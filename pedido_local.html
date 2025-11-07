@@ -431,62 +431,74 @@
         : '';
 
       const items = Array.isArray(o.items)?o.items:[];
-      const linesHTML = items.map(it=>{
-        const qty = it.qty||1;
-        const name = (it.name||'').toString();
-        const base = (it.price||0);
-        const pattyCount = it.extras?.patty||0;
-        const pattyUnit  = it.extras?.EXTRA_PRICE_PATTY||0;
-        const cheddarCount = it.extras?.cheddar||0;
-        const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||0;
+     const linesHTML = items.map(it=>{
+  const qty = it.qty||1;
+  const name = (it.name||'').toString();
+  const base = (it.price||0);
+  const pattyCount   = it.extras?.patty||0;
+  const pattyUnit    = it.extras?.EXTRA_PRICE_PATTY||0;
+  const cheddarCount = it.extras?.cheddar||0;
+  const cheddarUnit  = it.extras?.EXTRA_PRICE_CHEDDAR||0;
 
-        const baseSubtotal = base * qty;
-        const pattySum   = qty * pattyCount * pattyUnit;
-        const cheddarSum = qty * cheddarCount * cheddarUnit;
+  const baseSubtotal = base * qty;
+  const pattySum     = qty * pattyCount   * pattyUnit;
+  const cheddarSum   = qty * cheddarCount * cheddarUnit;
 
-        const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
-        function normalizeFriesLabel(raw){
-          if(!raw && raw !== 0) return '';
-          let s = String(raw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
-          if(!s) return '';
-          if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) return 'Sin sal';
-          if(/\bsazon\b/.test(s)) return 'Sazonadas';
-          if(/\bsal\b/.test(s)) return 'Con sal';
-          if(s.includes('sazon')) return 'Sazonadas';
-          if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
-          if(s.includes('sal')) return 'Con sal';
-          return '';
-        }
-        const friesLabel = normalizeFriesLabel(friesRaw);
+  const friesRaw = (it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || (it.item && it.item.fries) || '');
+  function normalizeFriesLabel(raw){
+    if(!raw && raw !== 0) return '';
+    let s = String(raw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+    if(!s) return '';
+    if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) return 'Sin sal';
+    if(/\bsazon\b/.test(s)) return 'Sazonadas';
+    if(/\bsal\b/.test(s)) return 'Con sal';
+    if(s.includes('sazon')) return 'Sazonadas';
+    if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
+    if(s.includes('sal')) return 'Con sal';
+    return '';
+  }
+  const friesLabel = normalizeFriesLabel(friesRaw);
 
-        let perUnitNotes = null;
-        if (Array.isArray(it.notes)) perUnitNotes = it.notes;
-        else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
-        else if (Array.isArray(it.comment)) perUnitNotes = it.comment;
+  // Notas por ítem
+  let perUnitNotes = null;
+  if (Array.isArray(it.notes)) perUnitNotes = it.notes;
+  else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
+  else if (Array.isArray(it.comment)) perUnitNotes = it.comment;
 
-        let commentPart = '';
-        if (perUnitNotes && perUnitNotes.length){
-          commentPart = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${esc(c)}</div>`).join('');
-        } else {
-          const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
-                       : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
-                       : null;
-          if (single){
-            commentPart = `<div class="sub">• Nota: ${esc(single)}${qty>1?' (todas)':''}</div>`;
-          }
-        }
+  let commentPart = '';
+  if (perUnitNotes && perUnitNotes.length){
+    commentPart = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${esc(c)}</div>`).join('');
+  } else {
+    const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
+                 : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
+                 : null;
+    if (single){
+      commentPart = `<div class="sub">• Nota: ${esc(single)}${qty>1?' (todas)':''}</div>`;
+    }
+  }
 
-        return `
-          <div class="row name"><div class="l">${qty} × ${esc(name)}</div></div>
-          ${friesLabel ? `<div class="sub">• Papas: ${esc(friesLabel)}</div>` : ''}
-          ${commentPart}
-          <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
-          ${cheddarCount ? `<div class="sub ex">• +${cheddarCount} × Cheddar — ${money(qty*cheddarCount*cheddarUnit)}</div>` : ''}
-          ${pattyCount ? `<div class="sub ex">• +${pattyCount} × Medallón — ${money(qty*pattyCount*pattyUnit)}</div>` : ''}
-          <div class="row amount final"><div class="l"></div><div class="r">${money(baseSubtotal+pattySum+cheddarSum)}</div></div>
-          <div class="sep"></div>
-        `;
-      }).join('') || '<div class="sub">Sin ítems.</div>';
+  // 🔧 EXTRAS como filas con importe a la derecha (no bullets)
+  const extrasRows = [];
+  if (cheddarCount){
+    const label = `+${cheddarCount} × Cheddar`;
+    extrasRows.push(`<div class="row extra"><div class="l">${esc(label)}</div><div class="r">${money(qty*cheddarCount*cheddarUnit)}</div></div>`);
+  }
+  if (pattyCount){
+    const plural = pattyCount>1 ? 'Medallones extra' : 'Medallón extra';
+    const label  = `+${pattyCount} × ${plural}`;
+    extrasRows.push(`<div class="row extra"><div class="l">${esc(label)}</div><div class="r">${money(qty*pattyCount*pattyUnit)}</div></div>`);
+  }
+
+  return `
+    <div class="row name"><div class="l">${qty} × ${esc(name)}</div></div>
+    ${friesLabel ? `<div class="sub">• Papas: ${esc(friesLabel)}</div>` : ''}
+    ${commentPart}
+    <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
+    ${extrasRows.join('')}
+    <div class="row amount final"><div class="l"></div><div class="r">${money(baseSubtotal+pattySum+cheddarSum)}</div></div>
+    <div class="sep"></div>
+  `;
+}).join('') || '<div class="sub">Sin ítems.</div>';
 
       const subtotal = (function computeRawSubtotal(o){
         if (typeof o.rawTotal === "number") return o.rawTotal;
@@ -542,6 +554,9 @@
   .row.name .r{ display:none; }
   .row.amount .l{ display:block; }
   .row.amount.final{ margin-top:3px; }
+  /* Fila de extra: igual alineación que monto, un toque más chico */
+  .row.extra .l{ font-size:11px; }
+  .row.extra .r{ font-size:12px; }
   .sub{ font-size:11px; margin:1px 0 0 2mm; }
   .sub.ex{ white-space:nowrap; }
   .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
