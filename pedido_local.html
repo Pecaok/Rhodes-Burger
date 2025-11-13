@@ -371,7 +371,7 @@
       localStorage.setItem("rb_auto_print",JSON.stringify(autoPrint));
       $("#btnAutoPrint").classList.toggle("active", autoPrint);
     };
-    /* ========= RENDER DE CADA PEDIDO ========= */
+       /* ========= RENDER DE CADA PEDIDO ========= */
     const STATE_SEQ=['accepted','in_prep','ready','delivered','cancelled'];
     const STATE_LABEL={
       accepted:"Recibido",
@@ -443,7 +443,6 @@
       const payToggleClass = isPaid ? "is-paid" : "is-pending";
       const payToggleText = isPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO";
 
-      /* 🚀 SELECTOR DE MÉTODO DE PAGO (NUEVO) */
       const payMethodSelect = `
         <select class="pay-method-select" data-id="${doc.id}">
           <option value="">Método de pago...</option>
@@ -506,11 +505,10 @@
       idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
 
       const docs=snap.docs.filter(d=>passFilter(d.data()));
+      $("#orders").innerHTML = docs.length
+        ? docs.map(renderOrder).join("")
+        : "<p class='muted'>No hay pedidos.</p>";
 
-      $("#orders").innerHTML =
-        docs.length ? docs.map(renderOrder).join("") : "<p class='muted'>No hay pedidos.</p>";
-
-      /* === EVENTOS DE CADA CARD === */
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
 
@@ -519,7 +517,7 @@
           btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act));
         });
 
-        /* Pago toggle */
+        /* Pago */
         const payBtn = card.querySelector("[data-pay-toggle]");
         if(payBtn){
           payBtn.addEventListener("click", async ()=>{
@@ -527,8 +525,8 @@
             payBtn.disabled=true;
 
             payBtn.dataset.payToggle = wasPaid?"pending":"paid";
-            payBtn.classList.toggle("is-paid", !wasPaid);
-            payBtn.classList.toggle("is-pending", wasPaid);
+            payBtn.classList.toggle("is-paid",!wasPaid);
+            payBtn.classList.toggle("is-pending",wasPaid);
             payBtn.textContent = wasPaid ? "PENDIENTE DE PAGO" : "PAGADO ✓";
 
             await setPaymentStatus(id,!wasPaid);
@@ -540,18 +538,20 @@
         const select = card.querySelector(".pay-method-select");
         if(select){
           select.addEventListener("change", async ()=>{
-            const val=select.value;
             await db.collection("orders").doc(id).update({
-              pago: val,
-              payment_method: val
+              pago: select.value,
+              payment_method: select.value
             });
           });
         }
 
-        /* Imprimir */
-        const pr=card.querySelector("[data-print]");
+        /* 🔥 IMPRIMIR — VERSIÓN FIX */
+        const pr = card.querySelector("[data-print]");
         if(pr){
-          pr.addEventListener("click",()=>trySilentPrint(idToDoc.get(id)));
+          pr.addEventListener("click",()=>{
+            const snapDoc = lastSnap.docs.find(x=>x.id===id);
+            if(snapDoc) trySilentPrint(snapDoc);
+          });
         }
       });
     }
@@ -575,7 +575,7 @@
       setTimeout(()=>iframe.remove(),15000);
     }
 
-    /* ========= SUBSCRIBE A FIRESTORE ========= */
+    /* ========= FIRESTORE SUBSCRIBE ========= */
     (async function subscribe(){
       try{
         const probe=await db.collection("orders").limit(1).get();
@@ -583,9 +583,10 @@
         if(!probe.empty) dateField=chooseDateField(probe.docs[0].data());
 
         let q=db.collection("orders");
-        q = dateField ? q.orderBy(dateField,"desc") : q;
+        if(dateField) q=q.orderBy(dateField,"desc");
 
-        let first = true;
+        let first=true;
+
         q.limit(500).onSnapshot(snap=>{
           $("#ordersError").style.display="none";
           renderList(snap);
@@ -596,14 +597,14 @@
             if(ch.type==="added"){
               playBeepTriple();
               if(autoPrint){
-                const snapDoc=idToDoc.get(ch.doc.id)||ch.doc;
-                trySilentPrint(snapDoc);
+                const snapDoc = snap.docs.find(x=>x.id===ch.doc.id);
+                if(snapDoc) trySilentPrint(snapDoc);
               }
             }
           });
         });
       }catch(e){
-        $("#ordersError").textContent="Error cargando pedidos.";
+        $("#ordersError").textContent="No se pudo cargar la lista.";
         $("#ordersError").style.display="block";
       }
     })();
