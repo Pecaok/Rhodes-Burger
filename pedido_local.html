@@ -1,7 +1,7 @@
 <!doctype html> 
 <html lang="es">
   <script>
-  /* ======== SESIÓN COMPARTIDA ======== */
+  /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
   const TTL_HOURS = 20;
   const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
 
@@ -10,7 +10,7 @@
     const ts = Number(localStorage.getItem('rb_admin_t') || 0);
     return ok && (Date.now() - ts) < TTL_MS;
   }
-  function bumpSession(){
+  function bumpSession(){  // renueva TTL con actividad
     if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
   }
   function logout(){
@@ -21,6 +21,7 @@
     const next = encodeURIComponent('pedido_local.html');
     location.replace('login.html?reason=logout&next=' + next);
   }
+
   (function requireSession(){
     if (!sessionValid()){
       const next = encodeURIComponent(
@@ -33,8 +34,9 @@
     }
   })();
 
-  ['click','keydown','focus','mousemove','touchstart','scroll']
-    .forEach(evt => window.addEventListener(evt, bumpSession, {passive:true}));
+  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
+    window.addEventListener(evt, bumpSession, {passive:true});
+  });
   </script>
 
 <head>
@@ -43,25 +45,17 @@
   <title>Pedidos • Rhodes Burgers</title>
   <link rel="icon" href="images/logo.png" />
 
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#625A45" />
+
   <style>
     :root{
-      --primary:#625A45; 
-      --text:#111; 
-      --muted:#444; 
-      --bg:#f6f6f6; 
-      --card:#fff;
-      --ring:#eaeaea;
-      --shadow:0 12px 34px rgba(0,0,0,.10);
-      --font: Inter, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
-
-      --st-accepted:#FBC02D; 
-      --st-in_prep:#FB8C00; 
-      --st-ready:#00ACC1; 
-      --st-delivered:#2E7D32; 
-      --st-cancelled:#D32F2F;
-
-      --pay-pending:#FFA000;
-      --pay-paid:#625A45;
+      --primary:#625A45; --text:#111; --muted:#444; --bg:#f6f6f6; --card:#fff;
+      --ring:#eaeaea; --shadow:0 12px 34px rgba(0,0,0,.10);
+      --font: Inter, system-ui, "Segoe UI", Roboto, Arial, "Helvetica Neue", "Noto Sans", sans-serif;
+      --st-accepted:#FBC02D; --st-in_prep:#FB8C00; --st-ready:#00ACC1; --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
+      --pay-pending:#FFA000; --pay-paid:#625A45;
     }
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
@@ -71,72 +65,90 @@
     .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain;margin-right:8px}
     .spacer{flex:1}
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600;text-decoration:none;color:inherit}
-    .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .btn.active,.btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
     .danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
-
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
-
-    .tabs{display:flex;gap:10px;margin:14px 0}
-    .chipf{background:#f3f3f3;border:1px solid var(--ring);padding:6px 10px;border-radius:999px;font-size:13px;cursor:pointer}
-    .chipf.active{background:var(--primary);color:#fff}
-
+    h1{font-size:28px;margin:10px 0 18px}
+    .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+    .chipf{background:#f3f3f3;border:1px solid var(--ring);color:#111;border-radius:999px;padding:6px 10px;font-size:13px;cursor:pointer}
+    .chipf.active{background:var(--primary);color:#fff;border-color:var(--primary)}
     .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
-
+    .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
     .order-title{font-weight:800}
     .muted{color:var(--muted)}
-
     .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-    .chip{background:#f3f3f3;border:1px solid var(--ring);padding:6px 10px;border-radius:999px;font-size:13px}
-
-    .pay-line{display:flex;align-items:center;gap:10px;margin-top:10px}
-    .pay-method-select{
-      padding:6px 10px;
-      border-radius:8px;
-      border:1px solid var(--ring);
-      font-size:14px;
-      background:#fff;
-    }
-
-    .pay-toggle.is-paid{background:var(--pay-paid);color:#fff;border-color:var(--pay-paid)}
-    .pay-toggle.is-pending{background:var(--pay-pending);color:#fff;border-color:var(--pay-pending)}
+    .chip{background:#f3f3f3;border:1px solid var(--ring);color:#111;border-radius:999px;padding:6px 10px;font-size:13px}
+    .right-total{font-weight:800;font-size:18px;white-space:nowrap}
+    .items{margin-top:10px}
+    .item{margin:8px 0 6px 0}
+    .item .sub{color:#111;font-size:13px;margin-top:3px}
+    .money{white-space:nowrap}
+    .divider{height:1px;background:#efefef;margin:10px 0}
+    .err{color:#b00020;font-weight:600}
 
     .stateBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-    .state-btn{border:2px solid #dcdcdc;background:#fff;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer}
+    .state-btn{border:2px solid #dcdcdc;background:#fff;color:#111;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;min-width:160px;text-align:center}
+    .state-btn.on{color:#fff;border-color:var(--primary);background:var(--primary)}
+    .state-accepted.on{background:var(--st-accepted);border-color:var(--st-accepted);color:#000}
+    .state-in_prep.on{background:var(--st-in_prep);border-color:var(--st-in_prep);color:#fff}
+    .state-ready.on{background:var(--st-ready);border-color:var(--st-ready);color:#fff}
+    .state-delivered.on{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
+    .state-cancelled.on{background:var(--st-cancelled);border-color:var(--st-cancelled);color:#fff}
 
+    /* Línea de pago: botón único (toggle) */
+    .pay-line{margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+    .pay-toggle{min-width:200px;text-align:center}
+    .pay-toggle.is-paid{ background:var(--pay-paid); color:#fff; border-color:var(--pay-paid); }
+    .pay-toggle.is-pending{ background:var(--pay-pending); color:#fff; border-color:var(--pay-pending); }
+    .pay-toggle[disabled]{opacity:.9; cursor:default;}
+
+    .order.cancelled{opacity:.7}
+    .order.cancelled .order-title{text-decoration:line-through}
+
+    @media print{
+      @page{size:A4 portrait;margin:12mm}
+      header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"],[title="Panel admin"],[title="Abrir mostrador"],#btnInstall,#btnAutoPrint{display:none!important}
+      .order{break-inside:avoid;box-shadow:none;border:1px solid #eee}
+    }
   </style>
 </head>
 <body>
+  <header>
+    <div class="topbar">
+      <a class="brand" href="#"><img src="images/logo.png" alt="Rhodes Burgers">Pedidos</a>
 
-<header>
-  <div class="topbar">
-    <a class="brand" href="#"><img src="images/logo.png" alt="">Pedidos</a>
-    <div class="spacer"></div>
-    <nav style="display:flex;gap:8px">
-      <a href="pedido_local.html" class="btn primary">📦 Pedidos</a>
-      <a href="finanzas.html" class="btn">📈 Finanzas</a>
-      <a href="mostrador.html" class="btn">🧾 Mostrador</a>
-      <a href="admin.html" class="btn">⚙️ Admin</a>
-    </nav>
-    <button id="btnLogout" class="btn danger">⏻ Cerrar sesión</button>
-  </div>
-</header>
+      <div class="spacer"></div>
 
-<main class="container">
-  <h1>Últimos pedidos</h1>
+      <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <a href="pedido_local.html" class="btn primary" title="Ver pedidos">📦 Pedidos</a>
+        <a href="finanzas.html" class="btn" title="Finanzas">📈 Finanzas</a>
+        <a href="mostrador.html" class="btn" title="Mostrador">🧾 Mostrador</a>
+        <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
+      </nav>
 
-  <div class="tabs" id="tabs">
-    <span class="chipf active" data-f="recibidos">Recibidos</span>
-    <span class="chipf" data-f="entregados">Entregados</span>
-    <span class="chipf" data-f="cancelled">Cancelados</span>
-    <span class="chipf" data-f="all">Todos</span>
-  </div>
+      <button id="btnInstall" class="btn" style="display:none" title="Instalar app">➕ Instalar app</button>
+      <button id="btnBell" class="btn" title="Activar/desactivar sonido">🔔 Sonido</button>
+      <button id="btnAutoPrint" class="btn" title="Autoimprimir nuevos pedidos">🖨️ Autoimprimir</button>
+      <button id="btnLogout" class="btn danger" title="Cerrar sesión">⏻ Cerrar sesión</button>
+    </div>
+  </header>
 
-  <div id="orders"></div>
-  <div id="ordersError" class="err" style="display:none;"></div>
-</main>
+  <main class="container">
+    <h1>Últimos pedidos</h1>
 
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <div class="tabs" id="tabs">
+      <span class="chipf active" data-f="recibidos">Recibidos</span>
+      <span class="chipf" data-f="entregados">Entregados</span>
+      <span class="chipf" data-f="cancelled">Cancelados</span>
+      <span class="chipf" data-f="all">Todos</span>
+    </div>
+
+    <div id="orders"></div>
+    <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
   window.addEventListener('DOMContentLoaded', () => {
@@ -361,26 +373,13 @@
       const isPaid = forcePaidInDeliveredTab || ((o.payment_status==='paid' || o.paid) === true);
       const payBtnAttrs = forcePaidInDeliveredTab ? 'disabled' : '';
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
-     const payLine = `
-  <div class="pay-line">
-
-    <select class="pay-method-select" data-id="${doc.id}">
-      <option value="">Método de pago...</option>
-      <option value="efectivo"     ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
-      <option value="debito"       ${o.pago==="debito"?"selected":""}>Débito</option>
-      <option value="credito"      ${o.pago==="credito"?"selected":""}>Crédito</option>
-      <option value="mercadopago"  ${o.pago==="mercadopago"?"selected":""}>Mercado Pago</option>
-      <option value="transferencia"${o.pago==="transferencia"?"selected":""}>Transferencia</option>
-      <option value="otro"         ${o.pago==="otro"?"selected":""}>Otro</option>
-    </select>
-
-    <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}" ${payBtnAttrs}>
-      ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
-    </button>
-
-    <button class="btn" data-print>🖨 Imprimir</button>
-  </div>
-`;
+      const payLine = `<div class="pay-line">
+        <span class="chip">Pago: ${o.pago||'—'}</span>
+        <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}" ${payBtnAttrs}>
+          ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
+        </button>
+        <button class="btn" data-print>🖨 Imprimir</button>
+      </div>`;
 
       return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
         <div class="order-head">
@@ -725,22 +724,6 @@ function printInIframe(docSnap){
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
         card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
-
-        // === Selector de método de pago ===
-const paySelect = card.querySelector(".pay-method-select");
-if (paySelect) {
-  paySelect.addEventListener("change", async () => {
-    const newMethod = paySelect.value;
-    try {
-      await db.collection("orders").doc(id).update({
-        pago: newMethod,
-        payment_method: newMethod
-      });
-    } catch (e) {
-      alert("Error guardando método de pago: " + (e.message || e));
-    }
-  });
-}
 
         // Botón único de pago (toggle)
         const payToggle=card.querySelector("[data-pay-toggle]");
