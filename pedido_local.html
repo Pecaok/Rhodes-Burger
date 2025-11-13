@@ -1,265 +1,387 @@
-<!doctype html>
+<!doctype html> 
 <html lang="es">
-  <script>
-  const TTL_HOURS = 20;
-  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
 
-  function sessionValid(){
-    const ok = localStorage.getItem('rb_admin_ok') === 'true';
-    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
-    return ok && (Date.now() - ts) < TTL_MS;
-  }
-  function bumpSession(){
-    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
-  }
-  function logout(){
-    try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
-    try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
-    try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
-    try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
-    const next = encodeURIComponent('pedido_local.html');
-    location.replace('login.html?reason=logout&next=' + next);
-  }
+<!-- ============================
+   SESIÓN COMPARTIDA (ADMIN)
+=============================== -->
+<script>
+const TTL_HOURS = 20;
+const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
 
-  (function requireSession(){
-    if (!sessionValid()){
-      const next = encodeURIComponent(
-        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
-        (location.search || '') + (location.hash || '')
-      );
-      location.replace('login.html?next=' + next);
-    } else {
-      bumpSession();
-    }
-  })();
-
-  ['click','keydown','focus','mousemove','touchstart','scroll']
-    .forEach(evt => window.addEventListener(evt, bumpSession, {passive:true}));
-  </script>
+function sessionValid(){
+  const ok = localStorage.getItem('rb_admin_ok') === 'true';
+  const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+  return ok && (Date.now() - ts) < TTL_MS;
+}
+function bumpSession(){ 
+  if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now())); 
+}
+function logout(){
+  try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
+  try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
+  try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
+  try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
+  location.replace('login.html');
+}
+(function(){
+  if (!sessionValid()){
+    const next = encodeURIComponent(location.pathname.replace(/^\//,''));
+    location.replace('login.html?next=' + next);
+  } else bumpSession();
+})();
+['click','keydown','focus','mousemove','touchstart','scroll']
+.forEach(evt=>{
+  window.addEventListener(evt, bumpSession, {passive:true});
+});
+</script>
 
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Pedidos • Rhodes Burgers</title>
-  <link rel="icon" href="images/logo.png" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pedidos • Rhodes Burgers</title>
+<link rel="icon" href="images/logo.png">
 
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#625A45" />
+<style>
+:root{
+  --primary:#625A45;
+  --text:#111;
+  --muted:#444;
+  --bg:#f6f6f6;
+  --card:#fff;
+  --ring:#eaeaea;
+  --shadow:0 12px 34px rgba(0,0,0,.10);
+  --font: Inter, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
 
-  <style>
-    :root{
-      --primary:#625A45; --text:#111; --muted:#444; --bg:#f6f6f6; --card:#fff;
-      --ring:#eaeaea; --shadow:0 12px 34px rgba(0,0,0,.10);
-      --font: Inter, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  --st-accepted:#FBC02D;
+  --st-in_prep:#FB8C00;
+  --st-ready:#00ACC1;
+  --st-delivered:#2E7D32;
+  --st-cancelled:#D32F2F;
 
-      --st-accepted:#FBC02D;
-      --st-in_prep:#FB8C00;
-      --st-ready:#00ACC1;
-      --st-delivered:#2E7D32;
-      --st-cancelled:#D32F2F;
+  --pay-pending:#FFA000;
+  --pay-paid:#625A45;
+}
 
-      --pay-pending:#FFA000;
-      --pay-paid:#625A45;
-    }
+html,body{
+  margin:0;
+  background:var(--bg);
+  font-family:var(--font);
+  color:var(--text);
+}
 
-    *{box-sizing:border-box}
-    html,body{
-      margin:0;background:var(--bg);color:var(--text);font-family:var(--font)
-    }
+header{
+  position:sticky;
+  top:0;
+  z-index:10;
+  background:#fff;
+  box-shadow:0 2px 12px rgba(0,0,0,.06)
+}
 
-    header{
-      position:sticky;top:0;z-index:10;
-      background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06)
-    }
+.topbar{
+  max-width:1100px;
+  margin:0 auto;
+  padding:10px 12px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
 
-    .topbar{
-      max-width:1100px;margin:0 auto;padding:10px 12px;
-      display:flex;align-items:center;gap:12px
-    }
+.brand{
+  display:flex;
+  align-items:center;
+  text-decoration:none;
+  font-weight:700;
+  color:inherit;
+}
+.brand img{
+  width:36px;
+  height:36px;
+  border-radius:10px;
+  margin-right:8px;
+}
 
-    .brand{
-      display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700
-    }
-    .brand img{
-      width:36px;height:36px;border-radius:10px;background:#fff;
-      object-fit:contain;margin-right:8px
-    }
-    .spacer{flex:1}
+.spacer{ flex:1; }
 
-    .btn{
-      display:inline-flex;align-items:center;gap:8px;
-      border:1px solid var(--ring);background:#fff;
-      padding:8px 12px;border-radius:999px;
-      cursor:pointer;font-weight:600;text-decoration:none;color:inherit
-    }
-    .btn.primary,.btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
-    .danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
+.btn{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid var(--ring);
+  padding:8px 12px;
+  border-radius:999px;
+  cursor:pointer;
+  background:#fff;
+  font-weight:600;
+  text-decoration:none;
+  color:inherit;
+}
 
-    .container{max-width:1100px;margin:24px auto;padding:0 12px}
-    h1{font-size:28px;margin:10px 0 18px}
+.btn.primary,
+.btn.active{
+  background:var(--primary);
+  color:#fff;
+  border-color:var(--primary);
+}
 
-    .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
-    .chipf{
-      background:#f3f3f3;border:1px solid var(--ring);color:#111;
-      border-radius:999px;padding:6px 10px;font-size:13px;cursor:pointer;
-    }
-    .chipf.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.btn.danger{
+  background:#fff5f5;
+  color:#b30000;
+}
 
-    .order{
-      background:var(--card);border-radius:18px;
-      box-shadow:var(--shadow);padding:16px 18px;margin:14px 0
-    }
+.container{
+  max-width:1100px;
+  margin:24px auto;
+  padding:0 12px;
+}
 
-    .order-head{
-      display:flex;align-items:flex-start;justify-content:space-between;gap:12px
-    }
+h1{
+  font-size:28px;
+  margin:10px 0 18px;
+}
 
-    .order-title{font-weight:800}
-    .muted{color:var(--muted)}
+.tabs{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin:14px 0;
+}
 
-    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-    .chip{
-      background:#f3f3f3;border:1px solid var(--ring);
-      padding:6px 10px;border-radius:999px;font-size:13px
-    }
+.chipf{
+  background:#f3f3f3;
+  border:1px solid var(--ring);
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:13px;
+  cursor:pointer;
+}
+.chipf.active{
+  background:var(--primary);
+  border-color:var(--primary);
+  color:#fff;
+}
 
-    .right-total{font-weight:800;font-size:18px;white-space:nowrap}
+.order{
+  background:var(--card);
+  border-radius:18px;
+  box-shadow:var(--shadow);
+  padding:16px 18px;
+  margin:14px 0;
+}
 
-    .items{margin-top:10px}
-    .sub{color:#111;font-size:13px;margin-top:3px}
-    .divider{height:1px;background:#efefef;margin:10px 0}
-    .err{color:#b00020;font-weight:600}
+.order-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+}
 
-    .stateBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-    .state-btn{
-      border:2px solid #dcdcdc;background:#fff;color:#111;
-      border-radius:999px;padding:8px 12px;font-weight:800;
-      cursor:pointer;min-width:160px;text-align:center
-    }
+.order-title{
+  font-weight:800;
+}
 
-    .state-btn.on{color:#fff;background:var(--primary);border-color:var(--primary)}
-    .state-accepted.on{background:var(--st-accepted)!important;color:#000}
-    .state-in_prep.on{background:var(--st-in_prep)!important;color:#fff}
-    .state-ready.on{background:var(--st-ready)!important;color:#fff}
-    .state-delivered.on{background:var(--st-delivered)!important;color:#fff}
-    .state-cancelled.on{background:var(--st-cancelled)!important;color:#fff}
+.muted{
+  color:var(--muted);
+}
 
-    .pay-line{
-      margin-top:6px;display:flex;align-items:center;
-      gap:10px;flex-wrap:wrap
-    }
+.chips{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:6px;
+}
 
-    .pay-method-select{
-      padding:6px 10px;border-radius:8px;
-      border:1px solid var(--ring);background:#fff;
-      height:36px;font-size:14px
-    }
+.chip{
+  background:#f3f3f3;
+  border:1px solid var(--ring);
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:13px;
+}
 
-    .pay-toggle{min-width:200px;text-align:center}
-    .pay-toggle.is-paid{background:var(--pay-paid);color:#fff;border-color:var(--pay-paid)}
-    .pay-toggle.is-pending{background:var(--pay-pending);color:#fff;border-color:var(--pay-pending)}
+.right-total{
+  font-weight:800;
+  font-size:18px;
+  white-space:nowrap;
+}
 
-    .order.cancelled{opacity:.65}
-    .order.cancelled .order-title{text-decoration:line-through}
-  </style>
+.items{ margin-top:10px; }
+.item{ margin:8px 0 6px; }
+.item .sub{ font-size:13px; margin-top:3px; }
+
+.divider{
+  height:1px;
+  background:#efefef;
+  margin:10px 0;
+}
+
+.stateBtns{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+
+.state-btn{
+  border:2px solid #dcdcdc;
+  border-radius:999px;
+  padding:8px 12px;
+  min-width:160px;
+  font-weight:800;
+  cursor:pointer;
+  text-align:center;
+  background:#fff;
+}
+
+.state-btn.on{ color:#fff; }
+.state-accepted.on{ background:var(--st-accepted); border-color:var(--st-accepted); color:#000; }
+.state-in_prep.on{ background:var(--st-in_prep); border-color:var(--st-in_prep); }
+.state-ready.on{ background:var(--st-ready); border-color:var(--st-ready); }
+.state-delivered.on{ background:var(--st-delivered); border-color:var(--st-delivered); }
+.state-cancelled.on{ background:var(--st-cancelled); border-color:var(--st-cancelled); }
+
+.pay-line{
+  margin-top:6px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.pay-method-select{
+  padding:6px 10px;
+  border:1px solid var(--ring);
+  border-radius:8px;
+  background:#fff;
+  font-size:14px;
+  height:36px;
+}
+
+.pay-toggle{
+  min-width:200px;
+  text-align:center;
+}
+.pay-toggle.is-paid{
+  background:var(--pay-paid);
+  border-color:var(--pay-paid);
+  color:#fff;
+}
+.pay-toggle.is-pending{
+  background:var(--pay-pending);
+  border-color:var(--pay-pending);
+  color:#fff;
+}
+</style>
 </head>
 
 <body>
-  <header>
-    <div class="topbar">
-      <a class="brand" href="#"><img src="images/logo.png">Pedidos</a>
 
-      <div class="spacer"></div>
+<header>
+  <div class="topbar">
+    <a class="brand" href="#"><img src="images/logo.png">Pedidos</a>
+    <div class="spacer"></div>
 
-      <nav style="display:flex;gap:8px;">
-        <a href="pedido_local.html" class="btn primary">📦 Pedidos</a>
-        <a href="finanzas.html" class="btn">📈 Finanzas</a>
-        <a href="mostrador.html" class="btn">🧾 Mostrador</a>
-        <a href="admin.html" class="btn">⚙️ Admin</a>
-      </nav>
+    <a href="pedido_local.html" class="btn primary">📦 Pedidos</a>
+    <a href="finanzas.html" class="btn">📈 Finanzas</a>
+    <a href="mostrador.html" class="btn">🧾 Mostrador</a>
+    <a href="admin.html" class="btn">⚙️ Admin</a>
 
-      <button id="btnBell" class="btn">🔔 Sonido</button>
-      <button id="btnAutoPrint" class="btn">🖨 Auto</button>
-      <button id="btnLogout" class="btn danger">⏻ Cerrar sesión</button>
-    </div>
-  </header>
+    <button id="btnBell" class="btn">🔔</button>
+    <button id="btnLogout" class="btn danger">⏻ Cerrar sesión</button>
+  </div>
+</header>
 
-  <main class="container">
-    <h1>Últimos pedidos</h1>
+<main class="container">
+  <h1>Últimos pedidos</h1>
 
-    <div class="tabs" id="tabs">
-      <span class="chipf active" data-f="recibidos">Recibidos</span>
-      <span class="chipf" data-f="entregados">Entregados</span>
-      <span class="chipf" data-f="cancelled">Cancelados</span>
-      <span class="chipf" data-f="all">Todos</span>
-    </div>
+  <div class="tabs" id="tabs">
+    <span class="chipf active" data-f="recibidos">Recibidos</span>
+    <span class="chipf" data-f="entregados">Entregados</span>
+    <span class="chipf" data-f="cancelled">Cancelados</span>
+    <span class="chipf" data-f="all">Todos</span>
+  </div>
 
-    <div id="orders"></div>
-    <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
-  </main>
+  <div id="orders"></div>
+  <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
+</main>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script>
 window.addEventListener('DOMContentLoaded', () => {
 
+  /* ============================
+       FIREBASE INIT
+  ============================ */
   const firebaseConfig = {
-    apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-    authDomain:"rhodes-burguers.firebaseapp.com",
-    projectId:"rhodes-burguers",
-    storageBucket:"rhodes-burguers.firebasestorage.app",
-    messagingSenderId:"951646688091",
-    appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"
+    apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+    authDomain: "rhodes-burguers.firebaseapp.com",
+    projectId: "rhodes-burguers",
+    storageBucket: "rhodes-burguers.firebasestorage.app",
+    messagingSenderId: "951646688091",
+    appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
   };
   try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
-  const db=firebase.firestore();
+  const db = firebase.firestore();
   const $ = s => document.querySelector(s);
-  const money = n => (Number(n)||0).toLocaleString("es-AR",
-      {style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-  /* ======== fecha ======== */
-  function chooseDateField(o){
-    const prefs=['createdAt','created_at','timestamp','date','fecha','time'];
-    return prefs.find(k=>o[k]!=null) || null;
-  }
+  const money = n =>
+    (Number(n)||0).toLocaleString("es-AR",{
+      style:"currency",
+      currency:"ARS",
+      maximumFractionDigits:0
+    });
 
-  function pickDocDate(o){
-    const pref=['createdAt','created_at','timestamp','date','fecha','time'];
-    for(const k of pref){
-      const v=o[k];
-      if(v?.toDate) return v.toDate();
-      if(typeof v==="number") return new Date(v);
-      if(typeof v==="string"){
-        const d=new Date(v); if(!isNaN(d)) return d;
+
+  /* ============================
+        FECHAS Y ORDENES
+  ============================ */
+  function pickDocDate(obj){
+    const keys = [
+      'createdAt','created_at','timestamp','date','fecha','time'
+    ];
+    for(const k of keys){
+      const v = obj[k];
+      if (v?.toDate) return v.toDate();
+      if (typeof v === 'number') return new Date(v);
+      if (typeof v === 'string'){
+        const d = new Date(v);
+        if(!isNaN(d)) return d;
       }
     }
-    return new Date();
+    return null;
   }
 
   function displayOrderNumber(doc){
-    const o=doc.data();
-    const keys=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,
-                o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+    const o = doc.data();
+    const keys = [
+      o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,
+      o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido
+    ];
     for(const v of keys){
       if(v==null) continue;
-      const n = typeof v==="string"?parseInt(v,10):v;
+      const n = typeof v==="string" ? parseInt(v,10) : v;
       if(Number.isFinite(n)) return `#${n}`;
     }
     return `#${doc.id.slice(-5).toUpperCase()}`;
   }
 
-  /* ======== pickup ======== */
+
+  /* ============================
+     FORMATO HORARIO RETIRO
+  ============================ */
   function formatSlotTime(raw){
     if(!raw) return null;
     try{
-      if(raw?.toDate) return raw.toDate().toLocaleTimeString("es-AR",{hour:'2-digit',minute:'2-digit',hour12:false});
-      if(raw?.seconds) return new Date(raw.seconds*1000).toLocaleTimeString("es-AR",{hour:'2-digit',minute:'2-digit',hour12:false});
-      if(typeof raw==="string"){
-        const d=new Date(raw); if(!isNaN(d)) return d.toLocaleTimeString("es-AR",{hour:'2-digit',minute:'2-digit',hour12:false});
-        const m=raw.match(/(\d{2})(\d{2})$/); if(m) return m[1]+":"+m[2];
+      if(typeof raw?.toDate === 'function')
+        return raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+      if(typeof raw === 'string'){
+        const d=new Date(raw);
+        if(!isNaN(d))
+          return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+        const m = raw.match(/(\d{2})(\d{2})$/);
+        if(m) return `${m[1]}:${m[2]}`;
       }
-      if(raw instanceof Date) return raw.toLocaleTimeString("es-AR",{hour:'2-digit',minute:'2-digit',hour12:false});
     }catch(e){}
     return null;
   }
@@ -267,360 +389,401 @@ window.addEventListener('DOMContentLoaded', () => {
   function getPickupPretty(o){
     let pretty =
       o.pickup_time_pretty ||
-      formatSlotTime(o.pickup_time || o.pickupTime || o.pickup);
+      formatSlotTime(o.pickup_time || o.pickup);
 
     if(!pretty && o.pickup_slot){
-      const m=String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
-      if(m) pretty = m[1]+":"+m[2];
+      const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
+      if(m) pretty = `${m[1]}:${m[2]}`;
     }
 
-    if(!pretty && o.pickup_asap===true)
-      pretty="A la brevedad";
+    if (!pretty && o.pickup_asap === true) pretty = "A la brevedad";
 
     return pretty || "—";
   }
 
-  /* ======== sonido ======== */
+
+  /* ============================
+          SONIDO
+  ============================ */
   let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
-  let audioCtx=null,audioReady=false;
+  const btnBell = $("#btnBell");
 
-  function getAudioCtx(){
-    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    return audioCtx;
+  function updateBellUI(){
+    btnBell.classList.toggle("active", soundEnabled);
   }
+  updateBellUI();
 
-  async function ensureAudioReady(){
-    try{
-      const c=getAudioCtx();
-      if(c.state==="suspended") await c.resume();
-      audioReady=(c.state==="running");
-    }catch(e){ audioReady=false; }
-    return audioReady;
-  }
-
-  function beepOnce(ctx,d=0.2,f=900,g=0.7){
-    const o=ctx.createOscillator(), ga=ctx.createGain();
-    o.type="square"; o.frequency.value=f;
-    o.connect(ga); ga.connect(ctx.destination);
-    ga.gain.setValueAtTime(0.0001,ctx.currentTime);
-    ga.gain.exponentialRampToValueAtTime(g,ctx.currentTime+0.02);
-    ga.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+d);
-    o.start(); o.stop(ctx.currentTime+d+0.02);
-  }
-
-  async function playBeepTriple(){
-    if(!soundEnabled) return;
-    if(!await ensureAudioReady()) return;
-    const c=getAudioCtx();
-    beepOnce(c); setTimeout(()=>beepOnce(c),300); setTimeout(()=>beepOnce(c),600);
-  }
-
-  $("#btnBell").onclick = ()=>{
-    soundEnabled=!soundEnabled;
-    localStorage.setItem("rb_bell_enabled",JSON.stringify(soundEnabled));
-    $("#btnBell").classList.toggle("active",soundEnabled);
-    if(soundEnabled) playBeepTriple();
+  btnBell.onclick = () => {
+    soundEnabled = !soundEnabled;
+    localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled));
+    updateBellUI();
   };
-  $("#btnBell").classList.toggle("active",soundEnabled);
 
-  $("#btnLogout").onclick=()=>logout();
+  function playBeep(){
+    if(!soundEnabled) return;
+    const audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
+    audio.volume = 0.4;
+    audio.play().catch(()=>{});
+  }
 
-  /* ======== filtros ======== */
-  const tabs=$("#tabs");
-  let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
 
-  tabs.addEventListener("click",e=>{
-    const el=e.target.closest("[data-f]");
+  /* ============================
+          FILTROS
+  ============================ */
+  const tabs = $("#tabs");
+  let currentFilter = "recibidos";
+  let lastSnap = null;
+
+  tabs.addEventListener("click", e=>{
+    const el = e.target.closest("[data-f]");
     if(!el) return;
-    currentFilter=el.dataset.f;
-    tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+
+    currentFilter = el.dataset.f;
+    tabs.querySelectorAll(".chipf").forEach(t=>t.classList.remove("active"));
     el.classList.add("active");
+
     if(lastSnap) renderList(lastSnap);
   });
 
   const passFilter = o => {
-    const s=o.status||"accepted";
-    if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
-    if(currentFilter==="entregados") return s==="delivered";
-    if(currentFilter==="cancelled") return s==="cancelled";
+    const s = o.status || "accepted";
+
+    if(currentFilter==="recibidos")
+      return ["accepted","pending_payment","in_prep","ready"].includes(s);
+
+    if(currentFilter==="entregados")
+      return s==="delivered";
+
+    if(currentFilter==="cancelled")
+      return s==="cancelled";
+
     return true;
   };
 
-  /* ======== acciones ======== */
+
+  /* ============================
+      ACCIÓN CAMBIAR ESTADO
+  ============================ */
   async function setOrderStatus(id,next){
     try{
       await db.collection("orders").doc(id).update({
         status: next,
-        statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()})
+        statusHistory: firebase.firestore.FieldValue.arrayUnion({
+          to:next,
+          at:new Date().toISOString()
+        })
       });
-    }catch(e){ alert("No se pudo actualizar el estado: "+e.message); }
+    }catch(e){
+      alert("Error cambiando estado: " + e);
+    }
   }
 
-  async function setPaymentStatus(id,paid){
+  /* ============================
+      PAGADO / PENDIENTE
+  ============================ */
+  async function setPaymentStatus(id, paid){
     try{
       await db.collection("orders").doc(id).update({
         paid: !!paid,
-        payment_status: paid?"paid":"pending_payment",
+        payment_status: paid ? "paid" : "pending_payment",
         statusHistory: firebase.firestore.FieldValue.arrayUnion({
           to: paid?"paid":"pending_payment",
           at:new Date().toISOString()
         })
       });
     }catch(e){
-      alert("Error guardando pago: "+e.message);
+      alert("No se pudo actualizar pago: "+e);
     }
   }
 
-  /* ======== auto imprimir ======== */
-  let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
-  $("#btnAutoPrint").classList.toggle("active", autoPrint);
 
-  $("#btnAutoPrint").onclick = ()=>{
-    autoPrint=!autoPrint;
-    localStorage.setItem("rb_auto_print",JSON.stringify(autoPrint));
-    $("#btnAutoPrint").classList.toggle("active", autoPrint);
+  /* ============================
+        NORMALIZAR PAPAS
+  ============================ */
+  function normalizeFriesLabel(raw){
+    if(!raw) return '';
+    let s = String(raw).toLowerCase().trim();
+    if(s.includes("sin sal")) return "Sin sal";
+    if(s.includes("sazon")) return "Sazonadas";
+    if(s.includes("sal")) return "Con sal";
+    return '';
+  }
+
+
+  /* ============================
+         RENDER PEDIDO
+  ============================ */
+  const STATE_SEQ = ["accepted","in_prep","ready","delivered","cancelled"];
+  const STATE_LABEL = {
+    accepted:"Recibido",
+    in_prep:"En preparación",
+    ready:"Listo",
+    delivered:"Entregado",
+    cancelled:"Cancelar"
   };
-    /* ========= RENDER DE CADA PEDIDO ========= */
-    const STATE_SEQ=['accepted','in_prep','ready','delivered','cancelled'];
-    const STATE_LABEL={
-      accepted:"Recibido",
-      in_prep:"En preparación",
-      ready:"Listo para retirar",
-      delivered:"Entregado",
-      cancelled:"Cancelar"
-    };
 
-    function normalizeFriesLabel(raw){
-      if(!raw) return "";
-      let s=String(raw).toLowerCase().replace(/[_-]/g," ").trim();
-      if(!s) return "";
-      if(s.includes("sin sal")) return "Sin sal";
-      if(s.includes("sazon")) return "Sazonadas";
-      if(s.includes("sal")) return "Con sal";
-      return "";
-    }
+  function renderOrder(doc){
+    const o = doc.data();
+    const dt = pickDocDate(o);
+    const dtText = dt ? dt.toLocaleDateString("es-AR")+" "+dt.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"}) : "—";
 
-    function computeRawSubtotal(o){
-      const items = Array.isArray(o.items)?o.items:[];
-      return items.reduce((t,it)=>{
-        const qty=it.qty||1;
-        const base=(it.price||0)*qty;
-        const patty=(it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty;
-        const cheddar=(it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
-        return t+base+patty+cheddar;
-      },0);
-    }
+    const items = o.items || [];
+    const pickupPretty = getPickupPretty(o);
 
-    function computeOrderTotal(o){
-      return (typeof o.total==="number") ? o.total : computeRawSubtotal(o);
-    }
+    /* ITEMS */
+    const itemsHTML = items.map(it=>{
+      const qty = it.qty||1;
+      const baseSubtotal = (it.price||0)*qty;
 
-    function renderOrder(doc){
-      const o=doc.data();
-      const dt=pickDocDate(o);
-      const dtText = dt.toLocaleDateString("es-AR")+", "+dt.toLocaleTimeString("es-AR");
-      const pickupPretty = getPickupPretty(o);
-      const isPaid = o.payment_status==="paid" || o.paid===true;
-      const st = o.status ?? "accepted";
-      const items = Array.isArray(o.items)?o.items:[];
+      const extras = [];
+      if(it.extras?.patty) extras.push(`+${it.extras.patty} medallón`);
+      if(it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
 
-      const lines = items.map(it=>{
-        const qty=it.qty||1;
-        const subtotal=
-          (it.price||0)*qty
-          + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
-          + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
-
-        const friesText = normalizeFriesLabel(it.fries||it.side||"") || "—";
-
-        let commentHtml="";
-        if (Array.isArray(it.notes)){
-          commentHtml = it.notes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${c}</div>`).join("");
-        } else if (typeof it.notes==="string" && it.notes.trim()){
-          commentHtml = `<div class="sub">• Nota: ${it.notes.trim()}${qty>1?" (todas)":""}</div>`;
-        }
-
-        return `
-        <div class="item">
-          <div>• <strong>${qty}× ${it.name||""}</strong></div>
-          <div class="sub">Papas: ${friesText}</div>
-          ${commentHtml}
-          <div class="sub">Subtotal: ${money(subtotal)}</div>
-        </div>`;
-      }).join("");
-
-      const payToggleClass = isPaid ? "is-paid" : "is-pending";
-      const payToggleText = isPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO";
-
-      const payMethodSelect = `
-        <select class="pay-method-select" data-id="${doc.id}">
-          <option value="">Método de pago...</option>
-          <option value="efectivo"     ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
-          <option value="debito"       ${o.pago==="debito"?"selected":""}>Débito</option>
-          <option value="credito"      ${o.pago==="credito"?"selected":""}>Crédito</option>
-          <option value="mercadopago"  ${o.pago==="mercadopago"?"selected":""}>Mercado Pago</option>
-          <option value="transferencia"${o.pago==="transferencia"?"selected":""}>Transferencia</option>
-          <option value="otro"         ${o.pago==="otro"?"selected":""}>Otro</option>
-        </select>
-      `;
+      const fries = normalizeFriesLabel(it.fries||it.side);
 
       return `
-      <div class="order ${st==="cancelled"?"cancelled":""}" data-id="${doc.id}">
-        <div class="order-head">
-          <div>
-            <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre||"Cliente"}</div>
-            <div class="muted">${dtText}</div>
+        <div class="item">
+          <div><strong>${qty}× ${it.name}</strong></div>
+          <div class="sub">Papas: ${fries||"—"} ${extras.length? " · Extras: "+extras.join(" · "):""}</div>
+          <div class="sub">Subtotal: ${money(baseSubtotal)}</div>
+        </div>
+      `;
+    }).join("");
 
-            <div class="chips">
-              <span class="chip">Estado: ${st}</span>
-              <span class="chip">Retiro: ${o.entrega||"mostrador"}</span>
-              <span class="chip">Horario: ${pickupPretty}</span>
-              ${o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:""}
-              ${o.source?`<span class="chip">Origen: ${o.source}</span>`:""}
-            </div>
 
-            <div class="stateBtns">
-              ${STATE_SEQ.map(key=>`
-                <button class="state-btn state-${key} ${STATE_SEQ.indexOf(key)<=STATE_SEQ.indexOf(st)?"on":""}"
-                  data-act="${key}">${STATE_LABEL[key]}
-                </button>`).join("")}
-            </div>
+    /* ESTADOS */
+    const st = o.status || "accepted";
+    const curIdx = STATE_SEQ.indexOf(st);
+
+    const stateBtns = `
+      <div class="stateBtns">
+        ${STATE_SEQ.map((s,idx)=>`
+          <button class="state-btn state-${s} ${idx<=curIdx?"on":""}" data-act="${s}">
+            ${STATE_LABEL[s]}
+          </button>
+        `).join("")}
+      </div>
+    `;
+
+
+    /* PAGO */
+    const isPaid = (o.payment_status==="paid" || o.paid===true);
+
+    const payBtnClass = isPaid ? "pay-toggle is-paid" : "pay-toggle is-pending";
+
+    const payLine = `
+    <div class="pay-line">
+
+      <select class="pay-method-select" data-id="${doc.id}">
+        <option value="">Método...</option>
+        <option value="efectivo"      ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
+        <option value="debito"        ${o.pago==="debito"?"selected":""}>Débito</option>
+        <option value="credito"       ${o.pago==="credito"?"selected":""}>Crédito</option>
+        <option value="mercadopago"   ${o.pago==="mercadopago"?"selected":""}>Mercado Pago</option>
+        <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
+        <option value="otro"          ${o.pago==="otro"?"selected":""}>Otro</option>
+      </select>
+
+      <span class="chip">Pago: ${o.pago||"—"}</span>
+
+      <button class="${payBtnClass}" data-pay-toggle="${isPaid?'paid':'pending'}">
+        ${isPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO"}
+      </button>
+
+      <button class="btn" data-print>🖨 Imprimir</button>
+    </div>
+    `;
+
+
+    return `
+    <div class="order" data-id="${doc.id}">
+      <div class="order-head">
+
+        <div>
+          <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre||"Cliente"}</div>
+          <div class="muted">${dtText}</div>
+
+          <div class="chips">
+            <span class="chip">Estado: ${st}</span>
+            <span class="chip">Retiro: ${o.entrega||"mostrador"}</span>
+            <span class="chip">Horario: ${pickupPretty}</span>
+            ${o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:""}
+            ${o.source?`<span class="chip">Origen: ${o.source}</span>`:""}
           </div>
 
-          <div>
-            <div class="right-total">${money(computeOrderTotal(o))}</div>
-
-            <div class="pay-line">
-              ${payMethodSelect}
-
-              <button class="btn pay-toggle ${payToggleClass}"
-                data-pay-toggle="${isPaid?"paid":"pending"}">
-                ${payToggleText}
-              </button>
-
-              <button class="btn" data-print>🖨 Imprimir</button>
-            </div>
-          </div>
+          ${stateBtns}
         </div>
 
-        <div class="divider"></div>
-        <div class="items">${lines||"<div class='muted'>Sin ítems.</div>"}</div>
-      </div>`;
-    }
+        <div>
+          <div class="right-total">${money(o.total || 0)}</div>
+          ${payLine}
+        </div>
 
-    /* ========= RENDER LISTA ========= */
-    function renderList(snap){
-      lastSnap=snap;
-      idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
+      </div>
 
-      const docs=snap.docs.filter(d=>passFilter(d.data()));
-      $("#orders").innerHTML = docs.length
-        ? docs.map(renderOrder).join("")
-        : "<p class='muted'>No hay pedidos.</p>";
+      <div class="divider"></div>
 
-      document.querySelectorAll(".order").forEach(card=>{
-        const id=card.dataset.id;
+      <div class="items">${itemsHTML}</div>
+    </div>
+    `;
+  }
 
-        /* Estado */
-        card.querySelectorAll("[data-act]").forEach(btn=>{
-          btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act));
-        });
 
-        /* Pago */
-        const payBtn = card.querySelector("[data-pay-toggle]");
-        if(payBtn){
-          payBtn.addEventListener("click", async ()=>{
-            const wasPaid = payBtn.dataset.payToggle==="paid";
-            payBtn.disabled=true;
+  /* ============================
+        RENDER LISTA
+  ============================ */
+  function renderList(snap){
+    const docs = snap.docs.filter(d=>passFilter(d.data()));
 
-            payBtn.dataset.payToggle = wasPaid?"pending":"paid";
-            payBtn.classList.toggle("is-paid",!wasPaid);
-            payBtn.classList.toggle("is-pending",wasPaid);
-            payBtn.textContent = wasPaid ? "PENDIENTE DE PAGO" : "PAGADO ✓";
+    lastSnap = snap;
 
-            await setPaymentStatus(id,!wasPaid);
-            payBtn.disabled=false;
-          });
-        }
+    $("#orders").innerHTML =
+      docs.length ? docs.map(renderOrder).join("") :
+      `<p class="muted">No hay pedidos.</p>`;
 
-        /* Método de pago */
-        const select = card.querySelector(".pay-method-select");
-        if(select){
-          select.addEventListener("change", async ()=>{
+    document.querySelectorAll(".order").forEach(card=>{
+
+      const id = card.dataset.id;
+
+
+      /* ——— Cambiar estado ——— */
+      card.querySelectorAll("[data-act]").forEach(btn=>
+        btn.addEventListener("click",()=> setOrderStatus(id,btn.dataset.act))
+      );
+
+
+      /* ——— Selector método de pago ——— */
+      const paySelect = card.querySelector(".pay-method-select");
+      if(paySelect){
+        paySelect.addEventListener("change", async ()=>{
+          const newMethod = paySelect.value;
+          try{
             await db.collection("orders").doc(id).update({
-              pago: select.value,
-              payment_method: select.value
+              pago:newMethod,
+              payment_method:newMethod
             });
-          });
-        }
-
-        /* 🔥 IMPRIMIR — VERSIÓN FIX */
-        const pr = card.querySelector("[data-print]");
-        if(pr){
-          pr.addEventListener("click",()=>{
-            const snapDoc = lastSnap.docs.find(x=>x.id===id);
-            if(snapDoc) trySilentPrint(snapDoc);
-          });
-        }
-      });
-    }
-
-    /* ========= TICKET ========= */
-    function trySilentPrint(docSnap){
-      const html = buildTicketHTML(docSnap);
-      const iframe=document.createElement("iframe");
-      iframe.style.position="fixed";
-      iframe.style.right=0;
-      iframe.style.bottom=0;
-      iframe.style.width=0;
-      iframe.style.height=0;
-      iframe.style.border=0;
-      document.body.appendChild(iframe);
-
-      const doc=iframe.contentWindow.document;
-      doc.open(); doc.write(html); doc.close();
-
-      iframe.contentWindow.onafterprint=()=>iframe.remove();
-      setTimeout(()=>iframe.remove(),15000);
-    }
-
-    /* ========= FIRESTORE SUBSCRIBE ========= */
-    (async function subscribe(){
-      try{
-        const probe=await db.collection("orders").limit(1).get();
-        let dateField=null;
-        if(!probe.empty) dateField=chooseDateField(probe.docs[0].data());
-
-        let q=db.collection("orders");
-        if(dateField) q=q.orderBy(dateField,"desc");
-
-        let first=true;
-
-        q.limit(500).onSnapshot(snap=>{
-          $("#ordersError").style.display="none";
-          renderList(snap);
-
-          if(first){ first=false; return; }
-
-          snap.docChanges().forEach(ch=>{
-            if(ch.type==="added"){
-              playBeepTriple();
-              if(autoPrint){
-                const snapDoc = snap.docs.find(x=>x.id===ch.doc.id);
-                if(snapDoc) trySilentPrint(snapDoc);
-              }
-            }
-          });
+          }catch(e){
+            alert("Error guardando método de pago: "+e);
+          }
         });
-      }catch(e){
-        $("#ordersError").textContent="No se pudo cargar la lista.";
-        $("#ordersError").style.display="block";
       }
-    })();
 
-  });
-  </script>
 
-  <script src="pwa.js"></script>
+      /* ——— Botón PAGADO/PENDIENTE ——— */
+      const payToggle = card.querySelector("[data-pay-toggle]");
+      if(payToggle){
+        payToggle.addEventListener("click", async ()=>{
+          const wasPaid = (payToggle.dataset.payToggle==="paid");
+          const newState = !wasPaid;
+
+          payToggle.textContent = newState ? "PAGADO ✓" : "PENDIENTE DE PAGO";
+          payToggle.dataset.payToggle = newState ? "paid" : "pending";
+          payToggle.classList.toggle("is-paid", newState);
+          payToggle.classList.toggle("is-pending", !newState);
+
+          await setPaymentStatus(id, newState);
+        });
+      }
+
+
+      /* ——— IMPRIMIR (nueva pestaña) ——— */
+      const pr = card.querySelector("[data-print]");
+      if(pr){
+        pr.addEventListener("click", () => {
+          const snapDoc = lastSnap.docs.find(x => x.id === id);
+          if(snapDoc) openPrintTab(snapDoc);
+        });
+      }
+
+    });
+  }
+
+
+  /* ============================
+        IMPRIMIR EN NUEVA PESTAÑA
+  ============================ */
+  function openPrintTab(docSnap){
+    const ticketHTML = buildTicketHTML(docSnap);
+    const w = window.open("", "_blank");
+    w.document.write(ticketHTML);
+    w.document.close();
+  }
+
+
+  /* ============================
+         BUILDER TICKET
+  ============================ */
+  function buildTicketHTML(docSnap){
+    const o = docSnap.data();
+    return `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ticket</title>
+<style>
+  body{
+    font-family: Arial, sans-serif;
+    padding:10px;
+    font-size:14px;
+  }
+  .big{ font-size:20px; font-weight:800; text-align:center; }
+  .line{ margin:6px 0; }
+</style>
+</head>
+<body>
+
+  <div class="big">Rhodes Burgers</div>
+  <div class="big">${displayOrderNumber(docSnap)}</div>
+  <hr>
+
+  <div class="line"><b>Cliente:</b> ${o.nombre||""}</div>
+  <div class="line"><b>Pago:</b> ${o.pago||"—"}</div>
+  <div class="line"><b>Retiro:</b> ${getPickupPretty(o)}</div>
+  <hr>
+
+  <b>Items:</b><br>
+  ${(o.items||[]).map(it=>`${it.qty}× ${it.name}`).join("<br>")}
+
+  <hr>
+  <div class="big">Total: ${money(o.total||0)}</div>
+
+  <script>
+     setTimeout(()=>window.print(),300);
+  <\/script>
+
 </body>
 </html>
+    `;
+  }
+
+
+  /* ============================
+        SUSCRIPCIÓN FIRESTORE
+  ============================ */
+  db.collection("orders")
+    .orderBy("createdAt","desc")
+    .limit(500)
+    .onSnapshot(
+      snap => {
+        $("#ordersError").style.display="none";
+        renderList(snap);
+        playBeep();
+      },
+      err => {
+        console.error(err);
+        $("#ordersError").textContent = "Error cargando pedidos.";
+        $("#ordersError").style.display="block";
+      }
+    );
+
+});
+</script>
+<!-- ============================
+        PWA LOADER
+============================= -->
+<script src="pwa.js"></script>
+
+</body>
+</html>
+
