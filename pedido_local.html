@@ -373,13 +373,23 @@
       const isPaid = forcePaidInDeliveredTab || ((o.payment_status==='paid' || o.paid) === true);
       const payBtnAttrs = forcePaidInDeliveredTab ? 'disabled' : '';
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
-      const payLine = `<div class="pay-line">
-        <span class="chip">Pago: ${o.pago||'—'}</span>
-        <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}" ${payBtnAttrs}>
-          ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
-        </button>
-        <button class="btn" data-print>🖨 Imprimir</button>
-      </div>`;
+      const payLine = `
+  <div class="pay-line">
+    
+    <select class="btn" data-select-pago style="min-width:200px">
+      <option value="" disabled ${!o.pago?'selected':''}>Medio de pago…</option>
+      <option value="efectivo" ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
+      <option value="debito" ${o.pago==="debito"?"selected":""}>Débito</option>
+      <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>Mercado Pago</option>
+      <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
+    </select>
+
+    <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}" ${payBtnAttrs}>
+      ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
+    </button>
+
+    <button class="btn" data-print>🖨 Imprimir</button>
+  </div>`;
 
       return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
         <div class="order-head">
@@ -727,6 +737,21 @@ function printInIframe(docSnap){
 
         // Botón único de pago (toggle)
         const payToggle=card.querySelector("[data-pay-toggle]");
+        // Cambio de medio de pago
+const selPago = card.querySelector("[data-select-pago]");
+if(selPago){
+  selPago.addEventListener("change", async ()=>{
+    const pago = selPago.value;
+    try{
+      await db.collection("orders").doc(id).update({
+        pago: pago,
+        payment_method: pago
+      });
+    }catch(e){
+      alert("No se pudo guardar el método de pago");
+    }
+  });
+}
         if(payToggle && currentFilter!=="entregados"){
           payToggle.addEventListener("click", async ()=>{
             const wasPaid = payToggle.dataset.payToggle === "paid";
