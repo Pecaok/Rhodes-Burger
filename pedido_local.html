@@ -1,1016 +1,634 @@
 <!doctype html>
 <html lang="es">
-  <script>
-  /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
-  const TTL_HOURS = 20;
-  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
-
-  function sessionValid(){
-    const ok = localStorage.getItem('rb_admin_ok') === 'true';
-    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
-    return ok && (Date.now() - ts) < TTL_MS;
-  }
-  function bumpSession(){
-    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
-  }
-  function logout(){
-    try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
-    try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
-    try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
-    try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
-    const next = encodeURIComponent('pedido_local.html');
-    location.replace('login.html?reason=logout&next=' + next);
-  }
-
-  (function requireSession(){
-    if (!sessionValid()){
-      const next = encodeURIComponent(
-        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
-        (location.search || '') + (location.hash || '')
-      );
-      location.replace('login.html?next=' + next);
-    } else {
-      bumpSession();
-    }
-  })();
-
-  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
-    window.addEventListener(evt, bumpSession, {passive:true});
-  });
-  </script>
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Pedidos • Rhodes Burgers</title>
   <link rel="icon" href="images/logo.png" />
 
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#625A45" />
-
   <style>
     :root{
       --primary:#625A45;
       --text:#111;
-      --muted:#444;
+      --muted:#666;
       --bg:#f6f6f6;
       --card:#fff;
+      --radius:18px;
       --ring:#eaeaea;
-      --shadow:0 12px 34px rgba(0,0,0,.10);
-      --font: Inter, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
-
-      --st-accepted:#FBC02D;
-      --st-in_prep:#FB8C00;
-      --st-ready:#00ACC1;
-      --st-delivered:#2E7D32;
-      --st-cancelled:#D32F2F;
-
-      --pay-pending:#FFA000;
-      --pay-paid:#625A45;
     }
-
-    *{ box-sizing:border-box; }
-
-    html,body{
-      margin:0;
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif;
       background:var(--bg);
       color:var(--text);
-      font-family:var(--font);
     }
 
     header{
-      position:sticky;
-      top:0;
-      z-index:10;
       background:#fff;
       box-shadow:0 2px 12px rgba(0,0,0,.06);
+      position:sticky;
+      top:0;
+      z-index:20;
     }
-
     .topbar{
-      max-width:1100px;
-      margin:0 auto;
-      padding:10px 12px;
       display:flex;
       align-items:center;
       gap:12px;
+      padding:10px 14px;
+      max-width:1200px;
+      margin:0 auto;
     }
-
     .brand{
       display:flex;
       align-items:center;
       text-decoration:none;
+      font-weight:800;
       color:inherit;
-      font-weight:700;
     }
     .brand img{
-      width:36px;height:36px;
-      border-radius:10px;
-      background:#fff;
+      width:32px;
+      height:32px;
       object-fit:contain;
       margin-right:8px;
-    }
-
-    .spacer{ flex:1; }
-
-    .btn{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      border:1px solid var(--ring);
+      border-radius:10px;
       background:#fff;
-      padding:8px 12px;
-      border-radius:999px;
-      cursor:pointer;
-      font-weight:600;
+    }
+    .spacer{flex:1}
+    nav a{
       text-decoration:none;
-      color:inherit;
-    }
-    .btn.primary{
-      background:var(--primary);
-      color:#fff;
-      border-color:var(--primary);
-    }
-    .btn.active{
-      background:var(--primary);
-      color:#fff;
-    }
-    .danger{
-      background:#fff5f5;
-      border-color:#ffdddd;
-      color:#b30000;
-    }
-
-    .container{
-      max-width:1100px;
-      margin:24px auto;
-      padding:0 12px;
-    }
-
-    h1{ font-size:28px; margin:10px 0 18px; }
-
-    .tabs{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      margin:14px 0;
-    }
-    .chipf{
-      background:#f3f3f3;
-      border:1px solid var(--ring);
-      color:#111;
-      border-radius:999px;
-      padding:6px 10px;
-      font-size:13px;
-      cursor:pointer;
-    }
-    .chipf.active{
-      background:var(--primary);
-      color:#fff;
-      border-color:var(--primary);
-    }
-
-    .order{
-      background:var(--card);
-      border-radius:18px;
-      box-shadow:var(--shadow);
-      padding:16px 18px;
-      margin:14px 0;
-    }
-
-    .order-head{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:12px;
-    }
-
-    .order-title{ font-weight:800; }
-    .muted{ color:var(--muted); }
-
-    .chips{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      margin-top:6px;
-    }
-    .chip{
-      background:#f3f3f3;
-      border:1px solid var(--ring);
-      color:#111;
-      border-radius:999px;
-      padding:6px 10px;
-      font-size:13px;
-    }
-
-    .right-total{
-      font-weight:800;
-      font-size:18px;
-      white-space:nowrap;
-    }
-
-    .items{ margin-top:10px; }
-    .item{ margin:8px 0 6px 0; }
-    .item .sub{
-      color:#111;
-      font-size:13px;
-      margin-top:3px;
-    }
-
-    .money{ white-space:nowrap; }
-
-    .divider{
-      height:1px;
-      background:#efefef;
-      margin:10px 0;
-    }
-
-    .stateBtns{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      margin-top:10px;
-    }
-
-    .state-btn{
-      border:2px solid #dcdcdc;
+      padding:6px 12px;
       background:#fff;
-      color:#111;
-      border-radius:999px;
-      padding:8px 12px;
-      font-weight:800;
-      cursor:pointer;
-      min-width:160px;
-      text-align:center;
-    }
-
-    .state-btn.on{ color:#fff; border-color:var(--primary); background:var(--primary); }
-    .state-accepted.on{ background:var(--st-accepted); border-color:var(--st-accepted); color:#000; }
-    .state-in_prep.on{ background:var(--st-in_prep); border-color:var(--st-in_prep); color:#fff; }
-    .state-ready.on{ background:var(--st-ready); border-color:var(--st-ready); color:#fff; }
-    .state-delivered.on{ background:var(--st-delivered); border-color:var(--st-delivered); color:#fff; }
-    .state-cancelled.on{ background:var(--st-cancelled); border-color:var(--st-cancelled); color:#fff; }
-
-    /* ----------- LÍNEA DE PAGO MEJORADA ----------- */
-    .pay-line{
-      margin-top:10px;
-      display:flex;
-      align-items:center;
-      gap:12px;
-      flex-wrap:wrap;
-    }
-
-    .pay-method-select{
-      padding:6px 10px;
       border:1px solid var(--ring);
-      border-radius:999px;
-      background:#fff;
-      font-size:14px;
-      font-weight:600;
-    }
-
-    .pay-toggle{
-      min-width:180px;
-      padding:8px 14px;
       border-radius:999px;
       font-weight:700;
-      border:1px solid transparent;
+      color:#000;
     }
 
-    .pay-toggle.is-paid{
-      background:var(--st-delivered);
-      color:#fff;
-    }
-    .pay-toggle.is-pending{
-      background:var(--pay-pending);
-      color:#fff;
+    h1{
+      margin:20px auto 10px;
+      max-width:1200px;
+      padding:0 14px;
+      font-size:26px;
+      font-weight:800;
     }
 
-    .pay-line .btn{
-      padding:8px 14px;
+    /* Filtros */
+    .filters{
+      max-width:1200px;
+      margin:0 auto;
+      padding:0 14px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .filters button{
+      padding:6px 14px;
+      border:1px solid var(--ring);
+      background:#fff;
       border-radius:999px;
-      font-weight:600;
+      cursor:pointer;
+      font-weight:700;
+    }
+    .filters button.active{
+      border-color:var(--primary);
+      background:var(--primary);
+      color:#fff;
     }
 
-    /* PRINT MODE */
-    @media print{
-      header,.tabs,.stateBtns,.pay-line .btn,#btnBell,#btnInstall,#btnAutoPrint,[title="Admin"],[title="Mostrador"],[title="Finanzas"],[title="Ver pedidos"]{
-        display:none!important;
-      }
-      .order{ break-inside:avoid; box-shadow:none; border:1px solid #eee; }
+    /* Tarjetas de pedido */
+    .order-card{
+      max-width:1200px;
+      margin:20px auto;
+      padding:14px;
+      background:#fff;
+      border-radius:var(--radius);
+      box-shadow:0 12px 30px rgba(0,0,0,.08);
     }
+
+    .order-header{
+      display:flex;
+      justify-content:space-between;
+      flex-wrap:wrap;
+      gap:10px;
+      font-weight:700;
+      font-size:18px;
+    }
+
+    .order-meta{
+      margin-top:8px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      font-size:13px;
+      color:var(--muted);
+    }
+    .badge{
+      padding:3px 8px;
+      background:#eee;
+      border-radius:8px;
+      font-weight:600;
+      font-size:12px;
+    }
+
+    /* Estado */
+    .status-row{
+      display:flex;
+      gap:10px;
+      margin-top:12px;
+      flex-wrap:wrap;
+    }
+    .status-row button{
+      padding:8px 14px;
+      border:1px solid var(--ring);
+      border-radius:8px;
+      font-weight:700;
+      background:#fff;
+      cursor:pointer;
+    }
+
+    /* Método de pago */
+    .pay-row{
+      margin-top:12px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    select{
+      padding:6px 10px;
+      border-radius:10px;
+      border:1px solid var(--ring);
+      font-weight:700;
+    }
+
+    .pay-badge{
+      padding:6px 14px;
+      background:#F7A400;
+      color:#fff;
+      border-radius:999px;
+      font-weight:800;
+      font-size:13px;
+    }
+
+    /* Botón imprimir */
+    .print-btn{
+      padding:8px 14px;
+      background:#fff;
+      border-radius:8px;
+      border:1px solid var(--ring);
+      font-weight:700;
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      gap:6px;
+    }
+
+    /* Items */
+    .items{
+      margin-top:16px;
+      border-top:1px solid #eee;
+      padding-top:10px;
+      font-size:14px;
+    }
+    .items strong{font-size:15px}
 
   </style>
 </head>
 
 <body>
-  <header>
-    <div class="topbar">
-      <a class="brand" href="#"><img src="images/logo.png" alt="">Pedidos</a>
+<header>
+  <div class="topbar">
+    <a class="brand"><img src="images/logo.png">Rhodes Burgers</a>
+    <div class="spacer"></div>
+    <nav>
+      <a href="pedido_local.html">📦 Pedidos</a>
+      <a href="finanzas.html">📈 Finanzas</a>
+      <a href="admin.html">⚙️ Admin</a>
+    </nav>
+  </div>
+</header>
 
-      <div class="spacer"></div>
+<h1>Últimos pedidos</h1>
 
-      <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <a href="pedido_local.html" class="btn primary" title="Ver pedidos">📦 Pedidos</a>
-        <a href="finanzas.html" class="btn" title="Finanzas">📈 Finanzas</a>
-        <a href="mostrador.html" class="btn" title="Mostrador">🧾 Mostrador</a>
-        <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
-      </nav>
+<div class="filters">
+  <button data-filter="recibidos" class="active">Recibidos</button>
+  <button data-filter="entregados">Entregados</button>
+  <button data-filter="cancelados">Cancelados</button>
+  <button data-filter="todos">Todos</button>
+</div>
 
-      <button id="btnInstall" class="btn" style="display:none">➕ Instalar app</button>
-      <button id="btnBell" class="btn">🔔 Sonido</button>
-      <button id="btnAutoPrint" class="btn">🖨️ Autoimprimir</button>
-      <button id="btnLogout" class="btn danger">⏻ Cerrar sesión</button>
-    </div>
-  </header>
-
-  <main class="container">
-    <h1>Últimos pedidos</h1>
-
-    <div class="tabs" id="tabs">
-      <span class="chipf active" data-f="recibidos">Recibidos</span>
-      <span class="chipf" data-f="entregados">Entregados</span>
-      <span class="chipf" data-f="cancelled">Cancelados</span>
-      <span class="chipf" data-f="all">Todos</span>
-    </div>
-
-    <div id="orders"></div>
-    <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
-  </main>
-<!-- ============================
-     PARTE 2 — LÓGICA PRINCIPAL
-============================= -->
-
+<div id="ordersContainer"></div>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
-window.addEventListener('DOMContentLoaded', () => {
+/* ============================
+   🔥 CONFIG FIREBASE
+============================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+  authDomain: "rhodes-burguers.firebaseapp.com",
+  projectId: "rhodes-burguers",
+  storageBucket: "rhodes-burguers.firebasestorage.app",
+  messagingSenderId: "951646688091",
+  appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
-  /* ======================================
-            FIREBASE INIT
-  ====================================== */
-  const firebaseConfig = {
-    apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-    authDomain: "rhodes-burguers.firebaseapp.com",
-    projectId: "rhodes-burguers",
-    storageBucket: "rhodes-burguers.firebasestorage.app",
-    messagingSenderId: "951646688091",
-    appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+const ordersContainer = document.getElementById("ordersContainer");
+
+
+/* ============================
+   🔥 FILTROS
+============================ */
+let currentFilter = "recibidos";
+
+document.querySelectorAll(".filters button").forEach(btn=>{
+  btn.onclick = ()=>{
+    document.querySelectorAll(".filters button").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    currentFilter = btn.dataset.filter;
+    renderOrders();
   };
-  try { firebase.initializeApp(firebaseConfig); } catch(e){}
-
-  const db = firebase.firestore();
-  const $ = s => document.querySelector(s);
-  const money = n => (Number(n)||0).toLocaleString(
-    "es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}
-  );
+});
 
 
-  /* ======================================
-          HELPERS FECHA Y NÚMEROS
-  ====================================== */
-  function pickDocDate(o){
-    const keys=['createdAt','created_at','timestamp','date','fecha','time'];
-    for(const k of keys){
-      const v=o[k];
-      if(v?.toDate) return v.toDate();
-      if(typeof v==="number") return new Date(v);
-      if(typeof v==="string"){
-        const d=new Date(v);
-        if(!isNaN(d)) return d;
-      }
-    }
-    return null;
-  }
+/* ============================
+   🔥 ESCUCHA EN VIVO FIRESTORE
+============================ */
+let ordersRaw = [];
 
-  function displayOrderNumber(doc){
-    const o=doc.data();
-    const keys=[
-      o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,
-      o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido
-    ];
-    for(const v of keys){
-      if(v==null) continue;
-      const n = typeof v==="string" ? parseInt(v,10) : v;
-      if(Number.isFinite(n)) return `#${n}`;
-    }
-    return `#${doc.id.slice(-5).toUpperCase()}`;
-  }
-
-
-  /* ======================================
-        HORARIO PRETTY
-  ====================================== */
-  function formatSlotTime(raw){
-    if(!raw) return null;
-    try{
-      if(raw?.toDate)
-        return raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-      if(typeof raw==="string"){
-        const d=new Date(raw);
-        if(!isNaN(d))
-          return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-        const m=raw.match(/(\d{2})(\d{2})$/);
-        if(m) return `${m[1]}:${m[2]}`;
-      }
-    }catch(e){}
-    return null;
-  }
-
-  function getPickupPretty(o){
-    let pretty = o.pickup_time_pretty ||
-                 formatSlotTime(o.pickup_time);
-
-    if(!pretty && o.pickup_slot){
-      const m=String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
-      if(m) pretty=`${m[1]}:${m[2]}`;
-    }
-
-    if(!pretty && o.pickup_asap) pretty="A la brevedad";
-
-    return pretty || "—";
-  }
-
-
-  /* ======================================
-            SONIDO
-  ====================================== */
-  let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
-  const btnBell = $("#btnBell");
-
-  const updateBellUI = () => {
-    btnBell.classList.toggle("active", soundEnabled);
-  };
-  updateBellUI();
-
-  btnBell.onclick = () => {
-    soundEnabled = !soundEnabled;
-    localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled));
-    updateBellUI();
-  };
-
-  function playBeep(){
-    if(!soundEnabled) return;
-    const audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
-    audio.volume = 0.4;
-    audio.play().catch(()=>{});
-  }
-
-
-  /* ======================================
-             FILTROS
-  ====================================== */
-  const tabs = $("#tabs");
-  let currentFilter = "recibidos";
-  let lastSnap = null;
-
-  tabs.addEventListener("click", e=>{
-    const el=e.target.closest("[data-f]");
-    if(!el) return;
-
-    currentFilter = el.dataset.f;
-    tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
-    el.classList.add("active");
-
-    if(lastSnap) renderList(lastSnap);
+db.collection("orders")
+  .orderBy("createdAt","desc")
+  .onSnapshot(snap=>{
+    ordersRaw = snap.docs;
+    renderOrders();
   });
 
-  const passFilter = o =>{
-    const s=o.status || "accepted";
-    if(currentFilter==="recibidos")
-      return ["accepted","pending_payment","in_prep","ready"].includes(s);
-    if(currentFilter==="entregados")
-      return s==="delivered";
-    if(currentFilter==="cancelled")
-      return s==="cancelled";
-    return true;
-  };
 
+/* ============================
+   🔥 FILTRAR + RENDERIZAR
+============================ */
+function shouldShow(order){
+  const st = order.status || order.data().status || "";
+  if(currentFilter==="todos") return true;
+  if(currentFilter==="recibidos") return st==="accepted" || st==="pending_payment";
+  if(currentFilter==="entregados") return st==="completed";
+  if(currentFilter==="cancelados") return st==="cancelled";
+  return true;
+}
 
-  /* ======================================
-     CAMBIAR ESTADO (RECIBIDO → ENTREGADO)
-  ====================================== */
-  async function setOrderStatus(id,next){
-    try{
-      await db.collection("orders").doc(id).update({
-        status: next,
-        statusHistory: firebase.firestore.FieldValue.arrayUnion({
-          to:next, at:new Date().toISOString()
-        })
-      });
-    }catch(e){ alert("Error cambiando estado: "+e); }
-  }
+function renderOrders(){
+  ordersContainer.innerHTML = "";
+  let count = 0;
 
+  ordersRaw.forEach(doc=>{
+    const o = doc.data();
+    if(!shouldShow(o)) return;
 
-  /* ======================================
-           PAGO PAGADO / PENDIENTE
-  ====================================== */
-  async function setPaymentStatus(id, paid){
-    try{
-      await db.collection("orders").doc(id).update({
-        paid: !!paid,
-        payment_status: paid ? "paid" : "pending_payment",
-        statusHistory: firebase.firestore.FieldValue.arrayUnion({
-          to: paid ? "paid" : "pending_payment",
-          at:new Date().toISOString()
-        })
-      });
-    }catch(e){
-      alert("No se pudo actualizar pago: "+e);
-    }
-  }
+    count++;
 
+    const card = document.createElement("div");
+    card.className = "order-card";
 
-  /* ======================================
-            PAPAS
-  ====================================== */
-  function normalizeFriesLabel(raw){
-    if(!raw) return "";
-    let s=String(raw).toLowerCase();
-    if(s.includes("sin sal")) return "Sin sal";
-    if(s.includes("sazon")) return "Sazonadas";
-    if(s.includes("sal")) return "Con sal";
-    return "";
-  }
+    /* ======================
+       🔥 CABECERA
+    ====================== */
+    const date = o.createdAt?.toDate ? o.createdAt.toDate() : new Date();
+    const dateStr = date.toLocaleDateString("es-AR");
+    const timeStr = date.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"});
 
+    const orderNumber = o.orderNumber || doc.id.slice(-5).toUpperCase();
 
-  /* ======================================
-        RENDER DE CADA PEDIDO
-  ====================================== */
-  const STATE_SEQ=["accepted","in_prep","ready","delivered","cancelled"];
-  const STATE_LABEL={
-    accepted:"Recibido",
-    in_prep:"En preparación",
-    ready:"Listo",
-    delivered:"Entregado",
-    cancelled:"Cancelar"
-  };
-
-  function renderOrder(doc){
-    const o=doc.data();
-    const dt = pickDocDate(o);
-    const dtText = dt
-      ? dt.toLocaleDateString("es-AR")+" "+dt.toLocaleTimeString("es-AR",{hour:'2-digit',minute:'2-digit'})
-      : "—";
-
-    const itemsHTML = (o.items||[]).map(it=>{
-      const qty = it.qty||1;
-      const baseSubtotal = (it.price||0)*qty;
-      const extras=[];
-
-      if(it.extras?.patty) extras.push(`+${it.extras.patty} medallón`);
-      if(it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
-
-      const fries = normalizeFriesLabel(it.fries||it.side);
-
-      return `
-        <div class="item">
-          <div><strong>${qty}× ${it.name}</strong></div>
-          <div class="sub">Papas: ${fries||"—"} ${extras.length?" · "+extras.join(" · "):""}</div>
-          <div class="sub">Subtotal: ${money(baseSubtotal)}</div>
-        </div>
-      `;
-    }).join("");
-
-
-    /* ========= ESTADOS ========= */
-    const st=o.status || "accepted";
-    const curIdx=STATE_SEQ.indexOf(st);
-
-    const stateBtns = `
-      <div class="stateBtns">
-        ${STATE_SEQ.map((k,i)=>`
-          <button class="state-btn state-${k} ${i<=curIdx?"on":""}" data-act="${k}">
-            ${STATE_LABEL[k]}
-          </button>
-        `).join("")}
+    card.innerHTML = `
+      <div class="order-header">
+        <div>#${orderNumber} — ${o.nombre || "Cliente"}</div>
+        <div>$ ${o.total?.toLocaleString("es-AR")}</div>
       </div>
-    `;
 
+      <div class="order-meta">
+        <div class="badge">Estado: ${o.status}</div>
+        <div class="badge">Retiro: mostrador</div>
+        ${o.pickup_time_pretty ? `<div class="badge">Horario: ${o.pickup_time_pretty}</div>` : ""}
+        <div class="badge">Tel: ${o.telefono || "-"}</div>
+        <div class="badge">Origen: mostrador</div>
+      </div>
 
-    /* ========= PAGO ========= */
-    const isPaid = (o.payment_status==="paid" || o.paid===true);
-    const payBtnClass = isPaid ? "pay-toggle is-paid" : "pay-toggle is-pending";
+      <div class="status-row">
+        <button data-act="recibido">Recibido</button>
+        <button data-act="preparacion">En preparación</button>
+        <button data-act="listo">Listo</button>
+        <button data-act="entregado">Entregado</button>
+        <button data-act="cancelar">Cancelar</button>
+      </div>
 
-    const payLine = `
-      <div class="pay-line">
-
-        <select class="pay-method-select" data-id="${doc.id}">
-          <option value="">Método...</option>
-          <option value="efectivo"      ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
-          <option value="debito"        ${o.pago==="debito"?"selected":""}>Débito</option>
-          <option value="credito"       ${o.pago==="credito"?"selected":""}>Crédito</option>
-          <option value="mercadopago"   ${o.pago==="mercadopago"?"selected":""}>Mercado Pago</option>
+      <div class="pay-row">
+        <select class="selPago">
+          <option value="efectivo" ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
+          <option value="debito" ${o.pago==="debito"?"selected":""}>Débito</option>
+          <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>Mercado Pago</option>
           <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
-          <option value="otro"          ${o.pago==="otro"?"selected":""}>Otro</option>
         </select>
 
-        <span class="chip">Pago: ${o.pago||"—"}</span>
-
-        <button class="${payBtnClass}" data-pay-toggle="${isPaid?'paid':'pending'}">
-          ${isPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO"}
-        </button>
-
-        <button class="btn" data-print>🖨 Imprimir</button>
-
-      </div>
-    `;
-
-
-    return `
-      <div class="order" data-id="${doc.id}">
-        <div class="order-head">
-
-          <div>
-            <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre||"Cliente"}</div>
-            <div class="muted">${dtText}</div>
-
-            <div class="chips">
-              <span class="chip">Estado: ${st}</span>
-              <span class="chip">Retiro: ${o.entrega||"mostrador"}</span>
-              <span class="chip">Horario: ${getPickupPretty(o)}</span>
-              ${o.telefono?`<span class="chip">Tel: ${o.telefono}</span>`:""}
-              ${o.source?`<span class="chip">Origen: ${o.source}</span>`:""}
-            </div>
-
-            ${stateBtns}
-          </div>
-
-          <div>
-            <div class="right-total">${money(o.total||0)}</div>
-            ${payLine}
-          </div>
-
+        <div class="pay-badge">
+          ${o.payment_status==="paid" ? "PAGADO" : "PENDIENTE DE PAGO"}
         </div>
 
-        <div class="divider"></div>
+        <button class="print-btn">🖨️ Imprimir</button>
+      </div>
 
-        <div class="items">${itemsHTML}</div>
+      <div class="items">
+        ${buildItemsHTML(o.items)}
+        <div style="margin-top:10px;font-weight:800">Subtotal: $ ${o.total?.toLocaleString("es-AR")}</div>
       </div>
     `;
-  }
 
+    /* ==========================
+       🔥 EVENTO CAMBIAR PAGO
+    ========================== */
+    card.querySelector(".selPago").onchange = e=>{
+      const pago = e.target.value;
 
-  /* ======================================
-          RENDER LISTA
-  ====================================== */
-  function renderList(snap){
-    lastSnap=snap;
-
-    const docs=snap.docs.filter(d=>passFilter(d.data()));
-    $("#orders").innerHTML =
-      docs.length ? docs.map(renderOrder).join("") :
-      `<p class="muted">No hay pedidos.</p>`;
-
-    document.querySelectorAll(".order").forEach(card=>{
-      const id = card.dataset.id;
-
-
-      /* —— cambiar estado —— */
-      card.querySelectorAll("[data-act]").forEach(btn=>{
-        btn.addEventListener("click",()=> setOrderStatus(id,btn.dataset.act));
-      });
-
-
-      /* —— cambiar método de pago —— */
-      const paySelect = card.querySelector(".pay-method-select");
-      if(paySelect){
-        paySelect.addEventListener("change", async ()=>{
-          try{
-            await db.collection("orders").doc(id).update({
-              pago: paySelect.value,
-              payment_method: paySelect.value
-            });
-          }catch(e){
-            alert("Error guardando método de pago: "+e);
-          }
-        });
-      }
-
-
-      /* —— toggle pagado/pendiente —— */
-      const payToggle = card.querySelector("[data-pay-toggle]");
-      if(payToggle){
-        payToggle.addEventListener("click", async ()=>{
-          const wasPaid = (payToggle.dataset.payToggle==="paid");
-          const newState = !wasPaid;
-
-          payToggle.textContent = newState ? "PAGADO ✓" : "PENDIENTE DE PAGO";
-          payToggle.dataset.payToggle = newState ? "paid" : "pending";
-          payToggle.classList.toggle("is-paid", newState);
-          payToggle.classList.toggle("is-pending", !newState);
-
-          await setPaymentStatus(id, newState);
-        });
-      }
-
-
-      /* —— imprimir —— */
-      const pr = card.querySelector("[data-print]");
-      if(pr){
-        pr.addEventListener("click", ()=>{
-          const snapDoc = lastSnap.docs.find(x=>x.id===id);
-          if(snapDoc) printTicket(snapDoc);
-        });
-      }
-
-    });
-  }
-
-
-  /* ======================================
-         IMPRIMIR EN IFRAME
-  ====================================== */
-  function printTicket(docSnap){
-    const html = buildTicketHTML(docSnap);
-
-    const iframe = document.createElement("iframe");
-    iframe.style.position="fixed";
-    iframe.style.right="0";
-    iframe.style.bottom="0";
-    iframe.style.width="0";
-    iframe.style.height="0";
-    iframe.style.border="0";
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentWindow.document;
-    doc.open();
-    doc.write(html);
-    doc.close();
-
-    iframe.onload = () => {
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
-
-      setTimeout(()=>{
-        document.body.removeChild(iframe);
-      }, 900);
+      db.collection("orders").doc(doc.id).set({
+        pago,
+        payment_status: pago==="efectivo" || pago==="debito" ? "paid" : "pending_payment"
+      },{merge:true});
     };
+
+    /* ==========================
+       🔥 BOTÓN IMPRIMIR
+    ========================== */
+    card.querySelector(".print-btn").onclick = ()=>{
+      printInIframe(doc);
+    };
+
+    ordersContainer.appendChild(card);
+  });
+
+  if(count===0){
+    ordersContainer.innerHTML = `<p style="padding:20px;color:#666">No hay pedidos.</p>`;
   }
+}
 
 
-  /* ======================================
-          SUSCRIPCIÓN FIRESTORE
-  ====================================== */
-  db.collection("orders")
-    .orderBy("createdAt","desc")
-    .limit(500)
-    .onSnapshot(
-      snap=>{
-        $("#ordersError").style.display="none";
-        renderList(snap);
-        playBeep();
-      },
-      err=>{
-        console.error(err);
-        $("#ordersError").textContent="Error cargando pedidos.";
-        $("#ordersError").style.display="block";
-      }
-    );
+/* ============================
+   🔥 FORMATEAR ITEMS
+============================ */
+function buildItemsHTML(items){
+  if(!items || !items.length) return "Sin ítems.";
 
-}); // END DOMContentLoaded
+  return items.map(it=>{
+    let extra = "";
+    if(it.extras){
+      if(it.extras.patty) extra += ` (+${it.extras.patty} medallón)`;
+      if(it.extras.cheddar) extra += ` (+${it.extras.cheddar} cheddar)`;
+    }
+    return `
+      <div style="margin-bottom:8px">
+        <strong>${it.qty}× ${it.name}</strong><br>
+        Papas: ${it.fries || "-"}<br>
+        ${extra ? `<span style="color:#666">${extra}</span><br>`:""}
+        $ ${(it.price * it.qty).toLocaleString("es-AR")}
+      </div>
+    `;
+  }).join("");
+}
+
+
+/* ============================
+   🔥 FUNCIÓN PARA IMPRIMIR
+   (ticket completo en la parte 3)
+============================ */
+function printInIframe(docSnap){
+  const html = buildTicketHTML(docSnap); // viene en parte 3
+
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  document.body.appendChild(iframe);
+
+  const win = iframe.contentWindow;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+
+  win.addEventListener("load", ()=>{
+    win.print();
+    setTimeout(()=>iframe.remove(), 800);
+  });
+}
 </script>
-<!-- ============================
-      PARTE 3 — TICKET BUILDER
-============================= -->
+<script>
+/* ======================================================
+   🔥 TICKET 58 MM — IGUAL AL DEL MOSTRADOR
+====================================================== */
+
+function normalizeFriesLabel(raw){
+  if(!raw) return "";
+  let s = raw.toString().toLowerCase().replace(/_/g," ").trim();
+
+  if(s.includes("sin") && s.includes("sal")) return "Sin sal";
+  if(s.includes("sazon")) return "Sazonadas";
+  if(s.includes("sal")) return "Con sal";
+
+  return "";
+}
 
 function buildTicketHTML(docSnap){
-  const o = docSnap.data();
+  const o = docSnap.data ? docSnap.data() : docSnap;  
+  const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+  const escape = s => (s||"").toString()
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
-  const escapeHtml = s =>
-    (s || "")
-      .toString()
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+  const dateObj = o.createdAt?.toDate ? o.createdAt.toDate() : new Date();
+  const dateStr = dateObj.toLocaleDateString("es-AR");
+  const timeStr = dateObj.toLocaleTimeString("es-AR",{hour12:false});
 
-  const money = n =>
-    (Number(n) || 0).toLocaleString("es-AR", {
-      style: "currency",
-      currency: "ARS",
-      maximumFractionDigits: 0
-    });
+  const orderNo = o.orderNumber || o.num || ("#" + docSnap.id.slice(-5).toUpperCase());
+  const phone = o.telefono || o.tel || "";
 
-  /* === NÚMERO REAL === */
-  const orderDisplay = (() => {
-    const possible = [
-      o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro,
-      o.orderNo, o.seq, o.n, o.idPedido, o.pedidoNumber, o.pedido
-    ];
-    for (const v of possible) {
-      if (v == null) continue;
-      const n = typeof v === "string" ? parseInt(v, 10) : v;
-      if (Number.isFinite(n)) return `#${n}`;
-    }
-    return `#${docSnap.id.slice(-5).toUpperCase()}`;
-  })();
+  const generalComment = o.comment || o.comentario || o.notes || "";
 
-  /* === FECHA === */
-  const dt = (() => {
-    const keys = ["createdAt", "created_at", "timestamp", "date", "fecha", "time"];
-    for (const k of keys) {
-      const v = o[k];
-      if (v?.toDate) return v.toDate();
-      if (typeof v === "number") return new Date(v);
-      if (typeof v === "string") {
-        const d = new Date(v);
-        if (!isNaN(d)) return d;
-      }
-    }
-    return new Date();
-  })();
+  const pickupPretty = o.pickup_time_pretty || null;
 
-  const dateStr = dt.toLocaleDateString("es-AR");
-  const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
-
-  /* === PICKUP === */
-  const pickupPretty = o.pickup_time_pretty || o.pickupPretty || o.pickup || null;
-
-  const pickupBlockLarge = pickupPretty
-    ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">
-         Retira a las:<br>${escapeHtml(pickupPretty)}
-       </div>`
-    : `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">
-         Retiro: A la brevedad
-       </div>`;
-
-  /* === ITEMS (idéntico mostrador) === */
-  const items = Array.isArray(o.items) ? o.items : [];
-  const linesHTML =
-    items
-      .map(it => {
-        const qty = it.qty || 1;
-        const name = escapeHtml(it.name || "");
-
-        const base = it.price || 0;
-        const baseSubtotal = base * qty;
-
-        const pattyCount = it.extras?.patty || 0;
-        const cheddarCount = it.extras?.cheddar || 0;
-
-        const pattyUnit = it.extras?.EXTRA_PRICE_PATTY || 0;
-        const cheddarUnit = it.extras?.EXTRA_PRICE_CHEDDAR || 0;
-
-        const pattySum = qty * pattyCount * pattyUnit;
-        const cheddarSum = qty * cheddarCount * cheddarUnit;
-
-        const friesRaw =
-          it.fries ||
-          it.side ||
-          (Array.isArray(it.sides) ? it.sides.join(" ") : "") ||
-          it.extras?.fries ||
-          "";
-
-        const friesPretty =
-          friesRaw.includes("sin") ? "Sin sal" :
-          friesRaw.includes("sazon") ? "Sazonadas" :
-          friesRaw.includes("sal") ? "Con sal" : "";
-
-        const extrasRows = [];
-
-        if (cheddarCount) {
-          extrasRows.push(
-            `<div class="row extra"><div class="l">+${cheddarCount} × Cheddar</div><div class="r">${money(
-              cheddarSum
-            )}</div></div>`
-          );
-        }
-
-        if (pattyCount) {
-          extrasRows.push(
-            `<div class="row extra"><div class="l">+${pattyCount} × Medallón extra</div><div class="r">${money(
-              pattySum
-            )}</div></div>`
-          );
-        }
-
-        return `
-        <div class="row name">
-          <div class="l">${qty} × ${name}</div>
-        </div>
-        ${friesPretty ? `<div class="sub">• Papas: ${friesPretty}</div>` : ""}
-        <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
-        ${extrasRows.join("")}
-        <div class="row amount final"><div class="l"></div><div class="r">${money(
-          baseSubtotal + pattySum + cheddarSum
-        )}</div></div>
-        <div class="sep"></div>
-        `;
-      })
-      .join("") || `<div class="sub">Sin ítems.</div>`;
-
-  /* === TOTAL === */
-  const subtotal = items.reduce((t, it) => {
+  /* ======================================================
+     🔥 Construcción de ITEMS (igual mostrador)
+  ====================================================== */
+  const itemsHTML = (o.items||[]).map(it=>{
     const qty = it.qty || 1;
-    const base = (it.price || 0) * qty;
-    const patty = (it.extras?.patty || 0) * (it.extras?.EXTRA_PRICE_PATTY || 0) * qty;
-    const cheddar =
-      (it.extras?.cheddar || 0) * (it.extras?.EXTRA_PRICE_CHEDDAR || 0) * qty;
-    return t + base + patty + cheddar;
-  }, 0);
+    const name = escape(it.name);
 
-  const total = typeof o.total === "number" ? o.total : subtotal;
+    const base = it.price * qty;
 
-  const generalNote =
-    (o.comment ||
-      o.notes ||
-      o.note ||
-      o.notes_general ||
-      o.comentario ||
-      o.comments ||
-      "")
-      .toString()
-      .trim();
+    const pattyCount = it.extras?.patty || 0;
+    const cheddarCount = it.extras?.cheddar || 0;
 
-  const commentBlock = generalNote
-    ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(
-        generalNote
-      )}</div></div><div class="hr"></div>`
-    : "";
+    const pattySum = pattyCount * qty * (it.extras?.EXTRA_PRICE_PATTY || 0);
+    const cheddarSum = cheddarCount * qty * (it.extras?.EXTRA_PRICE_CHEDDAR || 0);
 
-  /* === LAYOUT FINAL IDÉNTICO MOSTRADOR === */
+    const totalLine = base + pattySum + cheddarSum;
+
+    const fries = normalizeFriesLabel(it.fries);
+
+    let notesHTML = "";
+    if(it.notes){
+      notesHTML = `<div class="sub">• Nota: ${escape(it.notes)}</div>`;
+    }
+
+    const extrasHTML = [];
+    if(cheddarCount){
+      extrasHTML.push(`
+        <div class="row extra">
+          <div class="l">+${cheddarCount} × Cheddar</div>
+          <div class="r">${money(cheddarSum)}</div>
+        </div>
+      `);
+    }
+    if(pattyCount){
+      extrasHTML.push(`
+        <div class="row extra">
+          <div class="l">+${pattyCount} × Medallón extra</div>
+          <div class="r">${money(pattySum)}</div>
+        </div>
+      `);
+    }
+
+    return `
+      <div class="row name">
+        <div class="l">${qty} × ${name}</div>
+      </div>
+      ${fries ? `<div class="sub">• Papas: ${fries}</div>` : ""}
+      ${notesHTML}
+      <div class="row amount"><div class="l"></div><div class="r">${money(base)}</div></div>
+      ${extrasHTML.join("")}
+      <div class="row amount final"><div class="l"></div><div class="r">${money(totalLine)}</div></div>
+      <div class="sep"></div>
+    `;
+  }).join("");
+
+  const total = (typeof o.total === "number") ? o.total :
+    (o.items||[]).reduce((t,it)=>{
+      const base = it.price * it.qty;
+      const extras = (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0) +
+                     (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0);
+      return t + base + extras;
+    },0);
+
+  /* ======================================================
+     🔥 HTML COMPLETO DEL TICKET
+  ====================================================== */
   return `
 <!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Ticket ${escapeHtml(orderDisplay)}</title>
 
 <style>
-  @page{ size:58mm auto; margin:0; }
-  html,body{margin:0;padding:0;color:#000;}
-  body{
-    font-family: Arial, sans-serif;
-    font-size:13px;
-    font-weight:700;
-    line-height:1.45;
-  }
-  .ticket{ width:48mm; margin:0 auto; padding:2mm 3mm 10mm 2mm; }
-  .c{text-align:center}
-  .brand{ font-size:16px; }
-  .orderNo{ font-size:14px; margin:1mm 0 }
-  .hr{ border-top:1px solid #000; margin:4px 0 }
-  .lbl{ font-size:11px; text-transform:uppercase; }
-  .blk{ margin:2px 0 2mm 0; }
-  .row{ display:flex; justify-content:space-between; }
-  .l{ flex:1; }
-  .r{ flex:0; text-align:right; min-width:18mm; white-space:nowrap; }
-  .row.name .r{ display:none; }
-  .sub{ font-size:11px; margin:1px 0 0 2mm; }
-  .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
-  .total{ font-size:16px; margin-top:3mm; }
-  .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
+  @page { size:58mm auto; margin:0; }
+  * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body { font-family:Arial, sans-serif; font-size:13px; font-weight:700; margin:0; }
+  .ticket { width:48mm; padding:2mm 2mm 8mm; }
+
+  .c { text-align:center; }
+  .brand { font-size:16px; }
+  .orderNo { font-size:14px; margin:1mm 0; }
+
+  .hr { border-top:1px solid #000; margin:3px 0; }
+
+  .lbl { font-size:11px; text-transform:uppercase; }
+  .blk { margin:2px 0 2mm 0; }
+
+  .row { display:flex; justify-content:space-between; }
+  .l { flex:1; }
+  .r { min-width:20mm; text-align:right; }
+
+  .sub { font-size:11px; margin-left:2mm; }
+  .sep { border-top:1px dashed #000; opacity:.5; margin:2mm 0; }
+
+  .row.extra .l { font-size:11px; }
+  .row.extra .r { font-size:12px; }
+
+  .totalRow { font-size:16px; margin-top:3mm; }
+
+  .foot { margin-top:4mm; text-align:center; font-size:10px; font-weight:400; }
 </style>
 
 </head>
 <body>
-  <div class="ticket">
+<div class="ticket">
 
-    <div class="c brand">Rhodes Burgers</div>
-    <div class="orderNo c">${escapeHtml(orderDisplay)}</div>
+  <div class="c brand">Rhodes Burgers</div>
+  <div class="orderNo c">#${escape(orderNo)}</div>
 
+  <div class="hr"></div>
+
+  ${o.nombre ? `
+    <div class="blk">
+      <div class="lbl">CLIENTE</div>
+      <div>${escape(o.nombre)}</div>
+    </div>
+  ` : ""}
+
+  ${phone ? `
+    <div class="blk">
+      <div class="lbl">TELÉFONO</div>
+      <div>${escape(phone)}</div>
+    </div>
+  ` : ""}
+
+  ${pickupPretty ? `
+    <div class="c" style="margin:6px 0;font-size:20px;font-weight:900">
+      Retira a las:<br>${escape(pickupPretty)}
+    </div>
+  ` : `
+    <div class="c" style="margin:6px 0;font-size:20px;font-weight:900">
+      Retiro: A la brevedad
+    </div>
+  `}
+
+  ${(o.pago||o.payment_method) ? `
+    <div class="blk">
+      <div class="lbl">MEDIO DE PAGO</div>
+      <div>${escape(o.pago || o.payment_method)}</div>
+    </div>
+  `:""}
+
+  ${generalComment ? `
     <div class="hr"></div>
-
-    ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
-
-    ${pickupBlockLarge}
-
-    ${(o.pago || o.payment_method)
-      ? `<div class="blk"><div class="lbl">PAGO</div><div>${escapeHtml(
-          o.pago || o.payment_method
-        )}</div></div>`
-      : ""}
-
-    ${commentBlock}
-
+    <div class="blk">
+      <div class="lbl">COMENTARIO</div>
+      <div>${escape(generalComment)}</div>
+    </div>
     <div class="hr"></div>
+  `:""}
 
-    ${linesHTML}
+  <div class="hr"></div>
 
-    <div class="hr"></div>
+  ${itemsHTML}
 
-    <div class="row total"><div class="l">TOTAL</div><div class="r">${money(total)}</div></div>
+  <div class="hr"></div>
 
-    <div class="foot">${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}</div>
-
+  <div class="row totalRow">
+    <div class="l">TOTAL</div>
+    <div class="r">${money(total)}</div>
   </div>
 
-  <script>
-    window.addEventListener('load', () => {
-      setTimeout(() => { window.print(); }, 30);
-    });
-  <\/script>
+  <div class="foot">
+    ${dateStr} — ${timeStr}
+    <div>${pickupPretty ? `Horario de retiro: ${escape(pickupPretty)}` : "Retiro: A la brevedad"}</div>
+  </div>
+
+</div>
+
+<script>
+  window.onload = ()=>{ setTimeout(()=>{ window.print(); },30); };
+</script>
 
 </body>
 </html>`;
 }
-
-<!-- ============================
-          PWA LOADER
-============================= -->
-<script src="pwa.js"></script>
-
-</body>
-</html>
+</script>
