@@ -61,6 +61,41 @@
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600;text-decoration:none;color:inherit}
     .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
     .btn.danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
+    .calendar-grid{
+  display:grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap:6px;
+  margin-top:10px;
+}
+
+.cal-day{
+  border:1px solid var(--ring);
+  border-radius:10px;
+  padding:6px;
+  height:80px;
+  background:#fff;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+  font-size:13px;
+}
+
+.cal-day-header{
+  font-weight:700;
+  margin-bottom:4px;
+}
+
+.cal-mini{
+  font-size:11px;
+  line-height:14px;
+  color:#333;
+}
+
+.cal-empty{
+  background:#f2f2f2;
+  border:1px solid #e5e5e5;
+}
+
 
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
@@ -200,32 +235,21 @@
           </div>
         </div>
 
-        <!-- CALENDARIO DE HAMBURGUESAS POR DÍA (Opción B) -->
+       <!-- CALENDARIO CLÁSICO DE HAMBURGUESAS POR DÍA -->
 <div class="card" style="margin-top:12px">
-  <strong>Calendario de hamburguesas por día</strong>
+  <strong>Calendario por día</strong>
 
-  <div class="inline" style="margin:8px 0">
+  <div class="inline" style="margin:10px 0">
     <label class="badge">
-      Mes <input type="month" id="calBurgerMonth" />
+      Mes <input type="month" id="calMonth">
     </label>
-
     <button id="calPrev" class="btn">◀</button>
     <button id="calNext" class="btn">▶</button>
     <button id="calGo" class="btn">Ver</button>
-
     <span id="calRange" class="badge muted">—</span>
   </div>
 
-  <!-- Heatmap simple en 1 fila -->
-  <div id="calGrid"
-       style="
-         display:grid;
-         grid-template-columns: 70px repeat(31, 1fr);
-         border:1px solid var(--ring);
-         border-radius:12px;
-         overflow:hidden;
-       ">
-  </div>
+  <div id="calendarGrid" class="calendar-grid"></div>
 
   <div class="hm-legend" style="margin-top:8px">
     <span class="muted">Bajo</span>
@@ -236,9 +260,7 @@
     <span class="muted">Alto</span>
   </div>
 
-  <div id="calError"
-       class="err"
-       style="margin-top:8px;display:none"></div>
+  <div id="calError" style="display:none;color:#b30000;margin-top:10px;font-weight:600"></div>
 </div>
 <!-- FIN CALENDARIO -->
 
@@ -803,79 +825,120 @@
       loadBurgersByMonth();
     });
   </script>
-  <script>
-function renderCalendarBurgers(monthStr){
-  const grid = document.getElementById("calGrid");
-  grid.innerHTML = "";
+ <script>
+function colorForIntensity(val, max){
+  if(max <= 0) return "#fff";
+  const r = val / max;
+  if(r < 0.25) return "#e8f5e9";
+  if(r < 0.50) return "#a5d6a7";
+  if(r < 0.75) return "#66bb6a";
+  return "#2e7d32";
+}
 
-  const [y,m] = monthStr.split("-").map(Number);
-  const start = new Date(y, m-1, 1);
+// Render principal
+async function renderCalendar(monthStr){
+  const grid = document.getElementById("calendarGrid");
+  const err = document.getElementById("calError");
+  grid.innerHTML = "";
+  err.style.display = "none";
+
+  if(!monthStr){
+    err.textContent = "Seleccioná un mes válido.";
+    err.style.display = "block";
+    return;
+  }
+
+  const [y, m] = monthStr.split("-").map(Number);
+  const start = new Date(y, m - 1, 1);
   const end   = new Date(y, m, 0);
   const days  = end.getDate();
 
   document.getElementById("calRange").textContent =
     `${start.toLocaleDateString("es-AR")} → ${end.toLocaleDateString("es-AR")}`;
 
-  // encabezado
-  grid.insertAdjacentHTML("beforeend", `<div class="hm-cell hm-day">Burgs</div>`);
-  for(let d=1; d<=days; d++){
-    grid.insertAdjacentHTML("beforeend", `<div class="hm-cell hm-head">${String(d).padStart(2,"0")}</div>`);
+  // Probamos el campo fecha en Firebase
+  const probe = await db.collection("orders").limit(1).get();
+  let dateField = "createdAt";
+  if(!probe.empty){
+    const d = probe.docs[0].data();
+    for(const k of ["createdAt","created_at","date","fecha","timestamp","time"])
+      if(d[k] != null) dateField = k;
   }
 
-  // fila de valores
-  const row = Array(days).fill(0);
+  // Preparamos matriz
+  const counts = Array(days).fill(0);
+  const totals = Array(days).fill(0);
 
-  db.collection("orders").get().then(snap=>{
-    let max = 0;
+  // Query
+  const snap = await db.collection("orders")
+    .where(dateField, ">=", start)
+    .where(dateField, "<", new Date(y, m, 1))
+    .get();
 
-    snap.forEach(doc=>{
-      const data = doc.data();
-      const dt = pickDocDate(data);
-      if(!dt) return;
+  // Procesar pedidos
+  snap.forEach(doc=>{
+    const data = doc.data();
+    const dt = pickDocDate(data);
+    if(!dt) return;
 
-      if(dt.getFullYear() === y && (dt.getMonth()+1) === m){
-        const day = dt.getDate();
-        row[day-1] += 1;
-        if(row[day-1] > max) max = row[day-1];
-      }
-    });
-
-    // fila de celdas
-    grid.insertAdjacentHTML("beforeend", `<div class="hm-cell hm-day">Total</div>`);
-
-    for(let i=0;i<days;i++){
-      const v = row[i];
-      const bg = colorFor(v, max);
-      grid.insertAdjacentHTML(
-        "beforeend",
-        `<div class="hm-cell" style="background:${bg}">${v>0? v : ""}</div>`
-      );
-    }
+    const day = dt.getDate();
+    counts[day - 1] += 1;
+    totals[day - 1] += Number(data.total || 0);
   });
+
+  // Determinar día de la semana del 1°
+  const startWeekday = start.getDay(); // 0 = dom ... 6 = sáb
+  const adjustedStart = (startWeekday === 0 ? 6 : startWeekday - 1); // lunes = 0
+
+  // Agregar días vacíos previos
+  for(let i=0; i<adjustedStart; i++){
+    grid.insertAdjacentHTML("beforeend",
+      `<div class="cal-day cal-empty"></div>`
+    );
+  }
+
+  // Máximo para color
+  const max = Math.max(...counts);
+
+  // Renderizar días
+  for(let d=1; d<=days; d++){
+    const c = counts[d-1];
+    const t = totals[d-1];
+    const bg = colorForIntensity(c, max);
+
+    grid.insertAdjacentHTML("beforeend", `
+      <div class="cal-day" style="background:${bg}">
+        <div class="cal-day-header">${d}</div>
+        <div class="cal-mini">🟫 ${c} burguers</div>
+        <div class="cal-mini">💵 ${money(t)}</div>
+      </div>
+    `);
+  }
 }
 
+// Init
 document.addEventListener("DOMContentLoaded", ()=>{
-  const cal = document.getElementById("calBurgerMonth");
+  const cal = document.getElementById("calMonth");
   const d = new Date();
-  const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-  cal.value = m;
+  cal.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
 
-  renderCalendarBurgers(m);
+  renderCalendar(cal.value);
 
-  document.getElementById("calGo").onclick = ()=> renderCalendarBurgers(cal.value);
+  document.getElementById("calGo").onclick  = ()=> renderCalendar(cal.value);
   document.getElementById("calPrev").onclick = ()=>{
-    const [y,mm] = cal.value.split("-").map(Number);
-    const newDate = new Date(y, mm-2, 1);
+    const [y,m] = cal.value.split("-").map(Number);
+    const newDate = new Date(y, m - 2, 1);
     cal.value = `${newDate.getFullYear()}-${String(newDate.getMonth()+1).padStart(2,"0")}`;
-    renderCalendarBurgers(cal.value);
+    renderCalendar(cal.value);
   };
   document.getElementById("calNext").onclick = ()=>{
-    const [y,mm] = cal.value.split("-").map(Number);
-    const newDate = new Date(y, mm, 1);
+    const [y,m] = cal.value.split("-").map(Number);
+    const newDate = new Date(y, m, 1);
     cal.value = `${newDate.getFullYear()}-${String(newDate.getMonth()+1).padStart(2,"0")}`;
-    renderCalendarBurgers(cal.value);
+    renderCalendar(cal.value);
   };
 });
 </script>
+
 </body>
 </html>
