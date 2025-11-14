@@ -164,149 +164,6 @@
   <div id="calError" class="err" style="margin-top:8px; display:none"></div>
 </div>
 <!-- /CALENDARIO HAMBURGUESAS POR DÍA -->
-<script>
-  function monthRange2(monthStr){
-    const [y,m] = monthStr.split('-').map(Number);
-    const start = new Date(y, m-1, 1, 0, 0, 0, 0);
-    const end   = new Date(y, m,   1, 0, 0, 0, 0);
-    return {start, end};
-  }
-
-  function renderBurgerCalendar(counters, days){
-    const host = document.getElementById("calGrid");
-    host.innerHTML = '';
-    host.style.gridTemplateColumns = `repeat(${7}, 1fr)`;
-
-    // buscar máximos para colores
-    let max = 0;
-    for(const d of Object.values(counters)){
-      if (d.qty > max) max = d.qty;
-    }
-
-    function bgFor(v){
-      if(v <= 0) return '#e8f5e9';
-      const r = v/max;
-      if(r < 0.25) return '#e8f5e9';
-      if(r < 0.50) return '#a5d6a7';
-      if(r < 0.75) return '#66bb6a';
-      return '#2e7d32';
-    }
-
-    // construir calendario real
-    const month = Object.keys(counters)[0]?.slice(5,7);
-    const year  = Object.keys(counters)[0]?.slice(0,4);
-    const first = new Date(`${year}-${month}-01T00:00:00`);
-    const startWeekday = first.getDay(); // 0=Domingo
-
-    // celdas vacías antes del día 1
-    for(let i=0; i<startWeekday; i++){
-      host.insertAdjacentHTML('beforeend', `<div class="hm-cell" style="background:#fafafa"></div>`);
-    }
-
-    // días del mes
-    for(let d=1; d<=days; d++){
-      const dateKey = `${year}-${month}-${String(d).padStart(2,'0')}`;
-      const info = counters[dateKey] || {qty:0, revenue:0};
-      const bg = bgFor(info.qty);
-
-      host.insertAdjacentHTML(
-        'beforeend',
-        `<div class="hm-cell" style="background:${bg}">
-          <div><strong>${d}</strong></div>
-          <div>${info.qty} bur</div>
-          <div>${money(info.revenue)}</div>
-        </div>`
-      );
-    }
-  }
-
-  async function loadBurgerCalendar(){
-    const err = $("#calError");
-    err.style.display='none';
-    err.textContent='';
-
-    try{
-      const ym = $("#calBurgerMonth").value;
-      if(!ym) return;
-
-      const {start,end} = monthRange2(ym);
-      const endDisplay = new Date(end.getTime() - 1);
-      $("#calRange").textContent =
-        `${start.toLocaleDateString('es-AR')} → ${endDisplay.toLocaleDateString('es-AR')}`;
-
-      let dateField = null;
-      const probe = await db.collection("orders").limit(1).get();
-      if(!probe.empty){
-        const sample = probe.docs[0].data();
-        for(const k of ['createdAt','created_at','timestamp','date','fecha','time']){
-          if(sample[k] != null){ dateField = k; break; }
-        }
-      }
-      if(!dateField) dateField = "createdAt";
-
-      let q = db.collection("orders")
-        .where(dateField, ">=", start)
-        .where(dateField, "<",  end)
-        .orderBy(dateField, "asc");
-
-      const snap = await q.get();
-
-      const counters = {}; // { "2025-02-01": {qty:10,revenue:22000}, ... }
-      const daysInMonth = new Date(start.getFullYear(), start.getMonth()+1, 0).getDate();
-
-      snap.forEach(doc=>{
-        const o = doc.data();
-        const dt = pickDocDate(o);
-        if(!dt) return;
-
-        const y = dt.getFullYear();
-        const m = String(dt.getMonth()+1).padStart(2,'0');
-        const d = String(dt.getDate()).padStart(2,'0');
-        const key = `${y}-${m}-${d}`;
-
-        const items = Array.isArray(o.items) ? o.items : [];
-        let dayQty = 0;
-        let dayRev = 0;
-
-        items.forEach(it=>{
-          if(!isBurgerItem(it)) return;
-          const qty = Number(it.qty || it.quantity || 1);
-          const unit = getUnitPrice(it);
-          dayQty += qty;
-          dayRev += (qty * unit);
-        });
-
-        if(!counters[key]) counters[key] = {qty:0,revenue:0};
-        counters[key].qty += dayQty;
-        counters[key].revenue += dayRev;
-      });
-
-      renderBurgerCalendar(counters, daysInMonth);
-
-    }catch(e){
-      console.error(e);
-      err.textContent = "No se pudo cargar el calendario.";
-      err.style.display='block';
-    }
-  }
-
-  document.addEventListener("DOMContentLoaded", ()=>{
-    const m = $("#calBurgerMonth");
-    if(!m.value){
-      const d = new Date();
-      m.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    }
-
-    $("#calPrev").onclick = ()=>{ m.value = addMonths(m.value, -1); loadBurgerCalendar(); };
-    $("#calNext").onclick = ()=>{ m.value = addMonths(m.value, +1); loadBurgerCalendar(); };
-    $("#calGo").onclick   = loadBurgerCalendar;
-    m.addEventListener("change", loadBurgerCalendar);
-
-    loadBurgerCalendar();
-  });
-</script>
-
-
 
       <!-- Navegación cruzada -->
       <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -929,5 +786,146 @@
       loadBurgersByMonth();
     });
   </script>
+  <script>
+  function monthRange2(monthStr){
+    const [y,m] = monthStr.split('-').map(Number);
+    const start = new Date(y, m-1, 1, 0, 0, 0, 0);
+    const end   = new Date(y, m,   1, 0, 0, 0, 0);
+    return {start, end};
+  }
+
+  function renderBurgerCalendar(counters, days){
+    const host = document.getElementById("calGrid");
+    host.innerHTML = '';
+    host.style.gridTemplateColumns = `repeat(${7}, 1fr)`;
+
+    // buscar máximos para colores
+    let max = 0;
+    for(const d of Object.values(counters)){
+      if (d.qty > max) max = d.qty;
+    }
+
+    function bgFor(v){
+      if(v <= 0) return '#e8f5e9';
+      const r = v/max;
+      if(r < 0.25) return '#e8f5e9';
+      if(r < 0.50) return '#a5d6a7';
+      if(r < 0.75) return '#66bb6a';
+      return '#2e7d32';
+    }
+
+    // construir calendario real
+    const month = Object.keys(counters)[0]?.slice(5,7);
+    const year  = Object.keys(counters)[0]?.slice(0,4);
+    const first = new Date(`${year}-${month}-01T00:00:00`);
+    const startWeekday = first.getDay(); // 0=Domingo
+
+    // celdas vacías antes del día 1
+    for(let i=0; i<startWeekday; i++){
+      host.insertAdjacentHTML('beforeend', `<div class="hm-cell" style="background:#fafafa"></div>`);
+    }
+
+    // días del mes
+    for(let d=1; d<=days; d++){
+      const dateKey = `${year}-${month}-${String(d).padStart(2,'0')}`;
+      const info = counters[dateKey] || {qty:0, revenue:0};
+      const bg = bgFor(info.qty);
+
+      host.insertAdjacentHTML(
+        'beforeend',
+        `<div class="hm-cell" style="background:${bg}">
+          <div><strong>${d}</strong></div>
+          <div>${info.qty} bur</div>
+          <div>${money(info.revenue)}</div>
+        </div>`
+      );
+    }
+  }
+
+  async function loadBurgerCalendar(){
+    const err = $("#calError");
+    err.style.display='none';
+    err.textContent='';
+
+    try{
+      const ym = $("#calBurgerMonth").value;
+      if(!ym) return;
+
+      const {start,end} = monthRange2(ym);
+      const endDisplay = new Date(end.getTime() - 1);
+      $("#calRange").textContent =
+        `${start.toLocaleDateString('es-AR')} → ${endDisplay.toLocaleDateString('es-AR')}`;
+
+      let dateField = null;
+      const probe = await db.collection("orders").limit(1).get();
+      if(!probe.empty){
+        const sample = probe.docs[0].data();
+        for(const k of ['createdAt','created_at','timestamp','date','fecha','time']){
+          if(sample[k] != null){ dateField = k; break; }
+        }
+      }
+      if(!dateField) dateField = "createdAt";
+
+      let q = db.collection("orders")
+        .where(dateField, ">=", start)
+        .where(dateField, "<",  end)
+        .orderBy(dateField, "asc");
+
+      const snap = await q.get();
+
+      const counters = {}; // { "2025-02-01": {qty:10,revenue:22000}, ... }
+      const daysInMonth = new Date(start.getFullYear(), start.getMonth()+1, 0).getDate();
+
+      snap.forEach(doc=>{
+        const o = doc.data();
+        const dt = pickDocDate(o);
+        if(!dt) return;
+
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth()+1).padStart(2,'0');
+        const d = String(dt.getDate()).padStart(2,'0');
+        const key = `${y}-${m}-${d}`;
+
+        const items = Array.isArray(o.items) ? o.items : [];
+        let dayQty = 0;
+        let dayRev = 0;
+
+        items.forEach(it=>{
+          if(!isBurgerItem(it)) return;
+          const qty = Number(it.qty || it.quantity || 1);
+          const unit = getUnitPrice(it);
+          dayQty += qty;
+          dayRev += (qty * unit);
+        });
+
+        if(!counters[key]) counters[key] = {qty:0,revenue:0};
+        counters[key].qty += dayQty;
+        counters[key].revenue += dayRev;
+      });
+
+      renderBurgerCalendar(counters, daysInMonth);
+
+    }catch(e){
+      console.error(e);
+      err.textContent = "No se pudo cargar el calendario.";
+      err.style.display='block';
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", ()=>{
+    const m = $("#calBurgerMonth");
+    if(!m.value){
+      const d = new Date();
+      m.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    }
+
+    $("#calPrev").onclick = ()=>{ m.value = addMonths(m.value, -1); loadBurgerCalendar(); };
+    $("#calNext").onclick = ()=>{ m.value = addMonths(m.value, +1); loadBurgerCalendar(); };
+    $("#calGo").onclick   = loadBurgerCalendar;
+    m.addEventListener("change", loadBurgerCalendar);
+
+    loadBurgerCalendar();
+  });
+</script>
 </body>
 </html>
