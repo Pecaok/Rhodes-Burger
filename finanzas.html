@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="es">
   <script>
-  /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
+  /* ======== SESIÓN COMPARTIDA ======== */
   const TTL_HOURS = 20;
   const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
 
@@ -10,7 +10,7 @@
     const ts = Number(localStorage.getItem('rb_admin_t') || 0);
     return ok && (Date.now() - ts) < TTL_MS;
   }
-  function bumpSession(){  // renueva TTL con actividad
+  function bumpSession(){
     if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
   }
   function logout(){
@@ -18,33 +18,29 @@
     localStorage.removeItem('rb_admin_t');
     localStorage.removeItem('rb_auth_v2');
     sessionStorage.removeItem('rb_auth_v2');
-    location.replace('login.html'); // <-- página de login
+    location.replace('login.html');
   }
 
-  // Requerir sesión en páginas internas
   (function requireSession(){
     if (!sessionValid()){
-      // armar "next" con ruta+query+hash actuales
       const next = encodeURIComponent(
         (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
         (location.search || '') + (location.hash || '')
       );
-      location.replace('login.html?next=' + next); // <-- login con ?next=
-    } else {
-      bumpSession();
-    }
+      location.replace('login.html?next=' + next);
+    } else bumpSession();
   })();
 
-  // Mantener viva la sesión mientras se usa
-  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
-    window.addEventListener(evt, bumpSession, {passive:true});
-  });
+  ['click','keydown','focus','mousemove','touchstart','scroll']
+    .forEach(evt => window.addEventListener(evt, bumpSession, {passive:true}));
   </script>
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Finanzas • Rhodes Burgers</title>
   <link rel="icon" href="images/logo.png" />
+
   <style>
     :root{
       --primary:#625A45; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
@@ -97,91 +93,36 @@
     .hm-day{background:#fafafa;text-align:left;font-weight:700}
     .hm-legend{display:flex;gap:8px;align-items:center;margin-top:8px}
     .swatch{width:18px;height:18px;border-radius:4px;border:1px solid var(--ring)}
-    .warn-pill{display:inline-block;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}
-    .warn{background:#fff3cd;border:1px solid #ffe58f;color:#8a6d3b}
-    .danger{background:#fdecea;border:1px solid #f5c6cb;color:#8a1c1c}
 
-    /* Tabla hamburguesas por mes */
     table{width:100%;border-collapse:collapse}
     th,td{padding:10px;border-bottom:1px solid #eee;text-align:left}
     th{font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.02em}
   </style>
 </head>
+
 <body>
-  <script>
-    (function guard(){
-      const TTL_MS = 20*60*60*1000;
-      const qs = new URLSearchParams(location.search);
-      if (qs.get('auth')==='1') {
-        try{
-          const now = Date.now();
-          localStorage.setItem('rb_admin_ok','true');
-          localStorage.setItem('rb_admin_t', String(now));
-          localStorage.setItem('rb_auth_v2','ok');
-          sessionStorage.setItem('rb_auth_v2','ok');
-        }catch(_){}
-        try{ history.replaceState(null,'',location.pathname); }catch(_){}
-      }
-      const ok = localStorage.getItem('rb_admin_ok')==='true';
-      const ts = Number(localStorage.getItem('rb_admin_t')||0);
-      const live = (Date.now()-ts) < TTL_MS;
-      if (!(ok && live)){
-        const next = encodeURIComponent(location.pathname + location.search);
-        location.replace('login.html?reason=guard&next='+next);
-        return;
-      }
-      try{ localStorage.setItem('rb_admin_t', String(Date.now())); }catch(_){}
-    })();
-  </script>
 
-  <header>
-    <div class="topbar">
-      <a class="brand" href="#"><img src="images/logo.png" alt="Rhodes Burgers">Finanzas</a>
+<header>
+  <div class="topbar">
+    <a class="brand" href="#"><img src="images/logo.png">Finanzas</a>
+    <div class="spacer"></div>
 
-      <div class="spacer"></div>
-     <!-- CALENDARIO HAMBURGUESAS POR DÍA -->
-<div class="card" style="margin-top:12px">
-  <strong>Calendario de hamburguesas por día</strong>
-  <div class="inline" style="margin:8px 0">
-    <label class="badge">Mes <input type="month" id="calBurgerMonth" /></label>
-    <button id="calPrev" class="btn">◀</button>
-    <button id="calNext" class="btn">▶</button>
-    <button id="calGo" class="btn">Ver</button>
-    <span id="calRange" class="badge muted">—</span>
+    <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <a href="pedido_local.html" class="btn">📦 Pedidos</a>
+      <a href="finanzas.html" class="btn primary">📈 Finanzas</a>
+      <a href="mostrador.html" class="btn">🧾 Mostrador</a>
+      <a href="admin.html" class="btn">⚙️ Admin</a>
+    </nav>
+
+    <button id="btnLogout" class="btn danger">⏻ Cerrar sesión</button>
   </div>
+</header>
 
-  <div id="calGrid" class="heatmap" style="margin-top:8px"></div>
+<main class="container">
+  <h1>Resumen & Control</h1>
 
-  <div class="hm-legend">
-    <span class="muted">Bajo</span>
-    <span class="swatch" style="background:#e8f5e9"></span>
-    <span class="swatch" style="background:#a5d6a7"></span>
-    <span class="swatch" style="background:#66bb6a"></span>
-    <span class="swatch" style="background:#2e7d32"></span>
-    <span class="muted">Alto</span>
-  </div>
-
-  <div id="calError" class="err" style="margin-top:8px; display:none"></div>
-</div>
-<!-- /CALENDARIO HAMBURGUESAS POR DÍA -->
-
-      <!-- Navegación cruzada -->
-      <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <a href="pedido_local.html" class="btn" title="Ver pedidos">📦 Pedidos</a>
-        <a href="finanzas.html" class="btn primary" title="Finanzas (estás aquí)">📈 Finanzas</a>
-        <a href="mostrador.html" class="btn" title="Mostrador">🧾 Mostrador</a>
-        <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
-      </nav>
-
-      <button id="btnLogout" class="btn danger" title="Cerrar sesión">⏻ Cerrar sesión</button>
-    </div>
-  </header>
-
-  <main class="container">
-    <h1>Resumen & Control</h1>
-
-    <div class="grid">
-      <section class="card">
+  <div class="grid">
+    <section class="card">
         <div class="row" style="justify-content:space-between">
           <div class="row">
             <strong>Resumen</strong>
@@ -203,32 +144,52 @@
           </div>
 
           <div class="kpi">
-            <div class="kbadge"><div class="klabel">Pedidos</div><div class="kvalue" id="kpiCount">—</div></div>
-            <div class="kbadge"><div class="klabel">Ingresos</div><div class="kvalue" id="kpiRevenue">—</div></div>
-            <div class="kbadge"><div class="klabel">Ticket Prom.</div><div class="kvalue" id="kpiATV">—</div></div>
-            <div class="kbadge"><div class="klabel">Margen Est.</div><div class="kvalue" id="kpiMargin">—</div></div>
+            <div class="kbadge">
+              <div class="klabel">Pedidos</div>
+              <div class="kvalue" id="kpiCount">—</div>
+            </div>
+            <div class="kbadge">
+              <div class="klabel">Ingresos</div>
+              <div class="kvalue" id="kpiRevenue">—</div>
+            </div>
+            <div class="kbadge">
+              <div class="klabel">Ticket Prom.</div>
+              <div class="kvalue" id="kpiATV">—</div>
+            </div>
+            <div class="kbadge">
+              <div class="klabel">Margen Est.</div>
+              <div class="kvalue" id="kpiMargin">—</div>
+            </div>
           </div>
         </div>
 
         <div style="margin-top:12px">
-          <div class="chartWrapTall"><canvas id="ordersChart"></canvas></div>
+          <div class="chartWrapTall">
+            <canvas id="ordersChart"></canvas>
+          </div>
         </div>
 
         <div style="margin-top:12px" class="row">
           <div class="card" style="flex:1; padding:12px">
             <strong>Medios de pago</strong>
-            <div class="chartWrap"><canvas id="payChart"></canvas></div>
+            <div class="chartWrap">
+              <canvas id="payChart"></canvas>
+            </div>
           </div>
+
           <div class="card" style="flex:1; padding:12px">
             <strong>Estados</strong>
-            <div class="chartWrap"><canvas id="statusChart"></canvas></div>
+            <div class="chartWrap">
+              <canvas id="statusChart"></canvas>
+            </div>
           </div>
         </div>
 
-        <!-- Heatmap semana × día del mes -->
+        <!-- HEATMAP semana × día del mes -->
         <div class="card" style="margin-top:12px">
           <strong>Heatmap de demanda (semana × día del mes)</strong>
           <div id="heatmap" class="heatmap" style="margin-top:8px"></div>
+
           <div class="hm-legend">
             <span class="muted">Bajo</span>
             <span class="swatch" style="background:#e8f5e9"></span>
@@ -239,10 +200,12 @@
           </div>
         </div>
 
-        <!-- Heatmap por horas (19–00) -->
+        <!-- HEATMAP por horas -->
         <div class="card" style="margin-top:12px">
           <strong>Heatmap por horas (19 → 00)</strong>
+
           <div id="hourmap" class="heatmap" style="margin-top:8px"></div>
+
           <div class="hm-legend">
             <span class="muted">Bajo</span>
             <span class="swatch" style="background:#e8f5e9"></span>
@@ -251,10 +214,11 @@
             <span class="swatch" style="background:#2e7d32"></span>
             <span class="muted">Alto</span>
           </div>
+
           <div id="hourSummary" class="muted" style="margin-top:8px">—</div>
         </div>
 
-        <!-- Proyección -->
+        <!-- PROYECCIÓN -->
         <div class="card" style="margin-top:12px">
           <strong>Proyección del mes</strong>
           <div id="projText" class="muted" style="margin-top:6px">—</div>
@@ -266,666 +230,586 @@
         <!-- HAMBURGUESAS POR MES -->
         <div class="card" style="margin-top:12px">
           <strong>Hamburguesas por mes</strong>
+
           <div class="inline" style="margin:8px 0">
             <label class="badge">Mes <input type="month" id="burgMonth" /></label>
-            <button id="bmPrev" class="btn" title="Mes anterior">◀</button>
-            <button id="bmNext" class="btn" title="Mes siguiente">▶</button>
+            <button id="bmPrev" class="btn">◀</button>
+            <button id="bmNext" class="btn">▶</button>
             <button id="bmGo" class="btn">Ver</button>
             <span id="bmRange" class="badge muted">—</span>
           </div>
+
           <div id="bmErr" class="err" style="display:none;margin-bottom:6px"></div>
+
           <table>
-            <thead><tr><th>Hamburguesa</th><th>Cantidad</th><th>Precio unitario</th><th>Total</th></tr></thead>
-            <tbody id="bmBody"><tr><td class="muted" colspan="4">Sin datos…</td></tr></tbody>
-            <tfoot><tr><th>Total hamburguesas</th><th id="bmTotal">0</th><th>Ingresos del mes</th><th id="bmRevenue">$0</th></tr></tfoot>
+            <thead>
+              <tr>
+                <th>Hamburguesa</th>
+                <th>Cantidad</th>
+                <th>Precio unitario</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+
+            <tbody id="bmBody">
+              <tr><td class="muted" colspan="4">Sin datos…</td></tr>
+            </tbody>
+
+            <tfoot>
+              <tr>
+                <th>Total hamburguesas</th><th id="bmTotal">0</th>
+                <th>Ingresos del mes</th><th id="bmRevenue">$0</th>
+              </tr>
+            </tfoot>
           </table>
         </div>
-        <!-- /HAMBURGUESAS POR MES -->
+        <!-- FIN hamburguesas por mes -->
+
+        <!-- CALENDARIO HAMBURGUESAS POR DÍA -->
+        <div class="card" style="margin-top:12px">
+          <strong>Calendario de hamburguesas por día</strong>
+
+          <div class="inline" style="margin:8px 0">
+            <label class="badge">
+              Mes <input type="month" id="calBurgerMonth" />
+            </label>
+
+            <button id="calPrev" class="btn">◀</button>
+            <button id="calNext" class="btn">▶</button>
+            <button id="calGo" class="btn">Ver</button>
+
+            <span id="calRange" class="badge muted">—</span>
+          </div>
+
+          <div id="calGrid" class="heatmap" style="margin-top:8px"></div>
+
+          <div class="hm-legend">
+            <span class="muted">Bajo</span>
+            <span class="swatch" style="background:#e8f5e9"></span>
+            <span class="swatch" style="background:#a5d6a7"></span>
+            <span class="swatch" style="background:#66bb6a"></span>
+            <span class="swatch" style="background:#2e7d32"></span>
+            <span class="muted">Alto</span>
+          </div>
+
+          <div id="calError" class="err" style="margin-top:8px;display:none"></div>
+        </div>
+        <!-- FIN CALENDARIO -->
       </section>
     </div>
   </main>
 
-  <!-- Libs -->
+  <!-- LIBRERÍAS -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const btn = document.getElementById('btnLogout');
-    if(btn) btn.onclick = ()=>{
-      localStorage.removeItem('rb_auth_v2');
-      localStorage.removeItem('rb_admin_ok');
-      localStorage.removeItem('rb_admin_t');
-      sessionStorage.removeItem('rb_auth_v2');
-      location.replace('login.html?reason=logout&next=pedido_local.html');
-    };
-  });
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const btn=document.getElementById('btnLogout');
+      if(btn) btn.onclick=()=>{
+        localStorage.removeItem('rb_auth_v2');
+        localStorage.removeItem('rb_admin_ok');
+        localStorage.removeItem('rb_admin_t');
+        sessionStorage.removeItem('rb_auth_v2');
+        location.replace('login.html?next=pedido_local.html');
+      };
+    });
   </script>
-
   <script>
-  // Firebase
-  const firebaseConfig = {
-    apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-    authDomain: "rhodes-burguers.firebaseapp.com",
-    projectId: "rhodes-burguers",
-    storageBucket: "rhodes-burguers.firebasestorage.app",
-    messagingSenderId: "951646688091",
-    appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-  };
-  try{ firebase.initializeApp(firebaseConfig);}catch(e){}
-  const db = firebase.firestore();
+    // Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.firebasestorage.app",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+    };
+    try{ firebase.initializeApp(firebaseConfig);}catch(e){}
+    const db = firebase.firestore();
 
-  // Helpers
-  const $ = s=>document.querySelector(s);
-  const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const $ = s=>document.querySelector(s);
+    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-  function pickDocDate(obj){
-    const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
-    for (const k of cand){
-      const v = obj[k];
-      if (v?.toDate) return v.toDate();
-      if (typeof v === 'number') return new Date(v);
-      if (typeof v === 'string'){ const d=new Date(v); if(!isNaN(d)) return d; }
-    }
-    return null;
-  }
-  function monthKey(){
-    const d = $("#monthPicker").value ? new Date($("#monthPicker").value+'-01T00:00:00') : new Date();
-    return {y:d.getFullYear(), m:d.getMonth()+1, days:new Date(d.getFullYear(), d.getMonth()+1, 0).getDate()};
-  }
-  function dateRange(){
-    const from = $("#fromDate").value ? new Date($("#fromDate").value+'T00:00:00') : null;
-    const to   = $("#toDate").value   ? new Date($("#toDate").value  +'T23:59:59') : null;
-    return {from, to};
-  }
-  (function initMonth(){
-    const d = new Date(); const m = String(d.getMonth()+1).padStart(2,'0');
-    try{
-      $("#monthPicker").value = `${d.getFullYear()}-${m}`;
-      $("#burgMonth").value   = `${d.getFullYear()}-${m}`;
-    }catch(_){}
-  })();
-
-  // Heatmap utils
-  function colorFor(val, max){
-    if(max<=0) return '#e8f5e9';
-    const r = val/max;
-    if (r < 0.25) return '#e8f5e9';
-    if (r < 0.50) return '#a5d6a7';
-    if (r < 0.75) return '#66bb6a';
-    return '#2e7d32';
-  }
-  function renderHeatmapWeekByDay(matrix, colLabels){
-    const host = document.getElementById("heatmap");
-    host.innerHTML = '';
-    host.style.gridTemplateColumns = `90px repeat(${colLabels.length}, 1fr)`;
-
-    host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head"></div>`);
-    for(let c=0;c<colLabels.length;c++){
-      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head">${colLabels[c]}</div>`);
-    }
-
-    const weekNames = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-
-    let max=0; matrix.forEach(row=> row.forEach(v=>{ if(v>max) max=v; }));
-
-    for(let r=0;r<7;r++){
-      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-day">${weekNames[r]}</div>`);
-      for(let c=0;c<colLabels.length;c++){
-        const v = matrix[r][c] || 0;
-        const bg = colorFor(v, max);
-        host.insertAdjacentHTML('beforeend', `<div class="hm-cell" title="${v} pedidos" style="background:${bg}">${v? v : ''}</div>`);
+    function pickDocDate(obj){
+      const cand=['createdAt','created_at','timestamp','date','fecha','time'];
+      for(const k of cand){
+        const v=obj[k];
+        if(v?.toDate) return v.toDate();
+        if(typeof v==="number") return new Date(v);
+        if(typeof v==="string"){ const d=new Date(v); if(!isNaN(d)) return d; }
       }
-    }
-  }
-
-  // Charts
-  let ordersChart, payChart, statusChart;
-  function ensureOrdersChart(labels, orders, revenue){
-    const ctx = document.getElementById("ordersChart").getContext("2d");
-    if(ordersChart) ordersChart.destroy();
-    ordersChart = new Chart(ctx,{
-      type:'bar',
-      data:{ labels,
-        datasets:[
-          {type:'bar',label:'Pedidos',data:orders,backgroundColor:'rgba(98,90,69,.35)',borderColor:'#625A45',borderWidth:1,yAxisID:'y'},
-          {type:'line',label:'Ingresos ($)',data:revenue,borderColor:'#625A45',backgroundColor:'rgba(98,90,69,.10)',borderWidth:2,tension:.25,yAxisID:'y2'}
-        ]
-      },
-      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-        scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
-    });
-  }
-  const PAY_COLOR_MAP = {efectivo:'#625A45', mercado_pago:'#1E88E5', credito:'#8E24AA', debito:'#43A047', transferencia:'#26A69A', otro:'#FFA000'};
-  const STATUS_COLOR_MAP = {accepted:'#FBC02D', pending_payment:'#FFA000', in_prep:'#FB8C00', ready:'#00ACC1', delivered:'#2E7D32', cancelled:'#D32F2F'};
-  const colorsFrom = (labels, map) => labels.map(l => map[l] || '#9E9E9E');
-  function ensurePayChart(labels, vals){
-    const ctx = document.getElementById("payChart").getContext("2d");
-    if(payChart) payChart.destroy();
-    payChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, PAY_COLOR_MAP), borderColor: colorsFrom(labels, PAY_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
-      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
-    });
-  }
-  function ensureStatusChart(labels, vals){
-    const ctx = document.getElementById("statusChart").getContext("2d");
-    if(statusChart) statusChart.destroy();
-    statusChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP), borderColor: colorsFrom(labels, STATUS_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
-      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
-    });
-  }
-
-  /* ============== HEATMAP POR HORAS (19 → 00) ============== */
-  const HOUR_START = 19;  // inclusive
-  const HOUR_END   = 24;  // exclusivo (24 ~ 00)
-  const HOUR_COUNT = HOUR_END - HOUR_START;
-
-  function buildDateLabels(from, to){
-    const labels=[], keys=[];
-    if(!from || !to) return {labels, keys};
-    const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-    while(d <= to){
-      const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
-      labels.push(day);
-      keys.push(`${y}-${m}-${day}`);
-      d.setDate(d.getDate()+1);
-    }
-    return {labels, keys};
-  }
-  function renderHourHeatmap(matrix, colLabels){
-    const host=document.getElementById("hourmap");
-    if(!host) return;
-    host.innerHTML='';
-    host.style.gridTemplateColumns=`72px repeat(${colLabels.length},1fr)`;
-
-    host.insertAdjacentHTML('beforeend','<div class="hm-cell hm-head"></div>');
-    for(const lbl of colLabels){
-      host.insertAdjacentHTML('beforeend',`<div class="hm-cell hm-head">${lbl}</div>`);
+      return null;
     }
 
-    let max=0;
-    matrix.forEach(r=>r.forEach(v=>{if(v>max)max=v;}));
-
-    for(let hr=HOUR_START; hr<HOUR_END; hr++){
-      const label=`${String(hr).padStart(2,'0')}:00`;
-      host.insertAdjacentHTML('beforeend',`<div class="hm-cell hm-day">${label}</div>`);
-      for(let c=0;c<colLabels.length;c++){
-        const v=matrix[hr-HOUR_START][c]||0;
-        const bg=colorFor(v,max);
-        host.insertAdjacentHTML('beforeend',`<div class="hm-cell" title="${v} pedidos" style="background:${bg}">${v? v:''}</div>`);
-      }
+    function monthKey(){
+      const d = $("#monthPicker").value ? new Date($("#monthPicker").value + "-01") : new Date();
+      return {
+        y: d.getFullYear(),
+        m: d.getMonth()+1,
+        days: new Date(d.getFullYear(), d.getMonth()+1, 0).getDate()
+      };
     }
-  }
-  function summarizeHourMatrix(matrix, daysCount){
-    // promedio por hora (suma de columnas / cantidad de columnas con datos)
-    const cols = matrix[0]?.length || 0;
-    const effectiveCols = Math.max(1, daysCount || cols);
-    const avgs = matrix.map(row=>{
-      const sum = row.reduce((a,b)=>a+(b||0),0);
-      return sum / effectiveCols;
-    });
-    // encontrar hora pico
-    let peakIdx = 0; let peakVal = -1;
-    avgs.forEach((v,i)=>{ if(v>peakVal){ peakVal=v; peakIdx=i; } });
-    return {avgs, peakHour: (HOUR_START + peakIdx), peakVal};
-  }
-  function printHourSummary(matrix, colLabels){
-    const {avgs, peakHour, peakVal} = summarizeHourMatrix(matrix, colLabels.length);
-    const fmtHour = h => `${String(h).padStart(2,'0')}:00`;
-    const avgText = avgs.map((v,i)=> `${fmtHour(HOUR_START+i)}: ${v.toFixed(2)}`).join(' · ');
-    const peakText = `Hora pico: <strong>${fmtHour(peakHour)}</strong> (prom. ${peakVal.toFixed(2)} pedidos)`;
-    const el = document.getElementById('hourSummary');
-    if(el) el.innerHTML = `${peakText}<br><span class="muted">${avgText}</span>`;
-  }
-  /* ============== /HEATMAP POR HORAS ============== */
 
-  // KPI + Proyección + Heatmaps
-  async function loadKPI(){
-    const err = $("#kpiError"); err.style.display='none'; err.textContent='';
-    try{
-      const probe = await db.collection('orders').limit(1).get();
-      let dateField = null;
-      if (!probe.empty){
-        const d = probe.docs[0].data();
-        for (const k of ['createdAt','created_at','timestamp','date','fecha','time']){ if (d[k]!=null){ dateField=k; break; } }
-      }
-      let q = db.collection('orders');
-      if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
-      const snap = await q.limit(2000).get();
+    function dateRange(){
+      const from = $("#fromDate").value ? new Date($("#fromDate").value+"T00:00:00") : null;
+      const to   = $("#toDate").value   ? new Date($("#toDate").value+"T23:59:59") : null;
+      return {from, to};
+    }
 
-      const {from,to} = dateRange();
-      const useRange = !!(from || to);
+    (function initMonth(){
+      const d=new Date(), m=String(d.getMonth()+1).padStart(2,'0');
+      $("#monthPicker").value=`${d.getFullYear()}-${m}`;
+      $("#burgMonth").value =`${d.getFullYear()}-${m}`;
+      $("#calBurgerMonth").value =`${d.getFullYear()}-${m}`;
+    })();
 
-      const mk = monthKey();
-      const {y,m,days} = mk;
-      const labels = useRange ? [] : Array.from({length:days},(_,i)=>`${i+1}`);
-      const dayOrders = useRange ? [] : Array(days).fill(0);
-      const dayRevenue = useRange ? [] : Array(days).fill(0);
+    function colorFor(val,max){
+      if(max<=0) return "#e8f5e9";
+      const r=val/max;
+      if(r<0.25) return "#e8f5e9";
+      if(r<0.50) return "#a5d6a7";
+      if(r<0.75) return "#66bb6a";
+      return "#2e7d32";
+    }
 
-      const hmMatrix = Array.from({length:7}, ()=> Array(useRange?0:days).fill(0));
-      const hmLabels = useRange ? [] : Array.from({length:days}, (_,i)=> String(i+1).padStart(2,'0'));
+    /* ============== CHARTS ============== */
+    let ordersChart,payChart,statusChart;
 
-      // === estructuras del mapa horario (19→00)
-      let hourColLabels=[], dateKeyIndex=null;
-      let hourMatrix;
-
-      if(!useRange){
-        hourColLabels = Array.from({length:days},(_,i)=>String(i+1).padStart(2,'0'));
-        hourMatrix = Array.from({length:HOUR_COUNT},()=>Array(days).fill(0));
-      }else{
-        const fromClean=from?new Date(from.getFullYear(),from.getMonth(),from.getDate()):null;
-        const toClean=to?new Date(to.getFullYear(),to.getMonth(),to.getDate()):null;
-        const built=buildDateLabels(fromClean,toClean);
-        hourColLabels=built.labels;
-        dateKeyIndex=new Map(built.keys.map((k,i)=>[k,i]));
-        hourMatrix=Array.from({length:HOUR_COUNT},()=>Array(hourColLabels.length).fill(0));
-      }
-
-      let count=0, revenue=0, pendingTotal=0;
-      const payCount = new Map();
-      const statusCount = new Map();
-
-      const inMonth = (d)=> d.getFullYear()===y && (d.getMonth()+1)===m;
-
-      snap.forEach(doc=>{
-        const data=doc.data();
-        const dt = pickDocDate(data); if(!dt) return;
-
-        if(useRange){
-          if (from && dt<from) return;
-          if (to   && dt>to)   return;
-        }else{
-          if (!inMonth(dt)) return;
-        }
-
-        const tot = (typeof data.total==="number") ? data.total : 0;
-        count++; revenue += tot;
-
-        const paid = (data.payment_status==='paid') || !!data.paid;
-        if (!paid) pendingTotal += tot;
-
-        const p = (data.pago||'otro'); payCount.set(p, (payCount.get(p)||0)+1);
-        const st= (data.status||'accepted'); statusCount.set(st, (statusCount.get(st)||0)+1);
-
-        if(!useRange){
-          const dayIdx = dt.getDate()-1;
-          const weekRow= dt.getDay();
-          if(dayIdx>=0 && dayIdx<days){
-            dayOrders[dayIdx]  += 1;
-            dayRevenue[dayIdx] += tot;
-            hmMatrix[weekRow][dayIdx] = (hmMatrix[weekRow][dayIdx]||0)+1;
-          }
-        }
-
-        // === sumar al mapa horario si está entre 19 y 23 (00 es 24 excluido)
-        const hr = dt.getHours();
-        if(hr>=HOUR_START && hr<HOUR_END){
-          if(!useRange){
-            if (dt.getFullYear()===y && (dt.getMonth()+1)===m){
-              const c = dt.getDate()-1;
-              if(c>=0 && c<days) hourMatrix[hr-HOUR_START][c] += 1;
+    function ensureOrdersChart(labels,orders,revenue){
+      const ctx=$("#ordersChart").getContext("2d");
+      if(ordersChart) ordersChart.destroy();
+      ordersChart=new Chart(ctx,{
+        type:"bar",
+        data:{
+          labels,
+          datasets:[
+            {
+              type:"bar",
+              label:"Pedidos",
+              data: orders,
+              backgroundColor:"rgba(98,90,69,.35)",
+              borderColor:"#625A45",
+              borderWidth:1,
+              yAxisID:'y'
+            },
+            {
+              type:"line",
+              label:"Ingresos ($)",
+              data: revenue,
+              borderColor:"#625A45",
+              backgroundColor:"rgba(98,90,69,.10)",
+              tension:.25,
+              borderWidth:2,
+              yAxisID:'y2'
             }
-          }else{
-            const y2=dt.getFullYear(), m2=String(dt.getMonth()+1).padStart(2,'0'), d2=String(dt.getDate()).padStart(2,'0');
-            const key=`${y2}-${m2}-${d2}`;
-            const col=dateKeyIndex.get(key);
-            if(col!=null) hourMatrix[hr-HOUR_START][col] += 1;
+          ]
+        },
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          scales:{
+            y:{beginAtZero:true},
+            y2:{beginAtZero:true,position:"right"},
+            x:{grid:{display:false}}
           }
         }
       });
+    }
 
-      $("#kpiCount").textContent = count.toLocaleString("es-AR");
-      $("#kpiRevenue").textContent = money(revenue);
-      $("#kpiATV").textContent = count? money(revenue/count) : '—';
-      $("#kpiMargin").textContent = '—';
+    const PAY_COLOR_MAP = {
+      efectivo:"#625A45",
+      mercado_pago:"#1E88E5",
+      credito:"#8E24AA",
+      debito:"#43A047",
+      transferencia:"#26A69A",
+      otro:"#FFA000"
+    };
 
-      if(!useRange){ ensureOrdersChart(labels, dayOrders, dayRevenue); }
-      else{ ensureOrdersChart([], [], []); }
+    const STATUS_COLOR_MAP = {
+      accepted:"#FBC02D",
+      pending_payment:"#FFA000",
+      in_prep:"#FB8C00",
+      ready:"#00ACC1",
+      delivered:"#2E7D32",
+      cancelled:"#D32F2F"
+    };
 
-      const pLabels = Array.from(payCount.keys());
-      const pVals   = pLabels.map(k=>payCount.get(k));
-      ensurePayChart(pLabels, pVals.length? pVals : [0]);
+    function ensurePayChart(labels,vals){
+      const ctx=$("#payChart").getContext("2d");
+      if(payChart) payChart.destroy();
+      const colors = labels.map(l => PAY_COLOR_MAP[l] || "#9E9E9E");
 
-      const sLabels = Array.from(statusCount.keys());
-      const sVals   = sLabels.map(k=>statusCount.get(k));
-      ensureStatusChart(sLabels, sVals.length? sVals : [0]);
-
-      renderHeatmapWeekByDay(hmMatrix, useRange?[]:hmLabels);
-
-      // === renderizar heatmap horario + resumen
-      renderHourHeatmap(hourMatrix, hourColLabels);
-      printHourSummary(hourMatrix, hourColLabels);
-
-      const projBox = $("#projText");
-      const alertBox = $("#pendingAlert");
-      alertBox.innerHTML = '';
-      if(!useRange){
-        const today = new Date();
-        const [yy,mm] = ($("#monthPicker").value||"").split('-').map(Number);
-        const isSameYM = (today.getFullYear()===yy && (today.getMonth()+1)===mm);
-        const dayOfMonth = isSameYM ? today.getDate() : Math.max(1, dayRevenue.findLastIndex ? dayRevenue.findLastIndex(v=>v>0)+1 : dayRevenue.length);
-        const revToDate = dayRevenue.slice(0, dayOfMonth).reduce((a,b)=>a+b,0);
-        const avg = dayOfMonth? (revToDate/dayOfMonth) : 0;
-        const projected = avg * days;
-
-        projBox.innerHTML = `Ingresos a la fecha: <strong>${money(revToDate)}</strong> • Ingresos diarios prom.: <strong>${money(avg)}</strong><br>
-        Proyección fin de mes: <strong>${money(projected)}</strong> (sobre ${days} días)`;
-
-        const PENDING_THRESHOLD = 80000;
-        if(pendingTotal > 0){
-          const cls = pendingTotal >= PENDING_THRESHOLD ? 'danger' : 'warn';
-          const msg = pendingTotal >= PENDING_THRESHOLD
-            ? `Pendientes elevados: ${money(pendingTotal)}`
-            : `Pendientes: ${money(pendingTotal)}`;
-          alertBox.innerHTML = `<span class="warn-pill ${cls}">${msg}</span>`;
+      payChart=new Chart(ctx,{
+        type:"doughnut",
+        data:{
+          labels, datasets:[{
+            data:vals,
+            backgroundColor:colors,
+            borderColor:colors,
+            borderWidth:2
+          }]
+        },
+        options:{
+          responsive:true,
+          cutout:"55%",
+          plugins:{legend:{position:"bottom"}}
         }
-      }else{
-        projBox.textContent = 'Proyección disponible sólo con selección mensual.';
+      });
+    }
+
+    function ensureStatusChart(labels,vals){
+      const ctx=$("#statusChart").getContext("2d");
+      if(statusChart) statusChart.destroy();
+      const colors = labels.map(l => STATUS_COLOR_MAP[l] || "#9E9E9E");
+
+      statusChart=new Chart(ctx,{
+        type:"doughnut",
+        data:{
+          labels, datasets:[{
+            data:vals,
+            backgroundColor:colors,
+            borderColor:colors,
+            borderWidth:2
+          }]
+        },
+        options:{
+          responsive:true,
+          cutout:"55%",
+          plugins:{legend:{position:"bottom"}}
+        }
+      });
+    }
+
+    /* ============== HEATMAP WEEK × DAY ============== */
+    function renderHeatmapWeekByDay(matrix,labels){
+      const host=$("#heatmap");
+      host.innerHTML="";
+      host.style.gridTemplateColumns = `90px repeat(${labels.length},1fr)`;
+
+      host.insertAdjacentHTML("beforeend",`<div class="hm-cell hm-head"></div>`);
+      labels.forEach(l=>{
+        host.insertAdjacentHTML("beforeend",`<div class="hm-cell hm-head">${l}</div>`);
+      });
+
+      const weekNames=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+
+      let max=0;
+      matrix.forEach(r=>r.forEach(v=>{ if(v>max) max=v; }));
+
+      for(let r=0;r<7;r++){
+        host.insertAdjacentHTML("beforeend",`<div class="hm-cell hm-day">${weekNames[r]}</div>`);
+        for(let c=0;c<labels.length;c++){
+          const v=matrix[r][c]||0;
+          const bg=colorFor(v,max);
+          host.insertAdjacentHTML("beforeend",
+            `<div class="hm-cell" style="background:${bg}" title="${v} pedidos">${v||""}</div>`
+          );
+        }
+      }
+    }
+
+    /* ============== HEATMAP HOURS ============== */
+    const HOUR_START=19,HOUR_END=24,HOUR_COUNT=HOUR_END-HOUR_START;
+
+    function renderHourHeatmap(matrix,labels){
+      const host=$("#hourmap");
+      host.innerHTML="";
+      host.style.gridTemplateColumns = `72px repeat(${labels.length},1fr)`;
+
+      host.insertAdjacentHTML("beforeend",`<div class="hm-cell hm-head"></div>`);
+      labels.forEach(l=>{
+        host.insertAdjacentHTML("beforeend",`<div class="hm-cell hm-head">${l}</div>`);
+      });
+
+      let max=0;
+      matrix.forEach(r=>r.forEach(v=>{ if(v>max) max=v; }));
+
+      for(let h=HOUR_START;h<HOUR_END;h++){
+        const label = `${String(h).padStart(2,'0')}:00`;
+        host.insertAdjacentHTML("beforeend",`<div class="hm-cell hm-day">${label}</div>`);
+
+        for(let c=0;c<labels.length;c++){
+          const v=matrix[h-HOUR_START][c]||0;
+          const bg=colorFor(v,max);
+          host.insertAdjacentHTML(
+            "beforeend",
+            `<div class="hm-cell" style="background:${bg}" title="${v} pedidos">${v||""}</div>`
+          );
+        }
+      }
+    }
+
+    function summarizeHourMatrix(matrix, days){
+      const cols=matrix[0]?.length||0;
+      const effective = Math.max(1,days||cols);
+      const avgs = matrix.map(row=>{
+        const sum=row.reduce((a,b)=>a+(b||0),0);
+        return sum/effective;
+      });
+
+      let peakVal=-1, peakIdx=0;
+      avgs.forEach((v,i)=>{ if(v>peakVal){ peakVal=v; peakIdx=i; }});
+
+      return {peakHour:HOUR_START+peakIdx, peakVal};
+    }
+
+    function printHourSummary(matrix, labels){
+      const {peakHour,peakVal} = summarizeHourMatrix(matrix,labels.length);
+      $("#hourSummary").innerHTML =
+        `Hora pico: <strong>${String(peakHour).padStart(2,'0')}:00</strong> (${peakVal.toFixed(2)} pedidos de promedio)`;
+    }
+
+    /* =======================================================================
+       NUEVO: CALENDARIO HAMBURGUESAS POR DÍA
+       ======================================================================= */
+    function addMonths(ym,delta){
+      const [y,m]=ym.split("-").map(Number);
+      const d=new Date(y,m-1+delta,1);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    }
+
+    async function loadBurgerCalendar(){
+      const err=$("#calError");
+      err.style.display="none";
+
+      const ym = $("#calBurgerMonth").value;
+      const [y,m] = ym.split("-").map(Number);
+      const start = new Date(y, m-1, 1);
+      const end   = new Date(y, m,   1);
+      const days  = new Date(y, m, 0).getDate();
+
+      $("#calRange").textContent =
+        `${start.toLocaleDateString("es-AR")} → ${(new Date(end-1)).toLocaleDateString("es-AR")}`;
+
+      const grid=$("#calGrid");
+      grid.innerHTML="";
+      grid.style.gridTemplateColumns = `60px repeat(${days},1fr)`;
+
+      grid.insertAdjacentHTML("beforeend",`<div class="hm-cell hm-head"></div>`);
+      for(let d=1;d<=days;d++){
+        grid.insertAdjacentHTML("beforeend",`<div class="hm-cell hm-head">${d}</div>`);
       }
 
-      // guardar para Gastos/Neto si lo usás más abajo
-      window.__lastRevenue = revenue;
-
-    }catch(e){
-      console.error(e);
-      err.textContent = "No se pudo cargar el resumen.";
-      err.style.display='block';
-    }
-  }
-  document.getElementById("btnReload").onclick = loadKPI;
-  document.addEventListener('DOMContentLoaded', loadKPI);
-  </script>
-
-  <!-- ============== LÓGICA HAMBURGUESAS POR MES ============== -->
-  <script>
-    function monthRange(monthStr){
-      const [y,m] = monthStr.split('-').map(Number);
-      const start = new Date(y, m-1, 1, 0, 0, 0, 0);
-      const end   = new Date(y, m,   1, 0, 0, 0, 0);
-      return {start, end};
-    }
-    function addMonths(ym, delta){
-      const [y,m] = ym.split('-').map(Number);
-      const d = new Date(y, m-1+delta, 1);
-      const ym2 = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      return ym2;
-    }
-
-    function isBurgerItem(it){
-      if(!it) return false;
-      if(typeof it.type === 'string' && it.type.toLowerCase() === 'burger') return true;
-      if(it.item && typeof it.item.type === 'string' && it.item.type.toLowerCase() === 'burger') return true;
-      const name = (it.name || it.item?.name || it.item?.title || '').toString().toLowerCase();
-      const id   = (it.id   || it.item?.id || it.sku || '').toString().toLowerCase();
-      const burgerKeywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|bacon)/i;
-      if(name && burgerKeywords.test(name)) return true;
-      if(id && burgerKeywords.test(id)) return true;
-      if(it.category && typeof it.category === 'string' && it.category.toLowerCase().includes('burg')) return true;
-      if(it.item && it.item.category && typeof it.item.category === 'string' && it.item.category.toLowerCase().includes('burg')) return true;
-      return false;
-    }
-
-    function escapeHtml(s){
-      return (s||'').toString()
-        .replace(/&/g,'&amp;')
-        .replace(/</g,'&lt;')
-        .replace(/>/g,'&gt;')
-        .replace(/"/g,'&quot;')
-        .replace(/'/g,'&#39;');
-    }
-
-    function getUnitPrice(it){
-      if(!it) return 0;
-      const n = v => (typeof v === 'number' ? v : (typeof v === 'string' && v.trim()!=='' ? Number(v) : NaN));
-      const candidates = [
-        it.unit_price, it.unitPrice, it.price, it.prize, it.amount, it.value,
-        it.item?.price, it.item?.unit_price, it.item?.amount, it.line_price, it.line_total,
-        it.total, it.subtotal, it.unitamount
-      ];
-      for(const c of candidates){
-        const v = n(c);
-        if(!isNaN(v) && isFinite(v)) return v;
-      }
-      const lineTotal = n(it.total) || n(it.line_total) || n(it.amount) || n(it.subtotal);
-      const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
-      if(!isNaN(lineTotal) && qty>0) return lineTotal/qty;
-      return 0;
-    }
-
-    async function loadBurgersByMonth(){
-      const err = $("#bmErr"); err.style.display='none'; err.textContent='';
-      const tbody = $("#bmBody"); const totalEl = $("#bmTotal"); const range = $("#bmRange");
-      const revenueEl = $("#bmRevenue");
-      tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando…</td></tr>`;
-      totalEl.textContent = '0';
-      revenueEl.textContent = money(0);
+      let counts = Array(days).fill(0);
+      let max=0;
 
       try{
-        const probe = await db.collection('orders').limit(1).get();
-        if (probe.empty){ tbody.innerHTML = `<tr><td colspan="4" class="muted">Sin datos.</td></tr>`; return; }
-        let dateField = null;
-        const sample = probe.docs[0].data();
-        for (const k of ['createdAt','created_at','timestamp','date','fecha','time']){ if (sample[k]!=null){ dateField=k; break; } }
-        if(!dateField){ dateField = 'createdAt'; }
-
-        const ym = $("#burgMonth").value || (new Date().toISOString().slice(0,7));
-        const {start,end} = monthRange(ym);
-        const endDisplay = new Date(end.getTime() - 1);
-        range.textContent = `${start.toLocaleDateString('es-AR')} → ${endDisplay.toLocaleDateString('es-AR')}`;
-
-        let q = db.collection('orders')
-          .where(dateField, '>=', start)
-          .where(dateField, '<',  end)
-          .orderBy(dateField, 'asc');
-
-        const snap = await q.get();
-
-        const counter = new Map();
-        let totalQty = 0;
-        let totalRevenue = 0;
+        const snap = await db.collection("orders")
+          .where("createdAt",">=",start)
+          .where("createdAt","<",end)
+          .get();
 
         snap.forEach(doc=>{
-          const o = doc.data();
-          const items = Array.isArray(o.items)? o.items : [];
-          items.forEach(rawItem=>{
-            const it = rawItem || {};
-            const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
-            if(!isBurgerItem(it)) return;
+          const o=doc.data();
+          const dt=pickDocDate(o);
+          if(!dt) return;
+          if(dt.getMonth()+1!==m) return;
 
-            const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || 'Hamburguesa').toString().trim();
-            const key = name || 'Hamburguesa';
-
-            const unit = getUnitPrice(it);
-            const lineRevenue = (Number(unit)||0) * qty;
-
-            const prev = counter.get(key) || { qty:0, revenue:0 };
-            prev.qty += qty;
-            prev.revenue += lineRevenue;
-            counter.set(key, prev);
-
-            totalQty += qty;
-            totalRevenue += lineRevenue;
+          const dIdx=dt.getDate()-1;
+          const items=o.items||[];
+          items.forEach(it=>{
+            if(typeof it.type==="string" && it.type.toLowerCase()==="burger"){
+              counts[dIdx]++;
+            }
           });
         });
 
-        const rows = Array.from(counter.entries())
-          .sort((a,b)=> b[1].qty - a[1].qty)
-          .map(([name, data])=>{
-            const qty = data.qty || 0;
-            const revenue = data.revenue || 0;
-            const unit = qty ? (revenue/qty) : 0;
-            return `<tr>
-              <td>${escapeHtml(name)}</td>
-              <td>${qty}</td>
-              <td>${money(Math.round(unit))}</td>
-              <td>${money(Math.round(revenue))}</td>
-            </tr>`;
-          })
-          .join('');
+        max = Math.max(...counts);
 
-        tbody.innerHTML = rows || `<tr><td colspan="4" class="muted">No hubo hamburguesas en este mes.</td></tr>`;
-        totalEl.textContent = String(totalQty);
-        revenueEl.textContent = money(Math.round(totalRevenue));
-      }catch(e){
-        console.error('loadBurgersByMonth error:', e);
-        err.textContent = "No se pudo cargar las hamburguesas del mes.";
-        err.style.display = 'block';
-        tbody.innerHTML = `<tr><td colspan="4" class="muted">Error al cargar.</td></tr>`;
-      }
-    }
-
-    document.addEventListener('DOMContentLoaded', ()=>{
-      const m = $("#burgMonth");
-      if(!m.value){ const d=new Date(); m.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
-      $("#bmPrev").onclick = ()=>{ m.value = addMonths(m.value, -1); loadBurgersByMonth(); };
-      $("#bmNext").onclick = ()=>{ m.value = addMonths(m.value, +1); loadBurgersByMonth(); };
-      $("#bmGo").onclick   = loadBurgersByMonth;
-      m.addEventListener('change', loadBurgersByMonth);
-      loadBurgersByMonth();
-    });
-  </script>
-  <script>
-  function monthRange2(monthStr){
-    const [y,m] = monthStr.split('-').map(Number);
-    const start = new Date(y, m-1, 1, 0, 0, 0, 0);
-    const end   = new Date(y, m,   1, 0, 0, 0, 0);
-    return {start, end};
-  }
-
-  function renderBurgerCalendar(counters, days){
-    const host = document.getElementById("calGrid");
-    host.innerHTML = '';
-    host.style.gridTemplateColumns = `repeat(${7}, 1fr)`;
-
-    // buscar máximos para colores
-    let max = 0;
-    for(const d of Object.values(counters)){
-      if (d.qty > max) max = d.qty;
-    }
-
-    function bgFor(v){
-      if(v <= 0) return '#e8f5e9';
-      const r = v/max;
-      if(r < 0.25) return '#e8f5e9';
-      if(r < 0.50) return '#a5d6a7';
-      if(r < 0.75) return '#66bb6a';
-      return '#2e7d32';
-    }
-
-    // construir calendario real
-    const month = Object.keys(counters)[0]?.slice(5,7);
-    const year  = Object.keys(counters)[0]?.slice(0,4);
-    const first = new Date(`${year}-${month}-01T00:00:00`);
-    const startWeekday = first.getDay(); // 0=Domingo
-
-    // celdas vacías antes del día 1
-    for(let i=0; i<startWeekday; i++){
-      host.insertAdjacentHTML('beforeend', `<div class="hm-cell" style="background:#fafafa"></div>`);
-    }
-
-    // días del mes
-    for(let d=1; d<=days; d++){
-      const dateKey = `${year}-${month}-${String(d).padStart(2,'0')}`;
-      const info = counters[dateKey] || {qty:0, revenue:0};
-      const bg = bgFor(info.qty);
-
-      host.insertAdjacentHTML(
-        'beforeend',
-        `<div class="hm-cell" style="background:${bg}">
-          <div><strong>${d}</strong></div>
-          <div>${info.qty} bur</div>
-          <div>${money(info.revenue)}</div>
-        </div>`
-      );
-    }
-  }
-
-  async function loadBurgerCalendar(){
-    const err = $("#calError");
-    err.style.display='none';
-    err.textContent='';
-
-    try{
-      const ym = $("#calBurgerMonth").value;
-      if(!ym) return;
-
-      const {start,end} = monthRange2(ym);
-      const endDisplay = new Date(end.getTime() - 1);
-      $("#calRange").textContent =
-        `${start.toLocaleDateString('es-AR')} → ${endDisplay.toLocaleDateString('es-AR')}`;
-
-      let dateField = null;
-      const probe = await db.collection("orders").limit(1).get();
-      if(!probe.empty){
-        const sample = probe.docs[0].data();
-        for(const k of ['createdAt','created_at','timestamp','date','fecha','time']){
-          if(sample[k] != null){ dateField = k; break; }
+        grid.insertAdjacentHTML("beforeend",`<div class="hm-cell hm-day">Burgs</div>`);
+        for(let i=0;i<days;i++){
+          const v=counts[i];
+          const bg=colorFor(v,max);
+          grid.insertAdjacentHTML("beforeend",
+            `<div class="hm-cell" style="background:${bg}" title="${v} hamburguesas">${v||""}</div>`
+          );
         }
+
+      }catch(e){
+        console.error("cal error:",e);
+        err.textContent="No se pudo cargar el calendario.";
+        err.style.display="block";
       }
-      if(!dateField) dateField = "createdAt";
+    }
 
-      let q = db.collection("orders")
-        .where(dateField, ">=", start)
-        .where(dateField, "<",  end)
-        .orderBy(dateField, "asc");
+    $("#calPrev").onclick = ()=>{
+      const cur=$("#calBurgerMonth").value;
+      $("#calBurgerMonth").value=addMonths(cur,-1);
+      loadBurgerCalendar();
+    };
 
-      const snap = await q.get();
+    $("#calNext").onclick = ()=>{
+      const cur=$("#calBurgerMonth").value;
+      $("#calBurgerMonth").value=addMonths(cur,1);
+      loadBurgerCalendar();
+    };
 
-      const counters = {}; // { "2025-02-01": {qty:10,revenue:22000}, ... }
-      const daysInMonth = new Date(start.getFullYear(), start.getMonth()+1, 0).getDate();
+    $("#calGo").onclick = loadBurgerCalendar;
 
-      snap.forEach(doc=>{
-        const o = doc.data();
-        const dt = pickDocDate(o);
-        if(!dt) return;
+    document.addEventListener("DOMContentLoaded", loadBurgerCalendar);
 
-        const y = dt.getFullYear();
-        const m = String(dt.getMonth()+1).padStart(2,'0');
-        const d = String(dt.getDate()).padStart(2,'0');
-        const key = `${y}-${m}-${d}`;
+    /* =======================================================================
+       KPI + HEATMAP + HOURMAP + PROYECCIÓN (EXISTENTE)
+       ======================================================================= */
 
-        const items = Array.isArray(o.items) ? o.items : [];
-        let dayQty = 0;
-        let dayRev = 0;
+    async function loadKPI(){
+      const err=$("#kpiError");
+      err.style.display="none";
 
-        items.forEach(it=>{
-          if(!isBurgerItem(it)) return;
-          const qty = Number(it.qty || it.quantity || 1);
-          const unit = getUnitPrice(it);
-          dayQty += qty;
-          dayRev += (qty * unit);
+      try{
+        const probe=await db.collection("orders").limit(1).get();
+        let dateField=null;
+
+        if(!probe.empty){
+          const d=probe.docs[0].data();
+          for(const k of ['createdAt','created_at','timestamp','date','fecha','time']){
+            if(d[k]!=null){ dateField=k; break; }
+          }
+        }
+        if(!dateField) dateField="createdAt";
+
+        let q=db.collection("orders").orderBy(dateField,"desc").limit(2000);
+        const snap=await q.get();
+
+        const {from,to}=dateRange();
+        const useRange=!!(from||to);
+
+        const mk=monthKey();
+        const {y,m,days}=mk;
+
+        const labels = !useRange ? Array.from({length:days},(_,i)=>String(i+1)) : [];
+
+        const dayOrders = !useRange ? Array(days).fill(0) : [];
+        const dayRevenue= !useRange ? Array(days).fill(0) : [];
+
+        const hmMatrix = Array.from({length:7},()=> Array(!useRange?days:0).fill(0));
+        const hmLabels = !useRange ? Array.from({length:days},(_,i)=>String(i+1).padStart(2,'0')) : [];
+
+        let hourLabels, hourMatrix, dateKeyIndex;
+
+        if(!useRange){
+          hourLabels = Array.from({length:days},(_,i)=>String(i+1).padStart(2,'0'));
+          hourMatrix=Array.from({length:HOUR_COUNT},()=>Array(days).fill(0));
+        }else{
+          const fromD=from?new Date(from.getFullYear(),from.getMonth(),from.getDate()):null;
+          const toD=to?new Date(to.getFullYear(),to.getMonth(),to.getDate()):null;
+          const lbls=[];
+          const d2=new Date(fromD);
+          while(d2<=toD){
+            lbls.push(String(d2.getDate()).padStart(2,'0'));
+            d2.setDate(d2.getDate()+1);
+          }
+          hourLabels=lbls;
+          dateKeyIndex=new Map(lbls.map((lbl,i)=>[lbl,i]));
+          hourMatrix=Array.from({length:HOUR_COUNT},()=>Array(lbls.length).fill(0));
+        }
+
+        let count=0,revenue=0,pending=0;
+        const payCount=new Map();
+        const stCount=new Map();
+
+        const inMonth = dt => dt.getFullYear()===y && dt.getMonth()+1===m;
+
+        snap.forEach(doc=>{
+          const o=doc.data();
+          const dt=pickDocDate(o);
+          if(!dt) return;
+
+          if(useRange){
+            if(from && dt<from) return;
+            if(to && dt>to) return;
+          }else if(!inMonth(dt)) return;
+
+          count++;
+          const tot=Number(o.total)||0;
+          revenue+=tot;
+
+          if(o.payment_status!=="paid") pending+=tot;
+
+          const p=(o.pago||"otro");
+          payCount.set(p,(payCount.get(p)||0)+1);
+
+          const st=(o.status||"accepted");
+          stCount.set(st,(stCount.get(st)||0)+1);
+
+          if(!useRange){
+            const di=dt.getDate()-1;
+            const wr=dt.getDay();
+            if(di>=0 && di<days){
+              dayOrders[di]++;
+              dayRevenue[di]+=tot;
+              hmMatrix[wr][di] = (hmMatrix[wr][di]||0)+1;
+            }
+          }
+
+          const hr=dt.getHours();
+          if(hr>=HOUR_START && hr<HOUR_END){
+            if(!useRange){
+              const di=dt.getDate()-1;
+              if(di>=0 && di<days) hourMatrix[hr-HOUR_START][di]++;
+            }else{
+              const key=String(dt.getDate()).padStart(2,'0');
+              const col=dateKeyIndex.get(key);
+              if(col!=null) hourMatrix[hr-HOUR_START][col]++;
+            }
+          }
         });
 
-        if(!counters[key]) counters[key] = {qty:0,revenue:0};
-        counters[key].qty += dayQty;
-        counters[key].revenue += dayRev;
-      });
+        $("#kpiCount").textContent=count;
+        $("#kpiRevenue").textContent=money(revenue);
+        $("#kpiATV").textContent=count? money(revenue/count):"—";
+        $("#kpiMargin").textContent="—";
 
-      renderBurgerCalendar(counters, daysInMonth);
+        if(!useRange) ensureOrdersChart(labels,dayOrders,dayRevenue);
+        else ensureOrdersChart([],[],[]);
 
-    }catch(e){
-      console.error(e);
-      err.textContent = "No se pudo cargar el calendario.";
-      err.style.display='block';
+        ensurePayChart(Array.from(payCount.keys()), Array.from(payCount.values()));
+        ensureStatusChart(Array.from(stCount.keys()), Array.from(stCount.values()));
+
+        if(!useRange) renderHeatmapWeekByDay(hmMatrix,hmLabels);
+        renderHourHeatmap(hourMatrix,hourLabels);
+        printHourSummary(hourMatrix,hourLabels);
+
+        // PROYECCIÓN
+        const proj=$("#projText");
+        if(!useRange){
+          const today=new Date();
+          const isSame=(today.getFullYear()===y && today.getMonth()+1===m);
+          const dayOfMonth=isSame? today.getDate(): days;
+          const revToDate = dayRevenue.slice(0,dayOfMonth).reduce((a,b)=>a+b,0);
+          const avg=revToDate/dayOfMonth;
+          const projected=avg*days;
+
+          proj.innerHTML =
+            `Ingresos a la fecha: <strong>${money(revToDate)}</strong><br>
+             Ingresos diarios prom.: <strong>${money(avg)}</strong><br>
+             Proyección fin de mes: <strong>${money(projected)}</strong>`;
+
+          const pendBox=$("#pendingAlert");
+          pendBox.innerHTML="";
+          if(pending>0){
+            const cls=pending>=80000?"danger":"warn";
+            const msg=pending>=80000?
+              `Pendientes elevados: ${money(pending)}` :
+              `Pendientes: ${money(pending)}`;
+            pendBox.innerHTML=`<span class="warn-pill ${cls}">${msg}</span>`;
+          }
+        }else{
+          proj.textContent="Proyección disponible sólo al seleccionar un mes entero.";
+        }
+
+      }catch(e){
+        console.error(e);
+        const err=$("#kpiError");
+        err.textContent="Error cargando KPI";
+        err.style.display="block";
+      }
     }
-  }
 
-  document.addEventListener("DOMContentLoaded", ()=>{
-    const m = $("#calBurgerMonth");
-    if(!m.value){
-      const d = new Date();
-      m.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    }
-
-    $("#calPrev").onclick = ()=>{ m.value = addMonths(m.value, -1); loadBurgerCalendar(); };
-    $("#calNext").onclick = ()=>{ m.value = addMonths(m.value, +1); loadBurgerCalendar(); };
-    $("#calGo").onclick   = loadBurgerCalendar;
-    m.addEventListener("change", loadBurgerCalendar);
-
-    loadBurgerCalendar();
-  });
-</script>
+    $("#btnReload").onclick = loadKPI;
+    document.addEventListener("DOMContentLoaded", loadKPI);
+  </script>
 </body>
 </html>
