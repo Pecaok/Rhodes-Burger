@@ -1,530 +1,584 @@
-<main>
+<!doctype html>
+<html lang="es">
+   <script>
+  /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
+  const TTL_HOURS = 20;
+  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
 
-  <!-- ===================================================== -->
-  <!-- 🔥🔥 NUEVO MÓDULO COMPLETO: PRODUCTOS (CRUD + IMÁGENES) -->
-  <!-- ===================================================== -->
-  <section class="card">
-    <h2>Productos (crear / editar / ordenar / fotos)</h2>
-    <p class="muted">
-      Administrá todos los productos que aparecen en la web y mostrador.
-      Podés agregar, editar, borrar, subir imágenes y ordenar arrastrando.
-    </p>
-
-    <div class="row" style="margin-bottom:12px">
-      <button class="btn primary" id="btnNewProduct">➕ Nuevo producto</button>
-      <button class="btn" id="btnMigrateImages">Migrar imágenes desde GitHub → Firebase</button>
-      <span id="migrateStatus" style="font-weight:800;color:#625A45;margin-left:10px"></span>
-    </div>
-
-    <!-- Grilla de productos -->
-    <div id="productGrid" class="grid" style="margin-top:16px"></div>
-  </section>
-
-  <!-- ============================================================== -->
-  <!-- 🔥 MODAL PARA CREAR / EDITAR PRODUCTO (NUEVO COMPLETO)        -->
-  <!-- ============================================================== -->
-  <div class="modal-backdrop" id="productModalBackdrop" style="display:none">
-    <div class="modal" id="productModalBox">
-
-      <h2 id="productModalTitle">Nuevo producto</h2>
-
-      <label><strong>Nombre</strong></label>
-      <input id="prod_name" type="text">
-
-      <label style="margin-top:10px"><strong>Precio</strong></label>
-      <input id="prod_price" type="number" min="0">
-
-      <label style="margin-top:10px"><strong>Categoría</strong></label>
-      <select id="prod_category">
-        <option value="hamburguesas">Hamburguesas</option>
-        <option value="bebidas">Bebidas</option>
-        <option value="papas">Papas</option>
-      </select>
-
-      <label style="margin-top:10px"><strong>Descripción</strong></label>
-      <textarea id="prod_description"></textarea>
-
-      <label style="margin-top:10px"><strong>Imagen</strong></label>
-      <input id="prod_image" type="file" accept="image/*">
-
-      <img id="prod_img_preview"
-           style="width:100%;height:200px;object-fit:cover;border-radius:14px;margin-top:8px;display:none">
-
-      <label style="margin-top:10px"><strong>Disponible</strong></label>
-      <input id="prod_available" type="checkbox">
-
-      <div class="row" style="margin-top:18px;justify-content:flex-end">
-        <button class="btn" id="btnCancelProduct">Cancelar</button>
-        <button class="btn primary" id="btnSaveProduct">Guardar</button>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ======================================================== -->
-  <!-- 🔸 PAPAS / SIDES (TU MÓDULO ORIGINAL, NO TOCADO)        -->
-  <!-- ======================================================== -->
-  <section class="card">
-    <h2>Papas (habilitar / deshabilitar variantes)</h2>
-    <p class="muted">Aquí podés activar o desactivar las variantes de papas que querés ofrecer en la web y en mostrador. El estado se guarda en <code>config/sides</code>.</p>
-
-    <div id="sidesContainer" style="margin-top:12px" class="side-config">
-      <!-- Render dinámico -->
-    </div>
-  </section>
-
-  <!-- ======================================================== -->
-  <!-- 🔸 INVENTARIO LEGACY (lo mantenemos intacto)            -->
-  <!-- ======================================================== -->
-  <section class="card">
-    <h2>Inventario (activar / desactivar productos)</h2>
-    <p class="muted">Tocá el switch para sacar un producto sin stock. La web lee <code>products/{id}.available</code> para ocultar el botón de compra.</p>
-    <div id="invList" class="grid"></div>
-  </section>
-
-  <!-- ======================================================== -->
-  <!-- 🔸 CUPONES (NO TOCADO)                                   -->
-  <!-- ======================================================== -->
-  <section class="card">
-    <h2>Cupones de descuento</h2>
-
-    <div class="form-grid">
-      <div>
-        <label><strong>Código</strong></label>
-        <input id="cpCode" type="text" placeholder="Ej: BURGERS10">
-      </div>
-      <div>
-        <label><strong>Tipo</strong></label>
-        <select id="cpType">
-          <option value="percent">Porcentaje (%)</option>
-          <option value="fixed">Monto fijo ($)</option>
-        </select>
-      </div>
-      <div>
-        <label><strong>Valor</strong></label>
-        <input id="cpValue" type="number" min="0" step="1" placeholder="Ej: 10 o 1500">
-      </div>
-      <div>
-        <label><strong>Máx. usos (opcional)</strong></label>
-        <input id="cpMaxUses" type="number" min="0" step="1" placeholder="0 = ilimitado">
-      </div>
-      <div>
-        <label><strong>Válido desde (opcional)</strong></label>
-        <input id="cpFrom" type="datetime-local">
-      </div>
-      <div>
-        <label><strong>Válido hasta (opcional)</strong></label>
-        <input id="cpTo" type="datetime-local">
-      </div>
-      <div style="grid-column:1/-1">
-        <label><strong>Nota (opcional)</strong></label>
-        <input id="cpNote" type="text" placeholder="Texto interno de referencia">
-      </div>
-    </div>
-
-    <div class="row" style="margin-top:10px">
-      <button class="btn primary" id="btnCreateCp">Crear / Actualizar cupón</button>
-      <span class="muted">Los códigos se guardan en mayúsculas.</span>
-    </div>
-
-    <div class="sep"></div>
-
-    <h3 style="margin:0 0 6px">Cupones activos</h3>
-    <div class="muted" style="margin-bottom:6px">Podés habilitar/deshabilitar o eliminar un cupón.</div>
-    <div style="overflow:auto">
-      <table>
-        <thead>
-          <tr>
-            <th>Código</th><th>Tipo</th><th>Valor</th><th>Usos</th><th>Vigencia</th><th>Estado</th><th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody id="cpTable"></tbody>
-      </table>
-    </div>
-  </section>
-
-</main>
-<script>
-/* ============================================================
-    🔥 PRODUCTOS DINÁMICOS — CRUD + RENDER + DRAG & DROP
-    Firestore: colección "products"
-============================================================ */
-
-const productGrid = document.getElementById("productGrid");
-
-let productModalBackdrop, productModalBox;
-let editingProduct = null;  // null = creando, sino id del producto
-
-/* ============================================================
-    🔥 Abrir modal
-============================================================ */
-function openProductModal(edit = false, data = null) {
-  editingProduct = edit ? data.id : null;
-
-  productModalBackdrop.style.display = "flex";
-  document.getElementById("productModalTitle").textContent =
-    edit ? "Editar producto" : "Nuevo producto";
-
-  // Cargar datos si edita
-  document.getElementById("prod_name").value = data?.name || "";
-  document.getElementById("prod_price").value = data?.price || "";
-  document.getElementById("prod_category").value = data?.category || "hamburguesas";
-  document.getElementById("prod_description").value = data?.description || "";
-  document.getElementById("prod_available").checked = data?.available ?? true;
-
-  // Imágen
-  const prev = document.getElementById("prod_img_preview");
-  prev.src = data?.imageUrl || "";
-  prev.style.display = data?.imageUrl ? "block" : "none";
-
-  document.getElementById("prod_image").value = "";
-}
-
-/* ============================================================
-    🔥 Cerrar modal
-============================================================ */
-function closeProductModal() {
-  productModalBackdrop.style.display = "none";
-  editingProduct = null;
-}
-
-/* ============================================================
-    🔥 Render de tarjeta de producto
-============================================================ */
-function renderProductCard(p) {
-  const el = document.createElement("div");
-  el.className = "tile";
-  el.style.cursor = "grab";
-  el.draggable = true;
-  el.dataset.id = p.id;
-
-  el.innerHTML = `
-    <div style="display:flex;gap:12px;width:100%">
-      <img src="${p.imageUrl}" style="width:90px;height:90px;object-fit:cover;border-radius:12px;background:#eee">
-      <div style="flex:1">
-        <div style="font-weight:800;font-size:17px">${p.name}</div>
-        <div class="muted" style="font-size:13px">${p.category}</div>
-        <div class="muted" style="font-size:13px">${p.description || ""}</div>
-        <div style="margin-top:6px;font-weight:800">$${p.price}</div>
-      </div>
-    </div>
-
-    <div style="display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;min-width:90px">
-      <span class="pill ${p.available ? 'ok' : 'off'}">${p.available ? 'Activo' : 'Pausado'}</span>
-
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button class="btn" style="padding:6px 10px" onclick="editProduct('${p.id}')">Editar</button>
-        <button class="btn bad" style="padding:6px 10px" onclick="deleteProduct('${p.id}')">Borrar</button>
-      </div>
-    </div>
-  `;
-
-  // DRAG EVENTS
-  el.addEventListener("dragstart", productDragStart);
-  el.addEventListener("dragover", productDragOver);
-  el.addEventListener("drop", productDragDrop);
-  el.addEventListener("dragend", productDragEnd);
-
-  return el;
-}
-
-/* ============================================================
-    🔥 Cargar todos los productos con orden
-============================================================ */
-async function loadProducts() {
-  const snap = await db.collection("products")
-    .orderBy("order", "asc")
-    .get();
-
-  productGrid.innerHTML = "";
-
-  snap.forEach(doc => {
-    const p = { id: doc.id, ...doc.data() };
-    productGrid.appendChild(renderProductCard(p));
-  });
-}
-
-/* ============================================================
-    🔥 Guardar producto (crear o actualizar)
-============================================================ */
-async function saveProduct() {
-  const name = document.getElementById("prod_name").value.trim();
-  const price = Number(document.getElementById("prod_price").value);
-  const category = document.getElementById("prod_category").value;
-  const description = document.getElementById("prod_description").value;
-  const available = document.getElementById("prod_available").checked;
-
-  const file = document.getElementById("prod_image").files[0];
-  let imageUrl = null;
-
-  // Si está editando, recuperar data previa
-  if (editingProduct) {
-    const snap = await db.collection("products").doc(editingProduct).get();
-    imageUrl = snap.data().imageUrl;
+  function sessionValid(){
+    const ok = localStorage.getItem('rb_admin_ok') === 'true';
+    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+    return ok && (Date.now() - ts) < TTL_MS;
+  }
+  function bumpSession(){  // renueva TTL con actividad
+    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
+  }
+  function logout(){
+    localStorage.removeItem('rb_admin_ok');
+    localStorage.removeItem('rb_admin_t');
+    localStorage.removeItem('rb_auth_v2');
+    sessionStorage.removeItem('rb_auth_v2');
+    location.replace('login.html'); // <-- redirige a login
   }
 
-  // Si seleccionó nueva imagen
-  if (file) {
-    imageUrl = await uploadImageToFirebase(file); // (PARTE 3)
-  }
-
-  // Modo crear
-  if (!editingProduct) {
-    // Obtener último "order"
-    const last = await db.collection("products")
-      .orderBy("order", "desc")
-      .limit(1)
-      .get();
-
-    let nextOrder = last.empty ? 1 : last.docs[0].data().order + 1;
-
-    await db.collection("products").add({
-      name,
-      price,
-      category,
-      description,
-      imageUrl: imageUrl || "",
-      available,
-      order: nextOrder,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-  }
-
-  // Modo editar
-  else {
-    await db.collection("products").doc(editingProduct).set({
-      name,
-      price,
-      category,
-      description,
-      imageUrl: imageUrl || "",
-      available,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-  }
-
-  closeProductModal();
-  loadProducts();
-}
-
-/* ============================================================
-    🔥 Editar
-============================================================ */
-async function editProduct(id) {
-  const snap = await db.collection("products").doc(id).get();
-  const p = { id, ...snap.data() };
-  openProductModal(true, p);
-}
-
-/* ============================================================
-    🔥 Borrar
-============================================================ */
-async function deleteProduct(id) {
-  if (!confirm("¿Eliminar producto?")) return;
-
-  await db.collection("products").doc(id).delete();
-  loadProducts();
-}
-
-/* ============================================================
-    🔥 DRAG & DROP
-============================================================ */
-let dragSrc = null;
-
-function productDragStart() {
-  dragSrc = this;
-  this.style.opacity = "0.4";
-}
-function productDragOver(e) {
-  e.preventDefault();
-}
-function productDragDrop(e) {
-  if (dragSrc !== this) {
-    const items = Array.from(productGrid.children);
-    const srcIndex = items.indexOf(dragSrc);
-    const destIndex = items.indexOf(this);
-
-    if (srcIndex > destIndex)
-      productGrid.insertBefore(dragSrc, this);
-    else
-      productGrid.insertBefore(dragSrc, this.nextSibling);
-
-    saveProductOrder();
-  }
-}
-function productDragEnd() {
-  this.style.opacity = "1";
-}
-
-/* ============================================================
-    🔥 Guardar el nuevo orden
-============================================================ */
-async function saveProductOrder() {
-  const cards = Array.from(productGrid.children);
-  const batch = db.batch();
-
-  cards.forEach((c, i) => {
-    batch.update(
-      db.collection("products").doc(c.dataset.id),
-      { order: i + 1 }
-    );
-  });
-
-  await batch.commit();
-}
-
-/* ============================================================
-    🔥 INIT
-============================================================ */
-document.addEventListener("DOMContentLoaded", () => {
-  productModalBackdrop = document.getElementById("productModalBackdrop");
-  productModalBox = document.getElementById("productModalBox");
-
-  document.getElementById("btnNewProduct").onclick = () => openProductModal(false);
-  document.getElementById("btnCancelProduct").onclick = closeProductModal;
-  document.getElementById("btnSaveProduct").onclick = saveProduct;
-
-  loadProducts();
-});
-</script>
-<!-- ===============================================
-      🔥 PARTE 3 — SUBIDA A FIREBASE STORAGE
-      + PREVIEW
-      + MIGRADOR GITHUB → STORAGE
-================================================ -->
-<script>
-
-const storage = firebase.storage();
-const storageRoot = storage.ref();
-
-/* ============================================================
-    🔥 Subir imagen a Firebase Storage y obtener URL pública
-============================================================ */
-function uploadImageToFirebase(file) {
-  return new Promise((resolve, reject) => {
-
-    // Nombre único: products/timestamp_filename.jpg
-    const finalName = `products/${Date.now()}_${file.name}`;
-    const ref = storageRoot.child(finalName);
-
-    const uploadTask = ref.put(file);
-
-    uploadTask.on(
-      "state_changed",
-      null,
-      (err) => {
-        console.error("Error subiendo imagen:", err);
-        reject(err);
-      },
-      async () => {
-        const url = await ref.getDownloadURL();
-        resolve(url);
-      }
-    );
-  });
-}
-
-/* ============================================================
-    🔥 Previsualización de imagen antes de guardar
-============================================================ */
-document.addEventListener("change", (e) => {
-  if (e.target.id === "prod_image") {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const prev = document.getElementById("prod_img_preview");
-    prev.style.display = "block";
-    prev.src = URL.createObjectURL(file);
-  }
-});
-
-
-/* ============================================================
-    🔥 MIGRADOR AUTOMÁTICO GITHUB → STORAGE
-============================================================ */
-/*
-   Convierte todas tus imágenes actuales (GitHub)
-   a Firebase Storage automáticamente.
-
-   🔗 Carpeta origen GitHub:
-   https://raw.githubusercontent.com/Pecaok/Rhodes-Burger/main/images/
-*/
-const GITHUB_IMG_BASE =
-  "https://raw.githubusercontent.com/Pecaok/Rhodes-Burger/main/images/";
-
-/* Descargar imagen desde GitHub */
-async function downloadGitHubImage(filename) {
-  const url = GITHUB_IMG_BASE + filename;
-  const res = await fetch(url);
-
-  if (!res.ok) throw new Error("No se pudo descargar: " + filename);
-
-  return await res.blob();
-}
-
-/* Subir blob descargado */
-async function uploadMigratedImage(filename, blob) {
-  const ref = storageRoot.child("products/" + filename);
-  await ref.put(blob);
-  return await ref.getDownloadURL();
-}
-
-/* Ejecutar migración */
-async function migrateImagesFromGitHub() {
-  const status = document.getElementById("migrateStatus");
-  status.style.display = "block";
-  status.textContent = "Buscando productos...";
-
-  const snap = await db.collection("products").get();
-  if (snap.empty) {
-    status.textContent = "No hay productos en Firestore.";
-    return;
-  }
-
-  let total = snap.size;
-  let done = 0;
-
-  for (const doc of snap.docs) {
-    const p = doc.data();
-
-    const oldUrl = p.imageUrl || "";
-    if (!oldUrl) {
-      done++;
-      continue;
+  // Requerir sesión en páginas internas
+  (function requireSession(){
+    if (!sessionValid()){
+      // armar "next" con ruta+query+hash actuales
+      const next = encodeURIComponent(
+        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
+        (location.search || '') + (location.hash || '')
+      );
+      location.replace('login.html?next=' + next); // <-- login con ?next=
+    } else {
+      bumpSession();
     }
+  })();
 
-    // Extraer nombre original
-    const fileName = oldUrl.split("/").pop();
+  // Mantener viva la sesión mientras se usa
+  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
+    window.addEventListener(evt, bumpSession, {passive:true});
+  });
+</script>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin • Rhodes Burgers</title>
+  <link rel="icon" href="images/logo.png" />
+  <style>
+    :root{
+      --primary:#625A45; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
+      --ring:#eaeaea; --shadow:0 10px 28px rgba(0,0,0,.08); --good:#2e7d32; --warn:#fb8c00; --bad:#d32f2f;
+      --radius:18px;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
+    header{position:sticky;top:0;z-index:20;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+    .topbar{max-width:1200px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
+    .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:800}
+    .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain;margin-right:8px}
+    .spacer{flex:1}
+    .store-controls{display:flex;align-items:center;gap:10px;border-radius:12px;padding:8px 10px;background:#fff;border:1px solid var(--ring)}
+    .store-controls .pill{font-weight:800;padding:6px 10px;border-radius:12px}
+    .pill.ok{background:#eaf6ea;color:var(--good);border:1px solid #d7ecd7}
+    .pill.off{background:#fafafa;color:#777;border:1px solid #eee}
+    .small{font-size:13px;color:var(--muted)}
+    main{max-width:1200px;margin:22px auto;padding:0 12px;display:grid;grid-template-columns:1fr;gap:18px}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+    h1{font-size:26px;margin:8px 0 10px}
+    h2{font-size:20px;margin:8px 0 14px}
+    .muted{color:var(--muted)}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+    .tile{border:1.5px solid var(--ring);border-radius:14px;padding:12px;display:flex;justify-content:space-between;gap:10px}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1.5px solid var(--ring);background:#fff;padding:8px 12px;border-radius:12px;cursor:pointer;font-weight:700}
+    .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .btn.warn{background:#fff6e8;border-color:#ffe1b8}
+    .btn.good{background:#e9f6eb;border-color:#cfead3}
+    .btn.bad{background:#fff1f1;border-color:#ffd7d7}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+    input[type="text"],input[type="datetime-local"],textarea,select{
+      padding:10px;border:1.5px solid var(--ring);border-radius:12px;background:#fff;width:100%;
+    }
+    .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+    .sep{height:1px;background:#eee;margin:12px 0}
+    table{width:100%;border-collapse:separate;border-spacing:0 8px}
+    td,th{padding:10px 12px;text-align:left;background:#fff}
+    th{font-size:13px;color:#555;border-bottom:1px solid #eee;background:#fafafa}
+    tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
+    .code{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-weight:800}
+    .tag{display:inline-block;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:800}
+    .tag.green{background:#e8f5e9;color:#2e7d32}
+    .tag.gray{background:#f3f3f3;color:#333}
+    .header-right{display:flex;align-items:center;gap:10px}
+    .side-config{display:flex;gap:10px;flex-wrap:wrap}
+    .side-pill{display:flex;align-items:center;gap:8px;border-radius:12px;padding:8px 12px;border:1px solid var(--ring);background:#fff}
+    .side-pill.on{background:#eaf6ea;color:var(--good); border-color:#d7ecd7}
+    .side-pill.off{background:#fff6f6;color:var(--bad); color:#b33; border-color:#ffd7d7}
+    @media (max-width:880px){ .topbar{flex-wrap:wrap} .store-controls{width:100%;justify-content:space-between} .header-right{width:100%;justify-content:space-between} }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <a class="brand" href="#"><img src="images/logo.png" alt="">Rhodes Burgers • Admin</a>
 
-    try {
-      status.textContent = `Migrando ${done + 1}/${total}: ${fileName}`;
+      <!-- =========== AQUÍ VAN LOS CONTROLES DE APERTURA (arriba de todo) =========== -->
+      <div class="spacer"></div>
+      <div class="store-controls" aria-live="polite" id="storeControls">
+        <div style="display:flex;flex-direction:column">
+          <div id="storePill" class="pill off">Estado: —</div>
+          <div class="small" id="storeSub" style="margin-top:4px">—</div>
+        </div>
 
-      // 1) Descargar desde GitHub
-      const blob = await downloadGitHubImage(fileName);
+        <div style="min-width:220px;display:flex;gap:8px;align-items:center">
+          <button class="btn good" id="btnForceOpen">Forzar abierto</button>
+          <button class="btn bad" id="btnForceClose">Desactivar</button>
+        </div>
 
-      // 2) Subir a Storage
-      const newURL = await uploadMigratedImage(fileName, blob);
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="forceUntil" type="datetime-local" style="width:220px" />
+          <button class="btn primary" id="btnSaveUntil">Guardar</button>
+        </div>
+      </div>
 
-      // 3) Guardar nueva URL
-      await db.collection("products").doc(doc.id).update({
-        imageUrl: newURL
+      <div class="header-right" style="margin-left:12px">
+        <a class="btn" href="index.html">Ir al Menú</a>
+        <button class="btn" onclick="logout()">Salir</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- SIDES / PAPAS -->
+    <section class="card">
+      <h2>Papas (habilitar / deshabilitar variantes)</h2>
+      <p class="muted">Aquí podés activar o desactivar las variantes de papas que querés ofrecer en la web y en mostrador. El estado se guarda en <code>config/sides</code>.</p>
+
+      <div id="sidesContainer" style="margin-top:12px" class="side-config">
+        <!-- Renderizado dinámico -->
+      </div>
+    </section>
+
+    <!-- INVENTARIO -->
+    <section class="card">
+      <h2>Inventario (activar / desactivar productos)</h2>
+      <p class="muted">Tocá el switch para sacar un producto sin stock. La web lee <code>products/{id}.available</code> para ocultar el botón de compra.</p>
+      <div id="invList" class="grid"></div>
+    </section>
+
+    <!-- CUPONES -->
+    <section class="card">
+      <h2>Cupones de descuento</h2>
+
+      <div class="form-grid">
+        <div>
+          <label><strong>Código</strong></label>
+          <input id="cpCode" type="text" placeholder="Ej: BURGERS10">
+        </div>
+        <div>
+          <label><strong>Tipo</strong></label>
+          <select id="cpType">
+            <option value="percent">Porcentaje (%)</option>
+            <option value="fixed">Monto fijo ($)</option>
+          </select>
+        </div>
+        <div>
+          <label><strong>Valor</strong></label>
+          <input id="cpValue" type="number" min="0" step="1" placeholder="Ej: 10 o 1500">
+        </div>
+        <div>
+          <label><strong>Máx. usos (opcional)</strong></label>
+          <input id="cpMaxUses" type="number" min="0" step="1" placeholder="0 = ilimitado">
+        </div>
+        <div>
+          <label><strong>Válido desde (opcional)</strong></label>
+          <input id="cpFrom" type="datetime-local">
+        </div>
+        <div>
+          <label><strong>Válido hasta (opcional)</strong></label>
+          <input id="cpTo" type="datetime-local">
+        </div>
+        <div style="grid-column:1/-1">
+          <label><strong>Nota (opcional)</strong></label>
+          <input id="cpNote" type="text" placeholder="Texto interno de referencia">
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="btnCreateCp">Crear / Actualizar cupón</button>
+        <span class="muted">Los códigos se guardan en mayúsculas.</span>
+      </div>
+
+      <div class="sep"></div>
+
+      <h3 style="margin:0 0 6px">Cupones activos</h3>
+      <div class="muted" style="margin-bottom:6px">Podés habilitar/deshabilitar o eliminar un cupón.</div>
+      <div style="overflow:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Código</th><th>Tipo</th><th>Valor</th><th>Usos</th><th>Vigencia</th><th>Estado</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="cpTable"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    // ===== Firebase =====
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.firebasestorage.app",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+    };
+    try{ firebase.initializeApp(firebaseConfig); }catch(e){}
+
+    // 🔧 FIX transporte: long-polling antes de crear `db`
+    try{ firebase.firestore().settings({ experimentalForceLongPolling: true, useFetchStreams: false }); }catch(e){}
+    const db = firebase.firestore();
+
+    // ===== Helpers =====
+    const $ = s => document.querySelector(s);
+    const fmtDate = ts => ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+
+    function safeLog(...a){ try{ console.log(...a); }catch(e){} }
+
+    // ===== Catálogo (ids deben coincidir con index/mostrador) =====
+    const CATALOG = [
+      { id:"bigjohn_simple", name:"Big John Simple", category:"hamburguesas" },
+      { id:"bigjohn_doble",  name:"Big John Doble",  category:"hamburguesas" },
+      { id:"burguesa_simple",name:"Burguesa Simple", category:"hamburguesas" },
+      { id:"burguesa_doble", name:"Burguesa Doble",  category:"hamburguesas" },
+      { id:"cheesebacon_simple", name:"CheeseBacon Simple", category:"hamburguesas" },
+      { id:"cheesebacon_doble",  name:"CheeseBacon Doble",  category:"hamburguesas" },
+      { id:"cheese_simple", name:"Cheeseburger Simple", category:"hamburguesas" },
+      { id:"cheese_doble",  name:"Cheeseburger Doble",  category:"hamburguesas" },
+      { id:"rhodes_simple", name:"Rhodes Simple", category:"hamburguesas" },
+      { id:"rhodes_doble",  name:"Rhodes Doble",  category:"hamburguesas" },
+      { id:"morgan_simple", name:"Morgan Simple", category:"hamburguesas" },
+      { id:"morgan_doble",  name:"Morgan Doble",  category:"hamburguesas" },
+      { id:"pollo_crispy",  name:"Pollo Crispy",  category:"hamburguesas" },
+      // Bebidas
+      { id:"andes_rubia", name:"Andes Origen Rubia 473ml", category:"bebidas" },
+      { id:"andes_roja",  name:"Andes Origen Roja 473ml",  category:"bebidas" },
+      { id:"coca_org",    name:"Coca-Cola Original 500ml", category:"bebidas" },
+      { id:"coca_zero",   name:"Coca-Cola Zero 500ml",     category:"bebidas" },
+      { id:"sprite",      name:"Sprite 500ml",             category:"bebidas" },
+      { id:"aq_pomelo",   name:"Aquarius Pomelo 500ml",    category:"bebidas" },
+      { id:"aq_pera",     name:"Aquarius Pera 500ml",      category:"bebidas" },
+      { id:"aq_manzana",  name:"Aquarius Manzana 500ml",   category:"bebidas" },
+      { id:"agua_sg",     name:"Agua sin gas 500ml",       category:"bebidas" }
+    ];
+
+    /* ================= SIDES (papas) CONFIG ================= */
+    // Doc: config/sides
+    // structure: { con_sazon: true/false, con_sal: true/false, sin_sal: true/false, updatedAt: Timestamp }
+    const sidesRef = () => db.collection('config').doc('sides');
+    const sidesContainer = document.getElementById('sidesContainer');
+
+    const SIDES_META = [
+      { key: 'con_sazon', label: 'Con sazón' },
+      { key: 'con_sal',   label: 'Con sal' },
+      { key: 'sin_sal',   label: 'Sin sal' }
+    ];
+
+    function renderSidesUI(state){
+      // state: object with keys. If undefined assume all true.
+      sidesContainer.innerHTML = '';
+      SIDES_META.forEach(s=>{
+        const enabled = state ? !!state[s.key] : true;
+        const el = document.createElement('div');
+        el.className = 'side-pill ' + (enabled ? 'on' : 'off');
+        el.innerHTML = `
+          <div style="display:flex;flex-direction:column">
+            <div style="font-weight:800">${s.label}</div>
+            <div class="muted" style="font-size:13px">${enabled ? 'Visible en web y mostrador' : 'Bloqueada en web y mostrador'}</div>
+          </div>
+          <div>
+            <button class="btn ${enabled ? 'bad' : 'good'}" data-side="${s.key}" data-next="${enabled?0:1}">
+              ${enabled ? 'Deshabilitar' : 'Habilitar'}
+            </button>
+          </div>
+        `;
+        sidesContainer.appendChild(el);
       });
-    } catch (e) {
-      console.error("Error migrando", fileName, e);
+
+      // attach handlers
+      sidesContainer.querySelectorAll('button[data-side]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const key = btn.dataset.side;
+          const next = btn.dataset.next === '1';
+          btn.disabled = true;
+          try{
+            await sidesRef().set({ [key]: !!next, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+          }catch(e){
+            console.error('No se pudo cambiar side', e);
+            alert('No se pudo cambiar el estado. Revisá la consola.');
+          }finally{
+            btn.disabled = false;
+          }
+        });
+      });
     }
 
-    done++;
-  }
+    async function loadSidesOnce(){
+      try{
+        const snap = await sidesRef().get();
+        const data = snap.exists ? (snap.data()||{}) : {};
+        renderSidesUI(data);
+      }catch(e){
+        console.warn('loadSidesOnce error', e);
+        renderSidesUI(null);
+      }
+    }
 
-  status.textContent = `✔ Migración finalizada (${done}/${total})`;
-}
+    // live subscription: actualiza UI automáticamente
+    (function subscribeSidesLive(){
+      try{
+        sidesRef().onSnapshot(snap=>{
+          const data = snap.exists ? (snap.data()||{}) : {};
+          renderSidesUI(data);
+        }, err=>{
+          console.warn('sides.onSnapshot failed', err);
+          loadSidesOnce();
+        });
+      }catch(e){
+        console.warn('subscribeSidesLive', e);
+        loadSidesOnce();
+      }
+    })();
 
-/* Botón migrar */
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("btnMigrateImages").onclick = () => {
-    if (!confirm("¿Migrar TODAS las imágenes desde GitHub → Firebase Storage?")) return;
-    migrateImagesFromGitHub();
-  };
-});
+    /* ================= INVENTARIO ================= */
+    const invList = document.getElementById('invList');
 
-</script>
+    async function ensureProductDoc(p){
+      const ref = db.collection('products').doc(p.id);
+      const snap = await ref.get();
+      if(!snap.exists){
+        await ref.set({ name:p.name, category:p.category, available:true, createdAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+      }else{
+        const d = snap.data();
+        if(typeof d.available !== 'boolean' || !d.name || !d.category){
+          await ref.set({ name:p.name, category:p.category, available: d.available ?? true }, {merge:true});
+        }
+      }
+      return ref;
+    }
+
+    async function toggleProduct(id, val){
+      try{
+        await db.collection('products').doc(id).set({ available: !!val, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+      }catch(e){ alert('No se pudo cambiar el estado del producto.'); console.error(e); }
+    }
+
+    function renderInventory(productsState){
+      invList.innerHTML = '';
+      CATALOG.forEach(p=>{
+        const st = productsState.get(p.id) ?? true;
+        const el = document.createElement('div');
+        el.className = 'tile';
+        el.innerHTML = `
+          <div>
+            <div style="font-weight:800">${p.name}</div>
+            <div class="muted" style="font-size:13px">${p.category}</div>
+          </div>
+          <div class="row">
+            <span class="pill ${st?'ok':'off'}">${st?'Disponible':'Sin stock'}</span>
+            <button class="btn ${st?'warn':'good'}" data-id="${p.id}" data-next="${st?0:1}">
+              ${st?'Desactivar':'Activar'}
+            </button>
+          </div>
+        `;
+        invList.appendChild(el);
+      });
+
+      invList.querySelectorAll('button[data-id]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const id = btn.dataset.id;
+          const next = btn.dataset.next === '1';
+          btn.disabled = true;
+          await toggleProduct(id, next);
+          await loadInventory();
+        });
+      });
+    }
+
+    async function loadInventory(){
+      await Promise.all(CATALOG.map(ensureProductDoc));
+      const snaps = await Promise.all(CATALOG.map(p => db.collection('products').doc(p.id).get()));
+      const map = new Map();
+      snaps.forEach((s,i)=> map.set(CATALOG[i].id, !!(s.data()?.available ?? true)) );
+      renderInventory(map);
+    }
+
+    /* ============== STORE OVERRIDE (FORCE OPEN) ============== */
+    const storeRef = () => db.collection('config').doc('store');
+
+    // UI elems in header
+    const storePill = $('#storePill');
+    const storeSub  = $('#storeSub');
+    const btnOpen   = $('#btnForceOpen');
+    const btnClose  = $('#btnForceClose');
+    const forceUntilInput = $('#forceUntil');
+    const btnSaveUntil = $('#btnSaveUntil');
+
+    // parse/store local helpers
+    function readStoreDocOnceAndRender(){
+      storeRef().get().then(snap=>{
+        const d = snap.exists ? snap.data() : {};
+        applyStoreDocToUI(d);
+      }).catch(e=>{ console.warn('store.get error', e); });
+    }
+
+    function applyStoreDocToUI(d){
+      const on = !!d.forceOpen;
+      const msg = d.forceOpenMessage || '';
+      let until = null;
+      if(d.forceOpenUntil){
+        // may be Timestamp or ISO or object with seconds
+        try{
+          if(typeof d.forceOpenUntil.toDate === 'function') until = d.forceOpenUntil.toDate();
+          else if(typeof d.forceOpenUntil.seconds === 'number') until = new Date(d.forceOpenUntil.seconds*1000);
+          else until = new Date(d.forceOpenUntil);
+        }catch(e){ until = new Date(d.forceOpenUntil); }
+      }
+      // UI
+      storePill.className = 'pill ' + (on || (until && until.getTime()>Date.now()) ? 'ok' : 'off');
+      storePill.textContent = 'Estado: ' + (on || (until && until.getTime()>Date.now()) ? 'Forzado ABIERTO' : 'Normal');
+      if(until && until.getTime()>Date.now()){
+        const hh = String(until.getHours()).padStart(2,'0');
+        const mm = String(until.getMinutes()).padStart(2,'0');
+        storeSub.textContent = `Hasta: ${hh}:${mm}`;
+        // set input value (as local datetime)
+        const local = new Date(until.getTime() - (until.getTimezoneOffset()*60000));
+        forceUntilInput.value = local.toISOString().slice(0,16);
+      } else {
+        storeSub.textContent = msg ? msg : 'Normal';
+        forceUntilInput.value = '';
+      }
+    }
+
+    // live subscription (keeps header updated)
+    (function subscribeStoreLive(){
+      try{
+        storeRef().onSnapshot(snap=>{
+          const d = snap.exists ? snap.data() : {};
+          applyStoreDocToUI(d);
+        }, err=>{ console.warn('store.onSnapshot error', err); readStoreDocOnceAndRender(); });
+      }catch(e){ console.warn('subscribe store failed', e); readStoreDocOnceAndRender(); }
+    })();
+
+    // actions
+    btnOpen.onclick = async ()=>{
+      try{
+        await storeRef().set({ forceOpen:true, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      }catch(e){ alert('No se pudo forzar apertura'); console.error(e); }
+    };
+    btnClose.onclick = async ()=>{
+      try{
+        await storeRef().set({ forceOpen:false, forceOpenMessage: firebase.firestore.FieldValue.delete(), forceOpenUntil: firebase.firestore.FieldValue.delete(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+      }catch(e){ alert('No se pudo desactivar'); console.error(e); }
+    };
+    btnSaveUntil.onclick = async ()=>{
+      const v = forceUntilInput.value;
+      if(!v){ alert('Elegí fecha y hora'); return; }
+      // v is "YYYY-MM-DDTHH:MM" in local time -> convert to Date
+      const local = new Date(v);
+      if(isNaN(local.getTime())){ alert('Fecha inválida'); return; }
+      try{
+        await storeRef().set({
+          forceOpen: true,
+          forceOpenUntil: firebase.firestore.Timestamp.fromDate(local),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge:true });
+        alert('Guardado: la tienda quedará abierta hasta ' + local.toLocaleString());
+      }catch(e){ alert('No se pudo guardar'); console.error(e); }
+    };
+
+    /* ==================== CUPONES (igual que antes) ==================== */
+    const cpTbody = document.getElementById('cpTable');
+
+    function upsertCouponFromForm(){
+      const code = ($('#cpCode').value||'').trim().toUpperCase();
+      if(!code){ alert('Ingresá un código'); return; }
+      const type = $('#cpType').value;
+      const value = Number($('#cpValue').value||0);
+      if(!(value>0)){ alert('Ingresá un valor mayor a 0'); return; }
+
+      const maxUses = Number($('#cpMaxUses').value||0);
+      const note = ($('#cpNote').value||'').trim();
+
+      const from = $('#cpFrom').value ? new Date($('#cpFrom').value) : null;
+      const to   = $('#cpTo').value   ? new Date($('#cpTo').value)   : null;
+
+      const payload = {
+        code, type, value,
+        enabled: true,
+        note: note || null,
+        validFrom: from ? firebase.firestore.Timestamp.fromDate(from) : null,
+        validTo: to ? firebase.firestore.Timestamp.fromDate(to) : null,
+        maxUses: maxUses>0 ? maxUses : null,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+
+      db.collection('coupons').doc(code).set({
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        uses: 0,
+        ...payload
+      }, {merge:true})
+      .then(()=>{ alert('Cupón guardado'); loadCoupons(); })
+      .catch(e=>{ console.error(e); alert('No se pudo guardar el cupón'); });
+    }
+    $('#btnCreateCp').onclick = upsertCouponFromForm;
+
+    function renderCoupons(list){
+      cpTbody.innerHTML = '';
+      list.forEach(doc=>{
+        const c = doc.data();
+        const uses = `${c.uses||0}${c.maxUses?` / ${c.maxUses}`:''}`;
+        const vf = c.validFrom ? fmtDate(c.validFrom) : null;
+        const vt = c.validTo ? fmtDate(c.validTo) : null;
+        const vig = (vf?vf.toLocaleDateString('es-AR')+' ':'') + (vt?('→ '+vt.toLocaleDateString('es-AR')):'');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="code">${c.code}</td>
+          <td>${c.type==='percent'?'%':'$'}</td>
+          <td>${c.value}</td>
+          <td>${uses}</td>
+          <td>${vig||'-'}</td>
+          <td>${c.enabled ? '<span class="tag green">HABILITADO</span>' : '<span class="tag gray">PAUSADO</span>'}</td>
+          <td class="row">
+            <button class="btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
+              ${c.enabled?'Deshabilitar':'Habilitar'}
+            </button>
+            <button class="btn bad" data-act="delete" data-id="${doc.id}">Eliminar</button>
+          </td>
+        `;
+        cpTbody.appendChild(tr);
+      });
+
+      cpTbody.querySelectorAll('button[data-act]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const id = btn.dataset.id;
+          const act = btn.dataset.act;
+          if(act==='toggle'){
+            const snap = await db.collection('coupons').doc(id).get();
+            const enabled = !!(snap.data()?.enabled);
+            await db.collection('coupons').doc(id).set({ enabled: !enabled, updatedAt:new Date() }, {merge:true});
+            loadCoupons();
+          }else if(act==='delete'){
+            if(confirm('¿Eliminar cupón '+id+'?')){
+              await db.collection('coupons').doc(id).delete();
+              loadCoupons();
+            }
+          }
+        });
+      });
+    }
+
+    async function loadCoupons(){
+      const q = await db.collection('coupons').orderBy('code').get();
+      renderCoupons(q.docs);
+    }
+
+    /* ================== INIT ================== */
+    (async function boot(){
+      await loadInventory();
+      readStoreDocOnceAndRender(); // live sub already attached, this ensures init quick
+      await loadCoupons();
+      await loadSidesOnce();
+      // (sides live subscription already attached above)
+    })();
+  </script>
+</body>
+</html>
