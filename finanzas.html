@@ -875,16 +875,52 @@ async function renderCalendar(monthStr){
     .where(dateField, "<", new Date(y, m, 1))
     .get();
 
-  // Procesar pedidos
-  snap.forEach(doc=>{
-    const data = doc.data();
-    const dt = pickDocDate(data);
-    if(!dt) return;
+ // Procesar pedidos (AHORA SUMA HAMBURGUESAS, NO PEDIDOS)
+snap.forEach(doc=>{
+  const data = doc.data();
+  const dt = pickDocDate(data);
+  if(!dt) return;
 
-    const day = dt.getDate();
-    counts[day - 1] += 1;
-    totals[day - 1] += Number(data.total || 0);
+  const day = dt.getDate();
+  const dayIndex = day - 1;
+
+  // sumar ingresos
+  totals[dayIndex] += Number(data.total || 0);
+
+  // sumar hamburguesas
+  let burgCount = 0;
+
+  // estructura moderna: items: [...]
+  const items = Array.isArray(data.items) ? data.items : [];
+
+  items.forEach(it=>{
+    const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
+    const name = (it.name || it.item?.name || "").toLowerCase();
+
+    // identificar hamburguesas
+    const isBurger =
+      name.includes("cheese") ||
+      name.includes("burger") ||
+      name.includes("bacon") ||
+      name.includes("morgan") ||
+      name.includes("rhodes") ||
+      name.includes("pollo") ||
+      name.includes("crispy") ||
+      name.includes("big john") ||
+      name.includes("burguesa");
+
+    if(isBurger) burgCount += qty;
   });
+
+  // si no detectamos ítems, intentar fallback: burgerCount del pedido
+  if(burgCount === 0 && typeof data.burgerCount === "number"){
+    burgCount = data.burgerCount;
+  }
+
+  // si sigue siendo 0, lo dejamos en 0 (no sumamos pedido)
+  counts[dayIndex] += burgCount;
+});
+
 
   // Determinar día de la semana del 1°
   const startWeekday = start.getDay(); // 0 = dom ... 6 = sáb
