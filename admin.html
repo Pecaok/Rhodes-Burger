@@ -476,57 +476,61 @@ function renderProductsTable(snapshot){
 productsCol.onSnapshot(renderProductsTable);
 </script>
 
-<!-- ============================================================
+/* ============================================================
       🔥 ORDEN VISUAL (DRAG & DROP con menuOrder)
-=============================================================== -->
+=============================================================== */
 
-<script>
 let ORDER_PRODUCTS = [];
 let CURRENT_CAT = "hamburguesas";
 
 const menuOrderRef = db.collection("config").doc("menuOrder");
 
-const orderGrid        = $("#orderGrid");
-const orderCatButtons  = $("#orderCatButtons");
+const orderGrid        = document.querySelector("#orderGrid");
+const orderCatButtons  = document.querySelector("#orderCatButtons");
 
-/* ============================================================
-      CAMBIO DE CATEGORÍA
-=============================================================== */
+/* CAMBIO DE CATEGORÍA */
 orderCatButtons.querySelectorAll("button").forEach(btn=>{
   btn.onclick = ()=>{
     orderCatButtons.querySelectorAll("button").forEach(b=> b.classList.remove("primary"));
     btn.classList.add("primary");
+
     CURRENT_CAT = btn.dataset.cat;
     renderOrderGrid();
   };
 });
 
-/* ============================================================
-      CARGAR ORDEN GUARDADO
-=============================================================== */
-let MENU_ORDER = {};   // {hamburguesas:[...], bebidas:[...], ...}
+/* CARGAR ORDEN GUARDADO */
+let MENU_ORDER = {};   // { hamburguesas:[id1,id2], bebidas:[...] }
 
 menuOrderRef.onSnapshot(snap=>{
-  MENU_ORDER = snap.exists ? snap.data() : {};
+  if(snap.exists){
+    MENU_ORDER = snap.data();
+  } else {
+    MENU_ORDER = {};
+  }
   renderOrderGrid();
 });
 
-/* ============================================================
-      RENDER DEL GRID — RESPETA ORDEN GUARDADO
-=============================================================== */
+/* RENDER GRID */
 function renderOrderGrid(){
+
   orderGrid.innerHTML = "";
 
-  const prods = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT);
+  const list = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT);
 
-  // Orden según el documento menuOrder
-  const order = MENU_ORDER[CURRENT_CAT] || [];
+  const orderedIds = MENU_ORDER[CURRENT_CAT] || [];
 
-  const sorted = [...prods].sort((a,b)=>{
-    return order.indexOf(a.id) - order.indexOf(b.id);
+  list.sort((a,b)=>{
+    const ia = orderedIds.indexOf(a.id);
+    const ib = orderedIds.indexOf(b.id);
+
+    if(ia === -1 && ib === -1) return a.name.localeCompare(b.name);
+    if(ia === -1) return 1;
+    if(ib === -1) return -1;
+    return ia - ib;
   });
 
-  sorted.forEach(p=>{
+  list.forEach(p=>{
     const card = document.createElement("div");
     card.className = "orderCard";
     card.draggable = true;
@@ -548,17 +552,16 @@ function renderOrderGrid(){
     card.addEventListener("dragover", e=>{
       e.preventDefault();
       const dragging = orderGrid.querySelector(".dragging");
-      if(dragging && dragging !== card){
-        orderGrid.insertBefore(dragging, card);
-      }
+      if(!dragging || dragging === card) return;
+      orderGrid.insertBefore(dragging, card);
     });
 
     orderGrid.appendChild(card);
   });
 }
-</script>
-      <script>
-$("#btnSaveOrder").onclick = async()=>{
+
+/* GUARDAR ORDEN */
+document.querySelector("#btnSaveOrder").onclick = async ()=>{
   const ids = [...orderGrid.querySelectorAll(".orderCard")].map(c => c.dataset.id);
 
   await menuOrderRef.set({
@@ -568,37 +571,13 @@ $("#btnSaveOrder").onclick = async()=>{
 
   alert("Orden guardado.");
 };
-</script>
 
-
-/* ============================================================
-      GUARDAR ORDEN
-=============================================================== */
-$("#btnSaveOrder").onclick = async()=>{
-  const cards = [...orderGrid.querySelectorAll(".orderCard")];
-
-  // Extraemos IDs en orden visual
-  const idsInOrder = cards.map(c => c.dataset.id);
-
-  // Actualizamos solo la categoría actual
-  MENU_ORDER[CURRENT_CAT] = idsInOrder;
-
-  try{
-    await menuOrderRef.set(MENU_ORDER, {merge:true});
-    alert("Orden guardado correctamente.");
-  }catch(e){
-    console.error(e);
-    alert("Error guardando orden.");
-  }
-};
-
-/* ============================================================
-      SUSCRIPCIÓN PRODUCTOS PARA ARMAR GRID
-=============================================================== */
+/* CARGAR PRODUCTOS PARA ORDEN */
 productsCol.onSnapshot(snap=>{
   ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
   renderOrderGrid();
 });
+
 </script>
 <!-- ============================================================
       🔥 INVENTARIO
