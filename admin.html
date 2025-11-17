@@ -215,6 +215,19 @@ function logout(){
   </div>
 
   <div class="sep" style="height:1px;background:#ddd;margin:18px 0"></div>
+  // No limpiar el form automáticamente si estamos editando
+productsCol.onSnapshot((snap)=>{
+  renderProductsTable(snap);
+
+  if(editingId){
+    productsCol.doc(editingId).get().then(d=>{
+      if(d.exists){
+        loadProductIntoForm(d.data(), editingId);
+      }
+    });
+  }
+});
+
 
   <!-- TABLA -->
   <h3>Lista de productos</h3>
@@ -445,51 +458,66 @@ async function toggleProductAvailability(id, current){
 // =============================================================
 // 🔥 RENDERIZAR TABLA CRUD
 // =============================================================
+let editingId = null; // ← NUEVO (para evitar que snapshot borre el form)
+
 function renderProductsTable(snapshot){
   const tbody = $('#prdTable');
   tbody.innerHTML = '';
 
   snapshot.forEach(doc => {
     const p = doc.data();
+
+    // Valores seguros (evita undefined)
+    const name = p.name || '';
+    const category = p.category || '';
+    const price = p.price || 0;
+    const img = p.img || '';
+    const desc = p.description || '';
+    const available = p.available !== false;
+
     const tr = document.createElement('tr');
 
-    const imgTag = p.img 
-      ? `<img src="${p.img}" class="img-preview">`
+    const imgTag = img
+      ? `<img src="${img}" class="img-preview">`
       : `<div class="img-preview"></div>`;
 
-    const availableTag = p.available
+    const availableTag = available
       ? '<span class="tag green">Activo</span>'
       : '<span class="tag gray">Pausado</span>';
 
     tr.innerHTML = `
       <td>${doc.id}</td>
       <td>${imgTag}</td>
-      <td>${p.name}</td>
-      <td>${p.category}</td>
-      <td>$${p.price}</td>
+      <td>${name}</td>
+      <td>${category}</td>
+      <td>$${price}</td>
       <td>${availableTag}</td>
       <td class="row">
         <button class="btn good" data-act="edit" data-id="${doc.id}">Editar</button>
-        <button class="btn warn" data-act="toggle" data-id="${doc.id}" data-av="${p.available}">${p.available?'Desactivar':'Activar'}</button>
+        <button class="btn warn" data-act="toggle" data-id="${doc.id}" data-av="${available}">
+          ${available ? 'Desactivar':'Activar'}
+        </button>
         <button class="btn bad" data-act="delete" data-id="${doc.id}">Eliminar</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
 
-  // Handlers
+  // handlers
   tbody.querySelectorAll('button').forEach(btn=>{
     btn.addEventListener('click', async()=>{
       const id = btn.dataset.id;
       const act = btn.dataset.act;
 
       if(act === 'edit'){
-        const d = await productsCol.doc(id).get();
-        loadProductIntoForm(d.data(), id);
+        editingId = id; // ← clave
+        const snap = await productsCol.doc(id).get();
+        const data = snap.data() || {};
+        loadProductIntoForm(data, id);
 
       } else if(act === 'toggle'){
         const av = btn.dataset.av === 'true';
-        toggleProductAvailability(id, av);
+        await toggleProductAvailability(id, av);
 
       } else if(act === 'delete'){
         deleteProduct(id);
