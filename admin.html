@@ -38,11 +38,6 @@ function logout(){
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
-  
   <title>Admin • Rhodes Burgers</title>
   <link rel="icon" href="images/logo.png" />
   <style>
@@ -176,11 +171,6 @@ function logout(){
 
   <!-- FORMULARIO -->
   <div class="form-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px">
-    
-    <div>
-  <label><strong>Orden</strong></label>
-  <input id="prdOrder" type="number" placeholder="Ej: 1, 2, 3...">
-</div>
 
     <div>
       <label><strong>ID (único)</strong></label>
@@ -208,10 +198,9 @@ function logout(){
     </div>
 
     <div>
-  <label><strong>Imagen del producto</strong></label>
-  <input id="prdImgFile" type="file" accept="image/png, image/jpeg">
-  <img id="prdImgPreview" class="img-preview" style="margin-top:8px">
-</div>
+      <label><strong>Imagen (URL)</strong></label>
+      <input id="prdImg" type="text" placeholder="https://...">
+    </div>
 
     <div style="grid-column:1/-1">
       <label><strong>Descripción</strong></label>
@@ -226,7 +215,7 @@ function logout(){
   </div>
 
   <div class="sep" style="height:1px;background:#ddd;margin:18px 0"></div>
-  
+
   <!-- TABLA -->
   <h3>Lista de productos</h3>
   <div style="overflow:auto">
@@ -342,7 +331,6 @@ function logout(){
 <!-- ============================================================= -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 
 <script>
 // ===== Firebase =====
@@ -350,7 +338,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
   authDomain: "rhodes-burguers.firebaseapp.com",
   projectId: "rhodes-burguers",
-  storageBucket: "rhodes-burguers.appspot.com",
+  storageBucket: "rhodes-burguers.firebasestorage.app",
   messagingSenderId: "951646688091",
   appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
 };
@@ -361,28 +349,6 @@ try{
   firebase.firestore().settings({ experimentalForceLongPolling:true, useFetchStreams:false });
 }catch(e){}
 const db = firebase.firestore();
-  // === SUBIR IMAGEN A STORAGE Y OBTENER URL ===
-async function uploadImageAndGetURL(file, id){
-  const storageRef = firebase.storage().ref().child(`products/${id}`);
-  await storageRef.put(file);
-  return await storageRef.getDownloadURL();
-}
-
-
-  // === SUBIR IMAGEN A STORAGE ===
-async function uploadImageAndGetURL(file, id){
-  const storageRef = firebase.storage().ref().child(`products/${id}`);
-  await storageRef.put(file);
-  return await storageRef.getDownloadURL();
-}
-
-
-  // === SUBIR IMAGEN A STORAGE Y OBTENER URL ===
-async function uploadImageAndGetURL(file, id){
-  const storageRef = firebase.storage().ref(`products/${id}`);
-  await storageRef.put(file);
-  return await storageRef.getDownloadURL();
-}
 
 // Helpers
 const $ = s => document.querySelector(s);
@@ -397,78 +363,37 @@ const productsCol = db.collection('products');
 // 🔥 FUNCIONES CRUD
 // =============================================================
 
-  // ===============================
-// 🔥 SUBIR IMAGEN A FIREBASE STORAGE
-// ===============================
-async function uploadImageAndGetURL(file, id){
-  return new Promise((resolve, reject)=>{
-    const storage = firebase.storage();
-    const path = `products/${id}_${Date.now()}`;
-
-    const ref = storage.ref().child(path);
-    const uploadTask = ref.put(file);
-
-    uploadTask.on('state_changed',
-      ()=>{},
-      reject,
-      async ()=>{
-        const url = await uploadTask.snapshot.ref.getDownloadURL();
-        resolve(url);
-      }
-    );
-  });
-}
-
 // GUARDAR / ACTUALIZAR PRODUCTO
 async function saveProduct(){
   const id = $('#prdId').value.trim();
   const name = $('#prdName').value.trim();
   const category = $('#prdCategory').value.trim();
   const price = Number($('#prdPrice').value || 0);
+  const img = $('#prdImg').value.trim();
   const desc = $('#prdDesc').value.trim();
-  const order = Number($('#prdOrder').value || 0);
-
-
-  const file = $('#prdImgFile').files[0];
 
   if(!id){ alert('Ingresá un ID'); return; }
   if(!name){ alert('Ingresá un nombre'); return; }
   if(!(price > 0)){ alert('Ingresá un precio válido'); return; }
 
-  let imgURL = null;
-
-  // si hay archivo nuevo → subirlo
-  if(file){
-    imgURL = await uploadImageAndGetURL(file, id);
-  } else {
-    // sino mantener la que ya tenga
-    const snap = await productsCol.doc(id).get();
-    imgURL = snap.exists ? (snap.data().img || null) : null;
-  }
-
   const payload = {
     name,
     category,
     price,
-    order,
-    img: imgURL,
+    img: img || null,
     description: desc || null,
     available: true,
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
   };
-
-  const existing = await productsCol.doc(id).get();
-  if(!existing.exists){
-    payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-  }
 
   try{
     await productsCol.doc(id).set(payload, {merge:true});
-    alert('Producto guardado correctamente');
+    alert('Producto guardado.');
     clearProductForm();
   }catch(e){
     console.error(e);
-    alert('Error guardando producto');
+    alert('Error guardando producto.');
   }
 }
 
@@ -488,19 +413,8 @@ function loadProductIntoForm(data, id){
   $('#prdName').value = data.name || '';
   $('#prdCategory').value = data.category || 'hamburguesas';
   $('#prdPrice').value = data.price || '';
+  $('#prdImg').value = data.img || '';
   $('#prdDesc').value = data.description || '';
-  $('#prdOrder').value = data.order ?? 0;
-
-
-  // reset file input
-  $('#prdImgFile').value = '';
-
-  // preview
-  if(data.img){
-    $('#prdImgPreview').src = data.img;
-  } else {
-    $('#prdImgPreview').src = '';
-  }
 }
 
 // ELIMINAR PRODUCTO
@@ -531,66 +445,51 @@ async function toggleProductAvailability(id, current){
 // =============================================================
 // 🔥 RENDERIZAR TABLA CRUD
 // =============================================================
-let editingId = null; // ← NUEVO (para evitar que snapshot borre el form)
-
 function renderProductsTable(snapshot){
   const tbody = $('#prdTable');
   tbody.innerHTML = '';
 
   snapshot.forEach(doc => {
     const p = doc.data();
-
-    // Valores seguros (evita undefined)
-    const name = p.name || '';
-    const category = p.category || '';
-    const price = p.price || 0;
-    const img = p.img || '';
-    const desc = p.description || '';
-    const available = p.available !== false;
-
     const tr = document.createElement('tr');
 
-    const imgTag = img
-      ? `<img src="${img}" class="img-preview">`
+    const imgTag = p.img 
+      ? `<img src="${p.img}" class="img-preview">`
       : `<div class="img-preview"></div>`;
 
-    const availableTag = available
+    const availableTag = p.available
       ? '<span class="tag green">Activo</span>'
       : '<span class="tag gray">Pausado</span>';
 
     tr.innerHTML = `
       <td>${doc.id}</td>
       <td>${imgTag}</td>
-      <td>${name}</td>
-      <td>${category}</td>
-      <td>$${price}</td>
+      <td>${p.name}</td>
+      <td>${p.category}</td>
+      <td>$${p.price}</td>
       <td>${availableTag}</td>
       <td class="row">
         <button class="btn good" data-act="edit" data-id="${doc.id}">Editar</button>
-        <button class="btn warn" data-act="toggle" data-id="${doc.id}" data-av="${available}">
-          ${available ? 'Desactivar':'Activar'}
-        </button>
+        <button class="btn warn" data-act="toggle" data-id="${doc.id}" data-av="${p.available}">${p.available?'Desactivar':'Activar'}</button>
         <button class="btn bad" data-act="delete" data-id="${doc.id}">Eliminar</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
 
-  // handlers
+  // Handlers
   tbody.querySelectorAll('button').forEach(btn=>{
     btn.addEventListener('click', async()=>{
       const id = btn.dataset.id;
       const act = btn.dataset.act;
 
       if(act === 'edit'){
-        editingId = id; // ← clave
-        const snap = await productsCol.doc(id).get();
-        const data = snap.data() || {};
-        loadProductIntoForm(data, id);
+        const d = await productsCol.doc(id).get();
+        loadProductIntoForm(d.data(), id);
 
       } else if(act === 'toggle'){
         const av = btn.dataset.av === 'true';
-        await toggleProductAvailability(id, av);
+        toggleProductAvailability(id, av);
 
       } else if(act === 'delete'){
         deleteProduct(id);
@@ -602,25 +501,7 @@ function renderProductsTable(snapshot){
 // =============================================================
 // 🔥 SUBSCRIPCIÓN EN VIVO A PRODUCTOS
 // =============================================================
-// === ÚNICO onSnapshot para evitar conflictos ===
-productsCol.orderBy("order", "asc").onSnapshot((snap)=>{
-
-
-  // Render CRUD
-  renderProductsTable(snap);
-
-  // Mantener formulario si estamos editando
-  if(editingId){
-    productsCol.doc(editingId).get().then(doc=>{
-      if(doc.exists) loadProductIntoForm(doc.data(), editingId);
-    });
-  }
-
-  // Render inventario dinámico
-  renderInventory(snap);
-
-});
-
+productsCol.onSnapshot(renderProductsTable);
 
 // =============================================================
 // HANDLERS DEL FORM
@@ -678,6 +559,10 @@ function renderInventory(snapshot){
     });
   });
 }
+
+// subscripción en vivo inventario
+productsCol.onSnapshot(renderInventory);
+
 
 /* =============================================================
    🔥 SIDES (con sazón, con sal, sin sal)
@@ -921,22 +806,13 @@ async function loadCoupons(){
   renderCoupons(q.docs);
 }
 
+
 /* =============================================================
    🔥 BOOT FINAL
    ============================================================= */
 (async function boot(){
   loadCoupons();
 })();
-
-  // Preview de imagen antes de subirla
-$('#prdImgFile').addEventListener('change', () => {
-  const file = $('#prdImgFile').files[0];
-  if(file){
-    const url = URL.createObjectURL(file);
-    $('#prdImgPreview').src = url;
-  }
-});
-
 </script>
 
 </body>
