@@ -317,7 +317,7 @@ try{
 const db = firebase.firestore();
 
 // Helpers
-const $ = s => document.querySelector(s);
+const $ = s => document.querySelector(s);  // ➜ ESTA LÍNEA ES OBLIGATORIA
 const fmtDate = ts => ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
 
 /* ============================================================
@@ -474,6 +474,8 @@ function renderProductsTable(snapshot){
 
 /* Suscripción CRUD */
 productsCol.onSnapshot(renderProductsTable);
+</script>
+
 <!-- ============================================================
       🔥 ORDEN VISUAL (DRAG & DROP con menuOrder)
 =============================================================== -->
@@ -494,7 +496,6 @@ orderCatButtons.querySelectorAll("button").forEach(btn=>{
   btn.onclick = ()=>{
     orderCatButtons.querySelectorAll("button").forEach(b=> b.classList.remove("primary"));
     btn.classList.add("primary");
-
     CURRENT_CAT = btn.dataset.cat;
     renderOrderGrid();
   };
@@ -503,14 +504,10 @@ orderCatButtons.querySelectorAll("button").forEach(btn=>{
 /* ============================================================
       CARGAR ORDEN GUARDADO
 =============================================================== */
-let MENU_ORDER = {};   // objeto: { hamburguesas:["id1","id2"], bebidas:[...], ... }
+let MENU_ORDER = {};   // {hamburguesas:[...], bebidas:[...], ...}
 
 menuOrderRef.onSnapshot(snap=>{
-  if(snap.exists){
-    MENU_ORDER = snap.data();
-  } else {
-    MENU_ORDER = {};
-  }
+  MENU_ORDER = snap.exists ? snap.data() : {};
   renderOrderGrid();
 });
 
@@ -518,21 +515,18 @@ menuOrderRef.onSnapshot(snap=>{
       RENDER DEL GRID — RESPETA ORDEN GUARDADO
 =============================================================== */
 function renderOrderGrid(){
-  if(!ORDER_PRODUCTS.length) return;
-
   orderGrid.innerHTML = "";
 
-  // Lista de productos de esa categoría
-  let list = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT);
+  const prods = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT);
 
-  // Si existe orden guardado → ordenarlo
-  const savedOrder = MENU_ORDER[CURRENT_CAT] || [];
+  // Orden según el documento menuOrder
+  const order = MENU_ORDER[CURRENT_CAT] || [];
 
-  list.sort((a,b)=>{
-    return savedOrder.indexOf(a.id) - savedOrder.indexOf(b.id);
+  const sorted = [...prods].sort((a,b)=>{
+    return order.indexOf(a.id) - order.indexOf(b.id);
   });
 
-  list.forEach(p=>{
+  sorted.forEach(p=>{
     const card = document.createElement("div");
     card.className = "orderCard";
     card.draggable = true;
@@ -545,28 +539,37 @@ function renderOrderGrid(){
       </div>
     `;
 
-    /* DRAG START */
     card.addEventListener("dragstart", e=>{
       e.dataTransfer.setData("id", p.id);
       card.classList.add("dragging");
     });
+    card.addEventListener("dragend", ()=> card.classList.remove("dragging"));
 
-    /* DRAG END */
-    card.addEventListener("dragend", ()=>{
-      card.classList.remove("dragging");
-    });
-
-    /* DRAG OVER */
     card.addEventListener("dragover", e=>{
       e.preventDefault();
       const dragging = orderGrid.querySelector(".dragging");
-      if(!dragging || dragging===card) return;
-      orderGrid.insertBefore(dragging, card);
+      if(dragging && dragging !== card){
+        orderGrid.insertBefore(dragging, card);
+      }
     });
 
     orderGrid.appendChild(card);
   });
 }
+</script>
+      <script>
+$("#btnSaveOrder").onclick = async()=>{
+  const ids = [...orderGrid.querySelectorAll(".orderCard")].map(c => c.dataset.id);
+
+  await menuOrderRef.set({
+    ...MENU_ORDER,
+    [CURRENT_CAT]: ids
+  }, {merge:true});
+
+  alert("Orden guardado.");
+};
+</script>
+
 
 /* ============================================================
       GUARDAR ORDEN
