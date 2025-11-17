@@ -198,9 +198,10 @@ function logout(){
     </div>
 
     <div>
-      <label><strong>Imagen (URL)</strong></label>
-      <input id="prdImg" type="text" placeholder="https://...">
-    </div>
+  <label><strong>Imagen del producto</strong></label>
+  <input id="prdImgFile" type="file" accept="image/png, image/jpeg">
+  <img id="prdImgPreview" class="img-preview" style="margin-top:8px">
+</div>
 
     <div style="grid-column:1/-1">
       <label><strong>Descripción</strong></label>
@@ -369,31 +370,47 @@ async function saveProduct(){
   const name = $('#prdName').value.trim();
   const category = $('#prdCategory').value.trim();
   const price = Number($('#prdPrice').value || 0);
-  const img = $('#prdImg').value.trim();
   const desc = $('#prdDesc').value.trim();
+
+  const file = $('#prdImgFile').files[0];
 
   if(!id){ alert('Ingresá un ID'); return; }
   if(!name){ alert('Ingresá un nombre'); return; }
   if(!(price > 0)){ alert('Ingresá un precio válido'); return; }
 
+  let imgURL = null;
+
+  // si hay archivo nuevo → subirlo
+  if(file){
+    imgURL = await uploadImageAndGetURL(file, id);
+  } else {
+    // sino mantener la que ya tenga
+    const snap = await productsCol.doc(id).get();
+    imgURL = snap.exists ? (snap.data().img || null) : null;
+  }
+
   const payload = {
     name,
     category,
     price,
-    img: img || null,
+    img: imgURL,
     description: desc || null,
     available: true,
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
+
+  const existing = await productsCol.doc(id).get();
+  if(!existing.exists){
+    payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+  }
 
   try{
     await productsCol.doc(id).set(payload, {merge:true});
-    alert('Producto guardado.');
+    alert('Producto guardado correctamente');
     clearProductForm();
   }catch(e){
     console.error(e);
-    alert('Error guardando producto.');
+    alert('Error guardando producto');
   }
 }
 
@@ -413,8 +430,17 @@ function loadProductIntoForm(data, id){
   $('#prdName').value = data.name || '';
   $('#prdCategory').value = data.category || 'hamburguesas';
   $('#prdPrice').value = data.price || '';
-  $('#prdImg').value = data.img || '';
   $('#prdDesc').value = data.description || '';
+
+  // reset file input
+  $('#prdImgFile').value = '';
+
+  // preview
+  if(data.img){
+    $('#prdImgPreview').src = data.img;
+  } else {
+    $('#prdImgPreview').src = '';
+  }
 }
 
 // ELIMINAR PRODUCTO
@@ -873,6 +899,16 @@ productsCol.onSnapshot((snap)=>{
 (async function boot(){
   loadCoupons();
 })();
+
+  // Preview de imagen antes de subirla
+$('#prdImgFile').addEventListener('change', () => {
+  const file = $('#prdImgFile').files[0];
+  if(file){
+    const url = URL.createObjectURL(file);
+    $('#prdImgPreview').src = url;
+  }
+});
+
 </script>
 
 </body>
