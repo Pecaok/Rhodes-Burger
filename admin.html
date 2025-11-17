@@ -56,7 +56,7 @@ html,body{
   font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif;
 }
 
-/* ================= HEADER ================= */
+/* HEADER */
 header{
   position:sticky;
   top:0;
@@ -214,7 +214,6 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
 </header>
 
 <main>
-
 <!-- ============================================================
        BLOQUE CRUD PRINCIPAL
 =============================================================== -->
@@ -293,6 +292,7 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
     </table>
   </div>
 </section>
+
 <!-- ============================================================
      FIREBASE
 =============================================================== -->
@@ -317,7 +317,7 @@ try{
 const db = firebase.firestore();
 
 // Helpers
-const $ = s => document.querySelector(s);  // ➜ ESTA LÍNEA ES OBLIGATORIA
+const $ = s => document.querySelector(s);  
 const fmtDate = ts => ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
 
 /* ============================================================
@@ -475,11 +475,10 @@ function renderProductsTable(snapshot){
 /* Suscripción CRUD */
 productsCol.onSnapshot(renderProductsTable);
 </script>
-
-/* ============================================================
+<!-- ============================================================
       🔥 ORDEN VISUAL (DRAG & DROP con menuOrder)
-=============================================================== */
-
+=============================================================== -->
+<script>
 let ORDER_PRODUCTS = [];
 let CURRENT_CAT = "hamburguesas";
 
@@ -488,7 +487,9 @@ const menuOrderRef = db.collection("config").doc("menuOrder");
 const orderGrid        = document.querySelector("#orderGrid");
 const orderCatButtons  = document.querySelector("#orderCatButtons");
 
-/* CAMBIO DE CATEGORÍA */
+/* ============================================================
+      CAMBIO DE CATEGORÍA
+=============================================================== */
 orderCatButtons.querySelectorAll("button").forEach(btn=>{
   btn.onclick = ()=>{
     orderCatButtons.querySelectorAll("button").forEach(b=> b.classList.remove("primary"));
@@ -499,7 +500,9 @@ orderCatButtons.querySelectorAll("button").forEach(btn=>{
   };
 });
 
-/* CARGAR ORDEN GUARDADO */
+/* ============================================================
+      CARGAR ORDEN GUARDADO DE FIRESTORE
+=============================================================== */
 let MENU_ORDER = {};   // { hamburguesas:[id1,id2], bebidas:[...] }
 
 menuOrderRef.onSnapshot(snap=>{
@@ -511,7 +514,9 @@ menuOrderRef.onSnapshot(snap=>{
   renderOrderGrid();
 });
 
-/* RENDER GRID */
+/* ============================================================
+      RENDER GRID — RESPETA ORDEN GUARDADO
+=============================================================== */
 function renderOrderGrid(){
 
   orderGrid.innerHTML = "";
@@ -543,11 +548,15 @@ function renderOrderGrid(){
       </div>
     `;
 
+    // Drag events
     card.addEventListener("dragstart", e=>{
       e.dataTransfer.setData("id", p.id);
       card.classList.add("dragging");
     });
-    card.addEventListener("dragend", ()=> card.classList.remove("dragging"));
+
+    card.addEventListener("dragend", ()=>{
+      card.classList.remove("dragging");
+    });
 
     card.addEventListener("dragover", e=>{
       e.preventDefault();
@@ -560,30 +569,153 @@ function renderOrderGrid(){
   });
 }
 
-/* GUARDAR ORDEN */
+/* ============================================================
+      GUARDAR ORDEN EN FIRESTORE
+=============================================================== */
 document.querySelector("#btnSaveOrder").onclick = async ()=>{
-  const ids = [...orderGrid.querySelectorAll(".orderCard")].map(c => c.dataset.id);
+
+  const ids = [...orderGrid.querySelectorAll(".orderCard")]
+    .map(c => c.dataset.id);
 
   await menuOrderRef.set({
     ...MENU_ORDER,
     [CURRENT_CAT]: ids
   }, {merge:true});
 
-  alert("Orden guardado.");
+  alert("Orden guardada.");
 };
 
-/* CARGAR PRODUCTOS PARA ORDEN */
+/* ============================================================
+      CARGAR PRODUCTOS DE FIRESTORE
+=============================================================== */
 productsCol.onSnapshot(snap=>{
   ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
   renderOrderGrid();
 });
+</script>
+<!-- ============================================================
+      🔥 ORDEN VISUAL (DRAG & DROP con menuOrder)
+=============================================================== -->
+<script>
+let ORDER_PRODUCTS = [];
+let CURRENT_CAT = "hamburguesas";
 
+const menuOrderRef = db.collection("config").doc("menuOrder");
+
+const orderGrid        = document.querySelector("#orderGrid");
+const orderCatButtons  = document.querySelector("#orderCatButtons");
+
+/* ============================================================
+      CAMBIO DE CATEGORÍA
+=============================================================== */
+orderCatButtons.querySelectorAll("button").forEach(btn=>{
+  btn.onclick = ()=>{
+    orderCatButtons.querySelectorAll("button").forEach(b=> b.classList.remove("primary"));
+    btn.classList.add("primary");
+
+    CURRENT_CAT = btn.dataset.cat;
+    renderOrderGrid();
+  };
+});
+
+/* ============================================================
+      CARGAR ORDEN GUARDADO DE FIRESTORE
+=============================================================== */
+let MENU_ORDER = {};   // { hamburguesas:[id1,id2], bebidas:[...] }
+
+menuOrderRef.onSnapshot(snap=>{
+  if(snap.exists){
+    MENU_ORDER = snap.data();
+  } else {
+    MENU_ORDER = {};
+  }
+  renderOrderGrid();
+});
+
+/* ============================================================
+      RENDER GRID — RESPETA ORDEN GUARDADO
+=============================================================== */
+function renderOrderGrid(){
+
+  orderGrid.innerHTML = "";
+
+  const list = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT);
+
+  const orderedIds = MENU_ORDER[CURRENT_CAT] || [];
+
+  list.sort((a,b)=>{
+    const ia = orderedIds.indexOf(a.id);
+    const ib = orderedIds.indexOf(b.id);
+
+    if(ia === -1 && ib === -1) return a.name.localeCompare(b.name);
+    if(ia === -1) return 1;
+    if(ib === -1) return -1;
+    return ia - ib;
+  });
+
+  list.forEach(p=>{
+    const card = document.createElement("div");
+    card.className = "orderCard";
+    card.draggable = true;
+    card.dataset.id = p.id;
+
+    card.innerHTML = `
+      <div style="border:1px solid #ddd;border-radius:12px;overflow:hidden;background:#fff">
+        <img src="${p.img || ""}" style="width:100%;height:110px;object-fit:cover">
+        <div style="padding:10px;font-weight:700;font-size:14px">${p.name}</div>
+      </div>
+    `;
+
+    // Drag events
+    card.addEventListener("dragstart", e=>{
+      e.dataTransfer.setData("id", p.id);
+      card.classList.add("dragging");
+    });
+
+    card.addEventListener("dragend", ()=>{
+      card.classList.remove("dragging");
+    });
+
+    card.addEventListener("dragover", e=>{
+      e.preventDefault();
+      const dragging = orderGrid.querySelector(".dragging");
+      if(!dragging || dragging === card) return;
+      orderGrid.insertBefore(dragging, card);
+    });
+
+    orderGrid.appendChild(card);
+  });
+}
+
+/* ============================================================
+      GUARDAR ORDEN EN FIRESTORE
+=============================================================== */
+document.querySelector("#btnSaveOrder").onclick = async ()=>{
+
+  const ids = [...orderGrid.querySelectorAll(".orderCard")]
+    .map(c => c.dataset.id);
+
+  await menuOrderRef.set({
+    ...MENU_ORDER,
+    [CURRENT_CAT]: ids
+  }, {merge:true});
+
+  alert("Orden guardada.");
+};
+
+/* ============================================================
+      CARGAR PRODUCTOS DE FIRESTORE
+=============================================================== */
+productsCol.onSnapshot(snap=>{
+  ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  renderOrderGrid();
+});
 </script>
 <!-- ============================================================
       🔥 INVENTARIO
 =============================================================== -->
 <script>
-const invList = $('#invList');
+const invList = document.querySelector('#invList');
 
 function renderInventory(snapshot){
   if(!invList) return;
@@ -633,11 +765,11 @@ function renderInventory(snapshot){
 }
 
 productsCol.onSnapshot(renderInventory);
-
-
-/* ============================================================
+</script>
+<!-- ============================================================
       🔥 SIDES (configuración de papas)
-=============================================================== */
+=============================================================== -->
+<script>
 const sidesRef = () => db.collection("config").doc("sides");
 
 const SIDES_META = [
@@ -646,7 +778,7 @@ const SIDES_META = [
   { key:"sin_sal",   label:"Sin sal" }
 ];
 
-const sidesContainer = $("#sidesContainer");
+const sidesContainer = document.querySelector("#sidesContainer");
 
 function renderSidesUI(state){
   if(!sidesContainer) return;
@@ -700,19 +832,19 @@ function renderSidesUI(state){
 sidesRef().onSnapshot(snap=>{
   renderSidesUI(snap.exists ? snap.data() : {});
 });
-
-
-/* ============================================================
+</script>
+<!-- ============================================================
       🔥 STORE OVERRIDE (Horarios, Forzar abierto)
-=============================================================== */
+=============================================================== -->
+<script>
 const storeRef = () => db.collection("config").doc("store");
 
-const storePill  = $("#storePill");
-const storeSub   = $("#storeSub");
-const btnOpen    = $("#btnForceOpen");
-const btnClose   = $("#btnForceClose");
-const forceUntilInput = $("#forceUntil");
-const btnSaveUntil   = $("#btnSaveUntil");
+const storePill        = document.querySelector("#storePill");
+const storeSub         = document.querySelector("#storeSub");
+const btnOpen          = document.querySelector("#btnForceOpen");
+const btnClose         = document.querySelector("#btnForceClose");
+const forceUntilInput  = document.querySelector("#forceUntil");
+const btnSaveUntil     = document.querySelector("#btnSaveUntil");
 
 function applyStoreDocToUI(d){
   const on = !!d.forceOpen;
@@ -743,7 +875,6 @@ function applyStoreDocToUI(d){
 
     const local = new Date(until.getTime() - until.getTimezoneOffset()*60000);
     forceUntilInput.value = local.toISOString().slice(0,16);
-
   } else {
     storeSub.textContent = d.forceOpenMessage || "Normal";
     forceUntilInput.value = "";
@@ -775,7 +906,6 @@ btnSaveUntil.onclick = async()=>{
   if(!v){ alert("Elegí fecha y hora"); return; }
 
   const local = new Date(v);
-
   if(isNaN(local.getTime())){
     alert("Fecha inválida");
     return;
@@ -789,25 +919,25 @@ btnSaveUntil.onclick = async()=>{
 
   alert("Guardado correctamente.");
 };
-
-
-/* ============================================================
+</script>
+<!-- ============================================================
       🔥 CUPONES (CRUD COMPLETO)
-=============================================================== */
-const cpTbody = $("#cpTable");
+=============================================================== -->
+<script>
+const cpTbody = document.querySelector("#cpTable");
 
 function upsertCouponFromForm(){
-  const code = ($("#cpCode").value||"").trim().toUpperCase();
+  const code = (document.querySelector("#cpCode").value||"").trim().toUpperCase();
   if(!code){ alert("Ingresá código"); return; }
 
-  const type = $("#cpType").value;
-  const value = Number($("#cpValue").value||0);
+  const type = document.querySelector("#cpType").value;
+  const value = Number(document.querySelector("#cpValue").value||0);
   if(!(value>0)){ alert("Valor inválido"); return; }
 
-  const maxUses = Number($("#cpMaxUses").value||0);
-  const note = ($("#cpNote").value||"").trim();
-  const from = $("#cpFrom").value ? new Date($("#cpFrom").value) : null;
-  const to   = $("#cpTo").value   ? new Date($("#cpTo").value)   : null;
+  const maxUses = Number(document.querySelector("#cpMaxUses").value||0);
+  const note = (document.querySelector("#cpNote").value||"").trim();
+  const from = document.querySelector("#cpFrom").value ? new Date(document.querySelector("#cpFrom").value) : null;
+  const to   = document.querySelector("#cpTo").value   ? new Date(document.querySelector("#cpTo").value)   : null;
 
   const payload = {
     code, type, value,
@@ -834,7 +964,7 @@ function upsertCouponFromForm(){
     });
 }
 
-$("#btnCreateCp").onclick = upsertCouponFromForm;
+document.querySelector("#btnCreateCp").onclick = upsertCouponFromForm;
 
 function renderCoupons(list){
   cpTbody.innerHTML = "";
@@ -881,7 +1011,8 @@ function renderCoupons(list){
         const snap = await db.collection("coupons").doc(id).get();
         const enabled = !!snap.data()?.enabled;
 
-        await db.collection("coupons").doc(id)
+        await db.collection("coupons")
+          .doc(id)
           .set({ enabled:!enabled, updatedAt:new Date() },{merge:true});
 
         loadCoupons();
@@ -901,9 +1032,8 @@ async function loadCoupons(){
   renderCoupons(q.docs);
 }
 
-
 /* ============================================================
-      🔥 BOOT FINAL
+      BOOT FINAL
 =============================================================== */
 (async function boot(){
   loadCoupons();
