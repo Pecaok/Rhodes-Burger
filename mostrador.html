@@ -394,7 +394,6 @@
     </div>
   </div>
 </div>
-
 <!-- ===================== FIREBASE ===================== -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -429,11 +428,11 @@ let PRODUCTS = { burgers: [], drinks: [], sides: [] };
 /* ============================================================
       🔥 ORDEN VISUAL DEL MENÚ desde admin.html
 ============================================================ */
-let MENU_ORDER = {}; // ejemplo: { hamburguesas:["id1","id2"], bebidas:["idA","idB"] }
+let MENU_ORDER = {};
 
 db.collection("config").doc("menuOrder").onSnapshot(snap=>{
   MENU_ORDER = snap.exists ? snap.data() : {};
-  mountMenu();  // re-render automático cuando cambian posiciones
+  mountMenu();
 });
 
 /* ============================================================
@@ -442,7 +441,6 @@ db.collection("config").doc("menuOrder").onSnapshot(snap=>{
 function orderedList(category, arr){
   const order = MENU_ORDER[category] || [];
   const map   = new Map(order.map((id,i)=>[id,i]));
-
   return [...arr].sort((a,b)=>{
     const A = map.has(a.id) ? map.get(a.id) : 9999;
     const B = map.has(b.id) ? map.get(b.id) : 9999;
@@ -513,7 +511,6 @@ function renderCard(item){
     };
   }
   else {
-    // hamburguesas → abrir modal de personalización
     btn.onclick = ()=>{
       if(!isAvailable(item.id)) return;
       openCustomize(item, null, "add");
@@ -523,10 +520,10 @@ function renderCard(item){
   return card;
 }
 
-
 /* ======================= FIRESTORE -> PRODUCTOS ======================= */
 db.collection("products").onSnapshot(snap=>{
-  PRODUCTS = { burgers: [], drinks: [] };
+
+  PRODUCTS = { burgers: [], drinks: [], sides: [] };
 
   snap.forEach(doc=>{
     const d = doc.data();
@@ -543,13 +540,13 @@ db.collection("products").onSnapshot(snap=>{
     };
 
     if(d.category === "burger" || d.category === "hamburguesas")
-  PRODUCTS.burgers.push(item);
+      PRODUCTS.burgers.push(item);
 
-if(d.category === "drink" || d.category === "bebidas")
-  PRODUCTS.drinks.push(item);
+    if(d.category === "drink" || d.category === "bebidas")
+      PRODUCTS.drinks.push(item);
 
-if(d.category === "guarniciones" || d.category === "side")
-  PRODUCTS.sides.push(item);
+    if(d.category === "guarniciones" || d.category === "side")
+      PRODUCTS.sides.push(item);
   });
 
   mountMenu();
@@ -600,15 +597,11 @@ function refreshAvailabilityUI(){
   });
 }
 
-/* ======================= CARRITO (definido en Bloque 3) ======================= */
+/* ======================= CARRITO ======================= */
 let cart = { burger:{}, drink:{}, side:{} };
 const cartItems = $("#cartItems");
 const cartTotal = $("#cartTotal");
 
-/* ============================================================
-      ===  CARRITO COMPLETO  ===
-============================================================ */
-  
 function calcTotal(){
   let t = 0;
 
@@ -622,10 +615,10 @@ function calcTotal(){
   for(const d of Object.values(cart.drink)){
     t += d.item.price * d.qty;
   }
-  // Sides
-for(const s of Object.values(cart.side||{})){
-  t += s.item.price * s.qty;
-}
+
+  for(const s of Object.values(cart.side||{})){
+    t += s.item.price * s.qty;
+  }
 
   return t;
 }
@@ -641,28 +634,10 @@ function friesName(v){
 function renderCart(){
   const out = [];
 
-  // Burgers
   for(const [key,o] of Object.entries(cart.burger)){
     const unit = o.item.price
                + (o.extras?.patty||0)*EXTRA_PRICE_PATTY
                + (o.extras?.cheddar||0)*EXTRA_PRICE_CHEDDAR;
-    // Sides (guarniciones)
-if(cart.side){
-  for(const [key,o] of Object.entries(cart.side)){
-    out.push(`
-      <div class="item">
-        <div><strong>${o.item.name}</strong></div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <button class="qtybtn" onclick="changeQty('side','${encodeURIComponent(key)}',-1)">-</button>
-          <span>${o.qty}</span>
-          <button class="qtybtn" onclick="changeQty('side','${encodeURIComponent(key)}',1)">+</button>
-          <span>${money(o.item.price * o.qty)}</span>
-        </div>
-      </div>
-    `);
-  }
-}
-
 
     out.push(`
       <div class="item">
@@ -687,8 +662,7 @@ if(cart.side){
       </div>
     `);
   }
-// Sides (guarniciones)
-if(cart.side){
+
   for(const [key,o] of Object.entries(cart.side)){
     out.push(`
       <div class="item">
@@ -702,14 +676,11 @@ if(cart.side){
       </div>
     `);
   }
-}
 
-  // Drinks
   for(const [key,o] of Object.entries(cart.drink)){
     out.push(`
       <div class="item">
         <div><strong>${o.item.name}</strong></div>
-
         <div style="display:flex;align-items:center;gap:8px">
           <button class="qtybtn"
             onclick="changeQty('drink','${encodeURIComponent(key)}',-1)">-</button>
@@ -725,23 +696,17 @@ if(cart.side){
   cartItems.innerHTML = out.length ? out.join("") : "Sin ítems.";
   cartTotal.textContent = money(calcTotal());
 
-  // ACTUALIZA HORARIOS
   refreshSlotsUI();
 }
 
 window.changeQty = function(type, encKey, delta){
   const key = decodeURIComponent(encKey);
   const bucket = cart[type];
-
   if(!bucket[key]) return;
-
   bucket[key].qty += delta;
-
   if(bucket[key].qty <= 0) delete bucket[key];
-
   renderCart();
 };
-
 
 /* ============================================================
       ===  MODAL PERSONALIZAR  ===
@@ -854,14 +819,12 @@ function openCustomize(item, keyForEdit, mode="add"){
   }
 
   unitPricePreview(item.price);
-  applySidesToUI();
 
   overlay.classList.add("open");
 }
 
 $("#btnCancel").onclick = ()=>{
   overlay.classList.remove("open");
-
   if(CUSTOMIZE_MODE==="checkout" && typeof resolveCheckoutStep==="function"){
     resolveCheckoutStep(false);
   }
@@ -883,13 +846,11 @@ $("#btnAdd").onclick = ()=>{
 
   if(CUSTOMIZE_MODE==="add"){
     const k = buildKey(currentItem.id, fries, extras, note) + "|" + Date.now();
-
     cart.burger[k] = {
       qty:1, item:currentItem, fries, extras, notes:note
     };
-
-  } else if(CUSTOMIZE_MODE==="edit" || CUSTOMIZE_MODE==="checkout") {
-
+  }
+  else if(CUSTOMIZE_MODE==="edit" || CUSTOMIZE_MODE==="checkout"){
     const prev = cart.burger[editingKey];
     if(prev){
       const newBase = buildKey(prev.item.id, fries??prev.fries, extras, note);
