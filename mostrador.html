@@ -896,3 +896,173 @@ window.editItem = function(type, encKey){
   openCustomize(o.item, key, "edit");
 };
 </script>
+/* ============================================================
+      ===  SISTEMA DE HORARIOS  ===
+============================================================ */
+
+// Contenedor del modal
+const slotsOverlay   = $("#slotsOverlay");
+const slotsQuickList = $("#slotsQuickList");
+const btnCloseSlots  = $("#closeSlots");
+
+// Horarios tomados desde Firestore
+let SLOTS = [];
+
+// Escuchar horarios
+db.collection("config").doc("horarios").onSnapshot(doc => {
+  if(doc.exists) {
+    const d = doc.data();
+    SLOTS = d.slots || [];
+    refreshSlotsUI();
+  }
+});
+
+// Devuelve la fecha/hora más próxima
+function nextAvailableSlot(){
+  const now = new Date();
+  for(const s of SLOTS){
+    const [h,m] = s.split(":").map(Number);
+    const slot = new Date();
+    slot.setHours(h, m, 0, 0);
+    if(slot.getTime() >= now.getTime()) return s;
+  }
+  return SLOTS.length ? SLOTS[SLOTS.length - 1] : null;
+}
+
+// UI del horario dentro del carrito
+function refreshSlotsUI(){
+  const slot = nextAvailableSlot();
+  const selPago = $("#selPago");
+  const container = $("#slotsQuickList");
+
+  container.innerHTML = "";
+  if(!SLOTS.length) return;
+
+  // Listado rápido:
+  SLOTS.forEach(s => {
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.style.margin = "4px";
+    btn.textContent = s;
+    btn.onclick = () => {
+      closeSlots();
+      placeOrder(s);
+    };
+    container.appendChild(btn);
+  });
+}
+
+// Abrir modal horarios
+function openSlots(){
+  slotsOverlay.classList.add("open");
+}
+function closeSlots(){
+  slotsOverlay.classList.remove("open");
+}
+btnCloseSlots.onclick = closeSlots;
+
+/* ============================================================
+      ===  BOTÓN CARGAR PEDIDO  ===
+============================================================ */
+
+// Crear botón debajo de método de pago
+(function injectOrderButton(){
+  const aside = document.querySelector(".side");
+  const btn = document.createElement("button");
+  btn.id = "btnSubmitOrder";
+  btn.className = "btn primary";
+  btn.style.width = "100%";
+  btn.style.marginTop = "12px";
+  btn.textContent = "Cargar pedido";
+  btn.onclick = submitOrder;
+  aside.appendChild(btn);
+})();
+
+/* ============================================================
+      ===  VALIDACIÓN Y ENVÍO DEL PEDIDO  ===
+============================================================ */
+
+function submitOrder(){
+  const nombre = $("#inpNombre").value.trim();
+  const pago   = $("#selPago").value;
+  const tel    = $("#inpTel").value.trim();
+
+  if(!nombre){
+    alert("Ingresá un nombre.");
+    return;
+  }
+
+  if(Object.keys(cart.burger).length +
+     Object.keys(cart.side).length +
+     Object.keys(cart.drink).length === 0){
+    alert("El carrito está vacío.");
+    return;
+  }
+
+  openSlots();   // muestra horarios disponibles
+}
+
+function placeOrder(slot){
+  const nombre = $("#inpNombre").value.trim();
+  const pago   = $("#selPago").value;
+  const tel    = $("#inpTel").value.trim();
+
+  const total  = calcTotal();
+
+  const items = [];
+
+  for(const b of Object.values(cart.burger)){
+    items.push({
+      type:"burger",
+      name:b.item.name,
+      qty:b.qty,
+      fries:b.fries,
+      extras:b.extras,
+      notes:b.notes,
+      unit:b.item.price
+    });
+  }
+
+  for(const s of Object.values(cart.side)){
+    items.push({
+      type:"side",
+      name:s.item.name,
+      qty:s.qty,
+      unit:s.item.price
+    });
+  }
+
+  for(const d of Object.values(cart.drink)){
+    items.push({
+      type:"drink",
+      name:d.item.name,
+      qty:d.qty,
+      unit:d.item.price
+    });
+  }
+
+  const pedido = {
+    cliente: nombre,
+    telefono: tel || "",
+    pago,
+    items,
+    total,
+    horario: slot,
+    estado: "pendiente",
+    fecha: new Date().toISOString()
+  };
+
+  db.collection("pedidos_local")
+    .add(pedido)
+    .then(()=>{
+      alert("Pedido cargado ✔");
+      cart = {burger:{}, side:{}, drink:{}};
+      renderCart();
+      closeSlots();
+    })
+    .catch(err=>{
+      console.error(err);
+      alert("Error al cargar pedido");
+    });
+}
+
