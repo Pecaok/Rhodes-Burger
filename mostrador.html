@@ -639,19 +639,35 @@ function renderCart(){
     `;
   };
 
-  /* === BURGERS === */
-  for(const id in cart.burger){
-    const b = cart.burger[id];
-    const item = b.item;
-    let unit = item.price +
-      (b.extras?.patty||0) * EXTRA_PRICE_PATTY +
-      (b.extras?.cheddar||0) * EXTRA_PRICE_CHEDDAR;
+ /* === BURGERS === */
+for(const id in cart.burger){
+  const b = cart.burger[id];
+  const item = b.item;
+  let unit = item.price +
+    (b.extras?.patty||0) * EXTRA_PRICE_PATTY +
+    (b.extras?.cheddar||0) * EXTRA_PRICE_CHEDDAR;
 
-    const extras = [];
-    if(b.fries) extras.push("Papas: " + b.fries);
-    if(b.extras.patty)   extras.push("+"+b.extras.patty+" med");
-    if(b.extras.cheddar) extras.push("+"+b.extras.cheddar+" cheddar");
-    if(b.notes) extras.push("Nota: "+b.notes);
+  const extras = [];
+  if(b.fries) extras.push("Papas: " + b.fries);
+  if(b.extras.patty)   extras.push("+"+b.extras.patty+" med");
+  if(b.extras.cheddar) extras.push("+"+b.extras.cheddar+" cheddar");
+  if(b.notes) extras.push("Nota: "+b.notes);
+
+  // Render con botón EDITAR
+  html += `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+      <div>
+        <strong>${b.qty}× ${item.name}</strong><br>
+        <span class="muted">${extras.join(" · ")}</span><br>
+        <button onclick="editBurger('${id}')" 
+                style="margin-top:6px;background:none;border:none;color:#645E52;font-weight:700;cursor:pointer;font-size:13px">
+          ✏️ Editar
+        </button>
+      </div>
+      <div>${money(unit * b.qty)}</div>
+    </div>
+  `;
+}
 
     addLine(item.name, b.qty, unit, extras.join(" · "));
   }
@@ -738,6 +754,54 @@ function openCustomize(item){
     rowCheddar.style.display = "none";
   }
 
+  function editBurger(id){
+  const b = cart.burger[id];
+  if(!b) return;
+
+  currentItem = b.item;
+  currentEditId = id;
+  currentMode = "edit";
+
+  // Setear título
+  document.getElementById("modTitle").textContent = "Editar: " + b.item.name;
+
+  // Reset visual
+  resetCustomize();
+
+  // Papas
+  if(b.friesRaw){
+    const radio = document.querySelector(`input[name='fries'][value='${b.friesRaw}']`);
+    if(radio) radio.checked = true;
+  }
+
+  // Extras
+  $("#patVal").textContent = b.extras?.patty || 0;
+  $("#cheVal").textContent = b.extras?.cheddar || 0;
+
+  // Notas
+  $("#notes").value = b.notes || "";
+  $("#notesCount").textContent = (b.notes||"").length + "/200";
+
+  // Mostrar campos según tipo
+  const name = b.item.name.toLowerCase();
+
+  if(name.includes("doble")){
+    rowPatties.style.display = "flex";
+    rowCheddar.style.display = "flex";
+  } 
+  else if(name.includes("pollo")){
+    rowPatties.style.display = "none";
+    rowCheddar.style.display = "flex";
+  }
+  else{
+    rowPatties.style.display = "none";
+    rowCheddar.style.display = "none";
+  }
+
+  updateUnitPreview();
+  overlayCustomize.style.display = "flex";
+}
+
   // badges
   $("#badgePatty").textContent = `+${money(EXTRA_PRICE_PATTY)}`;
   $("#badgeCheddar").textContent = `+${money(EXTRA_PRICE_CHEDDAR)}`;
@@ -778,7 +842,7 @@ $("#btnAdd").onclick = ()=>{
     item: currentItem,
     qty: 1,
     fries: friesName,
-    friesRaw: friesValue,   // <--- se guarda vacío si no eligió papas
+    friesRaw: friesValue,
     extras: {
       patty: patties,
       cheddar: cheddar
@@ -786,10 +850,25 @@ $("#btnAdd").onclick = ()=>{
     notes
   };
 
-  const id = currentItem.id + "_" + Date.now();
-  cart.burger[id] = entry;
+  // EDITAR EXISTENTE
+  if(currentMode==="edit" && currentEditId){
+    const existing = cart.burger[currentEditId];
+    if(existing){
+      entry.qty = existing.qty;   // mantener cantidad
+    }
+    cart.burger[currentEditId] = entry;
+  }
 
-  $("#overlayCustomize").style.display="none";
+  // NUEVO
+  else{
+    const id = currentItem.id + "_" + Date.now();
+    cart.burger[id] = entry;
+  }
+
+  overlayCustomize.style.display="none";
+  currentMode = null;
+  currentEditId = null;
+
   renderCart();
 };
 
