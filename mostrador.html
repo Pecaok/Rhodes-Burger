@@ -763,28 +763,31 @@ $("#btnCancel").onclick = ()=> $("#overlayCustomize").style.display="none";
 $("#btnAdd").onclick = ()=>{
 
   const fries = document.querySelector("input[name='fries']:checked");
-  if(!fries){
-    alert("Elegí un tipo de papas");
-    return;
-  }
+  const friesValue = fries ? fries.value : "";
+  const friesName =
+      friesValue==="con_sazon" ? "Sazonadas" :
+      friesValue==="con_sal"   ? "Con sal" :
+      friesValue==="sin_sal"   ? "Sin sal" :
+      "Sin papas";
 
   const patties = Number($("#patVal").textContent);
   const cheddar = Number($("#cheVal").textContent);
   const notes = $("#notes").value.trim();
-  const friesValue = fries.value;
 
-  const key = currentItem.id + "_" + Date.now();
-
-  cart.burger[key] = {
+  const entry = {
     item: currentItem,
     qty: 1,
-    fries: friesValue,
+    fries: friesName,
+    friesRaw: friesValue,   // <--- se guarda vacío si no eligió papas
     extras: {
       patty: patties,
       cheddar: cheddar
     },
     notes
   };
+
+  const id = currentItem.id + "_" + Date.now();
+  cart.burger[id] = entry;
 
   $("#overlayCustomize").style.display="none";
   renderCart();
@@ -906,16 +909,21 @@ async function sendToFirestore(){
     return;
   }
 
-  const pago = $("#selPago").value.trim();
-  if(!pago){
-    alert("Elegí un método de pago");
-    return;
-  }
+  const pago = $("#selPago").value.trim() || "sin_especificar";
 
   if(!window.selectedSlot){
     alert("Elegí un horario");
     return;
   }
+
+  /* --- Si alguna hamburguesa no tiene papas, pedir que las elija --- */
+for (const id in cart.burger){
+  const b = cart.burger[id];
+  if(!b.friesRaw || b.friesRaw === ""){
+    alert(`La hamburguesa "${b.item.name}" no tiene papas seleccionadas. Editala antes de cargar el pedido.`);
+    return;
+  }
+}
 
   const tel = $("#inpTel").value.trim();
   const slot = window.selectedSlot;
