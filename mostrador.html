@@ -286,6 +286,9 @@
 
     <h2 style="margin-top:20px">Bebidas</h2>
     <div id="drinksGrid" class="grid"></div>
+
+    <h2 style="margin-top:20px">Guarniciones</h2>
+    <div id="sidesGrid" class="grid"></div>
   </section>
 
   <aside class="side">
@@ -421,7 +424,7 @@ const EXTRA_PRICE_PATTY   = 2500;
 const EXTRA_PRICE_CHEDDAR = 300;
 
 /* ======================= PRODUCTOS ======================= */
-let PRODUCTS = { burgers: [], drinks: [] };
+let PRODUCTS = { burgers: [], drinks: [], sides: [] };
 
 /* ============================================================
       🔥 ORDEN VISUAL DEL MENÚ desde admin.html
@@ -463,6 +466,7 @@ db.collection("products").onSnapshot(snap=>{
 /* ======================= RENDER DE PRODUCTOS ======================= */
 const elBurgersGrid = $("#burgersGrid");
 const elDrinksGrid  = $("#drinksGrid");
+const elSidesGrid   = $("#sidesGrid");
 
 function renderCard(item){
   const ok = isAvailable(item.id);
@@ -492,14 +496,27 @@ function renderCard(item){
   const btn = card.querySelector(".addBtn");
 
   if(item.category === "drink"){
-    btn.onclick = ()=>{
-      if(!isAvailable(item.id)) return;
-      if(!cart.drink[item.id]) cart.drink[item.id] = { qty: 0, item };
-      cart.drink[item.id].qty++;
-      renderCart();
-    };
-  } else {
-    btn.onclick = ()=>{
+  btn.onclick = ()=>{
+    if(!isAvailable(item.id)) return;
+    if(!cart.drink[item.id]) cart.drink[item.id] = { qty: 0, item };
+    cart.drink[item.id].qty++;
+    renderCart();
+  };
+}
+else if(item.category === "guarniciones"){
+  btn.onclick = ()=>{
+    if(!isAvailable(item.id)) return;
+    if(!cart.side) cart.side = {};
+    if(!cart.side[item.id]) cart.side[item.id] = { qty: 0, item };
+    cart.side[item.id].qty++;
+    renderCart();
+  };
+}
+else {
+  // hamburguesas → personalización
+  btn.onclick = ()=> openCustomize(item, null, "add");
+}
+
       if(!isAvailable(item.id)) return;
       openCustomize(item, null, "add");
     };
@@ -527,10 +544,13 @@ db.collection("products").onSnapshot(snap=>{
     };
 
     if(d.category === "burger" || d.category === "hamburguesas")
-      PRODUCTS.burgers.push(item);
+  PRODUCTS.burgers.push(item);
 
-    if(d.category === "drink" || d.category === "bebidas")
-      PRODUCTS.drinks.push(item);
+if(d.category === "drink" || d.category === "bebidas")
+  PRODUCTS.drinks.push(item);
+
+if(d.category === "guarniciones" || d.category === "side")
+  PRODUCTS.sides.push(item);
   });
 
   mountMenu();
@@ -540,12 +560,15 @@ db.collection("products").onSnapshot(snap=>{
 function mountMenu(){
   elBurgersGrid.innerHTML = "";
   elDrinksGrid.innerHTML  = "";
+  elSidesGrid.innerHTML   = "";
 
   const burgersOrdered = orderedList("hamburguesas", PRODUCTS.burgers);
   const drinksOrdered  = orderedList("bebidas", PRODUCTS.drinks);
+  const sidesOrdered   = orderedList("guarniciones", PRODUCTS.sides);
 
   burgersOrdered.forEach(b=> elBurgersGrid.appendChild(renderCard(b)));
   drinksOrdered.forEach(d=> elDrinksGrid.appendChild(renderCard(d)));
+  sidesOrdered.forEach(s=> elSidesGrid.appendChild(renderCard(s)));
 
   refreshAvailabilityUI();
 }
@@ -644,6 +667,22 @@ function renderCart(){
       </div>
     `);
   }
+// Sides (guarniciones)
+if(cart.side){
+  for(const [key,o] of Object.entries(cart.side)){
+    out.push(`
+      <div class="item">
+        <div><strong>${o.item.name}</strong></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="qtybtn" onclick="changeQty('side','${encodeURIComponent(key)}',-1)">-</button>
+          <span>${o.qty}</span>
+          <button class="qtybtn" onclick="changeQty('side','${encodeURIComponent(key)}',1)">+</button>
+          <span>${money(o.item.price * o.qty)}</span>
+        </div>
+      </div>
+    `);
+  }
+}
 
   // Drinks
   for(const [key,o] of Object.entries(cart.drink)){
