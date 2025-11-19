@@ -205,18 +205,39 @@
       return null;
     }
     function getPickupPretty(o){
-      // Prioridad: pretty explícito > timestamps/strings > slot HHMM > ASAP
-      let pretty = (o.pickup_time_pretty && String(o.pickup_time_pretty)) ||
-                   formatSlotTime(o.pickup_time || o.pickupTime || o.pickup || null);
+  // 1) Prioridad absoluta: pretty explícito
+  if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "")
+    return o.pickup_time_pretty;
 
-      if(!pretty && o.pickup_slot){
-        const m = String(o.pickup_slot).match(/(\d{2})(\d{2})$/);
-        if(m) pretty = m[1]+':'+m[2];
-      }
-      if(!pretty && (o.pickup_asap === true)) pretty = 'A la brevedad';
-      return pretty || null;
-    }
+  // 2) Mostrador: guarda pickup_slot como "HH:MM"
+  if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot))
+    return o.pickup_slot;
 
+  // 3) Si pickup_time viene como timestamp / string válida
+  const t = o.pickup_time || o.pickupTime || o.pickup;
+  if (t) {
+    try{
+      if (typeof t?.toDate === "function")
+        return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+
+      const d = new Date(t);
+      if (!isNaN(d))
+        return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+    }catch(_){}
+  }
+
+  // 4) Si es formato "HHMM" (web vieja)
+  if (typeof o.pickup_slot === "string") {
+    const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/);
+    if (m) return `${m[1]}:${m[2]}`;
+  }
+
+  // 5) ASAP
+  if (o.pickup_asap === true)
+    return "A la brevedad";
+
+  return null;
+}
     /* ===== sonido ===== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let audioCtx = null, audioReady = false;
