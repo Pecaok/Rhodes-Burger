@@ -739,6 +739,7 @@ function updateUnitPreview(){
 
 /* ===== ABRIR MODAL ===== */
 function openCustomize(item, mode="add", id=null){
+  document.getElementById("manualTime").value = "";
   currentItem   = item;
   currentMode   = mode;
   currentEditId = id;
@@ -1108,8 +1109,25 @@ for (const id in cart.burger){
   };
 
   try{
-    await db.collection("orders").add(order);
-    alert("Pedido cargado ✔️");
+    // === Obtener número de pedido ===
+const counterRef = db.collection("counters").doc("orders");
+
+const num = await db.runTransaction(async (tx)=>{
+  const snap = await tx.get(counterRef);
+  const data = snap.data() || { next: 1 };
+
+  const orderNumber = data.next;
+  tx.update(counterRef, { next: orderNumber + 1 });
+
+  return orderNumber;
+});
+
+// === Guardar el pedido con número ===
+order.orderNumber = num;
+
+await db.collection("orders").add(order);
+
+alert(`Pedido cargado ✔️\nNúmero de pedido: #${num}`);
     cart = { burger:{}, drink:{}, side:{} };
     renderCart();
   }catch(e){
