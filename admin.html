@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="es">
 
@@ -214,7 +215,6 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
 </header>
 
 <main>
-
 <!-- ============================================================
        BLOQUE CRUD PRINCIPAL
 =============================================================== -->
@@ -245,7 +245,7 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
       <select id="prdCategory">
         <option value="hamburguesas">Hamburguesas</option>
         <option value="bebidas">Bebidas</option>
-        <option value="guarniciones">Guarniciones</option>
+        <option value="guarniciones">Guarniciones</option>   <!-- NUEVA -->
       </select>
     </div>
 
@@ -302,12 +302,14 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
     Arrastrá para ordenar la posición de los productos.
   </p>
 
+  <!-- Botones de categoría -->
   <div class="row" id="orderCatButtons" style="margin-bottom:15px">
     <button class="btn primary" data-cat="hamburguesas">Hamburguesas</button>
     <button class="btn" data-cat="bebidas">Bebidas</button>
-    <button class="btn" data-cat="guarniciones">Guarniciones</button>
+    <button class="btn" data-cat="guarniciones">Guarniciones</button> <!-- NUEVO -->
   </div>
 
+  <!-- GRID VISUAL -->
   <div id="orderGrid" style="
     display:grid;
     grid-template-columns:repeat(auto-fill, minmax(150px,1fr));
@@ -318,6 +320,7 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
     <button class="btn primary" id="btnSaveOrder">Guardar orden</button>
   </div>
 </section>
+
 <!-- ============================================================
      FIREBASE
 =============================================================== -->
@@ -340,38 +343,17 @@ try{
 }catch(e){}
 
 const db = firebase.firestore();
+
+// Helpers
+const $ = s => document.querySelector(s);  
+const fmtDate = ts => ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+
+/* ============================================================
+    CRUD PRODUCTOS
+=============================================================== */
 const productsCol = db.collection('products');
 
-/* Helpers */
-const $ = s => document.querySelector(s);
-
-/* ============================================================
-   (1) FUNCIÓN PARA DETECTAR kind AUTOMÁTICAMENTE
-=============================================================== */
-function autoDetectKind(id, name = "", desc = "") {
-  id   = id.toLowerCase();
-  name = (name || "").toLowerCase();
-  desc = (desc || "").toLowerCase();
-
-  // 1) ID (más preciso porque vos usás *_simple *_doble)
-  if (id.includes("_doble"))  return "doble";
-  if (id.includes("_simple")) return "simple";
-  if (id.includes("_pollo"))  return "pollo";
-
-  // 2) Name
-  if (name.includes("doble")) return "doble";
-  if (name.includes("pollo")) return "pollo";
-
-  // 3) Description
-  if (desc.includes("doble")) return "doble";
-  if (desc.includes("pollo")) return "pollo";
-
-  return "simple"; // default
-}
-
-/* ============================================================
-   (2) Conversión archivo → Base64
-=============================================================== */
+/* Convertir archivo → Base64 */
 async function fileToBase64(file){
   return new Promise((resolve, reject)=>{
     const r = new FileReader();
@@ -381,9 +363,7 @@ async function fileToBase64(file){
   });
 }
 
-/* ============================================================
-   (3) GUARDAR / ACTUALIZAR PRODUCTO — CON kind AUTOMÁTICO 🔥
-=============================================================== */
+/* Guardar / Actualizar */
 async function saveProduct(){
   const id = $('#prdId').value.trim();
   const name = $('#prdName').value.trim();
@@ -403,23 +383,17 @@ async function saveProduct(){
   }
 
   const payload = {
-    name,
-    category,
-    price,
+    name, category, price,
     img: finalImg,
     description: desc || null,
     available: true,
-
-    // 🔥 NUEVO: GENERA kind SIEMPRE (Opción A)
-    kind: autoDetectKind(id, name, desc),
-
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   };
 
   try{
     await productsCol.doc(id).set(payload, {merge:true});
-    alert("Producto guardado correctamente.");
+    alert("Producto guardado.");
     clearProductForm();
   }catch(e){
     console.error(e);
@@ -427,9 +401,7 @@ async function saveProduct(){
   }
 }
 
-/* ============================================================
-   (4) LIMPIAR FORMULARIO
-=============================================================== */
+/* Limpiar */
 function clearProductForm(){
   $('#prdId').value = '';
   $('#prdName').value = '';
@@ -440,9 +412,7 @@ function clearProductForm(){
   $('#prdDesc').value = '';
 }
 
-/* ============================================================
-   (5) Cargar producto al formulario para editar
-=============================================================== */
+/* Cargar para editar */
 function loadProductIntoForm(data, id){
   $('#prdId').value = id;
   $('#prdName').value = data.name || '';
@@ -453,9 +423,7 @@ function loadProductIntoForm(data, id){
   $('#prdDesc').value = data.description || '';
 }
 
-/* ============================================================
-   (6) Eliminar producto
-=============================================================== */
+/* Eliminar */
 async function deleteProduct(id){
   if(!confirm("¿Eliminar "+id+"?")) return;
   try{
@@ -465,9 +433,7 @@ async function deleteProduct(id){
   }
 }
 
-/* ============================================================
-   (7) Toggle disponibilidad
-=============================================================== */
+/* Activar / Desactivar */
 async function toggleProductAvailability(id, current){
   try{
     await productsCol.doc(id).set({
@@ -479,9 +445,7 @@ async function toggleProductAvailability(id, current){
   }
 }
 
-/* ============================================================
-   (8) Render tabla CRUD
-=============================================================== */
+/* Render Tabla CRUD */
 function renderProductsTable(snapshot){
   const tbody = $('#prdTable');
   tbody.innerHTML = '';
@@ -536,9 +500,7 @@ function renderProductsTable(snapshot){
   });
 }
 
-/* ============================================================
-   (9) Suscripción a Firestore
-=============================================================== */
+/* Suscripción CRUD */
 productsCol.onSnapshot(renderProductsTable);
 </script>
 <!-- ============================================================
@@ -548,12 +510,12 @@ productsCol.onSnapshot(renderProductsTable);
 let ORDER_PRODUCTS = [];
 let CURRENT_CAT = "hamburguesas";
 
-const menuOrderRef   = db.collection("config").doc("menuOrder");
-const orderGrid      = document.querySelector("#orderGrid");
-const orderCatButtons = document.querySelector("#orderCatButtons");
+const menuOrderRef = db.collection("config").doc("menuOrder");
+const orderGrid        = document.querySelector("#orderGrid");
+const orderCatButtons  = document.querySelector("#orderCatButtons");
 
 /* ============================================================
-      Cambio de categoría
+      CAMBIO DE CATEGORÍA
 =============================================================== */
 window.addEventListener("DOMContentLoaded", ()=>{
 
@@ -574,7 +536,7 @@ window.addEventListener("DOMContentLoaded", ()=>{
 });
 
 /* ============================================================
-      Cargar orden guardado
+      CARGAR ORDEN GUARDADO DE FIRESTORE
 =============================================================== */
 let MENU_ORDER = {};
 
@@ -584,7 +546,7 @@ menuOrderRef.onSnapshot(snap=>{
 });
 
 /* ============================================================
-      Render grid con el orden respetado
+      RENDER GRID — RESPETA ORDEN GUARDADO
 =============================================================== */
 function renderOrderGrid(){
 
@@ -639,7 +601,7 @@ function renderOrderGrid(){
 }
 
 /* ============================================================
-      Suscripción a productos
+      CARGAR PRODUCTOS DE FIRESTORE
 =============================================================== */
 productsCol.onSnapshot(snap=>{
   ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
@@ -647,30 +609,6 @@ productsCol.onSnapshot(snap=>{
 });
 </script>
 
-<!-- Guardar orden -->
-<script>
-window.addEventListener("DOMContentLoaded", ()=>{
-
-  const btnSaveOrder = document.querySelector("#btnSaveOrder");
-  if(!btnSaveOrder){
-    console.error("btnSaveOrder NO EXISTE EN EL DOM");
-    return;
-  }
-
-  btnSaveOrder.onclick = async ()=>{
-    const ids = [...orderGrid.querySelectorAll(".orderCard")]
-      .map(c => c.dataset.id);
-
-    await menuOrderRef.set({
-      ...MENU_ORDER,
-      [CURRENT_CAT]: ids
-    }, {merge:true});
-
-    alert("Orden guardada.");
-  };
-
-});
-</script>
 <!-- ============================================================
       🔥 INVENTARIO
 =============================================================== -->
@@ -726,7 +664,6 @@ function renderInventory(snapshot){
 
 productsCol.onSnapshot(renderInventory);
 </script>
-
 <!-- ============================================================
       🔥 SIDES (configuración de papas)
 =============================================================== -->
@@ -782,8 +719,9 @@ function renderSidesUI(state){
           [key]: next,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         },{merge:true});
-      }catch(e){}
-
+      }catch(e){
+        console.error(e);
+      }
       btn.disabled = false;
     };
   });
@@ -793,7 +731,6 @@ sidesRef().onSnapshot(snap=>{
   renderSidesUI(snap.exists ? snap.data() : {});
 });
 </script>
-
 <!-- ============================================================
       🔥 STORE OVERRIDE (Horarios, Forzar abierto)
 =============================================================== -->
@@ -858,7 +795,7 @@ btnClose.onclick = async()=>{
     forceOpen:false,
     forceOpenMessage: firebase.firestore.FieldValue.delete(),
     forceOpenUntil: firebase.firestore.FieldValue.delete(),
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
   },{merge:true});
 };
 
@@ -875,7 +812,7 @@ btnSaveUntil.onclick = async()=>{
   await storeRef().set({
     forceOpen:true,
     forceOpenUntil: firebase.firestore.Timestamp.fromDate(local),
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
   },{merge:true});
 
   alert("Guardado correctamente.");
@@ -896,14 +833,14 @@ function upsertCouponFromForm(){
   if(!(value>0)){ alert("Valor inválido"); return; }
 
   const maxUses = Number(document.querySelector("#cpMaxUses").value||0);
-  const note    = (document.querySelector("#cpNote").value||"").trim();
-  const from    = document.querySelector("#cpFrom").value ? new Date(document.querySelector("#cpFrom").value) : null;
-  const to      = document.querySelector("#cpTo").value   ? new Date(document.querySelector("#cpTo").value)   : null;
+  const note = (document.querySelector("#cpNote").value||"").trim();
+  const from = document.querySelector("#cpFrom").value ? new Date(document.querySelector("#cpFrom").value) : null;
+  const to   = document.querySelector("#cpTo").value   ? new Date(document.querySelector("#cpTo").value)   : null;
 
   const payload = {
     code, type, value,
     enabled:true,
-    note: note || null,
+    note:note || null,
     validFrom: from ? firebase.firestore.Timestamp.fromDate(from) : null,
     validTo:   to   ? firebase.firestore.Timestamp.fromDate(to)   : null,
     maxUses: maxUses > 0 ? maxUses : null,
@@ -926,7 +863,6 @@ function upsertCouponFromForm(){
 }
 
 document.querySelector("#btnCreateCp").onclick = upsertCouponFromForm;
-
 
 function renderCoupons(list){
   cpTbody.innerHTML = "";
@@ -966,7 +902,7 @@ function renderCoupons(list){
 
   cpTbody.querySelectorAll("button[data-act]").forEach(btn=>{
     btn.onclick = async()=>{
-      const id  = btn.dataset.id;
+      const id = btn.dataset.id;
       const act = btn.dataset.act;
 
       if(act === "toggle"){
@@ -993,31 +929,54 @@ async function loadCoupons(){
   const q = await db.collection("coupons").orderBy("code").get();
   renderCoupons(q.docs);
 }
-</script>
 
-<!-- ============================================================
-      🔥 BOOT FINAL
-=============================================================== -->
-<script>
+/* ============================================================
+      BOOT FINAL
+=============================================================== */
 (async function boot(){
   loadCoupons();
 })();
 </script>
+    <script>
+window.addEventListener("DOMContentLoaded", ()=>{
 
-<!-- ============================================================
-      🔥 BOTONES FINALES CRUD
-=============================================================== -->
+  const btnSaveOrder = document.querySelector("#btnSaveOrder");
+  if(!btnSaveOrder){
+    console.error("btnSaveOrder NO EXISTE EN EL DOM");
+    return;
+  }
+
+  btnSaveOrder.onclick = async ()=>{
+    const ids = [...orderGrid.querySelectorAll(".orderCard")]
+      .map(c => c.dataset.id);
+
+    await menuOrderRef.set({
+      ...MENU_ORDER,
+      [CURRENT_CAT]: ids
+    }, {merge:true});
+
+    alert("Orden guardada.");
+  };
+
+});
+</script>
 <script>
 window.addEventListener("DOMContentLoaded", ()=>{
 
+  // === BOTÓN GUARDAR PRODUCTO ===
   const btnSaveProduct = document.querySelector("#btnSaveProduct");
   if(btnSaveProduct){
     btnSaveProduct.onclick = saveProduct;
+  } else {
+    console.error("btnSaveProduct no existe");
   }
 
+  // === BOTÓN LIMPIAR FORMULARIO ===
   const btnClearProduct = document.querySelector("#btnClearProduct");
   if(btnClearProduct){
     btnClearProduct.onclick = clearProductForm;
+  } else {
+    console.error("btnClearProduct no existe");
   }
 
 });
