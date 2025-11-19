@@ -206,7 +206,8 @@
       /* estilos responsive… */
     }
 
-    /* ===== MODAL ORIGINAL RESTAURADO ===== */
+    /* ===== MODAL PERSONALIZAR (estilo igual que antes) ===== */
+
     .overlay.open .modal{
       padding: 24px !important;
     }
@@ -309,7 +310,7 @@
 
       <span id="statusPill" class="status-pill status-open" aria-live="polite">
         <span class="status-main">Abierto</span>
-        <span class="status-sub">hasta 00:00</span>
+        <span class="status-sub">hasta 23:30</span>
       </span>
 
       <div class="spacer"></div>
@@ -359,7 +360,7 @@
     </div>
   </aside>
 
-  <!-- MODAL PERSONALIZAR -->
+  <!-- MODAL PERSONALIZAR (mismas IDs que mostrador, para compartir customizer.js) -->
   <div class="overlay" id="overlay">
     <div class="modal">
 
@@ -380,7 +381,7 @@
       </div>
 
       <!-- EXTRAS -->
-      <div class="rowx" id="rowPatties" style="display:none;">
+      <div class="rowx" id="rowPatties" style="display:none">
         <div>Medallones extra</div>
         <div class="qtybox">
           <button id="patDec">-</button>
@@ -389,7 +390,7 @@
         </div>
       </div>
 
-      <div class="rowx" id="rowCheddar" style="display:none;">
+      <div class="rowx" id="rowCheddar" style="display:none">
         <div>Fetas de cheddar extra</div>
         <div class="qtybox">
           <button id="cheDec">-</button>
@@ -429,13 +430,12 @@
 
     </div>
   </div>
-
   <!-- ==== FIREBASE ==== -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    /* ====== Horarios de apertura (cierre 00:00) ====== */
+    /* ====== Horarios de apertura ====== */
     const HOURS = {
       0: [[19,0,24,0]], 1: [],
       2: [], 3: [[19,0,24,0]],
@@ -446,8 +446,6 @@
     function fmtHM(h,m){
       return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");
     }
-
-    let orderable = true;
 
     function isOpenNow(d=new Date()){
       const cur=d.getHours()*60+d.getMinutes();
@@ -473,15 +471,7 @@
     }
 
     /* ====== Estado forzado Firestore ====== */
-    let FORCE_OPEN=false, FORCE_MSG="", FORCE_UNTIL=null;
-
-    function setOrderable(v){
-      orderable = !!v;
-      document.querySelectorAll("[data-add]").forEach(btn=>{
-        if(v){ btn.disabled=false; btn.classList.remove("disabled"); }
-        else { btn.disabled=true; btn.classList.add("disabled"); }
-      });
-    }
+    let FORCE_OPEN=false, FORCE_MSG="", FORCE_UNTIL=null, orderable=true;
 
     function renderStatus(){
       const pill=document.getElementById("statusPill");
@@ -520,6 +510,14 @@
       }
     }
 
+    function setOrderable(v){
+      orderable = !!v;
+      document.querySelectorAll("[data-add]").forEach(btn=>{
+        if(v){ btn.disabled=false; btn.classList.remove("disabled"); }
+        else { btn.disabled=true; btn.classList.add("disabled"); }
+      });
+    }
+
     /* ===== Firebase Init ===== */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
@@ -529,7 +527,7 @@
       messagingSenderId: "951646688091",
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
-    firebase.initializeApp(firebaseConfig);
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
     /* ======= Store override ======= */
@@ -550,12 +548,8 @@
       renderStatus();
     });
 
-    /* ======= SIDES (estado de papas) ======= */
-    let SIDES_STATE = {
-      con_sazon:true,
-      con_sal:true,
-      sin_sal:true
-    };
+    /* ======= SIDES (estado papas) ======= */
+    let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
 
     function applySidesToUI(){
       const note = document.getElementById("friesStateNote");
@@ -593,515 +587,385 @@
       applySidesToUI();
     });
 
-    /* ======= DISPONIBILIDAD + PRODUCTOS (MISMO ESQUEMA QUE MOSTRADOR) ======= */
-    const availability = new Map();
-    const isAvailable = id => availability.get(id) !== false;
-
-    let BURGERS = [], DRINKS = [], SIDES = [];
-    const FALLBACK_IMG = "images/logo.png";
-
-    function mapProduct(doc){
-      const d = doc.data();
-      let kind = (d.kind || "").toLowerCase();
-
-      if(kind === "doble" || kind === "double") kind = "double";
-      else if(kind === "pollo" || kind === "chicken") kind = "chicken";
-      else if(!kind) kind = "simple";
-
-      return {
-        id: doc.id,
-        name: d.name || "",
-        price: Number(d.price) || 0,
-        img: d.img || FALLBACK_IMG,
-        desc: d.description || "",
-        category: (d.category || "").toLowerCase(),
-        kind
-      };
-    }
+    /* ======= DISPONIBILIDAD ======= */
+    const availability=new Map();
+    const isAvailable=id => availability.has(id)?availability.get(id):true;
 
     db.collection("products").onSnapshot(snap=>{
       availability.clear();
-      const b = [], dArr = [], s = [];
-
       snap.forEach(doc=>{
-        const raw = doc.data();
-        const p   = mapProduct(doc);
-
-        if(raw.available === false) availability.set(doc.id, false);
-
-        const cat = (raw.category || "").toLowerCase();
-
-        if(["burger","hamburguesas","hamburger"].includes(cat)){
-          b.push(p);
-        } else if(["side","sides","guarniciones"].includes(cat)){
-          s.push(p);
-        } else if(["drink","drinks","bebidas"].includes(cat)){
-          dArr.push(p);
-        }
+        const d=doc.data();
+        availability.set(doc.id, d.available!==false);
       });
-
-      BURGERS = b;
-      SIDES   = s;
-      DRINKS  = dArr;
-
-      if(typeof mount === "function") mount();
       refreshAvailabilityUI();
     });
 
     function refreshAvailabilityUI(){
       document.querySelectorAll(".card[data-id]").forEach(card=>{
-        const id = card.dataset.id;
-        const ok = isAvailable(id);
-        card.dataset.soldout = ok ? "0" : "1";
+        const id=card.dataset.id;
+        const ok=isAvailable(id);
+        card.dataset.soldout = ok?"0":"1";
 
-        let badge = card.querySelector(".soldout-badge");
+        let badge=card.querySelector(".soldout-badge");
         if(!ok){
           if(!badge){
-            badge = document.createElement("div");
-            badge.className = "soldout-badge";
-            badge.textContent = "SIN STOCK";
-            const imgwrap = card.querySelector(".imgwrap");
-            if(imgwrap) imgwrap.appendChild(badge);
+            badge=document.createElement("div");
+            badge.className="soldout-badge";
+            badge.textContent="SIN STOCK";
+            card.querySelector(".imgwrap").appendChild(badge);
           }
-        }else if(badge){
-          badge.remove();
-        }
-
-        const btn = card.querySelector("[data-add]");
-        if(btn){
-          const disabled = !ok || !orderable;
-          btn.disabled = disabled;
-          btn.classList.toggle("disabled", disabled);
+        }else{
+          if(badge) badge.remove();
         }
       });
     }
-  </script>
 
-<script>
-  /* ============================================================
-        🔥 UTILS
-  ============================================================ */
-  const EXTRA_PRICE_PATTY  = 2500;
-  const EXTRA_PRICE_CHEDDAR = 300;
-  const CART_KEY = "rhodes_cart_v3";
+    /* ===== PRODUCTOS FIRESTORE ===== */
+    let BURGERS=[], DRINKS=[], SIDES=[];
+    const FALLBACK_IMG="images/logo.png";
 
-  const $ = s => document.querySelector(s);
-  const money = n => (Number(n)||0).toLocaleString("es-AR", {
-    style:"currency",
-    currency:"ARS",
-    maximumFractionDigits:0
-  });
-
-  /* ============================================================
-        🔥 CARRITO
-  ============================================================ */
-
-  let cart = loadCart();
-  function loadCart(){
-    try { return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{}, drink:{}}; }
-    catch { return {burger:{}, drink:{}}; }
-  }
-  function saveCart(){ localStorage.setItem(CART_KEY, JSON.stringify(cart)); }
-
-  function cartCount(){
-    let n=0;
-    Object.values(cart.burger).forEach(o=>n+=o.qty);
-    Object.values(cart.drink ).forEach(o=>n+=o.qty);
-    return n;
-  }
-  function calcTotal(){
-    let t=0;
-    for(const obj of Object.values(cart.burger)){
-      const base=obj.item.price;
-      t += ( base +
-             obj.extras.patty*EXTRA_PRICE_PATTY +
-             obj.extras.cheddar*EXTRA_PRICE_CHEDDAR ) * obj.qty;
+    function mapProduct(doc){
+      const d=doc.data();
+      return {
+        id:doc.id,
+        name:d.name,
+        price:d.price,
+        img:d.img||FALLBACK_IMG,
+        desc:d.description||"",
+        category:d.category||"",
+        kind:d.kind||""
+      };
     }
-    for(const obj of Object.values(cart.drink)){
-      t += obj.item.price * obj.qty;
+
+    db.collection("products").onSnapshot(snap=>{
+      const b=[], d=[], s=[];
+      snap.forEach(doc=>{
+        const p=mapProduct(doc);
+        if(p.category==="hamburguesas") b.push(p);
+        if(p.category==="guarniciones") s.push(p);
+        if(p.category==="bebidas")      d.push(p);
+      });
+
+      BURGERS=b;
+      SIDES=s;
+      DRINKS=d;
+
+      mount();
+    });
+
+    /* ====== ORDEN VISUAL MENU ====== */
+    let MENU_ORDER = {};
+
+    db.collection("config").doc("menuOrder").onSnapshot(snap=>{
+      MENU_ORDER = snap.exists ? snap.data() : {};
+      mount();
+    });
+
+    const $ = s => document.querySelector(s);
+    const money = n => (Number(n)||0).toLocaleString("es-AR", {
+      style:"currency",
+      currency:"ARS",
+      maximumFractionDigits:0
+    });
+
+    const EXTRA_PRICE_PATTY  = 2500;
+    const EXTRA_PRICE_CHEDDAR = 300;
+    const CART_KEY = "rhodes_cart_v3";
+
+    /* ====== CARRITO ====== */
+    let cart = loadCart();
+    function loadCart(){
+      try { return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{}, drink:{}}; }
+      catch { return {burger:{}, drink:{}}; }
     }
-    return t;
-  }
+    function saveCart(){ localStorage.setItem(CART_KEY, JSON.stringify(cart)); }
 
-  /* ============================================================
-        🔥 RENDER CARRITO
-  ============================================================ */
-
-  function friesLabel(code){
-    if(code === "con_sazon") return "Sazonadas";
-    if(code === "con_sal")   return "Con sal";
-    if(code === "sin_sal")   return "Sin sal";
-    return code || "—";
-  }
-
-  function renderCart(){
-    const cartItems = $("#cartItems");
-    const cartTotal = $("#cartTotal");
-
-    cartItems.innerHTML="";
-
-    // Hamburguesas
-    for(const [key,obj] of Object.entries(cart.burger)){
-      const base = obj.item.price;
-      const precioPatty   = obj.extras.patty   * EXTRA_PRICE_PATTY;
-      const precioCheddar = obj.extras.cheddar * EXTRA_PRICE_CHEDDAR;
-      const unit = base + precioPatty + precioCheddar;
-      const total = unit * obj.qty;
-
-      const friesTxt = friesLabel(obj.fries);
-
-      let detalleExtras = "";
-      if(obj.extras.patty > 0){
-        detalleExtras += `
-          <div class="muted">• Medallones extra (x${obj.extras.patty}): ${money(precioPatty)}</div>
-        `;
+    function cartCount(){
+      let n=0;
+      Object.values(cart.burger).forEach(o=>n+=o.qty);
+      Object.values(cart.drink ).forEach(o=>n+=o.qty);
+      return n;
+    }
+    function calcTotal(){
+      let t=0;
+      for(const obj of Object.values(cart.burger)){
+        const base=obj.item.price;
+        t += ( base +
+               obj.extras.patty*EXTRA_PRICE_PATTY +
+               obj.extras.cheddar*EXTRA_PRICE_CHEDDAR ) * obj.qty;
       }
-      if(obj.extras.cheddar > 0){
-        detalleExtras += `
-          <div class="muted">• Cheddar extra (x${obj.extras.cheddar}): ${money(precioCheddar)}</div>
-        `;
+      for(const obj of Object.values(cart.drink)){
+        t += obj.item.price * obj.qty;
       }
+      return t;
+    }
 
-      cartItems.innerHTML += `
-        <div class="item">
-          <div>
-            <strong>${obj.item.name}</strong><br>
+    function friesLabel(code){
+      if(code === "con_sazon") return "Sazonadas";
+      if(code === "con_sal")   return "Con sal";
+      if(code === "sin_sal")   return "Sin sal";
+      return code || "—";
+    }
 
-            <div class="muted">Papas: ${friesTxt}</div>
+    function renderCart(){
+      const cartItems = $("#cartItems");
+      const cartTotal = $("#cartTotal");
 
-            ${detalleExtras}
+      cartItems.innerHTML="";
 
-            <div class="muted" style="margin-top:4px;">
-              Subtotal: <strong>${money(unit)}</strong>
+      // Hamburguesas
+      for(const [key,obj] of Object.entries(cart.burger)){
+        const base = obj.item.price;
+        const precioPatty   = obj.extras.patty   * EXTRA_PRICE_PATTY;
+        const precioCheddar = obj.extras.cheddar * EXTRA_PRICE_CHEDDAR;
+        const unit = base + precioPatty + precioCheddar;
+        const total = unit * obj.qty;
+
+        const friesTxt = friesLabel(obj.fries);
+
+        let detalleExtras = "";
+        if(obj.extras.patty > 0){
+          detalleExtras += `
+            <div class="muted">• Medallones extra (x${obj.extras.patty}): ${money(precioPatty)}</div>
+          `;
+        }
+        if(obj.extras.cheddar > 0){
+          detalleExtras += `
+            <div class="muted">• Cheddar extra (x${obj.extras.cheddar}): ${money(precioCheddar)}</div>
+          `;
+        }
+
+        cartItems.innerHTML += `
+          <div class="item">
+            <div>
+              <strong>${obj.item.name}</strong><br>
+
+              <div class="muted">Papas: ${friesTxt}</div>
+
+              ${detalleExtras}
+
+              <div class="muted" style="margin-top:4px;">
+                Subtotal: <strong>${money(unit)}</strong>
+              </div>
+
+              ${obj.notes ? `<div class="muted">Nota: ${obj.notes}</div>` : ""}
             </div>
 
-            ${obj.notes ? `<div class="muted">Nota: ${obj.notes}</div>` : ""}
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn ghost" onclick="changeQty('burger','${encodeURIComponent(key)}',-1)">-</button>
+              <span>${obj.qty}</span>
+              <button class="btn ghost" onclick="changeQty('burger','${encodeURIComponent(key)}',1)">+</button>
+              <span>${money(total)}</span>
+            </div>
           </div>
-
-          <div style="display:flex;align-items:center;gap:10px">
-            <button class="btn ghost" onclick="changeQty('burger','${encodeURIComponent(key)}',-1)">-</button>
-            <span>${obj.qty}</span>
-            <button class="btn ghost" onclick="changeQty('burger','${encodeURIComponent(key)}',1)">+</button>
-            <span>${money(total)}</span>
-          </div>
-        </div>
-      `;
-    }
-
-    // Bebidas
-    for(const [key,obj] of Object.entries(cart.drink)){
-      const total = obj.qty * obj.item.price;
-
-      cartItems.innerHTML += `
-        <div class="item">
-          <div><strong>${obj.item.name}</strong></div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <button class="btn ghost" onclick="changeQty('drink','${encodeURIComponent(key)}',-1)">-</button>
-            <span>${obj.qty}</span>
-            <button class="btn ghost" onclick="changeQty('drink','${encodeURIComponent(key)}',1)">+</button>
-            <span>${money(total)}</span>
-          </div>
-        </div>
-      `;
-    }
-
-    cartTotal.textContent = money(calcTotal());
-    $("#cartBubble").textContent = `(${cartCount()})`;
-  }
-
-  window.changeQty = function(type, encodedKey, delta){
-    const key = decodeURIComponent(encodedKey);
-    const bucket = cart[type];
-    if(!bucket[key]) return;
-
-    bucket[key].qty += delta;
-    if(bucket[key].qty <= 0) delete bucket[key];
-
-    saveCart();
-    renderCart();
-  };
-
-  /* ============================================================
-        🔥 BEBIDAS
-  ============================================================ */
-  function addDrink(item){
-    if(!cart.drink[item.id])
-      cart.drink[item.id] = {qty:0, item};
-    cart.drink[item.id].qty++;
-    saveCart();
-    renderCart();
-  }
-
-  /* ============================================================
-        🔥 CUSTOMIZACIÓN (MODAL)
-  ============================================================ */
-
-  const overlay = $("#overlay");
-  const modTitle = $("#modTitle");
-
-  const rowPatties = $("#rowPatties");
-  const rowCheddar = $("#rowCheddar");
-
-  const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
-  const cheVal=$("#cheVal"), cheInc=$("#cheInc"), cheDec=$("#cheDec");
-
-  const notes=$("#notes");
-  const btnAdd=$("#btnAdd");
-  const btnCancel=$("#btnCancel");
-  const pricePreview=$("#pricePreview");
-
-  let currentItem=null;
-
-  // 👉 Igual lógica que mostrador:
-  // double  -> medallones + cheddar
-  // chicken -> solo cheddar
-  // simple  -> nada
-  function configureExtrasFor(item){
-    const kind = (item.kind || "").toLowerCase();
-
-    if(kind === "double"){
-      rowPatties.style.display = "flex";
-      rowCheddar.style.display = "flex";
-    } else if(kind === "chicken"){
-      rowPatties.style.display = "none";
-      rowCheddar.style.display = "flex";
-    } else {
-      // simples y cualquier otro tipo
-      rowPatties.style.display = "none";
-      rowCheddar.style.display = "none";
-    }
-  }
-
-  function updatePreview(){
-    if(!currentItem) return;
-
-    const extras = {
-      patty: Number(patVal.textContent),
-      cheddar: Number(cheVal.textContent)
-    };
-
-    const base = currentItem.price;
-    const precioPatty = extras.patty * EXTRA_PRICE_PATTY;
-    const precioCheddar = extras.cheddar * EXTRA_PRICE_CHEDDAR;
-    const subtotal = base + precioPatty + precioCheddar;
-
-    document.getElementById("precioBaseTxt").textContent =
-      "Precio base: " + money(base);
-
-    const patTxt = document.getElementById("precioPattyTxt");
-    if(extras.patty > 0){
-      patTxt.style.display = "block";
-      patTxt.textContent =
-        `Medallón extra (x${extras.patty}): ${money(precioPatty)}`;
-    } else {
-      patTxt.style.display = "none";
-    }
-
-    const cheTxt = document.getElementById("precioCheddarTxt");
-    if(extras.cheddar > 0){
-      cheTxt.style.display = "block";
-      cheTxt.textContent =
-        `Cheddar extra (x${extras.cheddar}): ${money(precioCheddar)}`;
-    } else {
-      cheTxt.style.display = "none";
-    }
-
-    document.getElementById("subtotalTxt").textContent = money(subtotal);
-    document.getElementById("pricePreview").textContent = money(subtotal);
-
-    btnAdd.textContent = "Agregar al carrito — " + money(subtotal);
-  }
-
-  function resetFries(){
-    document.querySelectorAll("input[name='fries']").forEach(r=>r.checked=false);
-  }
-
-  function openCustomize(item){
-    currentItem = item;
-
-    // título tipo mostrador: "Personalizar: Cheeseburger Simple"
-    modTitle.textContent = "Personalizar: " + (item.name || "");
-
-    resetFries();
-    patVal.textContent = "0";
-    cheVal.textContent = "0";
-    notes.value = "";
-
-    configureExtrasFor(item);   // 👈 decide si se ven los extras
-    updatePreview();
-
-    overlay.classList.add("open");
-  }
-
-  btnCancel.onclick = ()=> overlay.classList.remove("open");
-
-  patInc.onclick=()=>{ let v=+patVal.textContent; if(v<2) patVal.textContent=v+1; updatePreview(); };
-  patDec.onclick=()=>{ let v=+patVal.textContent; if(v>0) patVal.textContent=v-1; updatePreview(); };
-  cheInc.onclick=()=>{ let v=+cheVal.textContent; if(v<3) cheVal.textContent=v+1; updatePreview(); };
-  cheDec.onclick=()=>{ let v=+cheVal.textContent; if(v>0) cheVal.textContent=v-1; updatePreview(); };
-
-  btnAdd.onclick = ()=>{
-    const friesEl = document.querySelector("input[name='fries']:checked");
-    if(!friesEl){
-      alert("Elegí el tipo de papas");
-      return;
-    }
-
-    const extras = {
-      patty:  Number(patVal.textContent),
-      cheddar:Number(cheVal.textContent)
-    };
-
-    const key =
-      currentItem.id +
-      "|fries:"+friesEl.value +
-      "|patty:"+extras.patty +
-      "|cheddar:"+extras.cheddar +
-      "|notes:"+notes.value.trim();
-
-    if(!cart.burger[key]){
-      cart.burger[key] = {
-        qty:1,
-        item:currentItem,
-        fries:friesEl.value,
-        extras,
-        notes:notes.value.trim()
-      };
-    } else {
-      cart.burger[key].qty++;
-    }
-
-    saveCart();
-    renderCart();
-    overlay.classList.remove("open");
-  };
-
-  /* ==== DRAWER — ABRIR / CERRAR ==== */
-  const drawer = document.getElementById("drawer");
-  const btnCart = document.getElementById("btnCart");
-  const closeDrawerBtn = document.getElementById("closeDrawer");
-
-  function openDrawer(){
-    drawer.classList.add("open");
-  }
-
-  function closeDrawer(){
-    drawer.classList.remove("open");
-  }
-
-  btnCart.onclick = openDrawer;
-  closeDrawerBtn.onclick = closeDrawer;
-
-  // Botón "Ir a pagar"
-  const btnPagar = document.getElementById("btnPagar");
-  if(btnPagar){
-    btnPagar.onclick = ()=>{
-      if(cartCount() === 0){
-        alert("Tu carrito está vacío");
-        return;
+        `;
       }
-      window.location.href = "pedido_cliente.html";
-    };
-  }
 
-  // Botón "Vaciar"
-  const btnVaciar = document.getElementById("btnVaciar");
-  if(btnVaciar){
-    btnVaciar.onclick = ()=>{
-      cart = { burger:{}, drink:{} };
+      // Bebidas
+      for(const [key,obj] of Object.entries(cart.drink)){
+        const total = obj.qty * obj.item.price;
+
+        cartItems.innerHTML += `
+          <div class="item">
+            <div><strong>${obj.item.name}</strong></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn ghost" onclick="changeQty('drink','${encodeURIComponent(key)}',-1)">-</button>
+              <span>${obj.qty}</span>
+              <button class="btn ghost" onclick="changeQty('drink','${encodeURIComponent(key)}',1)">+</button>
+              <span>${money(total)}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      cartTotal.textContent = money(calcTotal());
+      $("#cartBubble").textContent = `(${cartCount()})`;
+    }
+
+    window.changeQty = function(type, encodedKey, delta){
+      const key = decodeURIComponent(encodedKey);
+      const bucket = cart[type];
+      if(!bucket[key]) return;
+
+      bucket[key].qty += delta;
+      if(bucket[key].qty <= 0) delete bucket[key];
+
       saveCart();
       renderCart();
     };
-  }
 
-  /* ============================================================
-        🔥 ORDEN VISUAL DESDE FIRESTORE
-  ============================================================ */
-
-  let MENU_ORDER = {};
-
-  db.collection("config").doc("menuOrder").onSnapshot(snap=>{
-    MENU_ORDER = snap.exists ? snap.data() : {};
-    mount();
-  });
-
-  /* ============================================================
-        🔥 RENDER DE TARJETAS
-  ============================================================ */
-
-  function renderCard(item, type){
-    const ok = isAvailable(item.id);
-
-    const card=document.createElement("div");
-    card.className="card";
-    card.dataset.id=item.id;
-    card.dataset.soldout = ok?"0":"1";
-
-    card.innerHTML=`
-      <div class="imgwrap">
-        <img src="${item.img}" onerror="this.src='images/logo.png'">
-        ${ok ? "" : `<div class="soldout-badge">SIN STOCK</div>`}
-      </div>
-      <div class="content">
-        <h3>${item.name}</h3>
-        ${item.desc ? `<p class="muted">${item.desc}</p>` : ""}
-        <div class="row">
-          <span class="price">${money(item.price)}</span>
-          <div class="actions">
-            <button class="btn" data-add ${(!ok || !orderable)?"disabled":""}>Agregar</button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    const addBtn = card.querySelector("[data-add]");
-    if(type==="drink"){
-      addBtn.onclick = ()=> ok && orderable && addDrink(item);
-    } else {
-      addBtn.onclick = ()=> ok && orderable && openCustomize(item);
+    function addDrink(item){
+      if(!cart.drink[item.id])
+        cart.drink[item.id] = {qty:0, item};
+      cart.drink[item.id].qty++;
+      saveCart();
+      renderCart();
     }
 
-    return card;
-  }
+    /* ==== función que usa el customizer.js para agregar hamburguesas ==== */
+    function addToCart(item, fries, extras, notes){
+      const extrasSafe = extras || {};
+      const key =
+        item.id +
+        "|fries:"+ (fries || "") +
+        "|patty:"+ (extrasSafe.patty  ?? 0) +
+        "|cheddar:"+ (extrasSafe.cheddar ?? 0) +
+        "|notes:"+ (notes||"").trim();
 
-  const gridBurgers = $("#burgersGrid");
-  const gridDrinks  = $("#drinksGrid");
-  const gridSides   = $("#sidesGrid");
+      if(!cart.burger[key]){
+        cart.burger[key] = {
+          qty:1,
+          item,
+          fries: fries || "",
+          extras:{
+            patty:  extrasSafe.patty  ?? 0,
+            cheddar:extrasSafe.cheddar?? 0
+          },
+          notes:(notes||"").trim()
+        };
+      } else {
+        cart.burger[key].qty++;
+      }
 
-  function orderedList(category, arr){
-    const order = MENU_ORDER[category] || [];
-    const orderMap = new Map(order.map((id,i)=>[id,i]));
+      saveCart();
+      renderCart();
+    }
 
-    return [...arr].sort((a,b)=>{
-      const A = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
-      const B = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
-      return A-B;
-    });
-  }
+    /* ====== ORDEN VISUAL ====== */
+    const gridBurgers = $("#burgersGrid");
+    const gridDrinks  = $("#drinksGrid");
+    const gridSides   = $("#sidesGrid");
 
-  function mount(){
-    if(!gridBurgers) return;
+    function orderedList(category, arr){
+      const order = MENU_ORDER[category] || [];
+      const orderMap = new Map(order.map((id,i)=>[id,i]));
 
-    gridBurgers.innerHTML="";
-    gridSides.innerHTML="";
-    gridDrinks.innerHTML="";
+      return [...arr].sort((a,b)=>{
+        const A = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
+        const B = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
+        return A-B;
+      });
+    }
 
-    orderedList("hamburguesas", BURGERS)
-      .forEach(b=> gridBurgers.appendChild(renderCard(b,"burger")));
+    function renderCard(item, type){
+      const ok = isAvailable(item.id);
 
-    orderedList("guarniciones", SIDES)
-      .forEach(s=> gridSides.appendChild(renderCard(s,"side")));
+      const card=document.createElement("div");
+      card.className="card";
+      card.dataset.id=item.id;
+      card.dataset.soldout = ok?"0":"1";
 
-    orderedList("bebidas", DRINKS)
-      .forEach(d=> gridDrinks.appendChild(renderCard(d,"drink")));
+      card.innerHTML=`
+        <div class="imgwrap">
+          <img src="${item.img}" onerror="this.src='images/logo.png'">
+          ${ok ? "" : `<div class="soldout-badge">SIN STOCK</div>`}
+        </div>
+        <div class="content">
+          <h3>${item.name}</h3>
+          ${item.desc ? `<p class="muted">${item.desc}</p>` : ""}
+          <div class="row">
+            <span class="price">${money(item.price)}</span>
+            <div class="actions">
+              <button class="btn" data-add ${(!ok || !orderable)?"disabled":""}>Agregar</button>
+            </div>
+          </div>
+        </div>
+      `;
 
-    refreshAvailabilityUI();
+      const addBtn = card.querySelector("[data-add]");
+      if(type==="drink"){
+        addBtn.onclick = ()=> ok && orderable && addDrink(item);
+      } else if(type==="side"){
+        // si algún día querés que las guarniciones entren al carrito acá
+        addBtn.onclick = ()=>{}; // por ahora nada
+      } else {
+        // HAMBURGUESAS → abre el customizer compartido
+        addBtn.onclick = ()=> ok && orderable && window.openCustomize && window.openCustomize(item);
+      }
+
+      return card;
+    }
+
+    function mount(){
+      if(!gridBurgers) return;
+
+      gridBurgers.innerHTML="";
+      gridSides.innerHTML="";
+      gridDrinks.innerHTML="";
+
+      orderedList("hamburguesas", BURGERS)
+        .forEach(b=> gridBurgers.appendChild(renderCard(b,"burger")));
+
+      orderedList("guarniciones", SIDES)
+        .forEach(s=> gridSides.appendChild(renderCard(s,"side")));
+
+      orderedList("bebidas", DRINKS)
+        .forEach(d=> gridDrinks.appendChild(renderCard(d,"drink")));
+
+      refreshAvailabilityUI();
+      renderCart();
+    }
+
+    /* ==== DRAWER — ABRIR / CERRAR ==== */
+    const drawer = document.getElementById("drawer");
+    const btnCart = document.getElementById("btnCart");
+    const closeDrawerBtn = document.getElementById("closeDrawer");
+
+    function openDrawer(){ drawer.classList.add("open"); }
+    function closeDrawer(){ drawer.classList.remove("open"); }
+
+    btnCart.onclick = openDrawer;
+    closeDrawerBtn.onclick = closeDrawer;
+
+    const btnPagar = document.getElementById("btnPagar");
+    if(btnPagar){
+      btnPagar.onclick = ()=>{
+        if(cartCount() === 0){
+          alert("Tu carrito está vacío");
+          return;
+        }
+        window.location.href = "pedido_cliente.html";
+      };
+    }
+
+    const btnVaciar = document.getElementById("btnVaciar");
+    if(btnVaciar){
+      btnVaciar.onclick = ()=>{
+        cart = { burger:{}, drink:{} };
+        saveCart();
+        renderCart();
+      };
+    }
+
     renderCart();
-  }
+    renderStatus();
+  </script>
+  <script type="module">
+    import { setupCustomizer } from "./js/customizer.js";
 
-  renderCart();
-  renderStatus();
-</script>
+    const openCustomize = setupCustomizer({
+      overlay: document.getElementById("overlay"),
+      modTitle: document.getElementById("modTitle"),
+      rowPatties: document.getElementById("rowPatties"),
+      rowCheddar: document.getElementById("rowCheddar"),
+      patVal: document.getElementById("patVal"),
+      patInc: document.getElementById("patInc"),
+      patDec: document.getElementById("patDec"),
+      cheVal: document.getElementById("cheVal"),
+      cheInc: document.getElementById("cheInc"),
+      cheDec: document.getElementById("cheDec"),
+      notes: document.getElementById("notes"),
+      btnCancel: document.getElementById("btnCancel"),
+      btnAdd: document.getElementById("btnAdd"),
 
+      updateCartCallback(item, fries, extras, notes){
+        // 🔥 Usa la misma función que definimos arriba
+        addToCart(item, fries, extras, notes);
+      }
+    });
+
+    // lo deja global para que renderCard lo use
+    window.openCustomize = openCustomize;
+  </script>
 </body>
 </html>
