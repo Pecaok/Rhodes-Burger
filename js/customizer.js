@@ -1,128 +1,159 @@
-/* ===============================================================
-   CUSTOMIZER UNIFICADO PARA INDEX + MOSTRADOR
-   =============================================================== */
+/* ============================================================
+   CUSTOMIZER UNIFICADO — MOSTRADOR + MENÚ CLIENTE
+   ============================================================ */
 
-export function setupCustomizer(config){
+export function setupCustomizer(opts){
 
-  const {
-    overlay,
-    modTitle,
+  /* ========= REFERENCIAS ========= */
+  const overlay     = opts.overlay;
+  const modTitle    = opts.modTitle;
 
-    rowPatties,
-    rowCheddar,
+  const rowPatties  = opts.rowPatties;
+  const rowCheddar  = opts.rowCheddar;
 
-    patVal, patInc, patDec,
-    cheVal, cheInc, cheDec,
+  const patVal      = opts.patVal;
+  const patInc      = opts.patInc;
+  const patDec      = opts.patDec;
 
-    notes,
-    btnCancel,
-    btnAdd,
+  const cheVal      = opts.cheVal;
+  const cheInc      = opts.cheInc;
+  const cheDec      = opts.cheDec;
 
-    updateCartCallback
-  } = config;
+  const notes       = opts.notes;
 
-  const EXTRA_PRICE_PATTY   = 2500;
-  const EXTRA_PRICE_CHEDDAR = 300;
+  const btnCancel   = opts.btnCancel;
+  const btnAdd      = opts.btnAdd;
 
+  const updateCartCallback = opts.updateCartCallback;
+
+  const MAX_PATTIES = 2;
+  const MAX_CHEDDAR = 3;
+
+  /* ========= ESTADO INTERNO ========= */
   let currentItem = null;
+  let currentMode = "add";
+  let currentEditId = null;
 
-  /* ---------- helpers ---------- */
-  function money(n){
-    return (Number(n)||0).toLocaleString("es-AR",
-      { style:"currency", currency:"ARS", maximumFractionDigits:0 }
-    );
-  }
-
-  function resetFields(){
+  /* ========= RESET ========= */
+  function reset(){
     patVal.textContent = "0";
     cheVal.textContent = "0";
     notes.value = "";
-    document.querySelectorAll("input[name='fries']").forEach(x=> x.checked = false);
+    overlay.style.display = "flex";
+
+    const fries = document.querySelectorAll("input[name='fries']");
+    fries.forEach(f => f.checked = false);
   }
 
-  function updatePreview(){
-    if(!currentItem) return;
+  /* ========= MOSTRAR ELEMENTOS SEGÚN TIPO ========= */
+  function configureExtras(itemName){
+    const name = itemName.toLowerCase();
+
+    const isDoble = name.includes("doble");
+    const isPollo = name.includes("pollo");
+
+    if(isDoble){
+      rowPatties.style.display = "flex";
+      rowCheddar.style.display = "flex";
+    } 
+    else if(isPollo){
+      rowPatties.style.display = "none";
+      rowCheddar.style.display = "flex";
+    }
+    else {
+      rowPatties.style.display = "none";
+      rowCheddar.style.display = "none";
+    }
+  }
+
+  /* ========= CALCULAR PRECIOS ========= */
+  function unitPrice(){
+    const base = currentItem.price;
+    const patties = Number(patVal.textContent);
+    const cheddar = Number(cheVal.textContent);
+
+    const EXTRA_PATTY   = currentItem.EXTRA_PRICE_PATTY   || 2500;
+    const EXTRA_CHEDDAR = currentItem.EXTRA_PRICE_CHEDDAR || 300;
+
+    return base + patties * EXTRA_PATTY + cheddar * EXTRA_CHEDDAR;
+  }
+
+  /* ========= ABRIR MODAL ========= */
+  function open(item, mode="add", id=null){
+    currentItem = item;
+    currentMode = mode;
+    currentEditId = id;
+
+    modTitle.textContent = (mode === "edit" ? "Editar: " : "Personalizar: ") + item.name;
+
+    reset();
+    configureExtras(item.name);
+
+    overlay.style.display = "flex";
+  }
+
+  /* ========= BOTONES DE CANTIDADES ========= */
+
+  patInc.onclick = () => {
+    let v = Number(patVal.textContent);
+    if(v < MAX_PATTIES){
+      patVal.textContent = v + 1;
+    }
+  };
+  patDec.onclick = () => {
+    let v = Number(patVal.textContent);
+    if(v > 0){
+      patVal.textContent = v - 1;
+    }
+  };
+
+  cheInc.onclick = () => {
+    let v = Number(cheVal.textContent);
+    if(v < MAX_CHEDDAR){
+      cheVal.textContent = v + 1;
+    }
+  };
+  cheDec.onclick = () => {
+    let v = Number(cheVal.textContent);
+    if(v > 0){
+      cheVal.textContent = v - 1;
+    }
+  };
+
+  /* ========= CANCELAR ========= */
+  btnCancel.onclick = () => {
+    overlay.style.display = "none";
+  };
+
+  /* ========= AGREGAR ========= */
+  btnAdd.onclick = () => {
+
+    const fries = document.querySelector("input[name='fries']:checked");
+    const friesCode = fries ? fries.value : "";
+    const friesName =
+        friesCode === "con_sazon" ? "Sazonadas" :
+        friesCode === "con_sal"   ? "Con sal" :
+        friesCode === "sin_sal"   ? "Sin sal" :
+        "Sin papas";
 
     const extras = {
       patty: Number(patVal.textContent),
       cheddar: Number(cheVal.textContent)
     };
 
-    const base = currentItem.price;
-    const subtotal =
-      base +
-      extras.patty   * EXTRA_PRICE_PATTY +
-      extras.cheddar * EXTRA_PRICE_CHEDDAR;
+    const notesValue = notes.value.trim();
 
-    // si index tiene pricePreview
-    const priceEl = document.getElementById("pricePreview");
-    if(priceEl) priceEl.textContent = money(subtotal);
-
-    // si mostrador tiene unitPreview
-    const unitEl = document.getElementById("unitPreview");
-    if(unitEl) unitEl.textContent = money(subtotal);
-
-    // botón
-    if(btnAdd){
-      btnAdd.textContent = "Agregar — " + money(subtotal);
-    }
-  }
-
-  /* ---------- lógica de extras ---------- */
-  function applyKind(kind){
-    if(kind === "doble"){
-      rowPatties.style.display = "flex";
-      rowCheddar.style.display = "flex";
-    }
-    else if(kind === "pollo"){
-      rowPatties.style.display = "none";
-      rowCheddar.style.display = "flex";
-    }
-    else {
-      // simple
-      rowPatties.style.display = "none";
-      rowCheddar.style.display = "none";
-    }
-  }
-
-  /* ---------- abrir ---------- */
-  function openCustomizer(item){
-    currentItem = item;
-
-    modTitle.textContent = "Personalizar: " + item.name;
-
-    resetFields();
-    applyKind(item.kind);
-    updatePreview();
-
-    overlay.style.display = "flex";
-  }
-
-  /* ---------- eventos ---------- */
-  patInc.onclick = ()=>{ let v=+patVal.textContent; if(v<2) patVal.textContent=v+1; updatePreview(); };
-  patDec.onclick = ()=>{ let v=+patVal.textContent; if(v>0) patVal.textContent=v-1; updatePreview(); };
-  cheInc.onclick = ()=>{ let v=+cheVal.textContent; if(v<3) cheVal.textContent=v+1; updatePreview(); };
-  cheDec.onclick = ()=>{ let v=+cheVal.textContent; if(v>0) cheVal.textContent=v-1; updatePreview(); };
-
-  btnCancel.onclick = ()=> overlay.style.display="none";
-
-  btnAdd.onclick = ()=>{
-    const fries = document.querySelector("input[name='fries']:checked");
-    const friesVal = fries ? fries.value : "";
-
-    const extras = {
-      patty: Number(patVal.textContent),
-      cheddar: Number(cheVal.textContent),
-      EXTRA_PRICE_PATTY,
-      EXTRA_PRICE_CHEDDAR
-    };
-
-    const notesTxt = notes.value.trim();
-
-    updateCartCallback(currentItem, friesVal, extras, notesTxt);
+    // Se lo pasamos al carrito del archivo que lo llamó
+    updateCartCallback(
+      currentItem,
+      friesName,
+      extras,
+      notesValue
+    );
 
     overlay.style.display = "none";
   };
 
-  return openCustomizer;
+  /* ========= EXPOSE ========= */
+  return open;
 }
