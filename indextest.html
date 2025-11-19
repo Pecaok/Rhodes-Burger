@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IndexTest • Rhodes Burgers</title>
+  <link rel="icon" href="images/logo.png" />
+  <style>
+    :root {
+      --primary: #625A45;
+      --text: #111;
+      --muted: #666;
+      --bg: #f6f6f6;
+      --card: #fff;
+      --radius: 18px;
+      --shadow: 0 10px 30px rgba(0, 0, 0, .08);
+      --ring: #eaeaea;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, Segoe UI, Roboto, Inter, Arial, sans-serif;
+    }
+    h1 { text-align: center; padding: 1rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 1rem;
+      padding: 1rem;
+    }
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card img {
+      width: 100%; height: 180px; object-fit: cover;
+    }
+    .card .content {
+      padding: 1rem;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 0.5rem;
+    }
+    .price {
+      font-weight: bold;
+    }
+    .btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 0.5em 1em;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .soldout-badge {
+      background: crimson;
+      color: white;
+      font-size: 0.8rem;
+      padding: 0.2em 0.5em;
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      border-radius: 4px;
+    }
+    .imgwrap { position: relative; }
+  </style>
+</head>
+<body>
+  <h1>IndexTest • Rhodes Burgers</h1>
+  <div class="grid" id="burgersGrid"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.appspot.com",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const burgersGrid = document.getElementById("burgersGrid");
+    const FALLBACK_IMG = "images/logo.png";
+
+    const availability = new Map();
+    const isAvailable = id => availability.get(id) !== false;
+
+    function mapProduct(doc) {
+      const d = doc.data();
+      let kind = (d.kind || "simple").toLowerCase();
+      if (kind === "doble") kind = "double";
+      if (kind === "pollo") kind = "chicken";
+      return {
+        id: doc.id,
+        name: d.name || "",
+        price: Number(d.price) || 0,
+        img: d.img || FALLBACK_IMG,
+        desc: d.description || "",
+        category: (d.category || "").toLowerCase(),
+        kind
+      };
+    }
+
+    function renderCard(item) {
+      const ok = isAvailable(item.id);
+      const card = document.createElement("div");
+      card.className = "card";
+      card.dataset.id = item.id;
+      card.innerHTML = `
+        <div class="imgwrap">
+          <img src="${item.img}" onerror="this.src='images/logo.png'">
+          ${ok ? "" : `<div class="soldout-badge">SIN STOCK</div>`}
+        </div>
+        <div class="content">
+          <h3>${item.name}</h3>
+          ${item.desc ? `<p class="muted">${item.desc}</p>` : ""}
+          <div class="row">
+            <span class="price">$${item.price.toLocaleString("es-AR")}</span>
+            <button class="btn" ${!ok ? "disabled" : ""}>Agregar</button>
+          </div>
+        </div>
+      `;
+      return card;
+    }
+
+    db.collection("products").onSnapshot(snap => {
+      burgersGrid.innerHTML = "";
+      snap.forEach(doc => {
+        const data = mapProduct(doc);
+        if (["hamburguesas", "burger", "hamburger"].includes(data.category)) {
+          if (doc.data().available === false) availability.set(doc.id, false);
+          burgersGrid.appendChild(renderCard(data));
+        }
+      });
+    });
+  </script>
+</body>
+</html>
