@@ -593,84 +593,88 @@
       applySidesToUI();
     });
 
-    /* ======= DISPONIBILIDAD ======= */
-    const availability=new Map();
-    const isAvailable=id => availability.has(id)?availability.get(id):true;
+    /* ======= DISPONIBILIDAD + PRODUCTOS (MISMO ESQUEMA QUE MOSTRADOR) ======= */
+    const availability = new Map();
+    const isAvailable = id => availability.get(id) !== false;
+
+    let BURGERS = [], DRINKS = [], SIDES = [];
+    const FALLBACK_IMG = "images/logo.png";
+
+    function mapProduct(doc){
+      const d = doc.data();
+      let kind = (d.kind || "").toLowerCase();
+
+      if(kind === "doble" || kind === "double") kind = "double";
+      else if(kind === "pollo" || kind === "chicken") kind = "chicken";
+      else if(!kind) kind = "simple";
+
+      return {
+        id: doc.id,
+        name: d.name || "",
+        price: Number(d.price) || 0,
+        img: d.img || FALLBACK_IMG,
+        desc: d.description || "",
+        category: (d.category || "").toLowerCase(),
+        kind
+      };
+    }
 
     db.collection("products").onSnapshot(snap=>{
       availability.clear();
+      const b = [], dArr = [], s = [];
+
       snap.forEach(doc=>{
-        const d=doc.data();
-        availability.set(doc.id, d.available!==false);
+        const raw = doc.data();
+        const p   = mapProduct(doc);
+
+        if(raw.available === false) availability.set(doc.id, false);
+
+        const cat = (raw.category || "").toLowerCase();
+
+        if(["burger","hamburguesas","hamburger"].includes(cat)){
+          b.push(p);
+        } else if(["side","sides","guarniciones"].includes(cat)){
+          s.push(p);
+        } else if(["drink","drinks","bebidas"].includes(cat)){
+          dArr.push(p);
+        }
       });
+
+      BURGERS = b;
+      SIDES   = s;
+      DRINKS  = dArr;
+
+      if(typeof mount === "function") mount();
       refreshAvailabilityUI();
     });
 
     function refreshAvailabilityUI(){
       document.querySelectorAll(".card[data-id]").forEach(card=>{
-        const id=card.dataset.id;
-        const ok=isAvailable(id);
-        card.dataset.soldout = ok?"0":"1";
+        const id = card.dataset.id;
+        const ok = isAvailable(id);
+        card.dataset.soldout = ok ? "0" : "1";
 
-        let badge=card.querySelector(".soldout-badge");
+        let badge = card.querySelector(".soldout-badge");
         if(!ok){
           if(!badge){
-            badge=document.createElement("div");
-            badge.className="soldout-badge";
-            badge.textContent="SIN STOCK";
-            card.querySelector(".imgwrap").appendChild(badge);
+            badge = document.createElement("div");
+            badge.className = "soldout-badge";
+            badge.textContent = "SIN STOCK";
+            const imgwrap = card.querySelector(".imgwrap");
+            if(imgwrap) imgwrap.appendChild(badge);
           }
-        }else{
-          if(badge) badge.remove();
+        }else if(badge){
+          badge.remove();
+        }
+
+        const btn = card.querySelector("[data-add]");
+        if(btn){
+          const disabled = !ok || !orderable;
+          btn.disabled = disabled;
+          btn.classList.toggle("disabled", disabled);
         }
       });
     }
-
-    /* ===== PRODUCTOS FIRESTORE ===== */
-    let BURGERS=[], DRINKS=[], SIDES=[];
-    const FALLBACK_IMG="images/logo.png";
-
- function mapProduct(doc){
-  const d = doc.data();
-  let kind = (d.kind || "simple").toLowerCase();
-
-  if (kind === "doble")  kind = "double";
-  if (kind === "pollo")  kind = "chicken";
-  if (kind === "simple") kind = "simple";
-
-  return {
-    id: doc.id,
-    name: d.name || "",
-    price: Number(d.price) || 0,
-    img: d.img || FALLBACK_IMG,
-    desc: d.description || "",
-    category: (d.category || "").toLowerCase(),
-    kind
-  };
-}
-
-
-    db.collection("products").onSnapshot(snap=>{
-      const b=[], d=[], s=[];
-      snap.forEach(doc=>{
-        const p=mapProduct(doc);
-
-if(["burger","hamburguesas","hamburger"].includes(p.category))
-  b.push(p);
-
-if(["side","sides","guarniciones"].includes(p.category))
-  s.push(p);
-
-if(["drink","drinks","bebidas"].includes(p.category))
-  d.push(p);
-      });
-
-      BURGERS=b;
-      SIDES=s;
-      DRINKS=d;
-
-      mount();
-    });
   </script>
 
   <script>
@@ -829,7 +833,7 @@ if(["drink","drinks","bebidas"].includes(p.category))
   }
 
   /* ============================================================
-        🔥 CUSTOMIZACIÓN (1:1 CON MOSTRADOR)
+        🔥 CUSTOMIZACIÓN (MODAL LOCAL)
   ============================================================ */
 
   const overlay = $("#overlay");
@@ -1017,15 +1021,20 @@ if(["drink","drinks","bebidas"].includes(p.category))
     if(type==="drink"){
       addBtn.onclick = ()=> ok && orderable && addDrink(item);
     } else {
-      addBtn.onclick = ()=> ok && orderable && openCustomize(item);
+      addBtn.onclick = ()=> {
+        if(!(ok && orderable)) return;
+        currentItem = item;
+        resetFries();
+        patVal.textContent = "0";
+        cheVal.textContent = "0";
+        notes.value = "";
+        updatePreview();
+        overlay.classList.add("open");
+      };
     }
 
     return card;
   }
-
-  /* ============================================================
-        🔥 MONTAJE DE LA UI
-  ============================================================ */
 
   const gridBurgers = $("#burgersGrid");
   const gridDrinks  = $("#drinksGrid");
@@ -1043,6 +1052,8 @@ if(["drink","drinks","bebidas"].includes(p.category))
   }
 
   function mount(){
+    if(!gridBurgers) return;
+
     gridBurgers.innerHTML="";
     gridSides.innerHTML="";
     gridDrinks.innerHTML="";
@@ -1063,30 +1074,15 @@ if(["drink","drinks","bebidas"].includes(p.category))
   renderCart();
   renderStatus();
   </script>
-<script>
-if ("serviceWorker" in navigator) {
-navigator.serviceWorker.getRegistrations()
-.then(regs => {
-regs.forEach(reg => reg.unregister());
-})
-.catch(err => console.log("SW unregister error:", err));
-}
-</script>
-  <!-- ========== CUSTOMIZER MÓDULO ========== -->
-<script type="module">
-  import { setupCustomizer } from "./js/customizer.js";
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyD7UtE3-L_TGrc9jl-pXkOth7YZvU0qbmE",
-    authDomain: "rhodes-burgers.firebaseapp.com",
-    projectId: "rhodes-burgers",
-    storageBucket: "rhodes-burgers.appspot.com",
-    messagingSenderId: "932768053227",
-    appId: "1:932768053227:web:b3722a97b4d4311a9d2ed0"
-  };
-
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.firestore();
-</script>
+  <script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations()
+    .then(regs => {
+      regs.forEach(reg => reg.unregister());
+    })
+    .catch(err => console.log("SW unregister error:", err));
+  }
+  </script>
 </body>
 </html>
