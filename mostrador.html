@@ -357,6 +357,15 @@
       <div class="arrow" id="slotNext">▶</div>
     </div>
 
+    <div style="margin-top:10px">
+  <label style="font-weight:600;font-size:14px">Horario personalizado</label>
+  <input 
+    id="manualTime" 
+    type="time"
+    style="margin-top:6px;padding:10px 12px;border-radius:10px;border:1px solid #ccc;font-size:15px;width:160px"
+  >
+</div>
+
     <div id="miniSlotSub" class="muted" style="margin-top:8px;font-size:14px;">
       Seleccionado: —
     </div>
@@ -939,6 +948,37 @@ function renderSlot(){
   $("#slotNext").classList.toggle("disabled", currentSlotIndex === visibleSlots.length - 1);
 }
 
+    document.getElementById("manualTime").addEventListener("input", e=>{
+  const val = e.target.value;
+
+  if(!val){
+    // Si se borra, volvemos al carrusel
+    refreshSlotsUI();
+    return;
+  }
+
+  // Crear horario manual
+  const now = new Date();
+  const manualISO = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    val.split(":")[0],
+    val.split(":")[1],
+    0
+  ).toISOString();
+
+  // Guardar como slot seleccionado
+  window.selectedSlot = {
+    iso: manualISO,
+    pretty: val
+  };
+
+  // Mostrarlo en la UI
+  document.getElementById("miniSlotSub").textContent =
+    "Seleccionado: " + val;
+});
+
 $("#slotPrev").onclick = ()=>{
   if(currentSlotIndex > 0){
     currentSlotIndex--;
@@ -970,10 +1010,23 @@ async function sendToFirestore(){
 
   const pago = $("#selPago").value.trim() || "sin_especificar";
 
-  if(!window.selectedSlot){
-    alert("Elegí un horario");
-    return;
-  }
+ let slot = window.selectedSlot;
+
+// Si eligió manualmente → lo usamos
+const manual = document.getElementById("manualTime").value;
+if(manual){
+  slot = {
+    iso: new Date(
+      new Date().toDateString() + " " + manual + ":00"
+    ).toISOString(),
+    pretty: manual
+  };
+}
+
+if(!slot){
+  alert("Elegí un horario");
+  return;
+}
 
   /* --- Si alguna hamburguesa no tiene papas, pedir que las elija --- */
 for (const id in cart.burger){
