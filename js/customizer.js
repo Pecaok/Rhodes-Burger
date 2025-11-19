@@ -24,23 +24,38 @@ export function setupCustomizer(cfg){
 
   const isIndex = window.location.pathname.includes("index");
 
+  // Detectar si estamos en INDEX aunque cargue como "/"
+const path = window.location.pathname;
+const isIndex = (
+  path === "/" ||
+  path.endsWith("/index") ||
+  path.endsWith("/index.html") ||
+  path.includes("index.html")
+);
+
   // ------------------------------------------------------------
   // VALIDAR PAPAS SOLO EN INDEX
   // ------------------------------------------------------------
-  function validateFriesSelection() {
-    if (!isIndex) return true; // 🔥 mostrador no valida
-
-    const selected = overlay.querySelector("input[name='fries']:checked");
-    if (!selected) {
-      btnAdd.disabled = true;
-      btnAdd.style.opacity = "0.5";
-      return false;
-    }
-
-    btnAdd.disabled = false;
-    btnAdd.style.opacity = "1";
+ function validateFriesSelection() {
+  // En MOSTRADOR NO se valida
+  if (!isIndex) {
+    config.btnAdd.disabled = false;
+    config.btnAdd.style.opacity = "1";
     return true;
   }
+
+  // En INDEX → obligatorio elegir papas
+  const fries = config.overlay.querySelector("input[name='fries']:checked");
+  if (!fries) {
+    config.btnAdd.disabled = true;
+    config.btnAdd.style.opacity = "0.5";
+    return false;
+  }
+
+  config.btnAdd.disabled = false;
+  config.btnAdd.style.opacity = "1";
+  return true;
+}
 
   function setupFriesValidation(){
     if (!isIndex) return; // mostrador no usa restricciones
@@ -98,6 +113,11 @@ export function setupCustomizer(cfg){
     currentOriginal = existing;
 
     reset();
+    // Bloquear al abrir si estamos en INDEX
+if (isIndex) {
+  config.btnAdd.disabled = true;
+  config.btnAdd.style.opacity = "0.5";
+}
     setupFriesValidation();  // activar radios SOLO index
 
     // en index, bloquear al abrir
