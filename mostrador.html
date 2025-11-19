@@ -1017,6 +1017,7 @@ document.addEventListener("DOMContentLoaded", refreshSlotsUI);
 /* ============================================================
    🔥 ENVIAR PEDIDO A FIRESTORE
 ============================================================ */
+<script>
 async function sendToFirestore(){
 
   const nombre = $("#inpNombre").value.trim();
@@ -1027,16 +1028,14 @@ async function sendToFirestore(){
 
   const pago = $("#selPago").value.trim() || "sin_especificar";
 
-  // ==========================
-  //  H O R A R I O   D E   R E T I R O
-  // ==========================
+  // ---- HORARIO ----
   let slot = window.selectedSlot;
 
-  // Si eligió horario manual
   const manual = document.getElementById("manualTime").value;
   if(manual){
     const now = new Date();
     slot = {
+      pretty: manual,
       iso: new Date(
         now.getFullYear(),
         now.getMonth(),
@@ -1044,8 +1043,7 @@ async function sendToFirestore(){
         manual.split(":")[0],
         manual.split(":")[1],
         0
-      ).toISOString(),
-      pretty: manual
+      ).toISOString()
     };
   }
 
@@ -1054,49 +1052,51 @@ async function sendToFirestore(){
     return;
   }
 
-  // ===============================
-  // VALIDAR PAPAS EN HAMBURGUESAS
-  // ===============================
+  // ---- VALIDACIÓN PAPAS ----
   for (const id in cart.burger){
     const b = cart.burger[id];
     if(!b.friesRaw || b.friesRaw === ""){
-      alert(`La hamburguesa "${b.item.name}" no tiene papas seleccionadas. Editala antes de cargar el pedido.`);
+      alert(`La hamburguesa "${b.item.name}" no tiene papas seleccionadas.`);
       return;
     }
   }
 
   const tel = $("#inpTel").value.trim();
 
+  // ---- ARMAR ITEMS ----
   const items = [];
-  let total = 0;
+  let rawTotal = 0;
 
-  // Burgers
   for(const id in cart.burger){
     const b = cart.burger[id];
 
     const unit =
       b.item.price +
-      (b.extras.patty * EXTRA_PRICE_PATTY) +
+      (b.extras.patty   * EXTRA_PRICE_PATTY) +
       (b.extras.cheddar * EXTRA_PRICE_CHEDDAR);
 
-    total += unit * b.qty;
+    rawTotal += unit * b.qty;
 
     items.push({
       type: "burger",
       id: b.item.id,
       name: b.item.name,
       qty: b.qty,
-      price: unit,
+      price: b.item.price,
       fries: b.fries,
-      extras: b.extras,
-      notes: b.notes
+      extras: {
+        patty: b.extras.patty,
+        cheddar: b.extras.cheddar,
+        EXTRA_PRICE_PATTY,
+        EXTRA_PRICE_CHEDDAR
+      },
+      notes: b.notes || ""
     });
   }
 
-  // Drinks
   for(const id in cart.drink){
     const d = cart.drink[id];
-    total += d.item.price * d.qty;
+    rawTotal += d.item.price * d.qty;
 
     items.push({
       type:"drink",
@@ -1107,10 +1107,9 @@ async function sendToFirestore(){
     });
   }
 
-  // Sides
   for(const id in cart.side){
     const s = cart.side[id];
-    total += s.item.price * s.qty;
+    rawTotal += s.item.price * s.qty;
 
     items.push({
       type:"side",
@@ -1121,39 +1120,59 @@ async function sendToFirestore(){
     });
   }
 
+  // ---- NUMERO DE PEDIDO COMPATIBLE CON LA WEB ----
+  async function getNextOrderNumber(){
+    let lastKnown = 0;
+    try {
+      const qs = await db.collection('orders')
+        .orderBy('orderNumber','desc')
+        .limit(1)
+        .get();
+      if(!qs.empty) lastKnown = Number(qs.docs[0].data().orderNumber)||0;
+    }catch(_){}
+
+    const ref = db.collection("config").doc("counters");
+
+    const next = await db.runTransaction(async tx=>{
+      const snap = await tx.get(ref);
+      const cur  = snap.exists ? Number(snap.data().orderNumber||0) : 0;
+      const base = Math.max(cur,lastKnown);
+      const nxt  = base + 1;
+
+      tx.set(ref,{ orderNumber:nxt },{merge:true});
+      return nxt;
+    });
+
+    return next;
+  }
+
+  const orderNumber = await getNextOrderNumber();
+
+  // ---- ORDER OBJ COMO EL CLIENTE ----
   const order = {
+    orderNumber,
+    number: orderNumber,
     nombre,
     telefono: tel,
+    entrega: "take_away",
     pago,
-    items,
-    total,
+    notes: "",
+    pickup_slot: slot.iso,      // mostrador no usa slotKey → dejamos el ISO
     pickup_time: slot.iso,
-    pickup_pretty: slot.pretty,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-    status: "accepted",
-    source: "mostrador"
+    status: (pago==="mercado_pago" ? "pending_payment" : "accepted"),
+    payment_status: (pago==="mercado_pago" ? "pending_payment" : "paid"),
+    items,
+    total: rawTotal,
+    rawTotal,
+    source: "mostrador",
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
   };
 
   try{
-    // === Obtener número de pedido ===
-const counterRef = db.collection("counters").doc("orders");
+    await db.collection("orders").doc().set(order);
 
-const num = await db.runTransaction(async (tx)=>{
-  const snap = await tx.get(counterRef);
-  const data = snap.data() || { next: 1 };
+    alert(`Pedido cargado ✔️\nNúmero de pedido: #${orderNumber}`);
 
-  const orderNumber = data.next;
-  tx.update(counterRef, { next: orderNumber + 1 });
-
-  return orderNumber;
-});
-
-// === Guardar el pedido con número ===
-order.orderNumber = num;
-
-await db.collection("orders").add(order);
-
-alert(`Pedido cargado ✔️\nNúmero de pedido: #${num}`);
     cart = { burger:{}, drink:{}, side:{} };
     renderCart();
   }catch(e){
@@ -1164,5 +1183,3 @@ alert(`Pedido cargado ✔️\nNúmero de pedido: #${num}`);
 
 $("#btnCargarPedido").onclick = sendToFirestore;
 </script>
-
-
