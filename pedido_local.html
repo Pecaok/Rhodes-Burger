@@ -497,11 +497,41 @@ function buildTicketHTML(docSnap){
   const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
 
   /* ==== Pickup ==== */
-  const pickupPretty =
-    o.pickup_time_pretty ||
-    o.pickupPretty ||
-    o.pickup ||
-    null;
+ // ==== HORARIO UNIFICADO ====
+function resolvePickupPretty(o){
+  // 1) Prioridad máxima (index web)
+  if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "")
+    return o.pickup_time_pretty;
+
+  // 2) Mostrador: guarda directo "HH:MM"
+  if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot))
+    return o.pickup_slot;
+
+  // 3) Timestamps / ISO de ambos sistemas
+  const t = o.pickup_time || o.pickupTime || o.pickup;
+  if (t) {
+    try {
+      if (typeof t?.toDate === "function")
+        return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+      const d = new Date(t);
+      if (!isNaN(d))
+        return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+    } catch(_){}
+  }
+
+  // 4) Formato “2210”
+  if (typeof o.pickup_slot === "string") {
+    const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/);
+    if (m) return `${m[1]}:${m[2]}`;
+  }
+
+  // 5) ASAP
+  if (o.pickup_asap === true) return "A la brevedad";
+
+  return null;
+}
+
+const pickupPretty = resolvePickupPretty(o);
 
   const pickupBlockLarge = pickupPretty
     ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">
