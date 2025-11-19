@@ -677,7 +677,7 @@
     }
   </script>
 
- <script>
+<script>
   /* ============================================================
         🔥 UTILS
   ============================================================ */
@@ -857,113 +857,124 @@
   // chicken -> solo cheddar
   // simple  -> nada
   function configureExtrasFor(item){
-    cconst name = item.name.toLowerCase();
+    const kind = (item.kind || "").toLowerCase();
 
-  const rowPatties = document.getElementById("rowPatties");
-  const rowCheddar = document.getElementById("rowCheddar");
-
-  if(name.includes("doble")){
-    rowPatties.style.display = "flex";
-    rowCheddar.style.display = "flex";
-  } else if(name.includes("pollo")){
-    rowPatties.style.display = "none";
-    rowCheddar.style.display = "flex";
-  } else {
-    rowPatties.style.display = "none";
-    rowCheddar.style.display = "none";
+    if(kind === "double"){
+      rowPatties.style.display = "flex";
+      rowCheddar.style.display = "flex";
+    } else if(kind === "chicken"){
+      rowPatties.style.display = "none";
+      rowCheddar.style.display = "flex";
+    } else {
+      // simples y cualquier otro tipo
+      rowPatties.style.display = "none";
+      rowCheddar.style.display = "none";
+    }
   }
 
-  updateUnitPreview();
-  $("#overlayCustomize").style.display = "flex";
-}
+  function updatePreview(){
+    if(!currentItem) return;
 
-function editBurger(id){
-  const b = cart.burger[id];
-  if(!b) return;
+    const extras = {
+      patty: Number(patVal.textContent),
+      cheddar: Number(cheVal.textContent)
+    };
 
-  openCustomize(b.item, "edit", id);
+    const base = currentItem.price;
+    const precioPatty = extras.patty * EXTRA_PRICE_PATTY;
+    const precioCheddar = extras.cheddar * EXTRA_PRICE_CHEDDAR;
+    const subtotal = base + precioPatty + precioCheddar;
 
-  if(b.friesRaw){
-    const r = document.querySelector(`input[name='fries'][value='${b.friesRaw}']`);
-    if(r) r.checked = true;
+    document.getElementById("precioBaseTxt").textContent =
+      "Precio base: " + money(base);
+
+    const patTxt = document.getElementById("precioPattyTxt");
+    if(extras.patty > 0){
+      patTxt.style.display = "block";
+      patTxt.textContent =
+        `Medallón extra (x${extras.patty}): ${money(precioPatty)}`;
+    } else {
+      patTxt.style.display = "none";
+    }
+
+    const cheTxt = document.getElementById("precioCheddarTxt");
+    if(extras.cheddar > 0){
+      cheTxt.style.display = "block";
+      cheTxt.textContent =
+        `Cheddar extra (x${extras.cheddar}): ${money(precioCheddar)}`;
+    } else {
+      cheTxt.style.display = "none";
+    }
+
+    document.getElementById("subtotalTxt").textContent = money(subtotal);
+    document.getElementById("pricePreview").textContent = money(subtotal);
+
+    btnAdd.textContent = "Agregar al carrito — " + money(subtotal);
   }
 
-  $("#patVal").textContent = b.extras.patty;
-  $("#cheVal").textContent = b.extras.cheddar;
-
-  $("#notes").value = b.notes || "";
-  $("#notesCount").textContent = (b.notes||"").length + "/200";
-
-  updateUnitPreview();
-}
-
-$("#patInc").onclick = ()=>{
-  let v = +$("#patVal").textContent;
-  if(v<2){
-    $("#patVal").textContent = v+1;
-    updateUnitPreview();
+  function resetFries(){
+    document.querySelectorAll("input[name='fries']").forEach(r=>r.checked=false);
   }
-};
-$("#patDec").onclick = ()=>{
-  let v = +$("#patVal").textContent;
-  if(v>0){
-    $("#patVal").textContent = v-1;
-    updateUnitPreview();
+
+  function openCustomize(item){
+    currentItem = item;
+
+    // título tipo mostrador: "Personalizar: Cheeseburger Simple"
+    modTitle.textContent = "Personalizar: " + (item.name || "");
+
+    resetFries();
+    patVal.textContent = "0";
+    cheVal.textContent = "0";
+    notes.value = "";
+
+    configureExtrasFor(item);   // 👈 decide si se ven los extras
+    updatePreview();
+
+    overlay.classList.add("open");
   }
-};
 
-$("#cheInc").onclick = ()=>{
-  let v = +$("#cheVal").textContent;
-  if(v<3){
-    $("#cheVal").textContent = v+1;
-    updateUnitPreview();
-  }
-};
-$("#cheDec").onclick = ()=>{
-  let v = +$("#cheVal").textContent;
-  if(v>0){
-    $("#cheVal").textContent = v-1;
-    updateUnitPreview();
-  }
-};
+  btnCancel.onclick = ()=> overlay.classList.remove("open");
 
-$("#btnCancel").onclick = ()=>
-  $("#overlayCustomize").style.display="none";
+  patInc.onclick=()=>{ let v=+patVal.textContent; if(v<2) patVal.textContent=v+1; updatePreview(); };
+  patDec.onclick=()=>{ let v=+patVal.textContent; if(v>0) patVal.textContent=v-1; updatePreview(); };
+  cheInc.onclick=()=>{ let v=+cheVal.textContent; if(v<3) cheVal.textContent=v+1; updatePreview(); };
+  cheDec.onclick=()=>{ let v=+cheVal.textContent; if(v>0) cheVal.textContent=v-1; updatePreview(); };
 
-$("#btnAdd").onclick = ()=>{
-  const fries = document.querySelector("input[name='fries']:checked");
-  const friesValue = fries ? fries.value : "";
-  const friesName =
-      friesValue==="con_sazon" ? "Sazonadas" :
-      friesValue==="con_sal"   ? "Con sal" :
-      friesValue==="sin_sal"   ? "Sin sal" :
-      "Sin papas";
+  btnAdd.onclick = ()=>{
+    const friesEl = document.querySelector("input[name='fries']:checked");
+    if(!friesEl){
+      alert("Elegí el tipo de papas");
+      return;
+    }
 
-  const entry = {
-    item: currentItem,
-    qty: 1,
-    fries: friesName,
-    friesRaw: friesValue,
-    extras: {
-      patty: Number($("#patVal").textContent),
-      cheddar: Number($("#cheVal").textContent),
-      EXTRA_PRICE_PATTY,
-      EXTRA_PRICE_CHEDDAR
-    },
-    notes: $("#notes").value.trim()
+    const extras = {
+      patty:  Number(patVal.textContent),
+      cheddar:Number(cheVal.textContent)
+    };
+
+    const key =
+      currentItem.id +
+      "|fries:"+friesEl.value +
+      "|patty:"+extras.patty +
+      "|cheddar:"+extras.cheddar +
+      "|notes:"+notes.value.trim();
+
+    if(!cart.burger[key]){
+      cart.burger[key] = {
+        qty:1,
+        item:currentItem,
+        fries:friesEl.value,
+        extras,
+        notes:notes.value.trim()
+      };
+    } else {
+      cart.burger[key].qty++;
+    }
+
+    saveCart();
+    renderCart();
+    overlay.classList.remove("open");
   };
-
-  if(currentMode==="edit" && currentEditId){
-    entry.qty = cart.burger[currentEditId].qty;
-    cart.burger[currentEditId] = entry;
-  } else {
-    const id = currentItem.id + "_" + Date.now();
-    cart.burger[id] = entry;
-  }
-
-  $("#overlayCustomize").style.display="none";
-  renderCart();
-};
 
   /* ==== DRAWER — ABRIR / CERRAR ==== */
   const drawer = document.getElementById("drawer");
@@ -1091,5 +1102,6 @@ $("#btnAdd").onclick = ()=>{
   renderCart();
   renderStatus();
 </script>
+
 </body>
 </html>
