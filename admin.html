@@ -8,23 +8,23 @@
 const TTL_HOURS = 20;
 const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
 
-function sessionValid(){
+function sessionValid() {
   const ok = localStorage.getItem('rb_admin_ok') === 'true';
   const ts = Number(localStorage.getItem('rb_admin_t') || 0);
   return ok && (Date.now() - ts) < TTL_MS;
 }
-function bumpSession(){
+function bumpSession() {
   if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
 }
-function logout(){
+function logout() {
   localStorage.removeItem('rb_admin_ok');
   localStorage.removeItem('rb_admin_t');
   localStorage.removeItem('rb_auth_v2');
   sessionStorage.removeItem('rb_auth_v2');
   location.replace('login.html');
 }
-(function requireSession(){
-  if (!sessionValid()){
+(function requireSession() {
+  if (!sessionValid()) {
     const next = encodeURIComponent(
       (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
       (location.search || '') + (location.hash || '')
@@ -44,7 +44,7 @@ function logout(){
 
 <style>
 :root{
-  --primary:#625A45; --text:#111; --muted:#666; --bg:#f6f6f6; 
+  --primary:#625A45; --text:#111; --muted:#666; --bg:#f6f6f6;
   --card:#fff; --ring:#eaeaea; --shadow:0 10px 28px rgba(0,0,0,.08);
   --good:#2e7d32; --warn:#fb8c00; --bad:#d32f2f; --radius:18px;
 }
@@ -128,7 +128,10 @@ main{
   padding:22px;
 }
 
+h1{font-size:26px;margin:8px 0 10px}
 h2{font-size:20px;margin:8px 0 14px}
+h3{font-size:17px;margin:8px 0}
+.muted{color:var(--muted)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 
 .btn{
@@ -155,6 +158,7 @@ input,textarea,select{
   background:#fff;
 }
 
+/* preview imagen */
 .img-preview{
   width:80px;height:80px;
   object-fit:cover;
@@ -163,8 +167,9 @@ input,textarea,select{
   background:#fafafa;
 }
 
+/* tabla */
 table{width:100%;border-collapse:separate;border-spacing:0 8px}
-td,th{padding:10px 12px;background:#fff}
+td,th{padding:10px 12px;background:#fff;text-align:left}
 th{
   color:#555;
   font-size:13px;
@@ -179,7 +184,7 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
 
 <header>
   <div class="topbar">
-    <a class="brand"><img src="images/logo.png">Rhodes Burgers • Admin</a>
+    <a class="brand" href="#"><img src="images/logo.png">Rhodes Burgers • Admin</a>
     <div class="spacer"></div>
 
     <div class="store-controls" id="storeControls">
@@ -208,11 +213,13 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
 
 <main>
 
+<!-- ============================================================
+       CRUD DE PRODUCTOS
+=============================================================== -->
 <section class="card featured">
-  <h2>Gestión del Menú (CRUD + Orden Visual)</h2>
-  <p class="muted" style="margin-bottom:14px">Agregá, editá, eliminá y ordená visualmente el menú.</p>
+  <h2>Gestión del Menú (CRUD + Quitar del menú)</h2>
+  <p class="muted">Agregá, editá, pausá, activá y sacá del menú cualquier producto.</p>
 
-  <!-- FORMULARIO CRUD -->
   <div class="form-grid" style="
     display:grid;
     grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
@@ -262,6 +269,7 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
   <div style="height:1px;background:#ddd;margin:18px 0"></div>
 
   <h3>Lista de productos</h3>
+
   <div style="overflow:auto">
     <table>
       <thead>
@@ -280,6 +288,30 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
   </div>
 </section>
 <!-- ============================================================
+     ORDEN VISUAL DEL MENÚ
+=============================================================== -->
+<section class="card">
+  <h2>Orden Visual del Menú</h2>
+  <p class="muted">Arrastrá para ordenar la posición de los productos.</p>
+
+  <div class="row" id="orderCatButtons" style="margin-bottom:15px">
+    <button class="btn primary" data-cat="hamburguesas">Hamburguesas</button>
+    <button class="btn" data-cat="bebidas">Bebidas</button>
+    <button class="btn" data-cat="guarniciones">Guarniciones</button>
+  </div>
+
+  <div id="orderGrid" style="
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(150px,1fr));
+    gap:16px;
+  "></div>
+
+  <div style="margin-top:16px">
+    <button class="btn primary" id="btnSaveOrder">Guardar orden</button>
+  </div>
+</section>
+
+<!-- ============================================================
      FIREBASE
 =============================================================== -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -295,40 +327,40 @@ const firebaseConfig = {
   messagingSenderId: "951646688091",
   appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
 };
-try{ firebase.initializeApp(firebaseConfig); } catch(e){}
-try{
+try { firebase.initializeApp(firebaseConfig); } catch(e){}
+try {
   firebase.firestore().settings({ experimentalForceLongPolling:true, useFetchStreams:false });
-}catch(e){}
+} catch(e){}
 
 const db = firebase.firestore();
 const productsCol = db.collection('products');
 
-/* Helpers */
+// Helper
 const $ = s => document.querySelector(s);
 
 /* ============================================================
-   (1) FUNCIÓN PARA DETECTAR kind AUTOMÁTICAMENTE
+   AUTO-DETECTAR TIPO DE HAMBURGUESA
 =============================================================== */
 function autoDetectKind(id, name = "", desc = "") {
-  id   = id.toLowerCase();
+  id = id.toLowerCase();
   name = (name || "").toLowerCase();
   desc = (desc || "").toLowerCase();
 
-  if (id.includes("_doble"))  return "doble";
-  if (id.includes("_simple")) return "simple";
-  if (id.includes("_pollo"))  return "pollo";
+  if(id.includes("_doble")) return "doble";
+  if(id.includes("_simple")) return "simple";
+  if(id.includes("_pollo")) return "pollo";
 
-  if (name.includes("doble")) return "doble";
-  if (name.includes("pollo")) return "pollo";
+  if(name.includes("doble")) return "doble";
+  if(name.includes("pollo")) return "pollo";
 
-  if (desc.includes("doble")) return "doble";
-  if (desc.includes("pollo")) return "pollo";
+  if(desc.includes("doble")) return "doble";
+  if(desc.includes("pollo")) return "pollo";
 
   return "simple";
 }
 
 /* ============================================================
-   (2) Conversión archivo → Base64
+   CONVERTIR ARCHIVO → BASE64
 =============================================================== */
 async function fileToBase64(file){
   return new Promise((resolve, reject)=>{
@@ -340,7 +372,7 @@ async function fileToBase64(file){
 }
 
 /* ============================================================
-   (3) GUARDAR / ACTUALIZAR PRODUCTO
+   GUARDAR / ACTUALIZAR PRODUCTO
 =============================================================== */
 async function saveProduct(){
   const id = $('#prdId').value.trim();
@@ -353,7 +385,7 @@ async function saveProduct(){
 
   if(!id){ alert("Ingresá un ID"); return; }
   if(!name){ alert("Ingresá un nombre"); return; }
-  if(!(price>0)){ alert("Precio inválido"); return; }
+  if(!(price > 0)){ alert("Precio inválido"); return; }
 
   let finalImg = urlImg || null;
   if(file){
@@ -367,7 +399,7 @@ async function saveProduct(){
     img: finalImg,
     description: desc || null,
     available: true,
-    hidden: false,   // 🔥 NUEVO
+    hiddenFromMenu: false,   // 🔥 NUEVO
     kind: autoDetectKind(id, name, desc),
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -378,12 +410,13 @@ async function saveProduct(){
     alert("Producto guardado correctamente.");
     clearProductForm();
   }catch(e){
+    console.error(e);
     alert("Error al guardar.");
   }
 }
 
 /* ============================================================
-   (4) LIMPIAR FORMULARIO
+   LIMPIAR FORMULARIO
 =============================================================== */
 function clearProductForm(){
   $('#prdId').value = '';
@@ -396,7 +429,7 @@ function clearProductForm(){
 }
 
 /* ============================================================
-   (5) Cargar producto al formulario
+   CARGAR FORMULARIO PARA EDITAR
 =============================================================== */
 function loadProductIntoForm(data, id){
   $('#prdId').value = id;
@@ -409,10 +442,10 @@ function loadProductIntoForm(data, id){
 }
 
 /* ============================================================
-   (6) 🔥 BORRADO TOTAL (NO recomendado)
+   ELIMINAR PRODUCTO
 =============================================================== */
 async function deleteProduct(id){
-  if(!confirm("¿ELIMINAR PERMANENTEMENTE '"+id+"'?")) return;
+  if(!confirm("¿Eliminar " + id + "?")) return;
   try{
     await productsCol.doc(id).delete();
   }catch(e){
@@ -421,7 +454,7 @@ async function deleteProduct(id){
 }
 
 /* ============================================================
-   (7) 🔥 Toggle disponibilidad (available)
+   DESACTIVAR / ACTIVAR PRODUCTO (available)
 =============================================================== */
 async function toggleProductAvailability(id, current){
   try{
@@ -435,22 +468,22 @@ async function toggleProductAvailability(id, current){
 }
 
 /* ============================================================
-   (8) 🔥 NUEVO — Toggle ocultar del menú (hidden)
+   QUITAR DEL MENÚ (hiddenFromMenu)
 =============================================================== */
-async function toggleProductHidden(id, current){
+async function toggleHidden(id, current){
   try{
     await productsCol.doc(id).set({
-      hidden: !current,
+      hiddenFromMenu: !current,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     },{merge:true});
   }catch(e){
-    alert("Error ocultando/mostrando el producto.");
+    alert("No se pudo modificar visibilidad.");
   }
 }
-
-/* ============================================================
-   (9) RENDER TABLA CRUD
-=============================================================== */
+<!-- ============================================================
+   (8) Render tabla CRUD
+=============================================================== -->
+<script>
 function renderProductsTable(snapshot){
   const tbody = $('#prdTable');
   tbody.innerHTML = '';
@@ -467,29 +500,38 @@ function renderProductsTable(snapshot){
       ? `<span class="pill ok">Activo</span>`
       : `<span class="pill off">Pausado</span>`;
 
-    const hiddenTag = p.hidden
-      ? `<span style="font-size:12px;color:#b00;font-weight:700">(OCULTO)</span>`
-      : ``;
+    const hiddenTag = p.hiddenFromMenu
+      ? `<span class="pill off" style="background:#ffecec;border-color:#ffbaba;color:#a33">
+           Oculto
+         </span>`
+      : `<span class="pill ok" style="background:#e8f5ff;border-color:#bae1ff;color:#1565c0">
+           Visible
+         </span>`;
 
     tr.innerHTML = `
-      <td>${doc.id} ${hiddenTag}</td>
+      <td>${doc.id}</td>
       <td>${imgTag}</td>
       <td>${p.name}</td>
       <td>${p.category}</td>
       <td>$${p.price}</td>
-      <td>${availableTag}</td>
-
+      <td>
+        ${availableTag}<br>
+        ${hiddenTag}
+      </td>
       <td class="row">
         <button class="btn good" data-act="edit" data-id="${doc.id}">Editar</button>
 
-        <button class="btn warn" data-act="toggle" 
-                data-id="${doc.id}" data-av="${p.available}">
+        <button class="btn warn" data-act="toggle" data-id="${doc.id}" data-av="${p.available}">
           ${p.available ? "Desactivar" : "Activar"}
         </button>
 
-        <button class="btn primary" data-act="hide" 
-                data-id="${doc.id}" data-hidden="${p.hidden}">
-          ${p.hidden ? "Mostrar en menú" : "Quitar del menú"}
+        <!-- 🔥 NUEVO: QUITAR / MOSTRAR EN MENÚ -->
+        <button class="btn" 
+                style="background:#625A45;color:white" 
+                data-act="hidden" 
+                data-id="${doc.id}" 
+                data-hid="${p.hiddenFromMenu}">
+          ${p.hiddenFromMenu ? "Mostrar en menú" : "Quitar del menú"}
         </button>
 
         <button class="btn bad" data-act="delete" data-id="${doc.id}">
@@ -501,9 +543,10 @@ function renderProductsTable(snapshot){
     tbody.appendChild(tr);
   });
 
+  /* Eventos */
   tbody.querySelectorAll("button").forEach(btn=>{
-    btn.onclick = async()=>{
-      const id = btn.dataset.id;
+    btn.onclick = async ()=>{
+      const id  = btn.dataset.id;
       const act = btn.dataset.act;
 
       if(act === "edit"){
@@ -513,8 +556,8 @@ function renderProductsTable(snapshot){
       } else if(act === "toggle"){
         toggleProductAvailability(id, btn.dataset.av === "true");
 
-      } else if(act === "hide"){
-        toggleProductHidden(id, btn.dataset.hidden === "true");
+      } else if(act === "hidden"){
+        toggleHidden(id, btn.dataset.hid === "true");
 
       } else if(act === "delete"){
         deleteProduct(id);
@@ -524,12 +567,13 @@ function renderProductsTable(snapshot){
 }
 
 /* ============================================================
-   (10) Suscripción
+   (9) Suscripción
 =============================================================== */
 productsCol.onSnapshot(renderProductsTable);
 </script>
+
 <!-- ============================================================
-      🔥 ORDEN VISUAL (DRAG & DROP con menuOrder)
+   ORDEN VISUAL (DRAG & DROP con menuOrder)
 =============================================================== -->
 <script>
 let ORDER_PRODUCTS = [];
@@ -539,16 +583,12 @@ const menuOrderRef   = db.collection("config").doc("menuOrder");
 const orderGrid      = document.querySelector("#orderGrid");
 const orderCatButtons = document.querySelector("#orderCatButtons");
 
-/* ============================================================
-      Cambio de categoría
-=============================================================== */
+/* Cambio de categoría */
 window.addEventListener("DOMContentLoaded", ()=>{
-
   if(orderCatButtons){
     orderCatButtons.querySelectorAll("button").forEach(btn=>{
       btn.onclick = ()=>{
-        orderCatButtons
-          .querySelectorAll("button")
+        orderCatButtons.querySelectorAll("button")
           .forEach(b=> b.classList.remove("primary"));
 
         btn.classList.add("primary");
@@ -557,12 +597,9 @@ window.addEventListener("DOMContentLoaded", ()=>{
       };
     });
   }
-
 });
 
-/* ============================================================
-      Cargar orden guardado
-=============================================================== */
+/* Cargar orden guardado */
 let MENU_ORDER = {};
 
 menuOrderRef.onSnapshot(snap=>{
@@ -570,16 +607,13 @@ menuOrderRef.onSnapshot(snap=>{
   renderOrderGrid();
 });
 
-/* ============================================================
-      Render grid con el orden respetado
-=============================================================== */
+/* Render grid */
 function renderOrderGrid(){
-
   if(!orderGrid) return;
 
   orderGrid.innerHTML = "";
 
-  const list = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT && !p.hidden);
+  const list = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT && !p.hiddenFromMenu);
   const orderedIds = MENU_ORDER[CURRENT_CAT] || [];
 
   list.sort((a,b)=>{
@@ -625,40 +659,12 @@ function renderOrderGrid(){
   });
 }
 
-/* ============================================================
-      Suscripción a productos
-=============================================================== */
+/* Suscripción */
 productsCol.onSnapshot(snap=>{
   ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
   renderOrderGrid();
 });
 </script>
-
-<!-- Guardar orden -->
-<script>
-window.addEventListener("DOMContentLoaded", ()=>{
-
-  const btnSaveOrder = document.querySelector("#btnSaveOrder");
-  if(!btnSaveOrder){
-    console.error("btnSaveOrder NO EXISTE EN EL DOM");
-    return;
-  }
-
-  btnSaveOrder.onclick = async ()=>{
-    const ids = [...orderGrid.querySelectorAll(".orderCard")]
-      .map(c => c.dataset.id);
-
-    await menuOrderRef.set({
-      ...MENU_ORDER,
-      [CURRENT_CAT]: ids
-    }, {merge:true});
-
-    alert("Orden guardada.");
-  };
-
-});
-</script>
-
 <!-- ============================================================
       🔥 INVENTARIO
 =============================================================== -->
@@ -675,6 +681,7 @@ function renderInventory(snapshot){
 
     const el = document.createElement('div');
     el.className = "tile";
+
     el.innerHTML = `
       <div>
         <div style="font-weight:800">${p.name}</div>
@@ -692,9 +699,11 @@ function renderInventory(snapshot){
         </button>
       </div>
     `;
+
     invList.appendChild(el);
   });
 
+  /* eventos */
   invList.querySelectorAll("button[data-id]").forEach(btn=>{
     btn.onclick = async()=>{
       const id = btn.dataset.id;
@@ -714,6 +723,7 @@ function renderInventory(snapshot){
 
 productsCol.onSnapshot(renderInventory);
 </script>
+
 
 <!-- ============================================================
       🔥 SIDES (configuración de papas)
@@ -759,6 +769,7 @@ function renderSidesUI(state){
     sidesContainer.appendChild(el);
   });
 
+  /* eventos */
   sidesContainer.querySelectorAll("button[data-side]").forEach(btn=>{
     btn.onclick = async()=>{
       const key = btn.dataset.side;
@@ -771,7 +782,6 @@ function renderSidesUI(state){
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         },{merge:true});
       }catch(e){}
-
       btn.disabled = false;
     };
   });
@@ -781,6 +791,8 @@ sidesRef().onSnapshot(snap=>{
   renderSidesUI(snap.exists ? snap.data() : {});
 });
 </script>
+
+
 
 <!-- ============================================================
       🔥 STORE OVERRIDE (Horarios, Forzar abierto)
@@ -869,8 +881,11 @@ btnSaveUntil.onclick = async()=>{
   alert("Guardado correctamente.");
 };
 </script>
+
+
+
 <!-- ============================================================
-      🔥 CUPONES (CRUD COMPLETO)
+      🔥 CUPONES
 =============================================================== -->
 <script>
 const cpTbody = document.querySelector("#cpTable");
@@ -916,30 +931,13 @@ function upsertCouponFromForm(){
 document.querySelector("#btnCreateCp").onclick = upsertCouponFromForm;
 
 
-function fmtDate(ts){
-  if(!ts) return null;
-  try{
-    if(typeof ts.toDate === "function") return ts.toDate();
-    if(ts.seconds) return new Date(ts.seconds * 1000);
-    return new Date(ts);
-  }catch(e){
-    return null;
-  }
-}
-
+/* Render cupones */
 function renderCoupons(list){
   cpTbody.innerHTML = "";
 
   list.forEach(doc=>{
     const c = doc.data();
     const uses = `${c.uses||0}${c.maxUses?` / ${c.maxUses}`:''}`;
-
-    const vf = c.validFrom ? fmtDate(c.validFrom) : null;
-    const vt = c.validTo   ? fmtDate(c.validTo)   : null;
-
-    const vig =
-      (vf ? vf.toLocaleDateString("es-AR") + " " : "") +
-      (vt ? "→ " + vt.toLocaleDateString("es-AR") : "");
 
     const tr = document.createElement("tr");
 
@@ -948,12 +946,19 @@ function renderCoupons(list){
       <td>${c.type === "percent" ? "%" : "$"}</td>
       <td>${c.value}</td>
       <td>${uses}</td>
-      <td>${vig || "-"}</td>
+      <td>${
+        c.validFrom || c.validTo 
+          ? ((c.validFrom?fmtDate(c.validFrom).toLocaleDateString("es-AR"):"") +
+             (c.validTo?" → "+fmtDate(c.validTo).toLocaleDateString("es-AR"):""))
+          : "-"
+      }</td>
       <td>${c.enabled ? "<span class='pill ok'>HABILITADO</span>" : "<span class='pill off'>PAUSADO</span>"}</td>
+
       <td class="row">
         <button class="btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
           ${c.enabled ? "Deshabilitar" : "Habilitar"}
         </button>
+
         <button class="btn bad" data-act="delete" data-id="${doc.id}">
           Eliminar
         </button>
@@ -963,9 +968,10 @@ function renderCoupons(list){
     cpTbody.appendChild(tr);
   });
 
+  /* eventos */
   cpTbody.querySelectorAll("button[data-act]").forEach(btn=>{
     btn.onclick = async()=>{
-      const id  = btn.dataset.id;
+      const id = btn.dataset.id;
       const act = btn.dataset.act;
 
       if(act === "toggle"){
@@ -994,6 +1000,8 @@ async function loadCoupons(){
 }
 </script>
 
+
+
 <!-- ============================================================
       🔥 BOOT FINAL
 =============================================================== -->
@@ -1002,6 +1010,8 @@ async function loadCoupons(){
   loadCoupons();
 })();
 </script>
+
+
 
 <!-- ============================================================
       🔥 BOTONES FINALES CRUD
