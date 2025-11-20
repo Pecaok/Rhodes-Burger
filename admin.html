@@ -235,3 +235,683 @@ th{
     </table>
   </div>
 </section>
+<!-- ============================================================
+     FIREBASE
+=============================================================== -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+// Firebase Config
+const firebaseConfig = {
+  apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+  authDomain: "rhodes-burguers.firebaseapp.com",
+  projectId: "rhodes-burguers",
+  storageBucket: "rhodes-burguers.firebasestorage.app",
+  messagingSenderId: "951646688091",
+  appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+};
+
+try { firebase.initializeApp(firebaseConfig); } catch(e){}
+try {
+  firebase.firestore().settings({ experimentalForceLongPolling:true });
+} catch(e){}
+
+const db = firebase.firestore();
+const productsCol = db.collection("products");
+
+/* ============================================================
+     DETECTAR kind AUTOMÁTICAMENTE
+=============================================================== */
+function autoDetectKind(id, name="", desc="") {
+  id = id.toLowerCase();
+  name = name.toLowerCase();
+  desc = desc.toLowerCase();
+
+  if(id.includes("_doble"))  return "doble";
+  if(id.includes("_simple")) return "simple";
+  if(id.includes("_pollo"))  return "pollo";
+
+  if(name.includes("doble")) return "doble";
+  if(name.includes("pollo")) return "pollo";
+  if(desc.includes("doble")) return "doble";
+  if(desc.includes("pollo")) return "pollo";
+
+  return "simple";
+}
+
+/* ============================================================
+     ARCHIVO → BASE64
+=============================================================== */
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const r = new FileReader();
+    r.onload = ()=> resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+/* ============================================================
+     GUARDAR / ACTUALIZAR PRODUCTO
+=============================================================== */
+async function saveProduct(){
+  const id   = document.querySelector("#prdId").value.trim();
+  const name = document.querySelector("#prdName").value.trim();
+  const cat  = document.querySelector("#prdCategory").value;
+  const price = Number(document.querySelector("#prdPrice").value || 0);
+  const urlImg = document.querySelector("#prdImg").value.trim();
+  const desc = document.querySelector("#prdDesc").value.trim();
+  const file = document.querySelector("#prdImgFile").files[0];
+
+  if(!id){ alert("Ingresá ID"); return; }
+  if(!name){ alert("Ingresá nombre"); return; }
+  if(!(price > 0)){ alert("Precio inválido"); return; }
+
+  let finalImg = urlImg || null;
+  if(file) finalImg = await fileToBase64(file);
+
+  const payload = {
+    name,
+    category: cat,
+    price,
+    img: finalImg,
+    description: desc || null,
+    available: true,
+    hidden: false,
+    kind: autoDetectKind(id, name, desc),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  try {
+    await productsCol.doc(id).set(payload, { merge:true });
+    alert("Guardado correctamente");
+    clearProductForm();
+  } catch(e){
+    console.error(e);
+    alert("Error guardando.");
+  }
+}
+
+/* ============================================================
+     LIMPIAR FORMULARIO
+=============================================================== */
+function clearProductForm(){
+  document.querySelector("#prdId").value = "";
+  document.querySelector("#prdName").value = "";
+  document.querySelector("#prdCategory").value = "hamburguesas";
+  document.querySelector("#prdPrice").value = "";
+  document.querySelector("#prdImg").value = "";
+  document.querySelector("#prdImgFile").value = "";
+  document.querySelector("#prdDesc").value = "";
+}
+
+/* ============================================================
+     CARGAR PARA EDITAR
+=============================================================== */
+async function loadProductIntoForm(data, id){
+  document.querySelector("#prdId").value = id;
+  document.querySelector("#prdName").value = data.name || "";
+  document.querySelector("#prdCategory").value = data.category || "hamburguesas";
+  document.querySelector("#prdPrice").value = data.price || "";
+  document.querySelector("#prdImg").value = (data.img && !data.img.startsWith("data:")) ? data.img : "";
+  document.querySelector("#prdImgFile").value = "";
+  document.querySelector("#prdDesc").value = data.description || "";
+}
+
+/* ============================================================
+     ELIMINAR
+=============================================================== */
+async function deleteProduct(id){
+  if(!confirm("¿Eliminar "+id+"?")) return;
+  await productsCol.doc(id).delete();
+}
+
+/* ============================================================
+     CAMBIAR available
+=============================================================== */
+async function toggleAvailable(id, current){
+  await productsCol.doc(id).set({
+    available: !current,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge:true });
+}
+
+/* ============================================================
+     CAMBIAR hidden (Quitar del menú)
+=============================================================== */
+async function toggleHidden(id, current){
+  await productsCol.doc(id).set({
+    hidden: !current,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge:true });
+}
+
+/* ============================================================
+     RENDER TABLA
+=============================================================== */
+function renderProductsTable(snapshot){
+  const tbody = document.querySelector("#prdTable");
+  tbody.innerHTML = "";
+
+  snapshot.forEach(doc=>{
+    const p = doc.data();
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${doc.id}</td>
+      <td>${p.img ? `<img src="${p.img}" class="img-preview">` : `<div class="img-preview"></div>`}</td>
+      <td>${p.name}</td>
+      <td>${p.category}</td>
+      <td>$${p.price}</td>
+      <td>
+        <span class="pill ${p.available ? 'ok' : 'off'}">${p.available ? 'Activo' : 'Pausado'}</span>
+        <br>
+        <span class="pill ${p.hidden ? 'off' : 'ok'}" style="margin-top:4px">
+          ${p.hidden ? 'Oculto' : 'Visible'}
+        </span>
+      </td>
+
+      <td class="row">
+        <button class="btn good" data-act="edit" data-id="${doc.id}">Editar</button>
+        <button class="btn warn" data-act="avail" data-id="${doc.id}" data-av="${p.available}">
+          ${p.available ? "Desactivar" : "Activar"}
+        </button>
+        <button class="btn primary" data-act="hide" data-id="${doc.id}" data-hid="${p.hidden}">
+          ${p.hidden ? "Volver a mostrar" : "Quitar del menú"}
+        </button>
+        <button class="btn bad" data-act="delete" data-id="${doc.id}">Eliminar</button>
+      </td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll("button").forEach(btn=>{
+    btn.onclick = async ()=>{
+      const id  = btn.dataset.id;
+      const act = btn.dataset.act;
+
+      if(act==="edit"){
+        const snap = await productsCol.doc(id).get();
+        loadProductIntoForm(snap.data(), id);
+
+      } else if(act==="avail"){
+        toggleAvailable(id, btn.dataset.av === "true");
+
+      } else if(act==="hide"){
+        toggleHidden(id, btn.dataset.hid === "true");
+
+      } else if(act==="delete"){
+        deleteProduct(id);
+      }
+    };
+  });
+}
+
+productsCol.onSnapshot(renderProductsTable);
+</script>
+<!-- ============================================================
+     ORDEN VISUAL DEL MENÚ — DRAG & DROP
+=============================================================== -->
+<script>
+let ORDER_PRODUCTS = [];
+let CURRENT_CAT = "hamburguesas";
+
+const menuOrderRef = db.collection("config").doc("menuOrder");
+const orderGrid = document.querySelector("#orderGrid");
+const orderCatButtons = document.querySelector("#orderCatButtons");
+
+window.addEventListener("DOMContentLoaded", () => {
+  if(orderCatButtons){
+    orderCatButtons.querySelectorAll("button").forEach(btn=>{
+      btn.onclick = ()=>{
+        orderCatButtons.querySelectorAll("button").forEach(b=> b.classList.remove("primary"));
+        btn.classList.add("primary");
+        CURRENT_CAT = btn.dataset.cat;
+        renderOrderGrid();
+      };
+    });
+  }
+});
+
+/* ============================================================
+   Escuchar cambios en menuOrder
+=============================================================== */
+let MENU_ORDER = {};
+
+menuOrderRef.onSnapshot(snap=>{
+  MENU_ORDER = snap.exists ? snap.data() : {};
+  renderOrderGrid();
+});
+
+/* ============================================================
+   Render del grid respetando el orden guardado
+=============================================================== */
+function renderOrderGrid(){
+  if(!orderGrid) return;
+
+  orderGrid.innerHTML = "";
+
+  const list = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT);
+  const orderIds = MENU_ORDER[CURRENT_CAT] || [];
+
+  list.sort((a,b)=>{
+    const ia = orderIds.indexOf(a.id);
+    const ib = orderIds.indexOf(b.id);
+
+    if(ia === -1 && ib === -1) return a.name.localeCompare(b.name);
+    if(ia === -1) return 1;
+    if(ib === -1) return -1;
+    return ia - ib;
+  });
+
+  list.forEach(p=>{
+    const card = document.createElement("div");
+    card.className = "orderCard";
+    card.draggable = true;
+    card.dataset.id = p.id;
+
+    card.innerHTML = `
+      <div style="border:1px solid #ddd;border-radius:12px;overflow:hidden;background:#fff">
+        <img src="${p.img || ""}" style="width:100%;height:110px;object-fit:cover">
+        <div style="padding:10px;font-weight:700;font-size:14px">${p.name}</div>
+      </div>
+    `;
+
+    card.addEventListener("dragstart", e=>{
+      e.dataTransfer.setData("id", p.id);
+      card.classList.add("dragging");
+    });
+
+    card.addEventListener("dragend", ()=>{
+      card.classList.remove("dragging");
+    });
+
+    card.addEventListener("dragover", e=>{
+      e.preventDefault();
+      const dragging = orderGrid.querySelector(".dragging");
+      if(!dragging || dragging === card) return;
+      orderGrid.insertBefore(dragging, card);
+    });
+
+    orderGrid.appendChild(card);
+  });
+}
+
+/* ============================================================
+   Suscripción a productos
+=============================================================== */
+productsCol.onSnapshot(snap=>{
+  ORDER_PRODUCTS = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+  renderOrderGrid();
+});
+</script>
+
+<!-- ============================================================
+     BOTÓN GUARDAR ORDEN
+=============================================================== -->
+<script>
+window.addEventListener("DOMContentLoaded", ()=>{
+  const btnSaveOrder = document.querySelector("#btnSaveOrder");
+
+  if(btnSaveOrder){
+    btnSaveOrder.onclick = async ()=>{
+      const ids = [...orderGrid.querySelectorAll(".orderCard")].map(c => c.dataset.id);
+
+      await menuOrderRef.set({
+        ...MENU_ORDER,
+        [CURRENT_CAT]: ids
+      }, { merge:true });
+
+      alert("Orden guardada.");
+    };
+  }
+});
+</script>
+
+<!-- ============================================================
+      CONFIGURACIÓN DE PAPAS (SIDES)
+=============================================================== -->
+<script>
+const SIDES_META = [
+  { key:"con_sazon", label:"Con sazón" },
+  { key:"con_sal",   label:"Con sal" },
+  { key:"sin_sal",   label:"Sin sal" }
+];
+
+const sidesRef = () => db.collection("config").doc("sides");
+const sidesContainer = document.querySelector("#sidesContainer");
+
+function renderSidesUI(data){
+  if(!sidesContainer) return;
+  sidesContainer.innerHTML = "";
+
+  SIDES_META.forEach(s=>{
+    const enabled = data ? !!data[s.key] : true;
+
+    const el = document.createElement("div");
+    el.className = "side-pill " + (enabled ? "on" : "off");
+
+    el.innerHTML = `
+      <div>
+        <div style="font-weight:800">${s.label}</div>
+        <div class="muted" style="font-size:13px">
+          ${enabled ? "Visible" : "Bloqueada"} en web y mostrador
+        </div>
+      </div>
+
+      <button class="btn ${enabled?'bad':'good'}"
+              data-key="${s.key}"
+              data-next="${enabled?0:1}">
+        ${enabled ? "Deshabilitar" : "Habilitar"}
+      </button>
+    `;
+
+    sidesContainer.appendChild(el);
+  });
+
+  sidesContainer.querySelectorAll("button[data-key]").forEach(btn=>{
+    btn.onclick = async ()=>{
+      const key = btn.dataset.key;
+      const next = btn.dataset.next === "1";
+
+      btn.disabled = true;
+
+      await sidesRef().set({
+        [key]: next,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge:true });
+
+      btn.disabled = false;
+    };
+  });
+}
+
+sidesRef().onSnapshot(snap=>{
+  renderSidesUI(snap.exists ? snap.data() : {});
+});
+</script>
+<!-- ============================================================
+      🔥 INVENTARIO
+=============================================================== -->
+<script>
+const invList = document.querySelector('#invList');
+
+function renderInventory(snapshot){
+  if(!invList) return;
+  invList.innerHTML = '';
+
+  snapshot.forEach(doc=>{
+    const p = doc.data();
+    const available = !!p.available;
+
+    const el = document.createElement('div');
+    el.className = "tile";
+    el.innerHTML = `
+      <div>
+        <div style="font-weight:800">${p.name}</div>
+        <div class="muted" style="font-size:13px">${p.category}</div>
+      </div>
+
+      <div class="row">
+        <span class="pill ${available?'ok':'off'}">
+          ${available ? 'Disponible' : 'Sin stock'}
+        </span>
+
+        <button class="btn ${available?'warn':'good'}"
+                data-id="${doc.id}" data-next="${available?0:1}">
+          ${available ? 'Desactivar' : 'Activar'}
+        </button>
+      </div>
+    `;
+    invList.appendChild(el);
+  });
+
+  invList.querySelectorAll("button[data-id]").forEach(btn=>{
+    btn.onclick = async()=>{
+      const id = btn.dataset.id;
+      const next = btn.dataset.next === "1";
+
+      try{
+        await productsCol.doc(id).set({
+          available: next,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        },{merge:true});
+      }catch(e){
+        alert("Error cambiando disponibilidad.");
+      }
+    };
+  });
+}
+
+productsCol.onSnapshot(renderInventory);
+</script>
+
+<!-- ============================================================
+      🔥 STORE OVERRIDE (Horarios y forzar abierto)
+=============================================================== -->
+<script>
+const storeRef = () => db.collection("config").doc("store");
+
+const storePill        = document.querySelector("#storePill");
+const storeSub         = document.querySelector("#storeSub");
+const btnOpen          = document.querySelector("#btnForceOpen");
+const btnClose         = document.querySelector("#btnForceClose");
+const forceUntilInput  = document.querySelector("#forceUntil");
+const btnSaveUntil     = document.querySelector("#btnSaveUntil");
+
+function applyStoreDocToUI(d){
+  const on = !!d.forceOpen;
+  let until = null;
+
+  if(d.forceOpenUntil){
+    try{
+      if(typeof d.forceOpenUntil.toDate === "function"){
+        until = d.forceOpenUntil.toDate();
+      } else if(d.forceOpenUntil.seconds){
+        until = new Date(d.forceOpenUntil.seconds * 1000);
+      } else {
+        until = new Date(d.forceOpenUntil);
+      }
+    }catch(e){}
+  }
+
+  const active = on || (until && until.getTime() > Date.now());
+
+  storePill.className = "pill " + (active ? "ok" : "off");
+  storePill.textContent = "Estado: " + (active ? "Forzado ABIERTO" : "Normal");
+
+  if(until && until.getTime() > Date.now()){
+    storeSub.textContent =
+      "Hasta: " +
+      String(until.getHours()).padStart(2,"0") + ":" +
+      String(until.getMinutes()).padStart(2,"0");
+
+    const local = new Date(until.getTime() - until.getTimezoneOffset()*60000);
+    forceUntilInput.value = local.toISOString().slice(0,16);
+  } else {
+    storeSub.textContent = d.forceOpenMessage || "Normal";
+    forceUntilInput.value = "";
+  }
+}
+
+storeRef().onSnapshot(snap=>{
+  applyStoreDocToUI(snap.exists ? snap.data() : {});
+});
+
+btnOpen.onclick = async()=>{
+  await storeRef().set({
+    forceOpen:true,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:true});
+};
+
+btnClose.onclick = async()=>{
+  await storeRef().set({
+    forceOpen:false,
+    forceOpenMessage: firebase.firestore.FieldValue.delete(),
+    forceOpenUntil: firebase.firestore.FieldValue.delete(),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:true});
+};
+
+btnSaveUntil.onclick = async()=>{
+  const v = forceUntilInput.value;
+  if(!v){ alert("Elegí fecha y hora"); return; }
+
+  const local = new Date(v);
+  if(isNaN(local.getTime())){
+    alert("Fecha inválida");
+    return;
+  }
+
+  await storeRef().set({
+    forceOpen:true,
+    forceOpenUntil: firebase.firestore.Timestamp.fromDate(local),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:true});
+
+  alert("Guardado correctamente.");
+};
+</script>
+
+<!-- ============================================================
+      🔥 CUPONES (CRUD COMPLETO)
+=============================================================== -->
+<script>
+const cpTbody = document.querySelector("#cpTable");
+
+function upsertCouponFromForm(){
+  const code = (document.querySelector("#cpCode").value||"").trim().toUpperCase();
+  if(!code){ alert("Ingresá código"); return; }
+
+  const type = document.querySelector("#cpType").value;
+  const value = Number(document.querySelector("#cpValue").value||0);
+  if(!(value>0)){ alert("Valor inválido"); return; }
+
+  const maxUses = Number(document.querySelector("#cpMaxUses").value||0);
+  const note    = (document.querySelector("#cpNote").value||"").trim();
+  const from    = document.querySelector("#cpFrom").value ? new Date(document.querySelector("#cpFrom").value) : null;
+  const to      = document.querySelector("#cpTo").value   ? new Date(document.querySelector("#cpTo").value)   : null;
+
+  const payload = {
+    code, type, value,
+    enabled:true,
+    note: note || null,
+    validFrom: from ? firebase.firestore.Timestamp.fromDate(from) : null,
+    validTo:   to   ? firebase.firestore.Timestamp.fromDate(to)   : null,
+    maxUses: maxUses > 0 ? maxUses : null,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  db.collection("coupons").doc(code)
+    .set({
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      uses:0,
+      ...payload
+    },{merge:true})
+    .then(()=>{
+      alert("Cupón guardado");
+      loadCoupons();
+    })
+    .catch(()=>{
+      alert("Error guardando cupón");
+    });
+}
+
+document.querySelector("#btnCreateCp").onclick = upsertCouponFromForm;
+
+function renderCoupons(list){
+  cpTbody.innerHTML = "";
+
+  list.forEach(doc=>{
+    const c = doc.data();
+    const uses = `${c.uses||0}${c.maxUses?` / ${c.maxUses}`:''}`;
+
+    const vf = c.validFrom ? fmtDate(c.validFrom) : null;
+    const vt = c.validTo   ? fmtDate(c.validTo)   : null;
+
+    const vig =
+      (vf ? vf.toLocaleDateString("es-AR") + " " : "") +
+      (vt ? "→ " + vt.toLocaleDateString("es-AR") : "");
+
+    const tr = document.createElement("tr");
+
+    tr.innerHTML = `
+      <td>${c.code}</td>
+      <td>${c.type === "percent" ? "%" : "$"}</td>
+      <td>${c.value}</td>
+      <td>${uses}</td>
+      <td>${vig || "-"}</td>
+      <td>${c.enabled ? "<span class='pill ok'>HABILITADO</span>" : "<span class='pill off'>PAUSADO</span>"}</td>
+      <td class="row">
+        <button class="btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
+          ${c.enabled ? "Deshabilitar" : "Habilitar"}
+        </button>
+        <button class="btn bad" data-act="delete" data-id="${doc.id}">
+          Eliminar
+        </button>
+      </td>
+    `;
+
+    cpTbody.appendChild(tr);
+  });
+
+  cpTbody.querySelectorAll("button[data-act]").forEach(btn=>{
+    btn.onclick = async()=>{
+      const id  = btn.dataset.id;
+      const act = btn.dataset.act;
+
+      if(act === "toggle"){
+        const snap = await db.collection("coupons").doc(id).get();
+        const enabled = !!snap.data()?.enabled;
+
+        await db.collection("coupons")
+          .doc(id)
+          .set({ enabled:!enabled, updatedAt:new Date() },{merge:true});
+
+        loadCoupons();
+
+      } else if(act === "delete"){
+        if(confirm("¿Eliminar "+id+"?")){
+          await db.collection("coupons").doc(id).delete();
+          loadCoupons();
+        }
+      }
+    };
+  });
+}
+
+async function loadCoupons(){
+  const q = await db.collection("coupons").orderBy("code").get();
+  renderCoupons(q.docs);
+}
+</script>
+
+<!-- ============================================================
+      🔥 BOOT FINAL
+=============================================================== -->
+<script>
+(async function boot(){
+  loadCoupons();
+})();
+</script>
+
+<!-- ============================================================
+      🔥 BOTONES FINAL CRUD
+=============================================================== -->
+<script>
+window.addEventListener("DOMContentLoaded", ()=>{
+  const btnSaveProduct = document.querySelector("#btnSaveProduct");
+  if(btnSaveProduct){
+    btnSaveProduct.onclick = saveProduct;
+  }
+
+  const btnClearProduct = document.querySelector("#btnClearProduct");
+  if(btnClearProduct){
+    btnClearProduct.onclick = clearProductForm;
+  }
+});
+</script>
