@@ -35,6 +35,7 @@
       align-items:center;
       gap:12px
     }
+
     .brand{
       display:flex;
       align-items:center;
@@ -93,6 +94,7 @@
       margin:24px auto;
       padding:0 12px
     }
+
     h1{font-size:34px;margin:14px 4px 18px}
     h2{font-size:26px;margin:24px 4px 14px}
 
@@ -249,11 +251,11 @@
       </div>
     </div>
 
-    <!-- PRECIOS DETALLADOS -->
-    <div class="rowx" style="flex-direction:column; align-items:flex-start; gap:6px; margin-top:10px;">
+    <!-- PRECIOS -->
+    <div class="rowx" style="flex-direction:column; align-items:flex-start; gap:6px;">
       <div class="muted" id="precioBaseTxt">Precio base: —</div>
-      <div class="muted" id="precioPattyTxt" style="display:none;">Medallón extra (x0): —</div>
-      <div class="muted" id="precioCheddarTxt" style="display:none;">Cheddar extra (x0): —</div>
+      <div class="muted" id="precioPattyTxt" style="display:none;">Medallón extra: —</div>
+      <div class="muted" id="precioCheddarTxt" style="display:none;">Cheddar extra: —</div>
 
       <div style="display:flex; justify-content:space-between; width:100%; margin-top:6px;">
         <span class="muted">Subtotal</span>
@@ -280,6 +282,7 @@
 
   </div>
 </div>
+
 <!-- ==== FIREBASE ==== -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -295,14 +298,18 @@ const HOURS = {
   6:[[19,0,24,0]]
 };
 
-function fmtHM(h,m){ return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0"); }
+function fmtHM(h,m){ 
+  return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0"); 
+}
 
 function isOpenNow(d=new Date()){
   const cur=d.getHours()*60+d.getMinutes();
   const blocks=HOURS[d.getDay()]||[];
+
   for(const [h1,m1,h2,m2] of blocks){
     const a=h1*60+m1, b=h2*60+m2;
-    if(cur>=a && cur<b) return {open:true, until:[h2,m2]};
+    if(cur>=a && cur<b) 
+      return {open:true, until:[h2,m2]};
   }
   return {open:false};
 }
@@ -323,15 +330,15 @@ function nextOpen(d=new Date()){
 /* ============================================
       FIREBASE INIT
 ============================================ */
-const firebaseConfig = {
+firebase.initializeApp({
   apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
   authDomain: "rhodes-burguers.firebaseapp.com",
   projectId: "rhodes-burguers",
   storageBucket: "rhodes-burguers.firebasestorage.app",
   messagingSenderId: "951646688091",
   appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-};
-firebase.initializeApp(firebaseConfig);
+});
+
 const db = firebase.firestore();
 
 /* ============================================
@@ -357,9 +364,7 @@ db.collection("config").doc("store").onSnapshot(s=>{
   if(d.forceOpenUntil){
     try{ FORCE_UNTIL = d.forceOpenUntil.toDate(); }
     catch{ FORCE_UNTIL = new Date(d.forceOpenUntil); }
-  } else {
-    FORCE_UNTIL = null;
-  }
+  } else FORCE_UNTIL=null;
 
   renderStatus();
 });
@@ -372,36 +377,27 @@ function renderStatus(){
   const untilActive = FORCE_UNTIL && FORCE_UNTIL.getTime() > Date.now();
 
   if(FORCE_OPEN || untilActive){
-    pill.classList.add("status-open");
-    pill.classList.remove("status-closed");
-
     main.textContent="Abierto";
     sub.textContent = untilActive
       ? `hasta ${fmtHM(FORCE_UNTIL.getHours(), FORCE_UNTIL.getMinutes())}`
       : (FORCE_MSG || "apertura especial");
-
     setOrderable(true);
     return;
   }
 
   const st=isOpenNow();
   if(st.open){
-    pill.classList.add("status-open");
-    pill.classList.remove("status-closed");
-
     main.textContent="Abierto";
     sub.textContent=`hasta ${fmtHM(st.until[0], st.until[1])}`;
     setOrderable(true);
   } else {
-    pill.classList.remove("status-open");
-    pill.classList.add("status-closed");
-
     main.textContent="Cerrado";
     sub.textContent="abrimos "+(nextOpen()||"pronto");
     setOrderable(false);
   }
 }
-
+</script>
+<script>
 /* ============================================
       DISPONIBILIDAD DE PRODUCTOS
 ============================================ */
@@ -417,11 +413,32 @@ db.collection("products").onSnapshot(snap=>{
   refreshAvailabilityUI();
 });
 
+function refreshAvailabilityUI(){
+  document.querySelectorAll(".card[data-id]").forEach(card=>{
+    const id=card.dataset.id;
+    const ok=isAvailable(id);
+
+    card.dataset.soldout = ok ? "0" : "1";
+
+    let badge = card.querySelector(".soldout-badge");
+    if(!ok){
+      if(!badge){
+        badge=document.createElement("div");
+        badge.className="soldout-badge";
+        badge.textContent="SIN STOCK";
+        card.querySelector(".imgwrap").appendChild(badge);
+      }
+    } else {
+      if(badge) badge.remove();
+    }
+  });
+}
+
 /* ============================================
       CATEGORÍAS FIRESTORE
 ============================================ */
 let BURGERS=[], SIDES=[], DRINKS=[];
-const FALLBACK_IMG="images/logo.png";
+const FALLBACK_IMG = "images/logo.png";
 
 function mapProduct(doc){
   const d=doc.data();
@@ -429,10 +446,10 @@ function mapProduct(doc){
     id:doc.id,
     name:d.name,
     price:d.price,
-    img:d.img||FALLBACK_IMG,
-    desc:d.description||"",
-    category:d.category||"",
-    kind:d.kind||""
+    img:d.img || FALLBACK_IMG,
+    desc:d.description || "",
+    category:d.category || "",
+    kind:d.kind || ""
   };
 }
 
@@ -446,27 +463,29 @@ db.collection("products").onSnapshot(snap=>{
     if(["bebidas","drink","drinks"].includes(p.category)) d.push(p);
   });
 
-  BURGERS=b; SIDES=s; DRINKS=d;
+  BURGERS=b;
+  SIDES=s;
+  DRINKS=d;
+
   mount();
 });
 
 /* ============================================
-      ORDEN VISUAL DEL MENÚ
+      ORDEN VISUAL MENÚ
 ============================================ */
-let MENU_ORDER = {};
+let MENU_ORDER={};
 
 db.collection("config").doc("menuOrder").onSnapshot(snap=>{
   MENU_ORDER = snap.exists ? snap.data() : {};
   mount();
 });
-</script>
-<script>
-/* ============================================================
-      🔥 CONSTANTES
-============================================================ */
-const EXTRA_PRICE_PATTY  = 2500;
+
+/* ============================================
+      CONSTANTES CARRITO
+============================================ */
+const EXTRA_PRICE_PATTY   = 2500;
 const EXTRA_PRICE_CHEDDAR = 300;
-const CART_KEY = "rhodes_cart_v3";
+const CART_KEY="rhodes_cart_v3";
 
 const $ = s => document.querySelector(s);
 const money = n => (Number(n)||0).toLocaleString("es-AR",{
@@ -475,14 +494,14 @@ const money = n => (Number(n)||0).toLocaleString("es-AR",{
   maximumFractionDigits:0
 });
 
-/* ============================================================
-      🔥 CARRITO
-============================================================ */
+/* ============================================
+      CARRITO
+============================================ */
 let cart = loadCart();
 
 function loadCart(){
   try { return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{}}; }
-  catch { return {burger:{},drink:{}}; }
+  catch { return {burger:{}, drink:{}}; }
 }
 function saveCart(){ localStorage.setItem(CART_KEY, JSON.stringify(cart)); }
 
@@ -496,10 +515,9 @@ function cartCount(){
 function calcTotal(){
   let t=0;
   for(const obj of Object.values(cart.burger)){
-    const base=obj.item.price;
-    t += ( base +
-      obj.extras.patty*EXTRA_PRICE_PATTY +
-      obj.extras.cheddar*EXTRA_PRICE_CHEDDAR
+    t += ( obj.item.price +
+           obj.extras.patty  * EXTRA_PRICE_PATTY +
+           obj.extras.cheddar* EXTRA_PRICE_CHEDDAR
     ) * obj.qty;
   }
   for(const obj of Object.values(cart.drink)){
@@ -508,14 +526,14 @@ function calcTotal(){
   return t;
 }
 
-/* ============================================================
-      🔥 RENDER CARRITO
-============================================================ */
+/* ============================================
+      RENDER CARRITO
+============================================ */
 function friesLabel(code){
   if(code==="con_sazon") return "Sazonadas";
   if(code==="con_sal")   return "Con sal";
   if(code==="sin_sal")   return "Sin sal";
-  return code||"—";
+  return code || "—";
 }
 
 function renderCart(){
@@ -523,7 +541,7 @@ function renderCart(){
   const total=$("#cartTotal");
   items.innerHTML="";
 
-  // Hamburguesas
+  /* Hamburguesas */
   for(const [key,obj] of Object.entries(cart.burger)){
     const base=obj.item.price;
     const ep=obj.extras.patty   * EXTRA_PRICE_PATTY;
@@ -557,9 +575,9 @@ function renderCart(){
     `;
   }
 
-  // Bebidas
+  /* Bebidas */
   for(const [key,obj] of Object.entries(cart.drink)){
-    const tot=obj.qty*obj.item.price;
+    const tot = obj.qty * obj.item.price;
 
     items.innerHTML += `
       <div class="item">
@@ -579,7 +597,7 @@ function renderCart(){
   $("#cartBubble").textContent = `(${cartCount()})`;
 }
 
-window.changeQty = function(type, encoded, delta){
+window.changeQty = function(type,encoded,delta){
   const key = decodeURIComponent(encoded);
   const bucket = cart[type];
   if(!bucket[key]) return;
@@ -591,33 +609,35 @@ window.changeQty = function(type, encoded, delta){
   renderCart();
 };
 
-/* ============================================================
-      🔥 AGREGAR BEBIDA
-============================================================ */
+/* ============================================
+      AGREGAR BEBIDA
+============================================ */
 function addDrink(item){
-  if(!cart.drink[item.id]) cart.drink[item.id]={qty:0,item};
+  if(!cart.drink[item.id])
+    cart.drink[item.id]={qty:0,item};
   cart.drink[item.id].qty++;
   saveCart();
   renderCart();
 }
-
+</script>
+<script>
 /* ============================================================
       🔥 CUSTOMIZER
 ============================================================ */
 const overlay = $("#overlay");
 const modTitle = $("#modTitle");
 
-const rowPatties=$("#rowPatties");
-const rowCheddar=$("#rowCheddar");
+const rowPatties = $("#rowPatties");
+const rowCheddar = $("#rowCheddar");
 
-const patVal=$("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
-const cheVal=$("#cheVal"), cheInc=$("#cheInc"), cheDec=$("#cheDec");
-const notes=$("#notes");
+const patVal = $("#patVal"), patInc=$("#patInc"), patDec=$("#patDec");
+const cheVal = $("#cheVal"), cheInc=$("#cheInc"), cheDec=$("#cheDec");
+const notes  = $("#notes");
 
-const btnAdd=$("#btnAdd");
-const btnCancel=$("#btnCancel");
+const btnAdd = $("#btnAdd");
+const btnCancel = $("#btnCancel");
 
-let currentItem=null;
+let currentItem = null;
 
 function updatePreview(){
   if(!currentItem) return;
@@ -632,19 +652,27 @@ function updatePreview(){
   const ec  = extras.cheddar* EXTRA_PRICE_CHEDDAR;
   const sub = base+ep+ec;
 
-  $("#precioBaseTxt").textContent  = "Precio base: "+money(base);
-  $("#subtotalTxt").textContent    = money(sub);
-  $("#precioPattyTxt").style.display  = extras.patty? "block":"none";
-  $("#precioCheddarTxt").style.display= extras.cheddar? "block":"none";
+  $("#precioBaseTxt").textContent = "Precio base: " + money(base);
+  $("#subtotalTxt").textContent   = money(sub);
 
-  if(extras.patty)
-    $("#precioPattyTxt").textContent = `Medallón extra (x${extras.patty}): ${money(ep)}`;
+  if(extras.patty){
+    $("#precioPattyTxt").style.display="block";
+    $("#precioPattyTxt").textContent =
+      `Medallón extra (x${extras.patty}): ${money(ep)}`;
+  } else {
+    $("#precioPattyTxt").style.display="none";
+  }
 
-  if(extras.cheddar)
-    $("#precioCheddarTxt").textContent = `Cheddar extra (x${extras.cheddar}): ${money(ec)}`;
+  if(extras.cheddar){
+    $("#precioCheddarTxt").style.display="block";
+    $("#precioCheddarTxt").textContent =
+      `Cheddar extra (x${extras.cheddar}): ${money(ec)}`;
+  } else {
+    $("#precioCheddarTxt").style.display="none";
+  }
 
   $("#pricePreview").textContent = money(sub);
-  btnAdd.textContent = "Agregar al carrito — "+money(sub);
+  btnAdd.textContent = "Agregar al carrito — " + money(sub);
 }
 
 function resetFries(){
@@ -653,6 +681,7 @@ function resetFries(){
 
 function openCustomize(item){
   currentItem = item;
+
   modTitle.textContent = "Personalizar: " + item.name;
 
   resetFries();
@@ -660,11 +689,11 @@ function openCustomize(item){
   patVal.textContent="0";
   cheVal.textContent="0";
 
-  if(item.kind==="doble"){
+  if(item.kind === "doble"){
     rowPatties.style.display="flex";
     rowCheddar.style.display="flex";
   }
-  else if(item.kind==="pollo"){
+  else if(item.kind === "pollo"){
     rowPatties.style.display="none";
     rowCheddar.style.display="flex";
   }
@@ -677,7 +706,7 @@ function openCustomize(item){
   overlay.classList.add("open");
 }
 
-window.openCustomize=openCustomize;
+window.openCustomize = openCustomize;
 
 btnCancel.onclick = ()=> overlay.classList.remove("open");
 
@@ -687,23 +716,23 @@ cheInc.onclick=()=>{ let v=+cheVal.textContent; if(v<3) cheVal.textContent=v+1; 
 cheDec.onclick=()=>{ let v=+cheVal.textContent; if(v>0) cheVal.textContent=v-1; updatePreview(); };
 
 btnAdd.onclick = ()=>{
-  const friesEl=document.querySelector("input[name='fries']:checked");
+  const friesEl = document.querySelector("input[name='fries']:checked");
   if(!friesEl){ alert("Elegí el tipo de papas"); return; }
 
-  const extras={
+  const extras = {
     patty:Number(patVal.textContent),
     cheddar:Number(cheVal.textContent)
   };
 
   const key =
-    currentItem.id+
-    "|fries:"+friesEl.value+
-    "|patty:"+extras.patty+
-    "|cheddar:"+extras.cheddar+
+    currentItem.id +
+    "|fries:"+friesEl.value +
+    "|patty:"+extras.patty +
+    "|cheddar:"+extras.cheddar +
     "|notes:"+notes.value.trim();
 
   if(!cart.burger[key]){
-    cart.burger[key]={
+    cart.burger[key] = {
       qty:1,
       item:currentItem,
       fries:friesEl.value,
@@ -723,6 +752,7 @@ btnAdd.onclick = ()=>{
       🔥 DRAWER
 ============================================================ */
 const drawer = $("#drawer");
+
 $("#btnCart").onclick = ()=> drawer.classList.add("open");
 $("#closeDrawer").onclick = ()=> drawer.classList.remove("open");
 
@@ -741,7 +771,7 @@ $("#btnPagar").onclick = ()=>{
 };
 
 /* ============================================================
-      🔥 TARJETA DE PRODUCTO
+      🔥 TARJETAS
 ============================================================ */
 function renderCard(item,type){
   const ok=isAvailable(item.id);
@@ -767,17 +797,17 @@ function renderCard(item,type){
     </div>
   `;
 
-  const addBtn=card.querySelector("[data-add]");
+  const btn=card.querySelector("[data-add]");
   if(type==="drink")
-    addBtn.onclick=()=> ok && orderable && addDrink(item);
+    btn.onclick=()=> ok && orderable && addDrink(item);
   else
-    addBtn.onclick=()=> ok && orderable && openCustomize(item);
+    btn.onclick=()=> ok && orderable && openCustomize(item);
 
   return card;
 }
 
 /* ============================================================
-      🔥 MONTAJE
+      🔥 MONTAR LISTADO
 ============================================================ */
 const gridBurgers=$("#burgersGrid");
 const gridSides=$("#sidesGrid");
@@ -807,5 +837,9 @@ function mount(){
   renderCart();
 }
 
+/* ============================================================
+      🔥 INICIO
+============================================================ */
 renderCart();
 renderStatus();
+</script>
