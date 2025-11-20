@@ -554,23 +554,27 @@ productsCol.onSnapshot(snap=>{
 =============================================================== -->
 <script>
 window.addEventListener("DOMContentLoaded", ()=>{
+
   const btnSaveOrder = document.querySelector("#btnSaveOrder");
-
-  if(btnSaveOrder){
-    btnSaveOrder.onclick = async ()=>{
-      const ids = [...orderGrid.querySelectorAll(".orderCard")].map(c => c.dataset.id);
-
-      await menuOrderRef.set({
-        ...MENU_ORDER,
-        [CURRENT_CAT]: ids
-      }, { merge:true });
-
-      alert("Orden guardada.");
-    };
+  if(!btnSaveOrder){
+    console.error("btnSaveOrder NO EXISTE EN EL DOM");
+    return;
   }
+
+  btnSaveOrder.onclick = async ()=>{
+    const ids = [...orderGrid.querySelectorAll(".orderCard")]
+      .map(c => c.dataset.id);
+
+    await menuOrderRef.set({
+      ...MENU_ORDER,
+      [CURRENT_CAT]: ids
+    }, {merge:true});
+
+    alert("Orden guardada.");
+  };
+
 });
 </script>
-
 <!-- ============================================================
       CONFIGURACIÓN DE PAPAS (SIDES)
 =============================================================== -->
@@ -780,123 +784,132 @@ btnSaveUntil.onclick = async()=>{
 <!-- ============================================================
       🔥 CUPONES (CRUD COMPLETO)
 =============================================================== -->
-<script>
-const cpTbody = document.querySelector("#cpTable");
-
-function upsertCouponFromForm(){
-  const code = (document.querySelector("#cpCode").value||"").trim().toUpperCase();
-  if(!code){ alert("Ingresá código"); return; }
-
-  const type = document.querySelector("#cpType").value;
-  const value = Number(document.querySelector("#cpValue").value||0);
-  if(!(value>0)){ alert("Valor inválido"); return; }
-
-  const maxUses = Number(document.querySelector("#cpMaxUses").value||0);
-  const note    = (document.querySelector("#cpNote").value||"").trim();
-  const from    = document.querySelector("#cpFrom").value ? new Date(document.querySelector("#cpFrom").value) : null;
-  const to      = document.querySelector("#cpTo").value   ? new Date(document.querySelector("#cpTo").value)   : null;
-
-  const payload = {
-    code, type, value,
-    enabled:true,
-    note: note || null,
-    validFrom: from ? firebase.firestore.Timestamp.fromDate(from) : null,
-    validTo:   to   ? firebase.firestore.Timestamp.fromDate(to)   : null,
-    maxUses: maxUses > 0 ? maxUses : null,
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  };
-
-  db.collection("coupons").doc(code)
-    .set({
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      uses:0,
-      ...payload
-    },{merge:true})
-    .then(()=>{
-      alert("Cupón guardado");
-      loadCoupons();
-    })
-    .catch(()=>{
-      alert("Error guardando cupón");
-    });
-}
-
-document.querySelector("#btnCreateCp").onclick = upsertCouponFromForm;
-
-function renderCoupons(list){
-  cpTbody.innerHTML = "";
-
-  list.forEach(doc=>{
-    const c = doc.data();
-    const uses = `${c.uses||0}${c.maxUses?` / ${c.maxUses}`:''}`;
-
-    const vf = c.validFrom ? fmtDate(c.validFrom) : null;
-    const vt = c.validTo   ? fmtDate(c.validTo)   : null;
-
-    const vig =
-      (vf ? vf.toLocaleDateString("es-AR") + " " : "") +
-      (vt ? "→ " + vt.toLocaleDateString("es-AR") : "");
-
-    const tr = document.createElement("tr");
-
-    tr.innerHTML = `
-      <td>${c.code}</td>
-      <td>${c.type === "percent" ? "%" : "$"}</td>
-      <td>${c.value}</td>
-      <td>${uses}</td>
-      <td>${vig || "-"}</td>
-      <td>${c.enabled ? "<span class='pill ok'>HABILITADO</span>" : "<span class='pill off'>PAUSADO</span>"}</td>
-      <td class="row">
-        <button class="btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
-          ${c.enabled ? "Deshabilitar" : "Habilitar"}
-        </button>
-        <button class="btn bad" data-act="delete" data-id="${doc.id}">
-          Eliminar
-        </button>
-      </td>
-    `;
-
-    cpTbody.appendChild(tr);
-  });
-
-  cpTbody.querySelectorAll("button[data-act]").forEach(btn=>{
-    btn.onclick = async()=>{
-      const id  = btn.dataset.id;
-      const act = btn.dataset.act;
-
-      if(act === "toggle"){
-        const snap = await db.collection("coupons").doc(id).get();
-        const enabled = !!snap.data()?.enabled;
-
-        await db.collection("coupons")
-          .doc(id)
-          .set({ enabled:!enabled, updatedAt:new Date() },{merge:true});
-
-        loadCoupons();
-
-      } else if(act === "delete"){
-        if(confirm("¿Eliminar "+id+"?")){
-          await db.collection("coupons").doc(id).delete();
-          loadCoupons();
-        }
-      }
-    };
-  });
-}
-
-async function loadCoupons(){
-  const q = await db.collection("coupons").orderBy("code").get();
-  renderCoupons(q.docs);
-}
-</script>
-
 <!-- ============================================================
-      🔥 BOOT FINAL
+      🔥 CUPONES (CRUD COMPLETO) — con chequeo de DOM
 =============================================================== -->
 <script>
-(async function boot(){
-  loadCoupons();
-})();
+const cpTbody = document.querySelector("#cpTable");
+const btnCreateCp = document.querySelector("#btnCreateCp");
+
+// Si no existe la tabla de cupones en el HTML, salimos y NO hacemos nada
+if (cpTbody && btnCreateCp) {
+
+  function upsertCouponFromForm(){
+    const code = (document.querySelector("#cpCode").value||"").trim().toUpperCase();
+    if(!code){ alert("Ingresá código"); return; }
+
+    const type = document.querySelector("#cpType").value;
+    const value = Number(document.querySelector("#cpValue").value||0);
+    if(!(value>0)){ alert("Valor inválido"); return; }
+
+    const maxUses = Number(document.querySelector("#cpMaxUses").value||0);
+    const note    = (document.querySelector("#cpNote").value||"").trim();
+    const from    = document.querySelector("#cpFrom").value ? new Date(document.querySelector("#cpFrom").value) : null;
+    const to      = document.querySelector("#cpTo").value   ? new Date(document.querySelector("#cpTo").value)   : null;
+
+    const payload = {
+      code, type, value,
+      enabled:true,
+      note: note || null,
+      validFrom: from ? firebase.firestore.Timestamp.fromDate(from) : null,
+      validTo:   to   ? firebase.firestore.Timestamp.fromDate(to)   : null,
+      maxUses: maxUses > 0 ? maxUses : null,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    db.collection("coupons").doc(code)
+      .set({
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        uses:0,
+        ...payload
+      },{merge:true})
+      .then(()=>{
+        alert("Cupón guardado");
+        loadCoupons();
+      })
+      .catch(()=>{
+        alert("Error guardando cupón");
+      });
+  }
+
+  btnCreateCp.onclick = upsertCouponFromForm;
+
+  function renderCoupons(list){
+    // seguridad extra
+    if(!cpTbody) return;
+
+    cpTbody.innerHTML = "";
+
+    list.forEach(doc=>{
+      const c = doc.data();
+      const uses = `${c.uses||0}${c.maxUses?` / ${c.maxUses}`:''}`;
+
+      const vf = c.validFrom ? fmtDate(c.validFrom) : null;
+      const vt = c.validTo   ? fmtDate(c.validTo)   : null;
+
+      const vig =
+        (vf ? vf.toLocaleDateString("es-AR") + " " : "") +
+        (vt ? "→ " + vt.toLocaleDateString("es-AR") : "");
+
+      const tr = document.createElement("tr");
+
+      tr.innerHTML = `
+        <td>${c.code}</td>
+        <td>${c.type === "percent" ? "%" : "$"}</td>
+        <td>${c.value}</td>
+        <td>${uses}</td>
+        <td>${vig || "-"}</td>
+        <td>${c.enabled ? "<span class='pill ok'>HABILITADO</span>" : "<span class='pill off'>PAUSADO</span>"}</td>
+        <td class="row">
+          <button class="btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
+            ${c.enabled ? "Deshabilitar" : "Habilitar"}
+          </button>
+          <button class="btn bad" data-act="delete" data-id="${doc.id}">
+            Eliminar
+          </button>
+        </td>
+      `;
+
+      cpTbody.appendChild(tr);
+    });
+
+    cpTbody.querySelectorAll("button[data-act]").forEach(btn=>{
+      btn.onclick = async()=>{
+        const id  = btn.dataset.id;
+        const act = btn.dataset.act;
+
+        if(act === "toggle"){
+          const snap = await db.collection("coupons").doc(id).get();
+          const enabled = !!snap.data()?.enabled;
+
+          await db.collection("coupons")
+            .doc(id)
+            .set({ enabled:!enabled, updatedAt:new Date() },{merge:true});
+
+          loadCoupons();
+
+        } else if(act === "delete"){
+          if(confirm("¿Eliminar "+id+"?")){
+            await db.collection("coupons").doc(id).delete();
+            loadCoupons();
+          }
+        }
+      };
+    });
+  }
+
+  async function loadCoupons(){
+    if(!cpTbody) return;
+    const q = await db.collection("coupons").orderBy("code").get();
+    renderCoupons(q.docs);
+  }
+
+  // BOOT SOLO SI EXISTE LA TABLA
+  (async function boot(){
+    await loadCoupons();
+  })();
+
+}
 </script>
 
 <!-- ============================================================
