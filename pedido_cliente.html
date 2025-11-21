@@ -450,6 +450,84 @@ window.addEventListener("DOMContentLoaded",()=>{
   renderResumen();
 });
 
+/* =============================
+   CONFIRMAR PEDIDO
+============================= */
+
+$("#btnConfirmar").onclick = async () => {
+
+  const nombre = $("#inpNombre").value.trim();
+  const telefono = $("#inpTelefono").value.trim();
+  const pago = document.querySelector("input[name='pago']:checked");
+  const entrega = "take_away";
+  const notas = $("#inpNotas").value.trim();
+  const slot = $("#slotsCarousel").selectedSlot;
+
+  const cart = loadCart();
+
+  if (!nombre) {
+    alert("Ingresá tu nombre");
+    return;
+  }
+
+  if (!pago) {
+    alert("Elegí el medio de pago");
+    return;
+  }
+
+  if (!slot) {
+    alert("Elegí un horario de retiro");
+    return;
+  }
+
+  // verificar que el carrito NO esté vacío
+  let totalItems = 0;
+  Object.values(cart.burger).forEach(o => totalItems += o.qty);
+  if (totalItems === 0) {
+    alert("Tu carrito está vacío");
+    return;
+  }
+
+  // reservar slot (sumar gramos)
+  try {
+    await reservarSlot(slot.key, gramosDelPedido());
+  } catch (err) {
+    alert("El horario se acaba de llenar. Elegí otro.");
+    cargarSlots();
+    return;
+  }
+
+  // calcular total
+  let total = 0;
+  Object.entries(cart.burger).forEach(([_, o]) => {
+    total += o.qty * o.item.price;
+  });
+
+  // armar resumen del pedido (texto para whatsapp)
+  let detalle = "";
+
+  for (const [_, o] of Object.entries(cart.burger)) {
+    detalle += `• ${o.item.name} x${o.qty}\n   Papas: ${o.fries}\n`;
+    if (o.notes) detalle += `   Nota: ${o.notes}\n`;
+  }
+
+  const mensaje =
+`*Nuevo Pedido*
+Nombre: ${nombre}
+Teléfono: ${telefono || "-"}
+Pago: ${pago.value === "mercado_pago" ? "Transferencia" : "En Local"}
+Retiro: ${slot.pretty}
+Notas: ${notas || "-"}
+
+*Pedido:*
+${detalle}
+
+*Total:* $${total.toLocaleString("es-AR")}`;
+
+  // redirigir a WhatsApp
+  const wa = "https://wa.me/5491136610954?text=" + encodeURIComponent(mensaje);
+  window.location.href = wa;
+};
 </script>
 
 </body>
