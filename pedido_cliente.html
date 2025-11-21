@@ -114,7 +114,6 @@
     }
     .actions{display:flex;gap:10px;margin-top:12px}
     .actions .btn{flex:1}
-    /* CARRUSEL SLOTS */
     .carousel{display:flex;align-items:center;gap:12px;margin-top:8px}
     .arrow{
       width:44px;height:44px;
@@ -296,163 +295,81 @@ function gramosDelPedido(){
   for(const k in c.side){ g += (c.side[k].qty || 0) * G_POR_SIDE; }
   return g;
 }
+/* ============================
+   MULTIBLOQUE — CALCULAR SLOTS NECESARIOS
+============================ */
+function calcularSlotsNecesarios(totalGramos){
+  const slots = [];
+  let restante = totalGramos;
 
-/* GENERAR TODOS LOS SLOTS */
-function generarSlotsDelDia(){
-  const start = parseHHMM(SLOT_START);
-  const end   = parseHHMM(SLOT_END);
-  const arr = [];
-  let cur = new Date(start.getTime());
-  while(cur <= end){
-    arr.push(new Date(cur));
-    cur = new Date(cur.getTime() + SLOT_INTERVAL_MIN*60000);
+  while(restante > 0){
+    const usar = Math.min(restante, GRAMOS_POR_BLOQUE);
+    slots.push(usar);
+    restante -= usar;
   }
-  return arr;
+  return slots;
 }
 
-let slotObjects = [];
-let visibles = [];
-let listeners = [];
-let currentIndex = 0;
-
-function limpiarListeners(){
-  listeners.forEach(u=>{ try{u();}catch{} });
-  listeners = [];
+/* ============================
+   ELEGIR SLOT BASE SELECCIONADO
+============================ */
+function slotSeleccionado(){
+  const car = $("#slotsCarousel");
+  return car.selectedSlot || null;
 }
 
-async function cargarSlots(){
-  limpiarListeners();
+/* ============================
+   RESERVA MÚLTIPLE (multibloque real)
+============================ */
+async function reservarMultibloque(slotBaseKey, totalGramos){
 
-  const pedidoGramos = gramosDelPedido();
-  const hoySlots = generarSlotsDelDia();
+  const partes = calcularSlotsNecesarios(totalGramos);
+  const indexBase = slotObjects.findIndex(s => s.key === slotBaseKey);
 
-  slotObjects = hoySlots.map(d => ({
-    date:d,
-    key:slotKey(d),
-    gramsUsed:0,
-    full:false
-  }));
+  if(indexBase < 0){
+    throw new Error("BASE_SLOT_NOT_FOUND");
+  }
 
-  $("#slotLabel").textContent = "Cargando…";
-  $("#slotNote").textContent  = "Cargando disponibilidad...";
+  let keysUsadas = [];
+  let gramosAReservar = [...partes];
+  let iSlot = indexBase;
 
-  slotObjects.forEach(s=>{
-    const ref = db.collection("slots_grams").doc(s.key);
+  for(let parte of gramosAReservar){
 
-    const unsub = ref.onSnapshot(doc=>{
-      if(!doc.exists){
-        // inicializar doc para que no rompa
-        ref.set({gramsUsed:0},{merge:true});
+    if(iSlot >= slotObjects.length){
+      throw new Error("NO_MORE_SLOTS");
+    }
+
+    const slot = slotObjects[iSlot];
+    const key = slot.key;
+
+    // reservar parte de ese bloque
+    await db.runTransaction(async tx => {
+      const ref = db.collection("slots_grams").doc(key);
+      const snap = await tx.get(ref);
+
+      let usados = 0;
+      if(snap.exists) usados = Number(snap.data().gramsUsed || 0);
+
+      if(usados + parte > GRAMOS_POR_BLOQUE){
+        throw new Error("BLOCK_FULL");
       }
 
-      const data = doc.data() || {};
-      s.gramsUsed = Number(data.gramsUsed || 0);
-
-      // === LÓGICA DE CAPACIDAD ===
-      if (pedidoGramos > GRAMOS_POR_BLOQUE){
-        // pedidos grandes: nunca marcar como lleno
-        s.full = false;
-      } else {
-        // pedidos normales: respetar límite por bloque
-        s.full = (s.gramsUsed + pedidoGramos) > GRAMOS_POR_BLOQUE;
-      }
-
-      reconstruirVisibles();
+      tx.set(ref, {
+        gramsUsed: usados + parte
+      }, { merge:true });
     });
 
-    listeners.push(unsub);
-  });
-}
-
-function reconstruirVisibles(){
-  visibles = slotObjects
-    .filter(s=>!s.full)
-    .sort((a,b)=>a.date - b.date);
-
-  if(visibles.length === 0){
-    currentIndex = -1;
-  }else{
-    if(currentIndex < 0 || currentIndex >= visibles.length) currentIndex = 0;
+    keysUsadas.push(key);
+    iSlot++;
   }
 
-  actualizarUI();
+  return keysUsadas; // array de slots reservados
 }
 
-function actualizarUI(){
-  const label = $("#slotLabel");
-  const count = $("#slotCount");
-  const prev  = $("#slotPrev");
-  const next  = $("#slotNext");
-  const car   = $("#slotsCarousel");
-
-  if(visibles.length === 0){
-    label.innerHTML = "<div class='no-slots'>No hay horarios disponibles</div>";
-    count.textContent = "";
-    prev.classList.add("disabled");
-    next.classList.add("disabled");
-    car.selectedSlot = null;
-    return;
-  }
-
-  const s = visibles[currentIndex];
-
-  label.textContent = formatHHMM(s.date);
-  const restante = Math.max(0, GRAMOS_POR_BLOQUE - s.gramsUsed);
-  count.textContent = `${restante} g disponibles`;
-
-  prev.classList.toggle("disabled", currentIndex===0);
-  next.classList.toggle("disabled", currentIndex===visibles.length-1);
-
-  car.selectedSlot = {
-    key: s.key,
-    iso: s.date.toISOString(),
-    pretty: formatHHMM(s.date)
-  };
-}
-
-/* ============================================
-   RESERVAR SLOT EN FIRESTORE (TRANSACCIÓN)
-============================================ */
-async function reservarSlot(key, gramosPedido) {
-  const ref = db.collection("slots_grams").doc(key);
-
-  return db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-
-    let usados = 0;
-    if (snap.exists) usados = Number(snap.data().gramsUsed || 0);
-
-    // si el pedido es chico, respetar límite del bloque
-    if (gramosPedido <= GRAMOS_POR_BLOQUE) {
-      if (usados + gramosPedido > GRAMOS_POR_BLOQUE) {
-        throw new Error("FULL");
-      }
-    }
-    // si es grande, igual lo dejamos pasar (toma parte del bloque siguiente)
-
-    tx.set(ref, {
-      gramsUsed: usados + gramosPedido
-    }, { merge:true });
-
-    return true;
-  });
-}
-
-/* HANDLERS CARRUSEL */
-$("#slotPrev").onclick = ()=>{
-  if(currentIndex > 0){
-    currentIndex--;
-    actualizarUI();
-  }
-};
-$("#slotNext").onclick = ()=>{
-  if(currentIndex < visibles.length-1){
-    currentIndex++;
-    actualizarUI();
-  }
-};
-$("#btnRefreshSlots").onclick = cargarSlots;
-/* RESUMEN DEL PEDIDO (columna derecha) */
+/* ============================
+   RESUMEN DEL PEDIDO
+============================ */
 function renderResumen(){
   const c = loadCart();
   const box = $("#resumen");
@@ -482,71 +399,131 @@ window.addEventListener("DOMContentLoaded", ()=>{
 });
 
 /* =============================
-   CONFIRMAR PEDIDO
+   CONFIRMAR PEDIDO — INICIO
 ============================= */
 $("#btnConfirmar").onclick = async () => {
+
   const nombre   = $("#inpNombre").value.trim();
   const telefono = $("#inpTelefono").value.trim();
   const pago     = document.querySelector("input[name='pago']:checked");
   const notas    = $("#inpNotas").value.trim();
-  const slot     = $("#slotsCarousel").selectedSlot;
+  const slotBase = slotSeleccionado();
   const cart     = loadCart();
 
-  if (!nombre){
+  if(!nombre){
     alert("Ingresá tu nombre");
     return;
   }
-  if (!pago){
+  if(!pago){
     alert("Elegí el medio de pago");
     return;
   }
-  if (!slot){
+  if(!slotBase){
     alert("Elegí un horario de retiro");
     return;
   }
 
-  // verificar que el carrito NO esté vacío
+  // validar carrito
   let totalItems = 0;
   Object.values(cart.burger).forEach(o => totalItems += o.qty);
-  if (totalItems === 0){
+  if(totalItems === 0){
     alert("Tu carrito está vacío");
     return;
   }
 
-  // reservar slot (sumar gramos)
+  const totalGramos = gramosDelPedido();
+
+  /* =============================
+     RESERVAR MULTIBLOQUE REAL
+  ============================== */
+  let pickupSlots = [];
   try{
-    await reservarSlot(slot.key, gramosDelPedido());
+    pickupSlots = await reservarMultibloque(slotBase.key, totalGramos);
   }catch(err){
-    alert("El horario se acaba de llenar. Elegí otro.");
+    console.error(err);
+    alert("Ese horario ya no tiene capacidad suficiente. Elegí otro.");
     cargarSlots();
     return;
   }
 
-  // calcular total
-  let total = 0;
-  Object.values(cart.burger).forEach(o => {
-    total += o.qty * o.item.price;
-  });
+  // horario visible al cliente → el primero
+  const pickupPretty = slotBase.pretty;
 
-  // armar resumen del pedido (texto para whatsapp)
+  /* =============================
+     CALCULAR TOTAL
+  ============================== */
+  let total = 0;
+  for(const o of Object.values(cart.burger)){
+    total += o.qty * o.item.price;
+  }
+  /* =============================
+     ARMAR ÍTEMS DEL PEDIDO
+  ============================== */
+  let items = [];
+  for(const o of Object.values(cart.burger)){
+    items.push({
+      name: o.item.name,
+      qty: o.qty,
+      price: o.item.price,
+      fries: o.fries,
+      notes: o.notes || ""
+    });
+  }
+
+  /* =============================
+     GENERAR DOCUMENTO PARA FIRESTORE
+  ============================== */
+  const orderData = {
+    created: Date.now(),
+    customer: {
+      name: nombre,
+      phone: telefono || ""
+    },
+    payment: pago.value === "mercado_pago" ? "transferencia" : "efectivo",
+    delivery: "take_away",
+    notes: notas || "",
+    pickup_time: pickupPretty,         // visible
+    pickup_slots: pickupSlots,         // array multibloque
+    status: "new",
+    total: total,
+    items: items
+  };
+
+  /* =============================
+     GUARDAR EN orders Y order_public
+  ============================== */
+  let newId = db.collection("orders").doc().id;
+
+  await db.collection("orders").doc(newId).set(orderData);
+  await db.collection("order_public").doc(newId).set(orderData);
+
+  /* =============================
+     MENSAJE WHATSAPP AL LOCAL
+  ============================== */
+
   let detalle = "";
-  for (const o of Object.values(cart.burger)){
-    detalle += `• ${o.item.name} x${o.qty}\n   Papas: ${o.fries}\n`;
-    if (o.notes) detalle += `   Nota: ${o.notes}\n`;
+  for(const it of items){
+    detalle += `• ${it.name} x${it.qty}\n   Papas: ${it.fries}\n`;
+    if(it.notes) detalle += `   Nota: ${it.notes}\n`;
   }
 
   const mensaje =
-`*Nuevo Pedido*
+`*Nuevo Pedido enviado por Ignacio 🔥*
 Nombre: ${nombre}
 Teléfono: ${telefono || "-"}
-Pago: ${pago.value === "mercado_pago" ? "Transferencia" : "En Local"}
-Retiro: ${slot.pretty}
+Pago: ${orderData.payment}
+Retiro: ${pickupPretty}
 Notas: ${notas || "-"}
 
 *Pedido:*
 ${detalle}
 
-*Total:* $${total.toLocaleString("es-AR")}`;
+*Total:* $${total.toLocaleString("es-AR")}
+
+ID: ${newId}`;
+
+  // limpiar carrito
+  localStorage.removeItem(CART_KEY);
 
   // redirigir a WhatsApp
   const wa = "https://wa.me/5491136610954?text=" + encodeURIComponent(mensaje);
