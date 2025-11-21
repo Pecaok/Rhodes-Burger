@@ -411,6 +411,34 @@ function actualizarUI(){
     iso:s.date.toISOString(),
     pretty:formatHHMM(s.date)
   };
+
+  /* ============================================
+   RESERVAR SLOT EN FIRESTORE (TRANSACCIÓN)
+============================================ */
+async function reservarSlot(key, gramosPedido) {
+  const ref = db.collection("slots_grams").doc(key);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+
+    let usados = 0;
+    if (snap.exists) usados = Number(snap.data().gramsUsed || 0);
+
+    // si el pedido supera un bloque → siempre permitir
+    if (gramosPedido <= GRAMOS_POR_BLOQUE) {
+      if (usados + gramosPedido > GRAMOS_POR_BLOQUE) {
+        throw new Error("FULL");
+      }
+    }
+
+    // sumar los gramos
+    tx.set(ref, {
+      gramsUsed: usados + gramosPedido
+    }, { merge: true });
+
+    return true;
+  });
+}
 }
 
 $("#slotPrev").onclick=()=>{
