@@ -241,9 +241,8 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
-
 /* FIREBASE */
-const firebaseConfig={
+const firebaseConfig = {
   apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
   authDomain:"rhodes-burguers.firebaseapp.com",
   projectId:"rhodes-burguers",
@@ -251,31 +250,31 @@ const firebaseConfig={
   messagingSenderId:"951646688091",
   appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"
 };
-if(!firebase.apps.length)firebase.initializeApp(firebaseConfig);
-const db=firebase.firestore();
+if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
 /* CONSTANTES */
-const CART_KEY="rhodes_cart_v3";
-const GRAMOS_POR_BLOQUE=1500;
-const G_POR_BURGER=200;
-const G_POR_SIDE=700;
-const SLOT_START="19:15";
-const SLOT_END="23:45";
-const SLOT_INTERVAL_MIN=15;
+const CART_KEY = "rhodes_cart_v3";
+const GRAMOS_POR_BLOQUE = 1500;
+const G_POR_BURGER = 200;
+const G_POR_SIDE = 700;
+const SLOT_START = "19:15";
+const SLOT_END   = "23:45";
+const SLOT_INTERVAL_MIN = 15;
 
-function $(s){return document.querySelector(s);}
+function $(s){ return document.querySelector(s); }
 
 function parseHHMM(str){
-  const[h,m]=str.split(":").map(Number);
-  const now=new Date();
+  const [h,m] = str.split(":").map(Number);
+  const now = new Date();
   return new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0,0);
 }
 function slotKey(date){
-  const y=date.getFullYear();
-  const M=String(date.getMonth()+1).padStart(2,"0");
-  const d=String(date.getDate()).padStart(2,"0");
-  const H=String(date.getHours()).padStart(2,"0");
-  const m=String(date.getMinutes()).padStart(2,"0");
+  const y = date.getFullYear();
+  const M = String(date.getMonth()+1).padStart(2,"0");
+  const d = String(date.getDate()).padStart(2,"0");
+  const H = String(date.getHours()).padStart(2,"0");
+  const m = String(date.getMinutes()).padStart(2,"0");
   return `${y}${M}${d}_${H}${m}`;
 }
 function formatHHMM(date){
@@ -284,81 +283,79 @@ function formatHHMM(date){
 
 function loadCart(){
   try{
-    return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{},side:{}};
-  }catch{return{burger:{},drink:{},side:{}};}
+    return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{},side:{}};
+  }catch{
+    return {burger:{},drink:{},side:{}};
+  }
 }
 
 function gramosDelPedido(){
-  const c=loadCart();
-  let g=0;
-  for(const k in c.burger){g+=(c.burger[k].qty||0)*G_POR_BURGER;}
-  for(const k in c.side){g+=(c.side[k].qty||0)*G_POR_SIDE;}
+  const c = loadCart();
+  let g = 0;
+  for(const k in c.burger){ g += (c.burger[k].qty || 0) * G_POR_BURGER; }
+  for(const k in c.side){ g += (c.side[k].qty || 0) * G_POR_SIDE; }
   return g;
 }
 
 /* GENERAR TODOS LOS SLOTS */
 function generarSlotsDelDia(){
-  const start=parseHHMM(SLOT_START);
-  const end=parseHHMM(SLOT_END);
-  const arr=[];
-  let cur=new Date(start.getTime());
-  while(cur<=end){
+  const start = parseHHMM(SLOT_START);
+  const end   = parseHHMM(SLOT_END);
+  const arr = [];
+  let cur = new Date(start.getTime());
+  while(cur <= end){
     arr.push(new Date(cur));
-    cur=new Date(cur.getTime()+SLOT_INTERVAL_MIN*60000);
+    cur = new Date(cur.getTime() + SLOT_INTERVAL_MIN*60000);
   }
   return arr;
 }
 
-let slotObjects=[];
-let visibles=[];
-let listeners=[];
-let currentIndex=0;
+let slotObjects = [];
+let visibles = [];
+let listeners = [];
+let currentIndex = 0;
 
 function limpiarListeners(){
-  listeners.forEach(u=>{try{u()}catch{}});
-  listeners=[];
+  listeners.forEach(u=>{ try{u();}catch{} });
+  listeners = [];
 }
 
 async function cargarSlots(){
   limpiarListeners();
 
-  const pedidoGramos=gramosDelPedido();
-  const hoySlots=generarSlotsDelDia();
+  const pedidoGramos = gramosDelPedido();
+  const hoySlots = generarSlotsDelDia();
 
-  slotObjects=hoySlots.map(d=>({
+  slotObjects = hoySlots.map(d => ({
     date:d,
     key:slotKey(d),
     gramsUsed:0,
     full:false
   }));
 
-  $("#slotLabel").textContent="Cargando…";
-  $("#slotNote").textContent="Cargando disponibilidad...";
+  $("#slotLabel").textContent = "Cargando…";
+  $("#slotNote").textContent  = "Cargando disponibilidad...";
 
   slotObjects.forEach(s=>{
-    const ref=db.collection("slots_grams").doc(s.key);
+    const ref = db.collection("slots_grams").doc(s.key);
 
-    const unsub=ref.onSnapshot(doc=>{
-
+    const unsub = ref.onSnapshot(doc=>{
       if(!doc.exists){
+        // inicializar doc para que no rompa
         ref.set({gramsUsed:0},{merge:true});
       }
 
-      const data=doc.data()||{};
-      s.gramsUsed=Number(data.gramsUsed||0);
+      const data = doc.data() || {};
+      s.gramsUsed = Number(data.gramsUsed || 0);
 
-     // ======================
-// NUEVA LÓGICA DE CAPACIDAD
-// PERMITE PEDIDOS > 1500g
-// ======================
-if (pedidoGramos > GRAMOS_POR_BLOQUE) {
-    // Si el pedido supera un bloque de 1500g,
-    // igual permitir que el slot sea válido (bloque + parte del siguiente).
-    s.full = false;
-} else {
-    // Pedido normal: validar capacidad real del slot
-    s.full = (s.gramsUsed + pedidoGramos) > GRAMOS_POR_BLOQUE;
-}
+      // === LÓGICA DE CAPACIDAD ===
+      if (pedidoGramos > GRAMOS_POR_BLOQUE){
+        // pedidos grandes: nunca marcar como lleno
+        s.full = false;
+      } else {
+        // pedidos normales: respetar límite por bloque
+        s.full = (s.gramsUsed + pedidoGramos) > GRAMOS_POR_BLOQUE;
+      }
 
       reconstruirVisibles();
     });
@@ -368,51 +365,52 @@ if (pedidoGramos > GRAMOS_POR_BLOQUE) {
 }
 
 function reconstruirVisibles(){
-  visibles=slotObjects
+  visibles = slotObjects
     .filter(s=>!s.full)
-    .sort((a,b)=>a.date-b.date);
+    .sort((a,b)=>a.date - b.date);
 
-  if(visibles.length===0){
-    currentIndex=-1;
+  if(visibles.length === 0){
+    currentIndex = -1;
   }else{
-    if(currentIndex<0||currentIndex>=visibles.length)currentIndex=0;
+    if(currentIndex < 0 || currentIndex >= visibles.length) currentIndex = 0;
   }
 
   actualizarUI();
 }
 
 function actualizarUI(){
-  const label=$("#slotLabel");
-  const count=$("#slotCount");
-  const prev=$("#slotPrev");
-  const next=$("#slotNext");
-  const car=$("#slotsCarousel");
+  const label = $("#slotLabel");
+  const count = $("#slotCount");
+  const prev  = $("#slotPrev");
+  const next  = $("#slotNext");
+  const car   = $("#slotsCarousel");
 
-  if(visibles.length===0){
-    label.innerHTML="<div class='no-slots'>No hay horarios disponibles</div>";
-    count.textContent="";
+  if(visibles.length === 0){
+    label.innerHTML = "<div class='no-slots'>No hay horarios disponibles</div>";
+    count.textContent = "";
     prev.classList.add("disabled");
     next.classList.add("disabled");
-    car.selectedSlot=null;
+    car.selectedSlot = null;
     return;
   }
 
-  const s=visibles[currentIndex];
+  const s = visibles[currentIndex];
 
-  label.textContent=formatHHMM(s.date);
-  const restante=Math.max(0,GRAMOS_POR_BLOQUE-s.gramsUsed);
-  count.textContent=`${restante} g disponibles`;
+  label.textContent = formatHHMM(s.date);
+  const restante = Math.max(0, GRAMOS_POR_BLOQUE - s.gramsUsed);
+  count.textContent = `${restante} g disponibles`;
 
-  prev.classList.toggle("disabled",currentIndex===0);
-  next.classList.toggle("disabled",currentIndex===visibles.length-1);
+  prev.classList.toggle("disabled", currentIndex===0);
+  next.classList.toggle("disabled", currentIndex===visibles.length-1);
 
-  car.selectedSlot={
-    key:s.key,
-    iso:s.date.toISOString(),
-    pretty:formatHHMM(s.date)
+  car.selectedSlot = {
+    key: s.key,
+    iso: s.date.toISOString(),
+    pretty: formatHHMM(s.date)
   };
+}
 
-  /* ============================================
+/* ============================================
    RESERVAR SLOT EN FIRESTORE (TRANSACCIÓN)
 ============================================ */
 async function reservarSlot(key, gramosPedido) {
@@ -424,56 +422,61 @@ async function reservarSlot(key, gramosPedido) {
     let usados = 0;
     if (snap.exists) usados = Number(snap.data().gramsUsed || 0);
 
-    // si el pedido supera un bloque → siempre permitir
+    // si el pedido es chico, respetar límite del bloque
     if (gramosPedido <= GRAMOS_POR_BLOQUE) {
       if (usados + gramosPedido > GRAMOS_POR_BLOQUE) {
         throw new Error("FULL");
       }
     }
+    // si es grande, igual lo dejamos pasar (toma parte del bloque siguiente)
 
-    // sumar los gramos
     tx.set(ref, {
       gramsUsed: usados + gramosPedido
-    }, { merge: true });
+    }, { merge:true });
 
     return true;
   });
 }
-}
 
-$("#slotPrev").onclick=()=>{
-  if(currentIndex>0){currentIndex--;actualizarUI();}
+/* HANDLERS CARRUSEL */
+$("#slotPrev").onclick = ()=>{
+  if(currentIndex > 0){
+    currentIndex--;
+    actualizarUI();
+  }
 };
-$("#slotNext").onclick=()=>{
-  if(currentIndex<visibles.length-1){currentIndex++;actualizarUI();}
+$("#slotNext").onclick = ()=>{
+  if(currentIndex < visibles.length-1){
+    currentIndex++;
+    actualizarUI();
+  }
 };
-$("#btnRefreshSlots").onclick=cargarSlots;
-
-/* RESUMEN DEL PEDIDO */
+$("#btnRefreshSlots").onclick = cargarSlots;
+/* RESUMEN DEL PEDIDO (columna derecha) */
 function renderResumen(){
-  const c=loadCart();
-  const box=$("#resumen");
-  const total=$("#resTotal");
-  box.innerHTML="";
-  let t=0;
+  const c = loadCart();
+  const box = $("#resumen");
+  const totalEl = $("#resTotal");
+  box.innerHTML = "";
+  let t = 0;
 
-  for(const[k,o]of Object.entries(c.burger)){
-    const unit=o.item.price;
-    const subt=unit*o.qty;
-    t+=subt;
-    box.innerHTML+=`
-      <div>
+  for(const [k,o] of Object.entries(c.burger)){
+    const unit = o.item.price;
+    const subt = unit * o.qty;
+    t += subt;
+    box.innerHTML += `
+      <div style="margin-bottom:8px">
         <strong>${o.item.name} x${o.qty}</strong>
         <div class="muted">Papas: ${o.fries}</div>
         <div class="muted">Subtotal: $ ${subt.toLocaleString("es-AR")}</div>
-      </div><br>
+      </div>
     `;
   }
 
-  total.textContent="$ "+t.toLocaleString("es-AR");
+  totalEl.textContent = "$ " + t.toLocaleString("es-AR");
 }
 
-window.addEventListener("DOMContentLoaded",()=>{
+window.addEventListener("DOMContentLoaded", ()=>{
   cargarSlots();
   renderResumen();
 });
@@ -481,29 +484,23 @@ window.addEventListener("DOMContentLoaded",()=>{
 /* =============================
    CONFIRMAR PEDIDO
 ============================= */
-
 $("#btnConfirmar").onclick = async () => {
-
-  const nombre = $("#inpNombre").value.trim();
+  const nombre   = $("#inpNombre").value.trim();
   const telefono = $("#inpTelefono").value.trim();
-  const pago = document.querySelector("input[name='pago']:checked");
-  const entrega = "take_away";
-  const notas = $("#inpNotas").value.trim();
-  const slot = $("#slotsCarousel").selectedSlot;
+  const pago     = document.querySelector("input[name='pago']:checked");
+  const notas    = $("#inpNotas").value.trim();
+  const slot     = $("#slotsCarousel").selectedSlot;
+  const cart     = loadCart();
 
-  const cart = loadCart();
-
-  if (!nombre) {
+  if (!nombre){
     alert("Ingresá tu nombre");
     return;
   }
-
-  if (!pago) {
+  if (!pago){
     alert("Elegí el medio de pago");
     return;
   }
-
-  if (!slot) {
+  if (!slot){
     alert("Elegí un horario de retiro");
     return;
   }
@@ -511,15 +508,15 @@ $("#btnConfirmar").onclick = async () => {
   // verificar que el carrito NO esté vacío
   let totalItems = 0;
   Object.values(cart.burger).forEach(o => totalItems += o.qty);
-  if (totalItems === 0) {
+  if (totalItems === 0){
     alert("Tu carrito está vacío");
     return;
   }
 
   // reservar slot (sumar gramos)
-  try {
+  try{
     await reservarSlot(slot.key, gramosDelPedido());
-  } catch (err) {
+  }catch(err){
     alert("El horario se acaba de llenar. Elegí otro.");
     cargarSlots();
     return;
@@ -527,14 +524,13 @@ $("#btnConfirmar").onclick = async () => {
 
   // calcular total
   let total = 0;
-  Object.entries(cart.burger).forEach(([_, o]) => {
+  Object.values(cart.burger).forEach(o => {
     total += o.qty * o.item.price;
   });
 
   // armar resumen del pedido (texto para whatsapp)
   let detalle = "";
-
-  for (const [_, o] of Object.entries(cart.burger)) {
+  for (const o of Object.values(cart.burger)){
     detalle += `• ${o.item.name} x${o.qty}\n   Papas: ${o.fries}\n`;
     if (o.notes) detalle += `   Nota: ${o.notes}\n`;
   }
