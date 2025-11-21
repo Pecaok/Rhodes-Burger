@@ -416,34 +416,54 @@ $("#btnRefreshSlots").onclick=cargarSlots;
 /* ============================
    📌 RESERVAR TODOS LOS BLOQUES NECESARIOS
 ============================ */
-async function reservarMultiBloque(horaInicioKey, gramosTotales){
-  const bloquesNecesarios=Math.ceil(gramosTotales/GRAMOS_POR_BLOQUE);
+async function reservarMultiBloque(horaInicioKey, gramosTotales) {
+  const bloquesNecesarios = Math.ceil(gramosTotales / GRAMOS_POR_BLOQUE);
 
-  const indexInicio=slotObjects.findIndex(s=>s.key===horaInicioKey);
+  const indexInicio = slotObjects.findIndex(s => s.key === horaInicioKey);
+  if (indexInicio === -1) throw new Error("NO_SLOT");
 
-  if(indexInicio===-1) throw new Error("NO_SLOT");
+  let bloques = [];
+  let restante = gramosTotales;
 
-  let keysAReservar=[];
-  for(let i=0;i<bloquesNecesarios;i++){
-    const s=slotObjects[indexInicio+i];
-    if(!s) throw new Error("SIN_BLOQUES_SUFI");
-    keysAReservar.push(s.key);
+  // CALCULAR BLOQUES Y GRAMOS QUE IRÁN EN CADA UNO
+  for (let i = 0; i < bloquesNecesarios; i++) {
+    const slot = slotObjects[indexInicio + i];
+    if (!slot) throw new Error("SIN_BLOQUES_SUFI");
+
+    let carga = Math.min(restante, GRAMOS_POR_BLOQUE);
+
+    bloques.push({
+      key: slot.key,
+      carga: carga,
+      usados: slot.gramsUsed
+    });
+
+    restante -= carga;
   }
 
-  // RESERVAR TODOS LOS BLOQUES (transacción por cada uno)
-  for(const key of keysAReservar){
-    await db.runTransaction(async(tx)=>{
-      const ref=db.collection("slots_grams").doc(key);
-      const snap=await tx.get(ref);
-      let usados=snap.exists ? Number(snap.data().gramsUsed||0) : 0;
-      usados+=Math.min(gramosTotales,GRAMOS_POR_BLOQUE);
-      tx.set(ref,{gramsUsed:usados},{merge:true});
+  // VERIFICAR CAPACIDAD ANTES DE RESERVAR
+  for (const b of bloques) {
+    if (b.usados + b.carga > GRAMOS_POR_BLOQUE) {
+      throw new Error("NO_CAPACIDAD");
+    }
+  }
+
+  // RESERVA REAL
+  for (const b of bloques) {
+    await db.runTransaction(async (tx) => {
+      const ref = db.collection("slots_grams").doc(b.key);
+      const snap = await tx.get(ref);
+
+      let actuales = snap.exists ? Number(snap.data().gramsUsed || 0) : 0;
+
+      tx.set(ref, {
+        gramsUsed: actuales + b.carga
+      }, { merge: true });
     });
   }
 
-  return keysAReservar;
+  return bloques.map(b => b.key);
 }
-
 /* ============================
    RESUMEN
 ============================ */
