@@ -533,10 +533,10 @@
   <script>
     /* ====== Horarios de apertura ====== */
     const HOURS = {
-      0: [[19,0,24,0]], 1: [],
-      2: [], 3: [[19,0,24,0]],
-      4: [[19,0,24,0]], 5: [[19,0,24,0]],
-      6: [[19,0,24,0]]
+      0: [[19,00,24,0]], 1: [],
+      2: [[19,00,24,0]],
+      4: [[19,00,24,0]], 5: [[19,00,24,0]],
+      6: [[19,00,24,0]]
     };
 
     function fmtHM(h,m){
@@ -770,10 +770,18 @@
 
     /* ====== CARRITO ====== */
     let cart = loadCart();
-    function loadCart(){
-      try { return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{}, drink:{}}; }
-      catch { return {burger:{}, drink:{}}; }
-    }
+   function loadCart(){
+  try {
+    const c = JSON.parse(localStorage.getItem(CART_KEY)) || {};
+    return {
+      burger: c.burger || {},
+      drink:  c.drink  || {},
+      side:   c.side   || {}    // ← ahora compatible
+    };
+  } catch {
+    return { burger:{}, drink:{}, side:{} };
+  }
+}
     function saveCart(){ localStorage.setItem(CART_KEY, JSON.stringify(cart)); }
 
     function cartCount(){
@@ -899,34 +907,45 @@
     }
 
     /* ==== función que usa el customizer.js para agregar hamburguesas ==== */
-    function addToCart(item, fries, extras, notes){
-      const extrasSafe = extras || {};
-      const key =
-        item.id +
-        "|fries:"+ (fries || "") +
-        "|patty:"+ (extrasSafe.patty  ?? 0) +
-        "|cheddar:"+ (extrasSafe.cheddar ?? 0) +
-        "|notes:"+ (notes||"").trim();
+  function addToCart(item, fries, extras = {}, notes = "") {
 
-      if(!cart.burger[key]){
-        cart.burger[key] = {
-          qty:1,
-          item,
-          fries: fries || "",
-          extras:{
-            patty:  extrasSafe.patty  ?? 0,
-            cheddar:extrasSafe.cheddar?? 0
-          },
-          notes:(notes||"").trim()
-        };
-      } else {
-        cart.burger[key].qty++;
-      }
+  // Asegurar valores válidos SIEMPRE
+  const safeFries = fries || "con_sal";   // valor por defecto obligatorio
+  const safePatty = Number(extras.patty ?? 0);
+  const safeCheddar = Number(extras.cheddar ?? 0);
+  const safeNotes = (notes || "").trim();
 
-      saveCart();
-      renderCart();
-    }
+  const burgaData = {
+    id: item.id,
+    name: item.name,
+    price: item.price,
+    qty: 1,
+    fries: safeFries,
+    extras: {
+      patty: safePatty,
+      cheddar: safeCheddar
+    },
+    notes: safeNotes,
+    item
+  };
 
+  // key idéntica a pedido_cliente
+  const key =
+    item.id +
+    "|fries:" + safeFries +
+    "|patty:" + safePatty +
+    "|cheddar:" + safeCheddar +
+    "|notes:" + safeNotes;
+
+  if (!cart.burger[key]) {
+    cart.burger[key] = burgaData;
+  } else {
+    cart.burger[key].qty++;
+  }
+
+  saveCart();
+  renderCart();
+}
     /* ====== ORDEN VISUAL ====== */
     const gridBurgers = $("#burgersGrid");
     const gridDrinks  = $("#drinksGrid");
@@ -1027,7 +1046,7 @@
     const btnVaciar = document.getElementById("btnVaciar");
     if(btnVaciar){
       btnVaciar.onclick = ()=>{
-        cart = { burger:{}, drink:{} };
+        cart = { burger:{}, drink:{}, side:{} };
         saveCart();
         renderCart();
       };
