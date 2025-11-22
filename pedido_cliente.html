@@ -238,13 +238,14 @@ const db=firebase.firestore();
 /* CONSTANTES */
 const CART_KEY="rhodes_cart_v3";
 const GRAMOS_POR_BLOQUE=1500;
-const G_POR_BURGER=200;  // PAPAS de burger
-const G_POR_SIDE=700;    // PAPAS sueltas
+const G_POR_BURGER=200;
+const G_POR_SIDE=700;
 const SLOT_START="19:15";
 const SLOT_END="23:45";
 const SLOT_INTERVAL_MIN=15;
 
 function $(s){ return document.querySelector(s); }
+
 /* ============================
    FUNCIONES UTILITARIAS
 ============================ */
@@ -253,7 +254,6 @@ function parseHHMM(str){
   const now=new Date();
   return new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0);
 }
-
 function slotKey(date){
   const y=date.getFullYear();
   const M=String(date.getMonth()+1).padStart(2,"0");
@@ -262,7 +262,6 @@ function slotKey(date){
   const m=String(date.getMinutes()).padStart(2,"0");
   return `${y}${M}${d}_${H}${m}`;
 }
-
 function formatHHMM(date){
   return date.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
 }
@@ -277,8 +276,6 @@ function loadCart(){
     return {burger:{},drink:{},side:{}};
   }
 }
-
-/* GRAMOS totales del pedido */
 function gramosDelPedido(){
   const c=loadCart();
   let g=0;
@@ -288,14 +285,13 @@ function gramosDelPedido(){
 }
 
 /* ============================
-   GENERAR SLOTS DEL DÍA
+   GENERAR SLOTS
 ============================ */
 function generarSlotsDelDia(){
   const start=parseHHMM(SLOT_START);
-  const end  =parseHHMM(SLOT_END);
+  const end=parseHHMM(SLOT_END);
   const arr=[];
   let cur=new Date(start);
-
   while(cur<=end){
     arr.push(new Date(cur));
     cur=new Date(cur.getTime()+SLOT_INTERVAL_MIN*60000);
@@ -304,7 +300,7 @@ function generarSlotsDelDia(){
 }
 
 /* ============================
-   ESTADO GLOBAL
+   SLOTS
 ============================ */
 let slotObjects=[];
 let visibles=[];
@@ -316,9 +312,6 @@ function limpiarListeners(){
   listeners=[];
 }
 
-/* ============================
-   📌 CARGAR SLOTS + MULTI-BLOQUE
-============================ */
 async function cargarSlots(){
   limpiarListeners();
 
@@ -345,8 +338,6 @@ async function cargarSlots(){
 
       const data=doc.data() || {};
       s.gramsUsed=Number(data.gramsUsed||0);
-
-      // ➜ nunca llenamos por "un solo bloque"
       s.full=false;
 
       reconstruirVisibles();
@@ -356,41 +347,20 @@ async function cargarSlots(){
   });
 }
 
-/* ============================
-   ARMAR LISTA DE SLOTS VISIBLES
-============================ */
-function reconstruirVisibles() {
-  visibles = slotObjects
-    .filter(s => {
-      // capacidad REAL del bloque
-      const capacidadRestante = GRAMOS_POR_BLOQUE - s.gramsUsed;
+function reconstruirVisibles(){
+  visibles = slotObjects.filter(s=>{
+    const restante = GRAMOS_POR_BLOQUE - s.gramsUsed;
+    if(restante<=0) return false;
+    if(gramosDelPedido()>GRAMOS_POR_BLOQUE) return true;
+    return restante>=gramosDelPedido();
+  }).sort((a,b)=>a.date-b.date);
 
-      // si NO entra nada → no mostrarlo
-      if (capacidadRestante <= 0) return false;
-
-      // si el pedido supera 1500g, igual puede usar este bloque si hay aunque sea 1g
-      if (gramosDelPedido() > GRAMOS_POR_BLOQUE) return true;
-
-      // pedido normal → solo mostrar si entra completo
-      return capacidadRestante >= gramosDelPedido();
-    })
-    .sort((a,b)=> a.date - b.date);
-
-  // ajustar índice
-  if (visibles.length === 0) {
-    currentIndex = -1;
-  } else {
-    if (currentIndex < 0 || currentIndex >= visibles.length) {
-      currentIndex = 0;
-    }
-  }
+  if(visibles.length===0) currentIndex=-1;
+  else if(currentIndex<0||currentIndex>=visibles.length) currentIndex=0;
 
   actualizarUI();
 }
 
-/* ============================
-   ACTUALIZAR DROPDOWN
-============================ */
 function actualizarUI(){
   const label=$("#slotLabel");
   const count=$("#slotCount");
@@ -408,7 +378,6 @@ function actualizarUI(){
   }
 
   const s=visibles[currentIndex];
-
   label.textContent=formatHHMM(s.date);
   count.textContent=`${s.gramsUsed} g usados`;
 
@@ -417,70 +386,56 @@ function actualizarUI(){
 
   car.selectedSlot={
     key:s.key,
-    iso:s.date.toISOString(),
     pretty:formatHHMM(s.date)
   };
 }
 
-$("#slotPrev").onclick=()=>{
-  if(currentIndex>0){currentIndex--;actualizarUI();}
-};
-$("#slotNext").onclick=()=>{
-  if(currentIndex<visibles.length-1){currentIndex++;actualizarUI();}
-};
+$("#slotPrev").onclick=()=>{ if(currentIndex>0){currentIndex--;actualizarUI();} };
+$("#slotNext").onclick=()=>{ if(currentIndex<visibles.length-1){currentIndex++;actualizarUI();} };
 $("#btnRefreshSlots").onclick=cargarSlots;
 
 /* ============================
-   📌 RESERVAR TODOS LOS BLOQUES NECESARIOS
+   MULTI-BLOQUE
 ============================ */
 async function reservarMultiBloque(horaInicioKey, gramosTotales) {
-  const bloquesNecesarios = Math.ceil(gramosTotales / GRAMOS_POR_BLOQUE);
+  const bloquesNecesarios=Math.ceil(gramosTotales/GRAMOS_POR_BLOQUE);
+  const indexInicio=slotObjects.findIndex(s=>s.key===horaInicioKey);
+  if(indexInicio===-1) throw new Error("NO_SLOT");
 
-  const indexInicio = slotObjects.findIndex(s => s.key === horaInicioKey);
-  if (indexInicio === -1) throw new Error("NO_SLOT");
+  let bloques=[];
+  let restante=gramosTotales;
 
-  let bloques = [];
-  let restante = gramosTotales;
+  for(let i=0;i<bloquesNecesarios;i++){
+    const slot=slotObjects[indexInicio+i];
+    if(!slot) throw new Error("SIN_BLOQUES");
 
-  // CALCULAR BLOQUES Y GRAMOS QUE IRÁN EN CADA UNO
-  for (let i = 0; i < bloquesNecesarios; i++) {
-    const slot = slotObjects[indexInicio + i];
-    if (!slot) throw new Error("SIN_BLOQUES_SUFI");
-
-    let carga = Math.min(restante, GRAMOS_POR_BLOQUE);
+    let carga=Math.min(restante,GRAMOS_POR_BLOQUE);
 
     bloques.push({
-      key: slot.key,
-      carga: carga,
-      usados: slot.gramsUsed
+      key:slot.key,
+      carga:carga,
+      usados:slot.gramsUsed
     });
 
-    restante -= carga;
+    restante-=carga;
   }
 
-  // VERIFICAR CAPACIDAD ANTES DE RESERVAR
-  for (const b of bloques) {
-    if (b.usados + b.carga > GRAMOS_POR_BLOQUE) {
-      throw new Error("NO_CAPACIDAD");
-    }
+  for(const b of bloques){
+    if(b.usados + b.carga > GRAMOS_POR_BLOQUE) throw new Error("NO_CAPACIDAD");
   }
 
-  // RESERVA REAL
-  for (const b of bloques) {
-    await db.runTransaction(async (tx) => {
-      const ref = db.collection("slots_grams").doc(b.key);
-      const snap = await tx.get(ref);
-
-      let actuales = snap.exists ? Number(snap.data().gramsUsed || 0) : 0;
-
-      tx.set(ref, {
-        gramsUsed: actuales + b.carga
-      }, { merge: true });
+  for(const b of bloques){
+    await db.runTransaction(async tx=>{
+      const ref=db.collection("slots_grams").doc(b.key);
+      const snap=await tx.get(ref);
+      const actuales=snap.exists?Number(snap.data().gramsUsed||0):0;
+      tx.set(ref,{gramsUsed:actuales+b.carga},{merge:true});
     });
   }
 
-  return bloques.map(b => b.key);
+  return bloques.map(b=>b.key);
 }
+
 /* ============================
    RESUMEN
 ============================ */
@@ -488,7 +443,6 @@ function renderResumen(){
   const c=loadCart();
   const box=$("#resumen");
   const totalEl=$("#resTotal");
-
   box.innerHTML="";
   let t=0;
 
@@ -507,6 +461,26 @@ function renderResumen(){
 }
 
 /* ============================
+   📌 CONTADOR DE NUMERO DE PEDIDO
+============================ */
+async function obtenerYIncrementarOrderNumber() {
+  const ref = db.collection("config").doc("counters");
+  let nuevoNumero = null;
+
+  await db.runTransaction(async (tx)=>{
+    const snap = await tx.get(ref);
+    const actual = snap.exists ? snap.data().orderNumber || 0 : 0;
+    nuevoNumero = actual + 1;
+    tx.update(ref, {
+      orderNumber: nuevoNumero,
+      updatedAt: new Date().toISOString()
+    });
+  });
+
+  return nuevoNumero;
+}
+
+/* ============================
    CONFIRMAR PEDIDO
 ============================ */
 $("#btnConfirmar").onclick=async()=>{
@@ -522,17 +496,12 @@ $("#btnConfirmar").onclick=async()=>{
   if(!pago){alert("Elegí el medio de pago");return;}
   if(!slot){alert("Elegí un horario de retiro");return;}
 
-  // verificar carrito
   let totalItems=0;
   Object.values(cart.burger).forEach(o=>totalItems+=o.qty);
-  if(totalItems===0){
-    alert("Tu carrito está vacío");
-    return;
-  }
+  if(totalItems===0){ alert("Tu carrito está vacío"); return; }
 
   const gramosTotales=gramosDelPedido();
 
-  // RESERVA MULTI-BLOQUE
   let bloquesReservados=[];
   try{
     bloquesReservados=await reservarMultiBloque(slot.key,gramosTotales);
@@ -542,73 +511,67 @@ $("#btnConfirmar").onclick=async()=>{
     return;
   }
 
-  // calcular total
   let total=0;
-  Object.values(cart.burger).forEach(o=>{ total+=o.qty*o.item.price; });
+  Object.values(cart.burger).forEach(o=>total+=o.qty*o.item.price);
 
-  // generar detalle
   let detalle="";
   for(const o of Object.values(cart.burger)){
     detalle+=`• ${o.item.name} x${o.qty}\n   Papas: ${o.fries}\n`;
     if(o.notes) detalle+=`   Nota: ${o.notes}\n`;
   }
 
-  // guardar en Firestore
-  await db.collection("pedidos_clientes").add({
+  /* ============================
+        GENERAR NÚMERO REAL
+  ============================= */
+  const orderNumber = await obtenerYIncrementarOrderNumber();
+
+  /* ============================
+        GUARDADO ÚNICO
+  ============================= */
+  const pedido = {
+    source:"web",
+    orderNumber,
     nombre,
     telefono,
     pago:pago.value,
-    notas,
-    slot_inicio:slot.key,
-    slot_pretty:slot.pretty,
-    bloques:bloquesReservados,
+    payment_method:pago.value,
+    payment_status:"pending_payment",
+    paid:false,
+
+    entrega:"take_away",
+    pickup_time_pretty:slot.pretty,
+    pickup_slot:slot.key,
+
+    status:"accepted",
+    statusHistory:[
+      {to:"accepted",at:new Date().toISOString()}
+    ],
+
+    items:Object.values(cart.burger).map(o=>({
+      name:o.item.name,
+      price:o.item.price,
+      qty:o.qty,
+      fries:o.fries,
+      notes:o.notes ? [o.notes] : [],
+      extras:{
+        patty:o.extras.patty,
+        cheddar:o.extras.cheddar,
+        EXTRA_PRICE_PATTY:2500,
+        EXTRA_PRICE_CHEDDAR:300
+      }
+    })),
+
     total,
-    cart,
-    fecha:new Date().toISOString()
-  });
+    createdAt:new Date().toISOString()
+  };
 
-  // =============================
-//  TAMBIÉN GUARDAR EN ORDERS
-// =============================
-await db.collection("orders").add({
-  source: "web",
-  nombre,
-  telefono,
-  pago: pago.value,
-  payment_method: pago.value,
-  payment_status: "pending_payment",
-  paid: false,
+  await db.collection("orders").add(pedido);
 
-  entrega: "take_away",
-  pickup_time_pretty: slot.pretty,
-  pickup_slot: slot.key,
-
-  status: "accepted",
-  statusHistory: [
-    { to: "accepted", at: new Date().toISOString() }
-  ],
-
-  items: Object.values(cart.burger).map(o => ({
-    name: o.item.name,
-    price: o.item.price,
-    qty: o.qty,
-    fries: o.fries,
-    notes: o.notes ? [o.notes] : [],
-    extras: {
-      patty: o.extras.patty,
-      cheddar: o.extras.cheddar,
-      EXTRA_PRICE_PATTY: 2500,
-      EXTRA_PRICE_CHEDDAR: 300
-    }
-  })),
-
-  total,
-  createdAt: new Date().toISOString()
-});
-
-  // WHATSAPP
+  /* ============================
+        WHATSAPP
+  ============================= */
   const msg =
-`*Nuevo Pedido*
+`*Nuevo Pedido #${orderNumber}*
 Nombre: ${nombre}
 Teléfono: ${telefono||"-"}
 Pago: ${pago.value==="mercado_pago"?"Transferencia":"En Local"}
