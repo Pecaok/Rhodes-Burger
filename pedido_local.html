@@ -331,118 +331,187 @@
       return '';
     }
 
-    /* ========== renderOrder: ahora muestra HORARIO en el chip ========== */
-    function renderOrder(doc){
-      const o = doc.data(); const dt = pickDocDate(o);
-      const dtText = dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
-      const items = Array.isArray(o.items) ? o.items : [];
+    /* ===== Agrupar hamburguesas idénticas y separar papas (vista grande) ===== */
+function groupItemsForScreen(items){
+  const burgers = {};
+  const fries = [];
 
-      const pickupPretty = getPickupPretty(o);   // <<<<<<<<<<<<<<
+  function normalizeFriesLabel(raw){
+    if(!raw && raw !== 0) return '';
+    let s = String(raw).toLowerCase();
+    s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+    if(!s) return '';
+    if(/\bsin\b/.test(s) && /\bsal\b/.test(s)) return 'Sin sal';
+    if(s.includes('sazon')) return 'Sazonadas';
+    if(s.includes('con sal')) return 'Con sal';
+    return s;
+  }
 
-      const lines = items.map(it=>{
-        const qty = it.qty||1;
-        const subtotal = (it.price||0)*qty
-          + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
-          + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
+  for(const it of items){
+    const qty = it.qty || 1;
+    const name = it.name || "";
+    const friesLabel = normalizeFriesLabel(it.fries || it.side || it.extras?.fries || "");
 
-        const extras = [];
-        if (it.extras?.patty) extras.push(`+${it.extras.patty} medallón(es)`);
-        if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
-        const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
-
-        const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
-        const friesText = normalizeFriesLabel(friesRaw) || '—';
-
-        let perUnitNotes = null;
-        if (Array.isArray(it.notes)) perUnitNotes = it.notes;
-        else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
-        else if (Array.isArray(it.comment)) perUnitNotes = it.comment;
-
-        let commentHtml = '';
-        if (perUnitNotes && perUnitNotes.length){
-          commentHtml = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${c}</div>`).join('');
-        } else {
-          const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
-                       : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
-                       : (typeof it.notes === 'number' ? String(it.notes) : null);
-          if (single){
-            commentHtml = `<div class="sub">• Nota: ${single}${qty>1?' <small style="color:#666">(aplica a todas)</small>':''}</div>`;
-          }
-        }
-
-        return `<div class="item">
-          <div>• <strong>${qty}× ${it.name||''}</strong></div>
-          <div class="sub">Papas: ${friesText}${extrasLine ? (' · '+extrasLine.replace(/^ · /,'')) : ''}</div>
-          ${commentHtml}
-          <div class="sub">Subtotal: ${money(subtotal)}</div>
-        </div>`;
-      }).join("");
-
-      const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
-
-      const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
-      const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
-      const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
-
-      const st = o.status ?? "accepted";
-      const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
-      const stateBtns = `<div class="stateBtns">
-        ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${STATE_LABEL[key]||key}</button>`).join('')}
-      </div>`;
-
-      const forcePaidInDeliveredTab = (currentFilter === 'entregados');
-      const isPaid = forcePaidInDeliveredTab || ((o.payment_status==='paid' || o.paid) === true);
-      const payBtnAttrs = forcePaidInDeliveredTab ? 'disabled' : '';
-      const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
-      const payLine = `
-  <div class="pay-line">
-    
-    <select class="btn" data-select-pago style="min-width:200px">
-      <option value="" disabled ${(!o.pago || o.pago==="sin_especificar")?'selected':''}>
-  Seleccioná medio de pago
-</option>
-      <option value="efectivo" ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
-      <option value="debito" ${o.pago==="debito"?"selected":""}>Débito</option>
-      <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>Mercado Pago</option>
-      <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
-    </select>
-
-    <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}" ${payBtnAttrs}>
-      ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
-    </button>
-
-    <button class="btn" data-print>🖨 Imprimir</button>
-  </div>`;
-
-      return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
-        <div class="order-head">
-          <div>
-            <div class="order-title">
-  ${displayOrderNumber(doc)} — 
-  ${o.nombre ?? 'Cliente'}
-  ${o.source === "mostrador" ? ' <span style="color:#625A45">(mostrador)</span>' : ''}
-</div>
-            <div class="muted">N° interno: ${o.orderNumber ?? '—'}</div>
-            <div class="muted">${dtText}</div>
-            <div class="chips">
-              <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
-              <span class="chip">Estado: ${st}</span>
-              <span class="chip">Retiro: ${o.entrega || 'mostrador'}</span>
-              <span class="chip">Horario: ${pickupPretty || '—'}</span>
-              ${telChip}${srcChip}${cmtChip}
-            </div>
-            ${stateBtns}
-          </div>
-          <div>
-            <div class="right-total">${money(computeOrderTotal(o))}</div>
-            ${payLine}
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
-      </div>`;
+    // === PAPAS VAN APARTE ===
+    if(name.toLowerCase().includes("papa") || name.toLowerCase().includes("fry")){
+      fries.push({
+        qty,
+        name,
+        friesLabel
+      });
+      continue;
     }
 
+    // === CLAVE ÚNICA DE HAMBURGUESA ===
+    const key = JSON.stringify({
+      name,
+      extras: it.extras || {},
+      notes: it.notes || it.comments || ""
+    });
+
+    if(!burgers[key]){
+      burgers[key] = {
+        qty: 0,
+        name,
+        extras: it.extras || {},
+        notes: it.notes || it.comments || it.comment || "",
+        price: it.price || 0
+      };
+    }
+
+    burgers[key].qty += qty;
+  }
+
+  return {
+    burgers: Object.values(burgers),
+    fries
+  };
+}
+
+    /* ========== renderOrder: ahora muestra HORARIO en el chip ========== */
+   function renderOrder(doc){
+  const o = doc.data();
+  const dt = pickDocDate(o);
+  const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
+
+  const items = Array.isArray(o.items) ? o.items : [];
+
+  // === AGRUPADO UNIVERSAL ===
+  const groups = groupItemsForScreen(items);
+
+  /* ==== Render Burgers ==== */
+  const burgerHTML = groups.burgers.map(it=>{
+    const extras = [];
+
+    if(it.extras?.patty)
+      extras.push(`+${it.extras.patty} medallones`);
+    if(it.extras?.cheddar)
+      extras.push(`+${it.extras.cheddar} cheddar`);
+
+    const extrasLine = extras.length ? `<div class="sub">Extras: ${extras.join(" · ")}</div>` : "";
+    const notesLine = it.notes ? `<div class="sub">Nota: ${it.notes}</div>` : "";
+
+    const subtotal =
+      (it.qty * it.price) +
+      (it.extras?.patty || 0) * (it.extras?.EXTRA_PRICE_PATTY || 0) * it.qty +
+      (it.extras?.cheddar || 0) * (it.extras?.EXTRA_PRICE_CHEDDAR || 0) * it.qty;
+
+    return `
+      <div class="item">
+        <strong>• ${it.qty}× ${it.name}</strong>
+        ${extrasLine}
+        ${notesLine}
+        <div class="sub">Subtotal: ${money(subtotal)}</div>
+      </div>
+    `;
+  }).join("");
+
+  /* ==== Render Fries ==== */
+  const friesHTML = groups.fries.length
+    ? `<h4 style="margin-top:12px">🍟 Papas</h4>` +
+      groups.fries.map(f=>`
+        <div class="item">
+          <strong>• ${f.qty}× ${f.name}</strong>
+          ${f.friesLabel ? `<div class="sub">Papas: ${f.friesLabel}</div>` : ""}
+        </div>
+      `).join("")
+    : "";
+
+  const pickupPretty = getPickupPretty(o);
+
+  const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
+  const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
+
+  const generalNote = (o.comment || o.notes || "").toString().trim();
+  const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
+
+  const st = o.status ?? "accepted";
+  const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
+
+  const stateBtns = `
+    <div class="stateBtns">
+      ${STATE_SEQ.map((key,idx)=>`
+        <button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">
+          ${STATE_LABEL[key]}
+        </button>
+      `).join('')}
+    </div>
+  `;
+
+  const isPaid = ((o.payment_status === "paid") || o.paid === true);
+  const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
+
+  const payLine = `
+    <div class="pay-line">
+      <select class="btn" data-select-pago style="min-width:200px">
+        <option value="" disabled ${(!o.pago)?'selected':''}>Seleccioná medio de pago</option>
+        <option value="efectivo" ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
+        <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>Mercado Pago</option>
+        <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
+      </select>
+
+      <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}">
+        ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
+      </button>
+
+      <button class="btn" data-print>🖨 Imprimir</button>
+    </div>
+  `;
+
+  return `
+    <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
+      <div class="order-head">
+        <div>
+          <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre ?? 'Cliente'}</div>
+          <div class="muted">N° interno: ${o.orderNumber ?? '—'}</div>
+          <div class="muted">${dtText}</div>
+
+          <div class="chips">
+            <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
+            <span class="chip">Estado: ${st}</span>
+            <span class="chip">Retiro: ${o.entrega||"take_away"}</span>
+            <span class="chip">Horario: ${pickupPretty || "—"}</span>
+            ${telChip}${srcChip}${cmtChip}
+          </div>
+
+          ${stateBtns}
+        </div>
+
+        <div>
+          <div class="right-total">${money(computeOrderTotal(o))}</div>
+          ${payLine}
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="items">
+        ${burgerHTML}
+        ${friesHTML}
+      </div>
+    </div>
+  `;
+}
     /* ===========================================================
    TICKET 58MM — MISMO DISEÑO QUE MOSTRADOR.HTML (VERSIÓN FINAL)
    =========================================================== */
