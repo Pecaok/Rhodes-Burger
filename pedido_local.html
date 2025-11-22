@@ -535,7 +535,7 @@ function buildTicketHTML(docSnap){
       maximumFractionDigits: 0
     });
 
-  /* ==== Número de pedido ==== */
+  /* ==== Número ==== */
   const orderDisplay = (() => {
     const possible = [
       o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro,
@@ -568,41 +568,32 @@ function buildTicketHTML(docSnap){
   const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
 
   /* ==== Pickup ==== */
- // ==== HORARIO UNIFICADO ====
-function resolvePickupPretty(o){
-  // 1) Prioridad máxima (index web)
-  if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "")
-    return o.pickup_time_pretty;
+  function resolvePickupPretty(o){
+    if (o.pickup_time_pretty) return o.pickup_time_pretty;
+    if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot))
+      return o.pickup_slot;
 
-  // 2) Mostrador: guarda directo "HH:MM"
-  if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot))
-    return o.pickup_slot;
+    const t = o.pickup_time || o.pickupTime || o.pickup;
+    if (t) {
+      try {
+        if (typeof t?.toDate === "function")
+          return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+        const d = new Date(t);
+        if (!isNaN(d))
+          return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+      }catch(_){}
+    }
 
-  // 3) Timestamps / ISO de ambos sistemas
-  const t = o.pickup_time || o.pickupTime || o.pickup;
-  if (t) {
-    try {
-      if (typeof t?.toDate === "function")
-        return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
-      const d = new Date(t);
-      if (!isNaN(d))
-        return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
-    } catch(_){}
+    if (typeof o.pickup_slot === "string"){
+      const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/);
+      if (m) return `${m[1]}:${m[2]}`;
+    }
+
+    if (o.pickup_asap) return "A la brevedad";
+    return null;
   }
 
-  // 4) Formato “2210”
-  if (typeof o.pickup_slot === "string") {
-    const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/);
-    if (m) return `${m[1]}:${m[2]}`;
-  }
-
-  // 5) ASAP
-  if (o.pickup_asap === true) return "A la brevedad";
-
-  return null;
-}
-
-const pickupPretty = resolvePickupPretty(o);
+  const pickupPretty = resolvePickupPretty(o);
 
   const pickupBlockLarge = pickupPretty
     ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">
@@ -612,145 +603,104 @@ const pickupPretty = resolvePickupPretty(o);
          Retiro: A la brevedad
        </div>`;
 
-  /* ==== Items ==== */
+  /* ==== Normalizar papas ==== */
   function normalizeFriesLabel(raw){
     if(!raw && raw !== 0) return '';
     let s = String(raw).toLowerCase();
     s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
     if(!s) return '';
-    if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) return 'Sin sal';
+    if(/\bsin\b/.test(s) && /\bsal\b/.test(s)) return 'Sin sal';
     if(/\bsazon\b/.test(s)) return 'Sazonadas';
     if(/\bsal\b/.test(s)) return 'Con sal';
-    if(s.includes('sazon')) return 'Sazonadas';
-    if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
-    if(s.includes('sal')) return 'Con sal';
-    return '';
+    if(s.includes("sazon")) return "Sazonadas";
+    return s;
   }
 
+  /* ==== AGRUPACIÓN INTELIGENTE (NO AGRUPAR SI CAMBIA NOTA O PAPAS) ==== */
   const items = Array.isArray(o.items) ? o.items : [];
 
-  const linesHTML =
-    items
-      .map(it => {
-        const qty = it.qty || 1;
-        const name = escapeHtml(it.name || "");
+  const groups = {};
 
-        const base = it.price || 0;
-        const baseSubtotal = base * qty;
+  for (const it of items) {
+    const name = it.name || "";
+    const price = it.price || 0;
 
-        /* Extras */
-        const pattyCount = it.extras?.patty || 0;
-        const cheddarCount = it.extras?.cheddar || 0;
-        const pattyUnit = it.extras?.EXTRA_PRICE_PATTY || 0;
-        const cheddarUnit = it.extras?.EXTRA_PRICE_CHEDDAR || 0;
+    const fries = normalizeFriesLabel(
+      it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(" "): "") || it.extras?.fries || ""
+    );
 
-        const pattySum = qty * pattyCount * pattyUnit;
-        const cheddarSum = qty * cheddarCount * cheddarUnit;
+    const patty = it.extras?.patty || 0;
+    const cheddar = it.extras?.cheddar || 0;
 
-        const friesRaw =
-          it.fries ||
-          it.side ||
-          (Array.isArray(it.sides) ? it.sides.join(" ") : "") ||
-          it.extras?.fries ||
-          "";
+    // TOMAR NOTA como string normalizada
+    let note = "";
+    if (Array.isArray(it.notes)) note = it.notes.join(" | ");
+    else if (Array.isArray(it.comments)) note = it.comments.join(" | ");
+    else if (typeof it.notes === "string") note = it.notes.trim();
+    else if (typeof it.comment === "string") note = it.comment.trim();
 
-        const friesLabel = normalizeFriesLabel(friesRaw);
-        const friesHTML = friesLabel
-          ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>`
-          : "";
+    const key = JSON.stringify({
+      name, price, fries, patty, cheddar, note
+    });
 
-        /* Comentarios */
-        let notesHTML = "";
-        let notesArr = null;
+    if (!groups[key])
+      groups[key] = { item: it, qty: 0, fries, note, patty, cheddar, price, name };
+    groups[key].qty += it.qty || 1;
+  }
 
-        if (Array.isArray(it.notes)) notesArr = it.notes;
-        else if (Array.isArray(it.comments)) notesArr = it.comments;
+  /* ==== RENDER LÍNEAS ==== */
+  const linesHTML = Object.values(groups).map(g=>{
+    const it = g.item;
+    const qty = g.qty;
 
-        if (notesArr?.length) {
-          notesHTML = notesArr
-            .map((c, i) => `<div class="sub">• Nota ${i + 1}: ${escapeHtml(c)}</div>`)
-            .join("");
-        } else {
-          const single =
-            (typeof it.notes === "string" && it.notes.trim()) ||
-            (typeof it.comment === "string" && it.comment.trim()) ||
-            null;
+    const baseSubtotal = g.price * qty;
 
-          if (single) {
-            notesHTML = `<div class="sub">• Nota: ${escapeHtml(single)}${
-              qty > 1 ? ` (todas)` : ""
-            }</div>`;
-          }
-        }
+    const pattySum = qty * g.patty * (it.extras?.EXTRA_PRICE_PATTY || 0);
+    const cheddarSum = qty * g.cheddar * (it.extras?.EXTRA_PRICE_CHEDDAR || 0);
 
-        const extrasRows = [];
+    const friesHTML = g.fries
+      ? `<div class="sub">• Papas: ${escapeHtml(g.fries)}</div>` : "";
 
-        if (cheddarCount) {
-          extrasRows.push(
-            `<div class="row extra"><div class="l">+${cheddarCount} × Cheddar</div><div class="r">${money(
-              cheddarSum
-            )}</div></div>`
-          );
-        }
+    const noteHTML = g.note
+      ? `<div class="sub">• Nota: ${escapeHtml(g.note)}</div>` : "";
 
-        if (pattyCount) {
-          const plural = pattyCount > 1 ? "Medallones extra" : "Medallón extra";
-          extrasRows.push(
-            `<div class="row extra"><div class="l">+${pattyCount} × ${plural}</div><div class="r">${money(
-              pattySum
-            )}</div></div>`
-          );
-        }
+    return `
+      <div class="row name">
+        <div class="l">${qty} × ${escapeHtml(g.name)}</div>
+      </div>
+      ${friesHTML}
+      ${noteHTML}
+      <div class="row amount final">
+        <div class="l"></div>
+        <div class="r">${money(baseSubtotal + pattySum + cheddarSum)}</div>
+      </div>
+      <div class="sep"></div>
+    `;
+  }).join("");
 
-        return `
-        <div class="row name">
-          <div class="l">${qty} × ${name}</div>
-        </div>
-        ${friesHTML}
-        ${notesHTML}
-        <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
-        ${extrasRows.join("")}
-        <div class="row amount final"><div class="l"></div><div class="r">${money(
-          baseSubtotal + pattySum + cheddarSum
-        )}</div></div>
-        <div class="sep"></div>
-        `;
-      })
-      .join("") || `<div class="sub">Sin ítems.</div>`;
-
-  /* ==== Totales ==== */
-  const subtotal = items.reduce((t, it) => {
-    const qty = it.qty || 1;
-    const base = (it.price || 0) * qty;
-    const patty = (it.extras?.patty || 0) * (it.extras?.EXTRA_PRICE_PATTY || 0) * qty;
-    const cheddar =
-      (it.extras?.cheddar || 0) * (it.extras?.EXTRA_PRICE_CHEDDAR || 0) * qty;
-    return t + base + patty + cheddar;
-  }, 0);
+  /* ==== TOTAl ==== */
+  const subtotal = Object.values(groups).reduce((t,g)=>{
+    const it = g.item;
+    const qty = g.qty;
+    return t +
+      g.price * qty +
+      qty * g.patty * (it.extras?.EXTRA_PRICE_PATTY||0) +
+      qty * g.cheddar * (it.extras?.EXTRA_PRICE_CHEDDAR||0);
+  },0);
 
   const total = typeof o.total === "number" ? o.total : subtotal;
 
-  const discountLine = o.descuento
-    ? `<div class="row subtotal"><div class="l">DESCUENTO</div><div class="r">-${money(
-        o.descuento
-      )}</div></div>`
-    : "";
-
   const generalNote =
-    (o.comment ||
-      o.notes ||
-      o.note ||
-      o.notes_general ||
-      o.comentario ||
-      o.comments ||
-      "")
-      .toString()
-      .trim();
+    (o.comment || o.notes || o.note || o.notes_general ||
+     o.comentario || o.comments || "").toString().trim();
 
   const commentBlock = generalNote
-    ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(
-        generalNote
-      )}</div></div><div class="hr"></div>`
+    ? `<div class="hr"></div>
+       <div class="blk">
+         <div class="lbl">COMENTARIO</div>
+         <div>${escapeHtml(generalNote)}</div>
+       </div>
+       <div class="hr"></div>`
     : "";
 
   /* ==== HTML FINAL ==== */
@@ -776,7 +726,7 @@ const pickupPretty = resolvePickupPretty(o);
   .row .r{ flex:0; text-align:right; min-width:18mm; white-space:nowrap; }
   .row.name .r{ display:none; }
   .sub{ font-size:11px; margin:1px 0 0 2mm; }
-  .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
+  .sep{ border-top:1px dashed #000; opacity:.4; margin:2mm 0 1.2mm 0; }
   .total{ font-size:16px; margin-top:3mm; }
   .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
 </style>
@@ -789,19 +739,22 @@ const pickupPretty = resolvePickupPretty(o);
 
     <div class="hr"></div>
 
-    ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
+    ${o.nombre ? `
+      <div class="blk">
+        <div class="lbl">CLIENTE</div>
+        <div>${escapeHtml(o.nombre)}</div>
+      </div>` 
+      : ""
+    }
 
     ${pickupBlockLarge}
 
-    ${(o.pago || o.payment_method)
-      ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(
-          o.pago || o.payment_method
-        )}</div></div>`
-      : ""}
-
-    ${o.cupon
-      ? `<div class="blk"><div class="lbl">CUPÓN</div><div>${escapeHtml(o.cupon)}</div></div>`
-      : ""}
+    ${(o.pago || o.payment_method) ? `
+      <div class="blk">
+        <div class="lbl">MEDIO DE PAGO</div>
+        <div>${escapeHtml(o.pago || o.payment_method)}</div>
+      </div>` : ""
+    }
 
     ${commentBlock}
 
@@ -810,7 +763,6 @@ const pickupPretty = resolvePickupPretty(o);
     <div class="hr"></div>
 
     <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${money(subtotal)}</div></div>
-    ${discountLine}
     <div class="row total"><div class="l">TOTAL</div><div class="r">${money(total)}</div></div>
 
     <div class="foot">
