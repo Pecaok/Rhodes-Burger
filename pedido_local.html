@@ -64,7 +64,7 @@
     .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700}
     .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain;margin-right:8px}
     .spacer{flex:1}
-    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid(var(--ring));background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600;text-decoration:none;color:inherit}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600;text-decoration:none;color:inherit}
     .btn.active,.btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
     .danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
@@ -95,6 +95,7 @@
     .state-delivered.on{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-cancelled.on{background:var(--st-cancelled);border-color:var(--st-cancelled);color:#fff}
 
+    /* Línea de pago: botón único (toggle) */
     .pay-line{margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
     .pay-toggle{min-width:200px;text-align:center}
     .pay-toggle.is-paid{ background:var(--pay-paid); color:#fff; border-color:var(--pay-paid); }
@@ -111,7 +112,6 @@
     }
   </style>
 </head>
-
 <body>
   <header>
     <div class="topbar">
@@ -146,6 +146,7 @@
     <div id="orders"></div>
     <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
   </main>
+
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
@@ -188,7 +189,7 @@
       return `#${doc.id.slice(-5).toUpperCase()}`;
     }
 
-    /* ===== Horario de retiro ===== */
+    /* ===== Horario de retiro (único para página + ticket) ===== */
     function formatSlotTime(raw){
       if(!raw) return null;
       try{
@@ -197,14 +198,12 @@
         if(typeof raw === 'string'){
           const d = new Date(raw);
           if(!isNaN(d)) return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
-          const m = raw.match(/(\d{2})(\d{2})$/); 
-          if(m) return m[1]+':'+m[2];
+          const m = raw.match(/(\d{2})(\d{2})$/); if(m) return m[1]+':'+m[2];
         }
         if(raw instanceof Date) return raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
       }catch(e){}
       return null;
     }
-
     function getPickupPretty(o){
       if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "")
         return o.pickup_time_pretty;
@@ -234,85 +233,37 @@
 
       return null;
     }
+
     /* ===== sonido ===== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let audioCtx = null, audioReady = false;
-
-    function getAudioCtx(){ 
-      if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); 
-      return audioCtx; 
-    }
-
-    async function ensureAudioReady(){ 
-      try{ 
-        const ctx=getAudioCtx(); 
-        if(ctx.state==='suspended') await ctx.resume(); 
-        audioReady=(ctx.state==='running'); 
-      }catch(e){ audioReady=false; } 
-      return audioReady; 
-    }
-
-    function beepOnce(ctx, d=0.22, f=900, g=0.7){ 
-      const o=ctx.createOscillator(), ga=ctx.createGain(); 
-      o.type="square"; 
-      o.frequency.value=f; 
-      o.connect(ga); 
-      ga.connect(ctx.destination); 
-      ga.gain.setValueAtTime(0.0001, ctx.currentTime); 
-      ga.gain.exponentialRampToValueAtTime(g, ctx.currentTime+0.02); 
-      ga.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+d); 
-      o.start(); 
-      o.stop(ctx.currentTime+d+0.02); 
-    }
-
-    async function playBeepTriple(){ 
-      if(!soundEnabled) return; 
-      const ok=await ensureAudioReady(); 
-      if(!ok) return; 
-      const ctx=getAudioCtx(); 
-      beepOnce(ctx); 
-      setTimeout(()=>beepOnce(ctx),320); 
-      setTimeout(()=>beepOnce(ctx),640); 
-    }
-
-    ['click','touchstart','keydown'].forEach(evt=> 
-      window.addEventListener(evt, ()=>{ 
-        if(!audioReady) ensureAudioReady(); 
-      }, {passive:true})
-    );
+    function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
+    async function ensureAudioReady(){ try{ const ctx=getAudioCtx(); if(ctx.state==='suspended') await ctx.resume(); audioReady=(ctx.state==='running'); }catch(e){ audioReady=false; } return audioReady; }
+    function beepOnce(ctx, d=0.22, f=900, g=0.7){ const o=ctx.createOscillator(), ga=ctx.createGain(); o.type="square"; o.frequency.value=f; o.connect(ga); ga.connect(ctx.destination); ga.gain.setValueAtTime(0.0001, ctx.currentTime); ga.gain.exponentialRampToValueAtTime(g, ctx.currentTime+0.02); ga.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+d); o.start(); o.stop(ctx.currentTime+d+0.02); }
+    async function playBeepTriple(){ if(!soundEnabled) return; const ok=await ensureAudioReady(); if(!ok) return; const ctx=getAudioCtx(); beepOnce(ctx); setTimeout(()=>beepOnce(ctx),320); setTimeout(()=>beepOnce(ctx),640); }
+    ['click','touchstart','keydown'].forEach(evt=> window.addEventListener(evt, ()=>{ if(!audioReady) ensureAudioReady(); }, {passive:true}));
 
     const btnBell=$("#btnBell");
     const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
     updateBellUI();
-
-    btnBell.onclick=()=>{ 
-      soundEnabled=!soundEnabled; 
-      localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); 
-      updateBellUI(); 
-      if(soundEnabled) playBeepTriple(); 
-    };
+    btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
 
     $("#btnLogout").onclick=()=>{ logout(); };
-
 
     /* ====== Filtros ====== */
     const tabs=$("#tabs");
     let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
 
     tabs.addEventListener("click",(e)=>{
-      const el=e.target.closest("[data-f]"); 
-      if(!el) return;
-
+      const el=e.target.closest("[data-f]"); if(!el) return;
       currentFilter = el.dataset.f;
       tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
       el.classList.add("active");
-
       if (lastSnap) renderList(lastSnap);
     });
 
     const passFilter=o=>{
       const s = o.status ?? "accepted";
-
       if(currentFilter==="recibidos"){
         return s==="accepted" || s==="pending_payment" || s==="in_prep" || s==="ready";
       }
@@ -325,59 +276,30 @@
       return true;
     };
 
-
     /* ====== acciones ====== */
     async function setOrderStatus(id,next){
       try{
         await db.collection("orders").doc(id).update({
           status: next,
-          statusHistory: firebase.firestore.FieldValue.arrayUnion({
-            to:next,
-            at:new Date().toISOString()
-          })
+          statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()})
         });
-      }catch(e){ 
-        alert("No se pudo actualizar el estado: "+(e?.message||e)); 
-      }
+      }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
     }
-
     async function setPaymentStatus(id, paid){
       try{
         await db.collection("orders").doc(id).update({
           paid: !!paid,
           payment_status: paid ? "paid" : "pending_payment",
-          statusHistory: firebase.firestore.FieldValue.arrayUnion({
-            to: paid?"paid":"pending_payment", 
-            at:new Date().toISOString()
-          })
+          statusHistory: firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()})
         });
-      }catch(e){ 
-        alert("No se pudo actualizar el pago: "+(e?.message||e)); 
-      }
+      }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
     }
 
     const btnStateClass=st=>`state-btn state-${st}`;
-    
-    const STATE_SEQ = [
-      'accepted',
-      'in_prep',
-      'ready',
-      'delivered',
-      'cancelled'
-    ];
-
-    const STATE_LABEL = {
-      accepted:'Recibido', 
-      in_prep:'En preparación', 
-      ready:'Listo para retirar', 
-      delivered:'Entregado', 
-      cancelled:'Cancelar'
-    };
-
+    const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
+    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
     const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
 
-
-    /* ======== SUBTOTALES ======== */
     const computeRawSubtotal = o => {
       if (typeof o.rawTotal === "number") return o.rawTotal;
       const items = Array.isArray(o.items)?o.items:[];
@@ -389,29 +311,23 @@
         return t + base + patty + cheddar;
       },0);
     };
+    const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    const computeOrderTotal = o => 
-      (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
-
-
-    /* ===== normalizar papas ===== */
     function normalizeFriesLabel(raw){
       if(!raw && raw !== 0) return '';
       let s = String(raw).toLowerCase();
       s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
-
       if(!s) return '';
-      if(/\bsin\b/.test(s) && (/\bsal\b/.test(s)||/\bsazon\b/.test(s))) return 'Sin sal';
+      if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) return 'Sin sal';
       if(/\bsazon\b/.test(s)) return 'Sazonadas';
       if(/\bsal\b/.test(s)) return 'Con sal';
       if(s.includes('sazon')) return 'Sazonadas';
       if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
       if(s.includes('sal')) return 'Con sal';
-
       return '';
     }
 
-    /* ===== Agrupar hamburguesas idénticas y separar papas ===== */
+    /* ===== Agrupar hamburguesas idénticas y separar papas (vista grande) ===== */
     function groupItemsForScreen(items){
       const burgers = {};   // hamburguesas
       const friesMap = {};  // papas
@@ -431,11 +347,11 @@
         return s;
       }
 
-      // extras pagos
       function hasPaidExtras(ex){
         if(!ex) return false;
         const patty = Number(ex.patty || 0);
         const cheddar = Number(ex.cheddar || 0);
+        // Si en el futuro agregás más extras pagos, sumalos acá.
         return (patty > 0 || cheddar > 0);
       }
 
@@ -445,32 +361,26 @@
         const price = it.price || 0;
         const extras = it.extras || {};
 
-        // normalizar papas
         const friesLabel = normalizeFriesLabelInner(
-          it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(" "): "") || extras.fries || ""
+          it.fries || it.side || extras.fries || ""
         );
 
-        /* ===== PAPAS SIEMPRE SEPARADAS ===== */
+        // PAPAS siempre aparte
         if(friesLabel){
           if(!friesMap[friesLabel]) friesMap[friesLabel] = 0;
           friesMap[friesLabel] += qty;
         }
 
-        /* ===== NORMALIZAR NOTA ===== */
+        // Nota normalizada
         let note = "";
         if(Array.isArray(it.notes)) note = it.notes.join(" | ");
-        else if(Array.isArray(it.comments)) note = it.comments.join(" | ");
         else if(typeof it.notes === "string") note = it.notes.trim();
         else if(typeof it.comment === "string") note = it.comment.trim();
 
-        /* ===== DETERMINAR SI SE AGRUPA ===== */
-        const simpleBurger = !hasPaidExtras(extras);
+        const simpleBurger = !hasPaidExtras(extras); // sin extras pagos
 
-        /*  
-           Si es simple → agrupar por:
-             nombre + precio + nota
-           Si tiene extras → NO agrupar (key única con índice)
-        */
+        // Si es simple, agrupamos por nombre + precio + nota
+        // Si tiene extras, nunca agrupamos (key única por índice)
         const key = simpleBurger
           ? JSON.stringify({ name, price, note })
           : `extra-${idx}`;
@@ -488,7 +398,6 @@
         burgers[key].qty += qty;
       });
 
-      /* ===== Transformar papas a array ===== */
       const fries = Object.entries(friesMap).map(([label, qty])=>({
         qty,
         name: "Papas",
@@ -500,36 +409,31 @@
         fries
       };
     }
-    /* ========== renderOrder: usa agrupación corregida ========== */
+
+    /* ========== renderOrder: ahora muestra HORARIO en el chip ========== */
     function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
-      const dtText = dt
-        ? dt.toLocaleDateString('es-AR') + ', ' + dt.toLocaleTimeString('es-AR')
-        : '—';
+      const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
 
       const items = Array.isArray(o.items) ? o.items : [];
+
       const groups = groupItemsForScreen(items);
 
       /* ==== Render Burgers ==== */
       const burgerHTML = groups.burgers.map(it=>{
-        const extrasList = [];
+        const extras = [];
 
         if(it.extras?.patty)
-          extrasList.push(`+${it.extras.patty} medallones`);
+          extras.push(`+${it.extras.patty} medallones`);
         if(it.extras?.cheddar)
-          extrasList.push(`+${it.extras.cheddar} cheddar`);
+          extras.push(`+${it.extras.cheddar} cheddar`);
 
-        const extrasLine = extrasList.length
-          ? `<div class="sub">Extras: ${extrasList.join(" · ")}</div>`
-          : "";
-
-        const notesLine = it.notes
-          ? `<div class="sub">Nota: ${it.notes}</div>`
-          : "";
+        const extrasLine = extras.length ? `<div class="sub">Extras: ${extras.join(" · ")}</div>` : "";
+        const notesLine = it.notes ? `<div class="sub">Nota: ${it.notes}</div>` : "";
 
         const subtotal =
-          it.qty * it.price +
+          (it.qty * it.price) +
           (it.extras?.patty || 0) * (it.extras?.EXTRA_PRICE_PATTY || 0) * it.qty +
           (it.extras?.cheddar || 0) * (it.extras?.EXTRA_PRICE_CHEDDAR || 0) * it.qty;
 
@@ -545,55 +449,38 @@
 
       /* ==== Render Fries ==== */
       const friesHTML = groups.fries.length
-        ? `
-          <h4 style="margin-top:12px">🍟 Papas</h4>
-          ${groups.fries.map(f=>`
+        ? `<h4 style="margin-top:12px">🍟 Papas</h4>` +
+          groups.fries.map(f=>`
             <div class="item">
               <strong>• ${f.qty}× ${f.name}</strong>
               ${f.friesLabel ? `<div class="sub">Papas: ${f.friesLabel}</div>` : ""}
             </div>
-          `).join("")}
-        `
+          `).join("")
         : "";
 
       const pickupPretty = getPickupPretty(o);
 
-      const telChip = o.telefono
-        ? `<span class="chip">Tel: ${o.telefono}</span>`
-        : "";
-
-      const srcChip = o.source
-        ? `<span class="chip">Origen: ${o.source}</span>`
-        : "";
+      const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
+      const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
 
       const generalNote = (o.comment || o.notes || "").toString().trim();
-      const cmtChip = generalNote
-        ? `<span class="chip">Comentario: ${generalNote}</span>`
-        : "";
+      const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
 
       const st = o.status ?? "accepted";
-      const curIdx = Math.max(STATE_SEQ.indexOf(st), 0);
+      const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
 
-      /* ==== Botones de estado ==== */
       const stateBtns = `
         <div class="stateBtns">
-          ${STATE_SEQ.map((key, idx)=>`
-            <button
-              class="${btnStateClass(key)} ${idx <= curIdx ? 'on' : ''}"
-              data-act="${key}">
+          ${STATE_SEQ.map((key,idx)=>`
+            <button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">
               ${STATE_LABEL[key]}
             </button>
-          `).join("")}
+          `).join('')}
         </div>
       `;
 
-      /* ==== Pago ==== */
-      const isPaid =
-        (o.payment_status === "paid") || (o.paid === true);
-
-      const payBtnClasses = `btn pay-toggle ${
-        isPaid ? 'is-paid' : 'is-pending'
-      }`;
+      const isPaid = ((o.payment_status === "paid") || o.paid === true);
+      const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
 
       const payLine = `
         <div class="pay-line">
@@ -604,7 +491,7 @@
             <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
           </select>
 
-          <button class="${payBtnClasses}" data-pay-toggle="${isPaid ? 'paid' : 'pending'}">
+          <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}">
             ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
           </button>
 
@@ -612,26 +499,20 @@
         </div>
       `;
 
-      /* ==== HTML completo del pedido ==== */
       return `
-        <div class="order ${st==='cancelled' ? 'cancelled' : ''}" data-id="${doc.id}">
+        <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
           <div class="order-head">
             <div>
-              <div class="order-title">
-                ${displayOrderNumber(doc)} — ${o.nombre ?? 'Cliente'}
-              </div>
-
+              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre ?? 'Cliente'}</div>
               <div class="muted">N° interno: ${o.orderNumber ?? '—'}</div>
               <div class="muted">${dtText}</div>
 
               <div class="chips">
                 <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
                 <span class="chip">Estado: ${st}</span>
-                <span class="chip">Retiro: ${o.entrega || "take_away"}</span>
+                <span class="chip">Retiro: ${o.entrega||"take_away"}</span>
                 <span class="chip">Horario: ${pickupPretty || "—"}</span>
-                ${telChip}
-                ${srcChip}
-                ${cmtChip}
+                ${telChip}${srcChip}${cmtChip}
               </div>
 
               ${stateBtns}
@@ -652,8 +533,9 @@
         </div>
       `;
     }
+
     /* ===========================================================
-       TICKET 58MM — Mismo diseño que mostrador (versión final)
+       TICKET 58MM — MISMO DISEÑO QUE MOSTRADOR.HTML (VERSIÓN FINAL)
        =========================================================== */
 
     function buildTicketHTML(docSnap){
@@ -661,80 +543,80 @@
 
       const escapeHtml = s =>
         (s || "")
-        .toString()
-        .replace(/&/g,"&amp;")
-        .replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;")
-        .replace(/"/g,"&quot;")
-        .replace(/'/g,"&#39;");
+          .toString()
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
 
       const moneyT = n =>
-        (Number(n)||0).toLocaleString("es-AR",{
-          style:"currency",
-          currency:"ARS",
-          maximumFractionDigits:0
+        (Number(n) || 0).toLocaleString("es-AR", {
+          style: "currency",
+          currency: "ARS",
+          maximumFractionDigits: 0
         });
 
-      /* ====== Número de pedido ====== */
+      /* ==== Número ==== */
       const orderDisplay = (() => {
         const possible = [
           o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro,
           o.orderNo, o.seq, o.n, o.idPedido, o.pedidoNumber, o.pedido
         ];
-        for(const v of possible){
-          if(v == null) continue;
-          const n = typeof v==="string" ? parseInt(v,10):v;
-          if(Number.isFinite(n)) return `#${n}`;
+        for (const v of possible) {
+          if (v == null) continue;
+          const n = typeof v === "string" ? parseInt(v, 10) : v;
+          if (Number.isFinite(n)) return `#${n}`;
         }
-        return `#${(docSnap.id||"").slice(-5).toUpperCase()}`;
+        return `#${(docSnap.id || "").slice(-5).toUpperCase()}`;
       })();
 
-      /* ====== Fecha ====== */
+      /* ==== Fecha ==== */
       const dt = (() => {
-        const keys=["createdAt","created_at","timestamp","date","fecha","time"];
-        for(const k of keys){
-          const x=o[k];
-          if(x?.toDate) return x.toDate();
-          if(typeof x==="number") return new Date(x);
-          if(typeof x==="string"){
-            const d=new Date(x);
-            if(!isNaN(d)) return d;
+        const keys = ["createdAt", "created_at", "timestamp", "date", "fecha", "time"];
+        for (const k of keys) {
+          const v = o[k];
+          if (v?.toDate) return v.toDate();
+          if (typeof v === "number") return new Date(v);
+          if (typeof v === "string") {
+            const d = new Date(v);
+            if (!isNaN(d)) return d;
           }
         }
         return new Date();
       })();
 
       const dateStr = dt.toLocaleDateString("es-AR");
-      const timeStr = dt.toLocaleTimeString("es-AR",{hour12:false});
+      const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
 
-      /* ====== Horario ====== */
-      function resolvePickupPretty(oo){
-        if(oo.pickup_time_pretty) return oo.pickup_time_pretty;
+      /* ==== Pickup ==== */
+      function resolvePickupPretty(o2){
+        if (o2.pickup_time_pretty) return o2.pickup_time_pretty;
+        if (o2.pickup_slot && /^\d{2}:\d{2}$/.test(o2.pickup_slot))
+          return o2.pickup_slot;
 
-        if(oo.pickup_slot && /^\d{2}:\d{2}$/.test(oo.pickup_slot))
-          return oo.pickup_slot;
-
-        const t = oo.pickup_time || oo.pickupTime || oo.pickup;
-        if(t){
-          try{
-            if(typeof t?.toDate==="function")
+        const t = o2.pickup_time || o2.pickupTime || o2.pickup;
+        if (t) {
+          try {
+            if (typeof t?.toDate === "function")
               return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
-            const d=new Date(t);
-            if(!isNaN(d))
+            const d = new Date(t);
+            if (!isNaN(d))
               return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
           }catch(_){}
         }
 
-        if(typeof oo.pickup_slot==="string"){
-          const m=oo.pickup_slot.match(/^(\d{2})(\d{2})$/);
-          if(m) return `${m[1]}:${m[2]}`;
+        if (typeof o2.pickup_slot === "string"){
+          const m = o2.pickup_slot.match(/^(\d{2})(\d{2})$/);
+          if (m) return `${m[1]}:${m[2]}`;
         }
 
-        if(oo.pickup_asap) return "A la brevedad";
+        if (o2.pickup_asap) return "A la brevedad";
         return null;
       }
 
       const pickupPretty = resolvePickupPretty(o);
+
       const pickupBlockLarge = pickupPretty
         ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">
              Retira a las: ${escapeHtml(pickupPretty)}
@@ -743,64 +625,61 @@
              Retiro: A la brevedad
            </div>`;
 
-      /* ===== Normalizar papas ===== */
+      /* ==== Normalizar papas ==== */
       function normalizeFriesLabelTicket(raw){
-        if(!raw && raw!==0) return "";
-        let s=String(raw).toLowerCase().replace(/[_-]/g," ").replace(/\s+/g," ").trim();
-        if(!s) return "";
-        if(s.includes("sin sal")) return "Sin sal";
+        if(!raw && raw !== 0) return '';
+        let s = String(raw).toLowerCase();
+        s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+        if(!s) return '';
+        if(/\bsin\b/.test(s) && /\bsal\b/.test(s)) return 'Sin sal';
+        if(/\bsazon\b/.test(s)) return 'Sazonadas';
+        if(/\bsal\b/.test(s)) return 'Con sal';
         if(s.includes("sazon")) return "Sazonadas";
-        if(s.includes("con sal")||s.includes("sal")) return "Con sal";
         return s;
       }
 
-      /* ===== Agrupación (igual lógica que pantalla) ===== */
       const items = Array.isArray(o.items) ? o.items : [];
       const groups = {};
 
-      items.forEach((it)=>{
-        const name  = it.name  || "";
+      for (const it of items) {
+        const name = it.name || "";
         const price = it.price || 0;
 
         const fries = normalizeFriesLabelTicket(
-          it.fries || it.side ||
-          (Array.isArray(it.sides)? it.sides.join(" "):"") ||
-          it.extras?.fries || ""
+          it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(" "): "") || it.extras?.fries || ""
         );
 
-        const patty   = it.extras?.patty   || 0;
+        const patty = it.extras?.patty || 0;
         const cheddar = it.extras?.cheddar || 0;
 
         let note = "";
-        if(Array.isArray(it.notes)) note = it.notes.join(" | ");
-        else if(Array.isArray(it.comments)) note = it.comments.join(" | ");
-        else if(typeof it.notes==="string") note = it.notes.trim();
-        else if(typeof it.comment==="string") note = it.comment.trim();
+        if (Array.isArray(it.notes)) note = it.notes.join(" | ");
+        else if (Array.isArray(it.comments)) note = it.comments.join(" | ");
+        else if (typeof it.notes === "string") note = it.notes.trim();
+        else if (typeof it.comment === "string") note = it.comment.trim();
 
-        const key = JSON.stringify({name,price,fries,patty,cheddar,note});
+        const key = JSON.stringify({
+          name, price, fries, patty, cheddar, note
+        });
 
-        if(!groups[key])
-          groups[key]={ item:it, qty:0, fries, note, patty, cheddar, price, name };
-
+        if (!groups[key])
+          groups[key] = { item: it, qty: 0, fries, note, patty, cheddar, price, name };
         groups[key].qty += it.qty || 1;
-      });
+      }
 
-      /* ===== Render líneas ===== */
       const linesHTML = Object.values(groups).map(g=>{
-        const it  = g.item;
+        const it = g.item;
         const qty = g.qty;
 
         const baseSubtotal = g.price * qty;
-        const pattySum   = qty * g.patty   * (it.extras?.EXTRA_PRICE_PATTY   || 0);
+        const pattySum = qty * g.patty * (it.extras?.EXTRA_PRICE_PATTY || 0);
         const cheddarSum = qty * g.cheddar * (it.extras?.EXTRA_PRICE_CHEDDAR || 0);
 
         const friesHTML = g.fries
-          ? `<div class="sub">• Papas: ${escapeHtml(g.fries)}</div>`
-          : "";
+          ? `<div class="sub">• Papas: ${escapeHtml(g.fries)}</div>` : "";
 
         const noteHTML = g.note
-          ? `<div class="sub">• Nota: ${escapeHtml(g.note)}</div>`
-          : "";
+          ? `<div class="sub">• Nota: ${escapeHtml(g.note)}</div>` : "";
 
         return `
           <div class="row name">
@@ -816,19 +695,17 @@
         `;
       }).join("");
 
-      /* ===== Totales ===== */
       const subtotal = Object.values(groups).reduce((t,g)=>{
-        const it=g.item;
-        const qty=g.qty;
+        const it = g.item;
+        const qty = g.qty;
         return t +
           g.price * qty +
-          qty*g.patty  * (it.extras?.EXTRA_PRICE_PATTY   || 0) +
-          qty*g.cheddar* (it.extras?.EXTRA_PRICE_CHEDDAR || 0);
+          qty * g.patty * (it.extras?.EXTRA_PRICE_PATTY||0) +
+          qty * g.cheddar * (it.extras?.EXTRA_PRICE_CHEDDAR||0);
       },0);
 
-      const total = (typeof o.total==="number") ? o.total : subtotal;
+      const total = typeof o.total === "number" ? o.total : subtotal;
 
-      /* ===== Comentario general ===== */
       const generalNote =
         (o.comment || o.notes || o.note || o.notes_general ||
          o.comentario || o.comments || "").toString().trim();
@@ -842,146 +719,125 @@
            <div class="hr"></div>`
         : "";
 
-      /* ===== HTML FINAL ===== */
       return `
 <!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <title>Ticket ${escapeHtml(orderDisplay)}</title>
-
 <style>
   @page{ size:58mm auto; margin:0; }
-  html,body{margin:0;padding:0;font-family:Arial, sans-serif;font-size:13px;color:#000;}
-  .ticket{width:48mm;margin:0 auto;padding:2mm 3mm 10mm 2mm;}
-  .c{text-align:center;}
-  .brand{font-size:16px;font-weight:700;}
-  .orderNo{font-size:14px;margin:1mm 0;}
-  .hr{border-top:1px solid #000;margin:4px 0;}
-  .blk{margin:2px 0 2mm 0;}
-  .lbl{text-transform:uppercase;font-size:11px;margin-bottom:1px;}
-  .row{display:flex;justify-content:space-between;}
-  .row .l{flex:1;}
-  .row .r{flex:0;text-align:right;min-width:18mm;white-space:nowrap;}
-  .row.name .r{display:none;}
-  .sub{font-size:11px;margin:1px 0 0 2mm;}
-  .sep{border-top:1px dashed #000;opacity:.4;margin:2mm 0 1.2mm 0;}
-  .total{font-size:16px;margin-top:3mm;}
-  .foot{text-align:center;font-size:10px;margin-top:4mm;}
+  html,body{margin:0;padding:0;color:#000;}
+  body{ font-family: Arial, sans-serif; font-size:13px; font-weight:700; line-height:1.45; }
+  .ticket{ width:48mm; margin:0 auto; padding:2mm 3mm 10mm 2mm; }
+  .c{text-align:center}
+  .brand{ font-size:16px; }
+  .orderNo{ font-size:14px; margin:1mm 0 }
+  .hr{ border-top:1px solid #000; margin:4px 0 }
+  .lbl{ font-size:11px; text-transform:uppercase; }
+  .blk{ margin:2px 0 2mm 0; }
+  .row{ display:flex; justify-content:space-between; }
+  .row .l{ flex:1; }
+  .row .r{ flex:0; text-align:right; min-width:18mm; white-space:nowrap; }
+  .row.name .r{ display:none; }
+  .sub{ font-size:11px; margin:1px 0 0 2mm; }
+  .sep{ border-top:1px dashed #000; opacity:.4; margin:2mm 0 1.2mm 0; }
+  .total{ font-size:16px; margin-top:3mm; }
+  .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
 </style>
 </head>
 
 <body>
-<div class="ticket">
+  <div class="ticket">
+    <div class="c brand">Rhodes Burgers</div>
+    <div class="orderNo c">${escapeHtml(orderDisplay)}</div>
 
-  <div class="c brand">Rhodes Burgers</div>
-  <div class="orderNo c">${escapeHtml(orderDisplay)}</div>
+    <div class="hr"></div>
 
-  <div class="hr"></div>
+    ${o.nombre ? `
+      <div class="blk">
+        <div class="lbl">CLIENTE</div>
+        <div>${escapeHtml(o.nombre)}</div>
+      </div>` 
+      : ""
+    }
 
-  ${o.nombre ? `
-    <div class="blk">
-      <div class="lbl">CLIENTE</div>
-      <div>${escapeHtml(o.nombre)}</div>
-    </div>` : ""}
+    ${pickupBlockLarge}
 
-  ${pickupBlockLarge}
+    ${(o.pago || o.payment_method) ? `
+      <div class="blk">
+        <div class="lbl">MEDIO DE PAGO</div>
+        <div>${escapeHtml(o.pago || o.payment_method)}</div>
+      </div>` : ""
+    }
 
-  ${(o.pago || o.payment_method)?`
-    <div class="blk">
-      <div class="lbl">MEDIO DE PAGO</div>
-      <div>${escapeHtml(o.pago || o.payment_method)}</div>
+    ${commentBlock}
+
+    <div class="hr"></div>
+    ${linesHTML}
+    <div class="hr"></div>
+
+    <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${moneyT(subtotal)}</div></div>
+    <div class="row total"><div class="l">TOTAL</div><div class="r">${moneyT(total)}</div></div>
+
+    <div class="foot">
+      ${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}
     </div>
-  `:""}
+  </div>
 
-  ${commentBlock}
-
-  <div class="hr"></div>
-
-  ${linesHTML}
-
-  <div class="hr"></div>
-
-  <div class="row"><div class="l">SUBTOTAL</div><div class="r">${moneyT(subtotal)}</div></div>
-  <div class="row total"><div class="l">TOTAL</div><div class="r">${moneyT(total)}</div></div>
-
-  <div class="foot">${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}</div>
-
-</div>
-
-<script>
-window.addEventListener('load',()=>{
-  setTimeout(()=>{window.print();},30);
-});
-</script>
-
+  <script>
+    window.addEventListener('load', () => {
+      setTimeout(() => { window.print(); }, 30);
+    });
+  <\/script>
 </body>
 </html>
       `;
     }
 
-    /* ====== Print en iframe ====== */
+    /* ======== Print en iframe ======== */
     function printInIframe(docSnap){
       const html = buildTicketHTML(docSnap);
-      const iframe = document.createElement("iframe");
-      iframe.style.position="fixed";
-      iframe.style.right="0";
-      iframe.style.bottom="0";
-      iframe.style.width="0";
-      iframe.style.height="0";
-      iframe.style.border="0";
-      iframe.setAttribute("aria-hidden","true");
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.setAttribute('aria-hidden','true');
       document.body.appendChild(iframe);
 
       const doc = iframe.contentWindow.document;
-      doc.open();
-      doc.write(html);
-      doc.close();
+      doc.open(); doc.write(html); doc.close();
 
-      const cleanup = () => {
-        try{ document.body.removeChild(iframe); }catch(_){}
-      };
-
-      iframe.contentWindow.onafterprint = () =>
-        setTimeout(cleanup,150);
-
-      setTimeout(cleanup,15000);
+      const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
+      iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150);
+      setTimeout(cleanup, 15000);
     }
+
+    function trySilentPrint(docSnap){ printInIframe(docSnap); }
+
     let initialLoaded = false;
-    let lastSnap = null;
-    let idToDoc = new Map();
 
-    /* =======================
-       RENDER LISTA DE PEDIDOS
-       ======================= */
     function renderList(snap){
-      const docs = snap.docs.filter(d => passFilter(d.data()));
-      idToDoc = new Map(snap.docs.map(d => [d.id, d]));
+      const docs=snap.docs.filter(d=>passFilter(d.data()));
+      idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
+      document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
 
-      $("#orders").innerHTML =
-        docs.length
-        ? docs.map(renderOrder).join("")
-        : `<p class="muted">No hay pedidos.</p>`;
+      document.querySelectorAll(".order").forEach(card=>{
+        const id=card.dataset.id;
+        card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
 
-      document.querySelectorAll(".order").forEach(card => {
-        const id = card.dataset.id;
-        const doc = idToDoc.get(id);
+        const payToggle=card.querySelector("[data-pay-toggle]");
 
-        /* ==== BOTONES DE ESTADO ==== */
-        card.querySelectorAll("[data-act]").forEach(btn => {
-          btn.addEventListener("click", () => {
-            setOrderStatus(id, btn.dataset.act);
-          });
-        });
-
-        /* ==== SELECT PAGO ==== */
         const selPago = card.querySelector("[data-select-pago]");
         if(selPago){
           selPago.addEventListener("change", async ()=>{
             const pago = selPago.value;
             try{
               await db.collection("orders").doc(id).update({
-                pago,
+                pago: pago,
                 payment_method: pago
               });
             }catch(e){
@@ -989,20 +845,14 @@ window.addEventListener('load',()=>{
             }
           });
         }
-
-        /* ==== TOGGLE PAGADO ==== */
-        const payToggle = card.querySelector("[data-pay-toggle]");
-        if(payToggle && currentFilter !== "entregados"){
+        if(payToggle && currentFilter!=="entregados"){
           payToggle.addEventListener("click", async ()=>{
             const wasPaid = payToggle.dataset.payToggle === "paid";
-
             payToggle.disabled = true;
-
             payToggle.classList.toggle("is-paid", !wasPaid);
             payToggle.classList.toggle("is-pending", wasPaid);
             payToggle.textContent = !wasPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO";
             payToggle.dataset.payToggle = !wasPaid ? "paid" : "pending";
-
             try{
               await setPaymentStatus(id, !wasPaid);
             }catch(e){
@@ -1010,116 +860,96 @@ window.addEventListener('load',()=>{
               payToggle.classList.toggle("is-pending", !wasPaid);
               payToggle.textContent = wasPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO";
               payToggle.dataset.payToggle = wasPaid ? "paid" : "pending";
-              alert("No se pudo actualizar el pago: "+(e?.message||e));
+              alert("No se pudo actualizar el pago: " + (e?.message||e));
             }finally{
               payToggle.disabled = false;
             }
           });
         }
 
-        /* ==== IMPRIMIR ==== */
-        const pr = card.querySelector("[data-print]");
-        if(pr){
-          pr.addEventListener("click", () => {
-            const d = idToDoc.get(id);
-            trySilentPrint(d);
-          });
-        }
+        const pr=card.querySelector("[data-print]");
+        if(pr) pr.addEventListener("click",()=> trySilentPrint(idToDoc.get(id)));
       });
     }
 
-    /* =======================
-       AUTO-PRINT (toggle)
-       ======================= */
+    /* ========= Toggle Autoimprimir ========= */
     let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
-
-    const btnAutoPrint = $("#btnAutoPrint");
-    function updateAP(){
-      btnAutoPrint.classList.toggle("active", autoPrint);
-    }
+    const btnAutoPrint = document.getElementById("btnAutoPrint");
+    const updateAP = ()=> btnAutoPrint.classList.toggle("active", autoPrint);
     updateAP();
-
-    btnAutoPrint.onclick = () => {
+    btnAutoPrint.onclick = ()=>{
       autoPrint = !autoPrint;
       localStorage.setItem("rb_auto_print", JSON.stringify(autoPrint));
       updateAP();
     };
 
-       /* =======================
-       SUSCRIPCIÓN FIRESTORE
-       ======================= */
+    /* ======== Suscripción a pedidos (sin beep en primera carga) ======== */
     (async function subscribeOrders(){
       try{
-        const probe = await db.collection("orders").limit(1).get();
-
-        let dateField = null;
-        if(!probe.empty)
-          dateField = chooseDateField(probe.docs[0].data());
-
-        let q = db.collection("orders");
-        q = dateField
-            ? q.orderBy(dateField, "desc")
-            : q.orderBy(firebase.firestore.FieldPath.documentId());
+        const probe=await db.collection("orders").limit(1).get();
+        let dateField=null;
+        if(!probe.empty) dateField = chooseDateField(probe.docs[0].data());
+        let q=db.collection("orders");
+        q=dateField ? q.orderBy(dateField,'desc') : q.orderBy(firebase.firestore.FieldPath.documentId());
 
         let firstSnapshot = true;
 
-        q.limit(500).onSnapshot(async snap => {
+        q.limit(500).onSnapshot(async snap=>{
           lastSnap = snap;
-          $("#ordersError").style.display="none";
+          document.getElementById("ordersError").style.display="none";
+          document.getElementById("ordersError").textContent="";
           renderList(snap);
 
-          if(firstSnapshot){
+          if (firstSnapshot) {
             firstSnapshot = false;
             initialLoaded = true;
             return;
           }
 
-          for(const ch of snap.docChanges()){
-            if(ch.type === "added"){
+          for (const ch of snap.docChanges()){
+            if (ch.type === 'added') {
               const d = ch.doc.data();
 
-              if(d.payment_status !== "pending_payment" || d.paid !== false){
-                try{
-                  await db.collection("orders").doc(ch.doc.id).update({
+              if (d.payment_status !== 'pending_payment' || d.paid !== false) {
+                try {
+                  await db.collection('orders').doc(ch.doc.id).update({
                     paid: false,
-                    payment_status: "pending_payment",
+                    payment_status: 'pending_payment',
                     statusHistory: firebase.firestore.FieldValue.arrayUnion({
-                      to: "pending_payment",
+                      to: 'pending_payment',
                       at: new Date().toISOString(),
-                      reason: "auto-set-on-arrival"
+                      reason: 'auto-set-on-arrival'
                     })
                   });
-                }catch(e){
-                  console.warn("No se pudo actualizar pago inicial:", e);
+                } catch (e) {
+                  console.warn('No se pudo forzar pendiente:', e);
                 }
               }
 
               try{ playBeepTriple(); }catch(_){}
-
-              if(autoPrint){
-                trySilentPrint(idToDoc.get(ch.doc.id) || ch.doc);
+              if (autoPrint) {
+                const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
+                trySilentPrint(snapDoc);
               }
             }
           }
-
-        }, err => {
+        }, err=>{
           console.error(err);
-          $("#ordersError").textContent="No se pudo cargar la lista de pedidos.";
-          $("#ordersError").style.display="block";
+          document.getElementById("ordersError").textContent="No se pudo cargar la lista de pedidos.";
+          document.getElementById("ordersError").style.display="block";
         });
 
       }catch(err){
         console.error(err);
-        $("#ordersError").textContent="No se pudo inicializar la lista de pedidos.";
-        $("#ordersError").style.display="block";
+        document.getElementById("ordersError").textContent="No se pudo inicializar la lista de pedidos.";
+        document.getElementById("ordersError").style.display="block";
       }
-    })();  /* cierre subscribeOrders() */
+    })();
 
-  });   /* cierre DOMContentLoaded */
+  });
   </script>
 
-  <!-- PWA loader -->
+  <!-- PWA loader (registra SW + botón instalar) -->
   <script src="pwa.js"></script>
-
 </body>
 </html>
