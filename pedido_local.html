@@ -333,57 +333,65 @@
 
     /* ===== Agrupar hamburguesas idénticas y separar papas (vista grande) ===== */
 function groupItemsForScreen(items){
-  const burgers = {};
-  const fries = [];
+  const burgers = {};  // agrupa hamburguesas por nombre+extras+nota
+  const friesMap = {}; // agrupa papas por tipo
 
   function normalizeFriesLabel(raw){
     if(!raw && raw !== 0) return '';
-    let s = String(raw).toLowerCase();
-    s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+    let s = String(raw).toLowerCase()
+      .replace(/[_-]/g,' ')
+      .replace(/\s+/g,' ')
+      .trim();
+
     if(!s) return '';
-    if(/\bsin\b/.test(s) && /\bsal\b/.test(s)) return 'Sin sal';
-    if(/\bsazon\b/.test(s)) return 'Sazonadas';
-    if(/\bcon sal\b/.test(s)) return 'Con sal';
     if(s.includes("sazon")) return "Sazonadas";
+    if(s.includes("sin sal")) return "Sin sal";
+    if(s.includes("con sal")) return "Con sal";
+    if(s.includes("sal")) return "Con sal";
     return s;
   }
 
   for(const it of items){
     const qty = it.qty || 1;
     const name = it.name || "";
-    
+    const extras = it.extras || {};
+
     const friesLabel = normalizeFriesLabel(
-      it.fries || it.side || it.extras?.fries || ""
+      it.fries || it.side || extras.fries || ""
     );
 
-    // Si realmente es una porción de papas independiente
-    if(name.toLowerCase().includes("papa") || name.toLowerCase().includes("fries")){
-      fries.push({ qty, name, friesLabel });
-      continue;
+    // ============================================
+    // ❤️ 1) PAPAS SIEMPRE APARTE, SIEMPRE AQUÍ
+    // ============================================
+    if(friesLabel){
+      if(!friesMap[friesLabel]) friesMap[friesLabel] = 0;
+      friesMap[friesLabel] += qty;
     }
 
-    // Normalizar nota
-    let note = "";
-    if (Array.isArray(it.notes)) note = it.notes.join(" | ");
-    else if (typeof it.notes === "string") note = it.notes.trim();
-    else if (typeof it.comment === "string") note = it.comment.trim();
+    // ============================================
+    // ❤️ 2) AGRUPAR HAMBURGUESAS SOLO POR:
+    // nombre + extras + nota
+    // (LAS PAPAS NO IMPORTAN)
+    // ============================================
 
-    // Clave más estricta
+    // nota normalizada
+    let note = "";
+    if(Array.isArray(it.notes)) note = it.notes.join(" | ");
+    else if(typeof it.notes === "string") note = it.notes.trim();
+    else if(typeof it.comment === "string") note = it.comment.trim();
+
     const key = JSON.stringify({
       name,
-      price: it.price || 0,
-      extras: it.extras || {},
-      fries: friesLabel,
-      note: note
+      extras,
+      note
     });
 
     if(!burgers[key]){
       burgers[key] = {
         qty: 0,
         name,
-        friesLabel,
+        extras,
         notes: note,
-        extras: it.extras || {},
         price: it.price || 0
       };
     }
@@ -391,12 +399,18 @@ function groupItemsForScreen(items){
     burgers[key].qty += qty;
   }
 
+  // Convertir papas en array para mostrar
+  const fries = Object.entries(friesMap).map(([label, qty])=>({
+    qty,
+    name: "Papas",
+    friesLabel: label
+  }));
+
   return {
     burgers: Object.values(burgers),
     fries
   };
 }
-
     /* ========== renderOrder: ahora muestra HORARIO en el chip ========== */
    function renderOrder(doc){
   const o = doc.data();
