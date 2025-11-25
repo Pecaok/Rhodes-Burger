@@ -809,135 +809,103 @@ $("#btnAdd").onclick = ()=>{
   renderCart();
 };
 
-/* ============= TURNOS MOSTRADOR ============= */
-const OPEN_TIME_MOSTRADOR  = "19:10";
-const CLOSE_TIME_MOSTRADOR = "02:00";
-const INTERVAL_MIN = 10;
-const MINUTES_AHEAD = 2;
+/* ============================
+   TURNOS MOSTRADOR (SIN BLOQUEOS)
+   SIEMPRE MUESTRA TODOS LOS HORARIOS
+============================ */
 
-let visibleSlots = [];
+const SLOT_START = "19:15";
+const SLOT_END   = "23:45";
+const SLOT_INTERVAL_MIN = 15;
+
+let allSlots = [];
 let currentSlotIndex = 0;
 
-function parseHHMM(s){
-  const [h,m] = s.split(":").map(Number);
-  return {h,m};
-}
-function dateTodayAt(hhmm){
-  const {h,m} = parseHHMM(hhmm);
+function parseHHMM(str){
+  const [h, m] = str.split(":").map(Number);
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0, 0);
-}
-function dateTomorrowAt(hhmm){
-  const {h,m} = parseHHMM(hhmm);
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, h, m, 0, 0);
-}
-function slotPretty(d){
-  return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
 }
 
-function generateAllSlots(){
-  const now = new Date();
+function formatHHMM(date){
+  return date.toLocaleTimeString("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+}
 
-  const open = dateTodayAt(OPEN_TIME_MOSTRADOR);
-  const close = CLOSE_TIME_MOSTRADOR.startsWith("0")
-                ? dateTomorrowAt(CLOSE_TIME_MOSTRADOR)
-                : dateTodayAt(CLOSE_TIME_MOSTRADOR);
+function generateDailySlots(){
+  const start = parseHHMM(SLOT_START);
+  const end   = parseHHMM(SLOT_END);
 
-  const slots = [];
-  let cur = new Date(open.getTime());
+  const arr = [];
+  let cur = new Date(start);
 
-  while(cur <= close){
-    if(cur >= new Date(now.getTime() + MINUTES_AHEAD*60000)){
-      slots.push(new Date(cur));
-    }
-    cur = new Date(cur.getTime() + INTERVAL_MIN*60000);
+  while(cur <= end){
+    arr.push(new Date(cur));
+    cur = new Date(cur.getTime() + SLOT_INTERVAL_MIN * 60000);
   }
-  return slots;
+
+  return arr;
 }
 
 function refreshSlotsUI(){
-  visibleSlots = generateAllSlots();
+  allSlots = generateDailySlots();
 
-  if(visibleSlots.length === 0){
-    $("#slotLabel").textContent = "Sin horarios";
-    $("#slotPrev").classList.add("disabled");
-    $("#slotNext").classList.add("disabled");
+  if(allSlots.length === 0){
+    document.getElementById("slotLabel").textContent = "Sin horarios";
     window.selectedSlot = null;
-    $("#miniSlotSub").textContent = "Seleccionado: —";
     return;
   }
 
-  if(currentSlotIndex >= visibleSlots.length) currentSlotIndex = visibleSlots.length - 1;
   if(currentSlotIndex < 0) currentSlotIndex = 0;
+  if(currentSlotIndex >= allSlots.length) currentSlotIndex = allSlots.length - 1;
 
   renderSlot();
 }
 
 function renderSlot(){
-  if(visibleSlots.length === 0){
-    $("#slotLabel").textContent = "Sin horarios";
-    window.selectedSlot = null;
-    $("#miniSlotSub").textContent = "Seleccionado: —";
-    return;
-  }
+  const label = document.getElementById("slotLabel");
+  const sub   = document.getElementById("miniSlotSub");
 
-  const d = visibleSlots[currentSlotIndex];
+  const d = allSlots[currentSlotIndex];
+  const pretty = formatHHMM(d);
 
-  $("#slotLabel").textContent = slotPretty(d);
+  label.textContent = pretty;
 
   window.selectedSlot = {
     iso: d.toISOString(),
-    pretty: slotPretty(d)
+    pretty
   };
 
-  $("#miniSlotSub").textContent = "Seleccionado: " + window.selectedSlot.pretty;
+  if(sub) sub.textContent = "Seleccionado: " + pretty;
 
-  $("#slotPrev").classList.toggle("disabled", currentSlotIndex === 0);
-  $("#slotNext").classList.toggle("disabled", currentSlotIndex === visibleSlots.length - 1);
+  document.getElementById("slotPrev")
+    .classList.toggle("disabled", currentSlotIndex === 0);
+
+  document.getElementById("slotNext")
+    .classList.toggle("disabled", currentSlotIndex === allSlots.length - 1);
 }
 
-document.getElementById("manualTime").addEventListener("input", e=>{
-  const val = e.target.value;
-
-  if(!val){
-    refreshSlotsUI();
-    return;
-  }
-
-  const now = new Date();
-  const manualISO = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    val.split(":")[0],
-    val.split(":")[1],
-    0
-  ).toISOString();
-
-  window.selectedSlot = {
-    iso: manualISO,
-    pretty: val
-  };
-
-  $("#slotLabel").textContent = val;
-  $("#miniSlotSub").textContent = "Seleccionado: " + val;
-});
-
-$("#slotPrev").onclick = ()=>{
+document.getElementById("slotPrev").onclick = () => {
   if(currentSlotIndex > 0){
     currentSlotIndex--;
     renderSlot();
   }
 };
-$("#slotNext").onclick = ()=>{
-  if(currentSlotIndex < visibleSlots.length - 1){
+
+document.getElementById("slotNext").onclick = () => {
+  if(currentSlotIndex < allSlots.length - 1){
     currentSlotIndex++;
     renderSlot();
   }
 };
 
-setInterval(refreshSlotsUI, 30000);
+/* Init */
+document.addEventListener("DOMContentLoaded", () => {
+  refreshSlotsUI();
+});
 
 /* ============= ENVIAR PEDIDO A FIRESTORE ============= */
 async function sendToFirestore(){
