@@ -656,6 +656,10 @@ $("#btnAdd").onclick=()=>{
    🔥 SLOTS MOSTRADOR  —  CAPACIDAD REAL PERO SIN BLOQUEAR
 ============================================================ */
 
+/* ============================================================
+   🔥 SLOTS MOSTRADOR — IGUAL A PEDIDO_CLIENTE PERO SIN BLOQUEAR
+============================================================ */
+
 const SLOT_START = "19:15";
 const SLOT_END   = "23:45";
 const SLOT_INTERVAL_MIN = 15;
@@ -672,22 +676,26 @@ function gramosDelPedido(){
 }
 
 function parseHHMM(str){
-  const [h,m]=str.split(":").map(Number);
-  const now=new Date();
-  return new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0);
+  const [h,m] = str.split(":").map(Number);
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m);
 }
 
-function formatHHMM(date){
-  return date.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+function formatHHMM(d){
+  return d.toLocaleTimeString("es-AR", {
+    hour:"2-digit",
+    minute:"2-digit",
+    hour12:false
+  });
 }
 
-function slotKey(date){
-  const y=date.getFullYear();
-  const M=String(date.getMonth()+1).padStart(2,"0");
-  const d=String(date.getDate()).padStart(2,"0");
-  const H=String(date.getHours()).padStart(2,"0");
-  const m=String(date.getMinutes()).padStart(2,"0");
-  return `${y}${M}${d}_${H}${m}`;
+function slotKey(d){
+  const y=d.getFullYear();
+  const M=String(d.getMonth()+1).padStart(2,"0");
+  const D=String(d.getDate()).padStart(2,"0");
+  const H=String(d.getHours()).padStart(2,"0");
+  const m=String(d.getMinutes()).padStart(2,"0");
+  return `${y}${M}${D}_${H}${m}`;
 }
 
 function generateDailySlots(){
@@ -697,49 +705,57 @@ function generateDailySlots(){
   let cur=new Date(start);
   while(cur<=end){
     arr.push(new Date(cur));
-    cur=new Date(cur.getTime()+SLOT_INTERVAL_MIN*60000);
+    cur=new Date(cur.getTime() + SLOT_INTERVAL_MIN*60000);
   }
   return arr;
 }
 
-let slotObjects = [];
-let currentSlotIndex = 0;
-let slot_unsubs = [];
+let slotObjects=[];
+let slotSubs=[];
+let currentSlotIndex=0;
 
 function clearSlotSubs(){
-  slot_unsubs.forEach(u=>{ try{u();}catch{} });
-  slot_unsubs=[];
+  slotSubs.forEach(u=>{ try{u();}catch{} });
+  slotSubs=[];
+}
+
+/* 🔥 BUSCA EL SLOT MÁS PRÓXIMO QUE NO ESTÉ LLENO */
+function goToFirstAvailableSlot(){
+  const idx = slotObjects.findIndex(s => !s.full);
+  currentSlotIndex = idx === -1 ? 0 : idx;
 }
 
 function loadSlotsMostrador(){
   clearSlotSubs();
 
   const slots = generateDailySlots();
-  slotObjects = slots.map(date => ({
-    date,
-    key: slotKey(date),
-    gramsUsed: 0,
-    full: false
+  slotObjects = slots.map(d => ({
+    date:d,
+    key:slotKey(d),
+    gramsUsed:0,
+    full:false
   }));
 
   $("#slotLabel").textContent="Cargando…";
   $("#miniSlotSub").textContent="Seleccionado: —";
 
   slotObjects.forEach(s=>{
-    const ref=db.collection("slots_grams").doc(s.key);
+    const ref = db.collection("slots_grams").doc(s.key);
 
-    const unsub=ref.onSnapshot(doc=>{
+    const unsub = ref.onSnapshot(doc=>{
       if(!doc.exists){
         ref.set({gramsUsed:0},{merge:true});
       }
-      const d=doc.data()||{};
-      s.gramsUsed = Number(d.gramsUsed||0);
+      const d = doc.data()||{};
+      s.gramsUsed = Number(d.gramsUsed || 0);
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
 
+      // 🔥 solo la primera vez selecciona automático
+      goToFirstAvailableSlot();
       renderSlotMostrador();
     });
 
-    slot_unsubs.push(unsub);
+    slotSubs.push(unsub);
   });
 }
 
@@ -750,11 +766,11 @@ function renderSlotMostrador(){
     return;
   }
 
-  if(currentSlotIndex < 0) currentSlotIndex=0;
-  if(currentSlotIndex >= slotObjects.length) currentSlotIndex=slotObjects.length-1;
+  if(currentSlotIndex<0) currentSlotIndex=0;
+  if(currentSlotIndex>=slotObjects.length) currentSlotIndex=slotObjects.length-1;
 
-  const s=slotObjects[currentSlotIndex];
-  const pretty=formatHHMM(s.date);
+  const s = slotObjects[currentSlotIndex];
+  const pretty = formatHHMM(s.date);
 
   $("#slotLabel").textContent = pretty;
 
@@ -766,25 +782,34 @@ function renderSlotMostrador(){
     $("#slotLabel").style.borderColor="var(--ring)";
   }
 
-  window.selectedSlot={
+  window.selectedSlot = {
     key:s.key,
     pretty,
     iso:s.date.toISOString(),
     full:s.full
   };
 
-  $("#miniSlotSub").textContent="Seleccionado: "+pretty;
+  $("#miniSlotSub").textContent = "Seleccionado: " + pretty;
 
   $("#slotPrev").classList.toggle("disabled", currentSlotIndex===0);
   $("#slotNext").classList.toggle("disabled", currentSlotIndex===slotObjects.length-1);
 }
 
-$("#slotPrev").onclick=()=>{ if(currentSlotIndex>0){currentSlotIndex--; renderSlotMostrador();} };
-$("#slotNext").onclick=()=>{ if(currentSlotIndex < slotObjects.length-1){currentSlotIndex++; renderSlotMostrador();} };
+$("#slotPrev").onclick = ()=>{
+  if(currentSlotIndex>0){
+    currentSlotIndex--;
+    renderSlotMostrador();
+  }
+};
 
-window.addEventListener("DOMContentLoaded",()=>{
-  loadSlotsMostrador();
-});
+$("#slotNext").onclick = ()=>{
+  if(currentSlotIndex < slotObjects.length-1){
+    currentSlotIndex++;
+    renderSlotMostrador();
+  }
+};
+
+window.addEventListener("DOMContentLoaded", loadSlotsMostrador);
 
 /* ============= ENVIAR PEDIDO A FIRESTORE ============= */
 async function sendToFirestore(){
