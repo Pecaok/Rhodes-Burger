@@ -72,10 +72,6 @@
       font-weight:700;
       text-decoration:none;
       color:inherit;
-      transition:0.15s ease;
-    }
-    .btn:hover{
-      opacity:.85;
     }
     .btn.primary{
       background:var(--primary);
@@ -130,51 +126,64 @@
     }
     .price{ font-weight:800; }
 
-    /* ---------- CARRITO FIJO ---------- */
-    aside.side{
-      background:var(--card);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
-      padding:16px;
-      position:sticky;
-      top:80px;
-      max-height:85vh;
-      overflow-y:auto;
-    }
+ aside.side{
+  background:var(--card);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:16px;
+  position:sticky;
+  top:80px;
 
-    .field{
-      margin-top:10px;
-      display:flex;
-      flex-direction:column;
-      gap:4px;
-    }
-    .field label{
-      font-weight:600;
-      font-size:14px;
-    }
+  display:flex;
+  flex-direction:column;
+  height: calc(100vh - 100px); /* 🔥 altura TOTAL del carrito */
+  overflow: hidden; /* evita que nada se desborde */
+}
+
+#cartScrollArea{
+  flex:1;                      /* 🔥 ocupa TODO lo disponible */
+  overflow-y:auto;             /* 🔥 scroll para la lista */
+  margin-bottom:16px;
+  padding-right:6px;
+}
+
     .field input,
-    .field select{
-      padding:12px;
-      border-radius:12px;
-      border:1px solid var(--ring);
-      font-size:15px;
-      background:white;
-    }
+.field select {
+  width: 100%;
+  padding:12px;
+  border-radius:12px;
+  border:1px solid var(--ring);
+  font-size:15px;
+  box-sizing:border-box;
+}
 
-    .total{
-      font-size:22px;
-      font-weight:800;
-      margin-bottom:12px;
-      display:flex;
-      justify-content:space-between;
-    }
+.field label{
+  display:block;
+  font-weight:600;
+  margin-bottom:4px;
+}
+
+#cartItems{
+  flex:1;
+  overflow-y:auto;
+  padding-right:8px;
+  margin-bottom:12px;
+}
 
     .muted{
       color:var(--muted);
       font-size:13px;
     }
 
-    /* ---------- HORARIOS ---------- */
+    .qtybtn{
+      padding:6px 10px;
+      border-radius:10px;
+      border:1px solid var(--ring);
+      font-weight:700;
+      cursor:pointer;
+      background:#fff;
+    }
+
     .carousel{
       display:flex;
       align-items:center;
@@ -193,11 +202,6 @@
       font-size:22px;
       font-weight:700;
       user-select:none;
-      transition:0.15s ease;
-    }
-    .arrow.disabled{
-      opacity:.35;
-      cursor:not-allowed;
     }
 
     .slot-display{
@@ -211,11 +215,6 @@
       font-size:18px;
     }
 
-    .slot-full{
-      color:#b00020;
-    }
-
-    /* ---------- MODAL ---------- */
     .overlay{
       position: fixed;
       top:0; left:0;
@@ -242,6 +241,12 @@
       to{ transform:scale(1); opacity:1 }
     }
 
+    .modal h3{
+      margin-top:0;
+      font-size:22px;
+      font-weight:800;
+    }
+
     textarea{
       width:100%;
       min-height:90px;
@@ -254,14 +259,27 @@
       resize:none;
       outline:none;
       transition:0.15s ease;
+      box-shadow:0 2px 6px rgba(0,0,0,0.04);
     }
+
+    textarea::placeholder{ color:#a59c8f; }
+
     textarea:focus{
       border-color:#b8ad9e;
       background:#f9f6f2;
+      box-shadow:0 3px 10px rgba(0,0,0,0.06);
+    }
+
+    #notesCount{
+      margin-top:4px;
+      font-size:13px;
+      color:#8b8377;
+      text-align:right;
+      display:block;
+      width:100%;
     }
   </style>
 </head>
-
 <body>
 
 <header>
@@ -302,7 +320,9 @@
       <span id="cartTotal">$0</span>
     </div>
 
-    <div id="cartItems" class="muted">Sin ítems.</div>
+ <div id="cartScrollArea">
+  <div id="cartItems" class="muted">Sin ítems.</div>
+</div>
 
     <div class="field">
       <label>Nombre (requerido)</label>
@@ -353,17 +373,68 @@
   </aside>
 </main>
 
+<!-- MODAL PERSONALIZAR -->
+<div class="overlay" id="overlayCustomize">
+  <div class="modal">
+    <h3 id="modTitle" style="margin-top:0;margin-bottom:18px;font-size:22px">Personalizar</h3>
 
+    <div class="field">
+      <label>Papas (obligatorio)</label>
+      <div style="display:flex;gap:12px;margin-top:6px">
+        <label class="chip"><input type="radio" name="fries" value="con_sazon"> Sazonadas</label>
+        <label class="chip"><input type="radio" name="fries" value="con_sal"> Con sal</label>
+        <label class="chip"><input type="radio" name="fries" value="sin_sal"> Sin sal</label>
+      </div>
+    </div>
 
-<!-- ========== SCRIPTS FIREBASE & LÓGICA COMPLETA ========== -->
+    <div id="rowPatties" class="row" style="display:none;margin-top:22px;justify-content:space-between">
+      <div style="font-weight:600;display:flex;align-items:center;gap:6px">
+        Medallones extra
+        <span id="badgePatty" class="badge-extra"></span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button id="patDec" class="qtybtn">-</button>
+        <span id="patVal" style="min-width:20px;text-align:center;font-weight:700">0</span>
+        <button id="patInc" class="qtybtn">+</button>
+      </div>
+    </div>
+
+    <div id="rowCheddar" class="row" style="display:none;margin-top:18px;justify-content:space-between">
+      <div style="font-weight:600;display:flex;align-items:center;gap:6px">
+        Fetas de cheddar extra
+        <span id="badgeCheddar" class="badge-extra"></span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button id="cheDec" class="qtybtn">-</button>
+        <span id="cheVal" style="min-width:20px;text-align:center;font-weight:700">0</span>
+        <button id="cheInc" class="qtybtn">+</button>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:24px;justify-content:flex-end">
+      <span class="muted" style="margin-right:6px;font-size:15px">Subtotal unitario:</span>
+      <span id="unitPreview" style="font-weight:800;font-size:20px"></span>
+    </div>
+
+    <div class="field" style="margin-top:22px">
+      <label>Notas (opcional)</label>
+      <textarea id="notes" maxlength="200" placeholder="Sin cebolla, extra salsa..."></textarea>
+      <div id="notesCount" class="muted">0/200</div>
+    </div>
+
+    <div class="row" style="margin-top:26px;justify-content:flex-end;gap:10px">
+      <button class="btn" id="btnCancel">Cancelar</button>
+      <button class="btn primary" id="btnAdd">Agregar</button>
+    </div>
+  </div>
+</div>
+
+<!-- FIREBASE -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
-
-///////////////////////////////////////////////////////////
-///   🔥 FIREBASE INIT
-///////////////////////////////////////////////////////////
+/* ============= FIREBASE ============= */
 const firebaseConfig = {
   apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
   authDomain: "rhodes-burguers.firebaseapp.com",
@@ -375,23 +446,17 @@ const firebaseConfig = {
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-///////////////////////////////////////////////////////////
-///   🔧 CONSTANTES
-///////////////////////////////////////////////////////////
+/* ============= HELPERS / CONST ============= */
 const $ = s => document.querySelector(s);
 const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+const FALLBACK_IMG = "images/logo.png";
 
 const EXTRA_PRICE_PATTY   = 2500;
 const EXTRA_PRICE_CHEDDAR = 300;
-
-const GRAMOS_POR_BLOQUE = 1500;
+  /* ==== CONFIGURACIÓN DE BLOQUES POR GRAMOS ==== */
+const GRAMOS_POR_BLOQUE = 1500; 
 const G_POR_BURGER = 200;
 const G_POR_SIDE   = 700;
-
-///////////////////////////////////////////////////////////
-///   🛒 CARRITO
-///////////////////////////////////////////////////////////
-let cart = { burger:{}, drink:{}, side:{} };
 
 function gramosDelPedido(){
   let g = 0;
@@ -400,78 +465,21 @@ function gramosDelPedido(){
   return g;
 }
 
-function renderCart(){
-  const wrap = $("#cartItems");
-  const totalEl = $("#cartTotal");
-
-  let html = "";
-  let total = 0;
-
-  // STACKEO DE ITEMS IGUALES
-  const stack = {};
-
-  for(const id in cart.burger){
-    const b = cart.burger[id];
-    const key = `${b.item.id}|${b.friesRaw}|${b.extras.patty}|${b.extras.cheddar}|${b.notes}`;
-
-    if(!stack[key]) stack[key] = { ...b };
-    else stack[key].qty += b.qty;
-  }
-
-  // reemplazamos
-  cart.burger = {};
-  let idx = 0;
-  for(const k in stack){
-    const b = stack[k];
-    cart.burger["b"+idx] = b;
-    idx++;
-  }
-
-  // Pintar carrito
-  for(const id in cart.burger){
-    const b = cart.burger[id];
-    const unit =
-      b.item.price +
-      (b.extras.patty * EXTRA_PRICE_PATTY) +
-      (b.extras.cheddar * EXTRA_PRICE_CHEDDAR);
-
-    const line = unit * b.qty;
-    total += line;
-
-    html += `
-      <div style="margin-bottom:12px;display:flex;justify-content:space-between">
-        <div>
-          <strong>${b.qty}× ${b.item.name}</strong><br>
-          <span class="muted">
-            Papas: ${b.fries}
-            ${
-              b.extras.patty||b.extras.cheddar
-              ? ` · Extras: ${b.extras.patty} med · ${b.extras.cheddar} cheddar`
-              : ""
-            }
-            ${b.notes ? ` · Nota: ${b.notes}` : ""}
-          </span>
-        </div>
-        <div style="text-align:right">
-          ${money(line)}
-        </div>
-      </div>
-    `;
-  }
-
-  totalEl.textContent = money(total);
-  wrap.innerHTML = html || "<span class='muted'>Sin ítems.</span>";
-}
-
-
-
-///////////////////////////////////////////////////////////
-///   🍔 PRODUCTOS (se carga desde Firebase)
-///////////////////////////////////////////////////////////
+/* ============= MENÚ / PRODUCTOS ============= */
 let PRODUCTS = { burgers: [], drinks: [], sides: [] };
+let MENU_ORDER = {};
+let availability = new Map();
+
+db.collection("config").doc("menuOrder").onSnapshot(snap=>{
+  MENU_ORDER = snap.exists ? snap.data() : {};
+  mountMenu();
+});
+
+const isAvailable = id => availability.get(id) !== false;
 
 db.collection("products").onSnapshot(snap=>{
-  PRODUCTS = { burgers:[], drinks:[], sides:[] };
+  availability.clear();
+  PRODUCTS = { burgers: [], drinks: [], sides: [] };
 
   snap.forEach(doc=>{
     const d = doc.data();
@@ -479,257 +487,557 @@ db.collection("products").onSnapshot(snap=>{
       id: doc.id,
       name: d.name,
       price: d.price,
-      img: d.img || "images/logo.png",
-      description: d.description||"",
-      category: d.category
+      img: d.img || FALLBACK_IMG,
+      description: d.description || "",
+      category: d.category,
+      kind: d.kind || ""
     };
 
-    if(d.category==="burger") PRODUCTS.burgers.push(item);
-    if(d.category==="drink")  PRODUCTS.drinks.push(item);
-    if(d.category==="side")   PRODUCTS.sides.push(item);
+    if(d.available === false) availability.set(doc.id, false);
+
+    if(["burger","hamburguesas","hamburger"].includes(d.category))
+      PRODUCTS.burgers.push(item);
+
+    if(["drink","drinks","bebidas"].includes(d.category))
+      PRODUCTS.drinks.push(item);
+
+    if(["side","sides","guarniciones"].includes(d.category))
+      PRODUCTS.sides.push(item);
   });
 
   mountMenu();
+  refreshAvailabilityUI();
 });
 
-function renderCard(item){
-  const div = document.createElement("div");
-  div.className = "card";
+function orderedList(category, arr){
+  const order = MENU_ORDER[category] || [];
+  const orderMap = new Map(order.map((id,i)=>[id,i]));
+  return [...arr].sort((a,b)=>{
+    const A = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
+    const B = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
+    return A - B;
+  });
+}
 
-  div.innerHTML = `
-    <img src="${item.img}">
-    <div class="content">
+const elBurgersGrid = $("#burgersGrid");
+const elDrinksGrid  = $("#drinksGrid");
+const elSidesGrid   = $("#sidesGrid");
+
+function renderCard(item){
+  const ok = isAvailable(item.id);
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.dataset.id = item.id;
+
+  // 👇 NUEVO (marca sold-out)
+  if (!ok) card.dataset.soldout = "1";
+
+  card.innerHTML = `
+    <img src="${item.img}" onerror="this.src='${FALLBACK_IMG}'">
+    <div class="content" style="${ok?"":"opacity:.4;filter:grayscale(100%)"}">
       <h3>${item.name}</h3>
-      <div class="muted">${item.description||""}</div>
+      ${item.description ? `<div class="muted">${item.description}</div>` : ""}
       <div class="row">
         <span class="price">${money(item.price)}</span>
-        <button class="btn addBtn">Agregar</button>
+        <button class="btn addBtn" ${ok?"":"disabled"}>Agregar</button>
       </div>
     </div>
   `;
 
-  div.querySelector(".addBtn").onclick = ()=> addItem(item);
+  const btn = card.querySelector(".addBtn");
 
-  return div;
+  if(item.category === "bebidas" || item.category === "drink"){
+    btn.onclick = ()=>{
+      if(!cart.drink[item.id]) cart.drink[item.id]={qty:0,item};
+      cart.drink[item.id].qty++;
+      renderCart();
+    };
+  } else if(item.category === "guarniciones" || item.category === "side"){
+    btn.onclick = ()=>{
+      if(!cart.side[item.id]) cart.side[item.id]={qty:0,item};
+      cart.side[item.id].qty++;
+      renderCart();
+    };
+  } else {
+    btn.onclick = ()=> openCustomize(item);
+  }
+
+  return card;
 }
 
 function mountMenu(){
-  $("#burgersGrid").innerHTML = "";
-  $("#drinksGrid").innerHTML  = "";
-  $("#sidesGrid").innerHTML   = "";
+  elBurgersGrid.innerHTML = "";
+  elDrinksGrid.innerHTML  = "";
+  elSidesGrid.innerHTML   = "";
 
-  PRODUCTS.burgers.forEach(x=>$("#burgersGrid").appendChild(renderCard(x)));
-  PRODUCTS.drinks.forEach(x=>$("#drinksGrid").appendChild(renderCard(x)));
-  PRODUCTS.sides.forEach(x=>$("#sidesGrid").appendChild(renderCard(x)));
+  orderedList("hamburguesas", PRODUCTS.burgers).forEach(x=> elBurgersGrid.appendChild(renderCard(x)));
+  orderedList("bebidas", PRODUCTS.drinks).forEach(x=> elDrinksGrid.appendChild(renderCard(x)));
+  orderedList("guarniciones", PRODUCTS.sides).forEach(x=> elSidesGrid.appendChild(renderCard(x)));
 }
 
-function addItem(item){
-  if(item.category==="burger"){
-    const id = item.id + "_" + Date.now();
+function refreshAvailabilityUI(){
+  document.querySelectorAll(".addBtn").forEach(btn=>{
+    if(btn.closest(".card").dataset.soldout === "1"){
+      btn.disabled = true;
+    }
+  });
+}
 
-    cart.burger[id] = {
-      item,
-      qty:1,
-      fries:"Sin sal",
-      friesRaw:"con_sal",
-      extras:{patty:0,cheddar:0},
-      notes:""
-    };
+/* ============= CARRITO ============= */
+let cart = { burger:{}, drink:{}, side:{} };
 
-  } else if(item.category==="drink"){
-    const id = item.id;
-    if(!cart.drink[id]) cart.drink[id]={item,qty:0};
-    cart.drink[id].qty++;
+function saveCart(){
+  localStorage.setItem("rb_cart_mostrador", JSON.stringify(cart));
+}
+function loadCart(){
+  try{
+    const x = JSON.parse(localStorage.getItem("rb_cart_mostrador"));
+    if(x) cart = x;
+  }catch(e){}
+}
+loadCart();
+  // Borrar carrito al abrir mostrador (opción recomendada)
+cart = { burger:{}, drink:{}, side:{} };
+localStorage.removeItem("rb_cart_mostrador");
+renderCart();
 
-  } else if(item.category==="side"){
-    const id = item.id;
-    if(!cart.side[id]) cart.side[id]={item,qty:0};
-    cart.side[id].qty++;
+function deleteItem(type, id){
+  if(cart[type] && cart[type][id]){
+    delete cart[type][id];
+    renderCart();
+  }
+}
+
+function renderCart(){
+  saveCart();
+
+  const wrap = $("#cartItems");
+  const totalEl = $("#cartTotal");
+  let html = "";
+  let total = 0;
+
+  const addLine = (type, id, name, qty, unit, extrasTxt="")=>{
+    const line = qty * unit;
+    total += line;
+
+    const isBurger = type === "burger";
+
+    html += `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+        <div style="max-width:240px">
+          <strong>${qty}× ${name}</strong><br>
+          ${extrasTxt ? `<span class="muted">${extrasTxt}</span>` : ""}
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+          <span>${money(line)}</span>
+          <div style="display:flex;gap:6px">
+            ${
+              isBurger
+                ? `<button onclick="editBurger('${id}')"
+                           style="background:none;border:none;cursor:pointer;font-size:18px;color:#444"
+                           title="Editar">✏️</button>`
+                : ""
+            }
+            <button onclick="deleteItem('${type}','${id}')"
+                    style="background:none;border:none;cursor:pointer;font-size:18px;color:#a33"
+                    title="Eliminar">🗑️</button>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  for(const id in cart.burger){
+    const b = cart.burger[id];
+    const unit =
+      b.item.price +
+      (b.extras.patty   * EXTRA_PRICE_PATTY) +
+      (b.extras.cheddar * EXTRA_PRICE_CHEDDAR);
+
+    const extras = [];
+    if(b.fries) extras.push("Papas: " + b.fries);
+    if(b.extras.patty)   extras.push("+"+b.extras.patty+" med");
+    if(b.extras.cheddar) extras.push("+"+b.extras.cheddar+" cheddar");
+    if(b.notes) extras.push("Nota: "+b.notes);
+
+    addLine("burger", id, b.item.name, b.qty, unit, extras.join(" · "));
   }
 
-  renderCart();
+  for(const id in cart.drink){
+    const d = cart.drink[id];
+    addLine("drink", id, d.item.name, d.qty, d.item.price);
+  }
+
+  for(const id in cart.side){
+    const s = cart.side[id];
+    addLine("side", id, s.item.name, s.qty, s.item.price);
+  }
+
+  wrap.innerHTML = html || "<span class='muted'>Sin ítems.</span>";
+  totalEl.textContent = money(total);
 }
 
+/* ============= PERSONALIZAR BURGER ============= */
+let currentItem   = null;
+let currentMode   = "add";   // add | edit
+let currentEditId = null;
 
+function resetCustomize(){
+  $("#patVal").textContent = "0";
+  $("#cheVal").textContent = "0";
+  $("#notes").value = "";
+  $("#notesCount").textContent = "0/200";
+  document.querySelectorAll("input[name='fries']").forEach(x=> x.checked=false);
+}
 
-///////////////////////////////////////////////////////////
-///   🕒 SISTEMA DE HORARIOS (con gramaje)
-///////////////////////////////////////////////////////////
+$("#notes").addEventListener("input",()=>{
+  $("#notesCount").textContent = $("#notes").value.length + "/200";
+});
+
+function updateUnitPreview(){
+  if(!currentItem) return;
+  const base    = currentItem.price;
+  const patties = Number($("#patVal").textContent);
+  const cheddar = Number($("#cheVal").textContent);
+
+  const subtotal = base +
+    patties * EXTRA_PRICE_PATTY +
+    cheddar * EXTRA_PRICE_CHEDDAR;
+
+  $("#unitPreview").textContent = money(subtotal);
+  $("#badgePatty").textContent   = `+${money(EXTRA_PRICE_PATTY)}`;
+  $("#badgeCheddar").textContent = `+${money(EXTRA_PRICE_CHEDDAR)}`;
+}
+
+function openCustomize(item, mode="add", id=null){
+  $("#manualTime").value = "";
+  currentItem   = item;
+  currentMode   = mode;
+  currentEditId = id;
+
+  $("#modTitle").textContent =
+    (mode==="edit" ? "Editar: " : "Personalizar: ") + item.name;
+
+  resetCustomize();
+
+  const name = item.name.toLowerCase();
+
+  const rowPatties = document.getElementById("rowPatties");
+  const rowCheddar = document.getElementById("rowCheddar");
+
+  if(name.includes("doble")){
+    rowPatties.style.display = "flex";
+    rowCheddar.style.display = "flex";
+  } else if(name.includes("pollo")){
+    rowPatties.style.display = "none";
+    rowCheddar.style.display = "flex";
+  } else {
+    rowPatties.style.display = "none";
+    rowCheddar.style.display = "none";
+  }
+
+  updateUnitPreview();
+  $("#overlayCustomize").style.display = "flex";
+}
+
+function editBurger(id){
+  const b = cart.burger[id];
+  if(!b) return;
+
+  openCustomize(b.item, "edit", id);
+
+  if(b.friesRaw){
+    const r = document.querySelector(`input[name='fries'][value='${b.friesRaw}']`);
+    if(r) r.checked = true;
+  }
+
+  $("#patVal").textContent = b.extras.patty;
+  $("#cheVal").textContent = b.extras.cheddar;
+
+  $("#notes").value = b.notes || "";
+  $("#notesCount").textContent = (b.notes||"").length + "/200";
+
+  updateUnitPreview();
+}
+
+$("#patInc").onclick = ()=>{
+  let v = +$("#patVal").textContent;
+  if(v<2){
+    $("#patVal").textContent = v+1;
+    updateUnitPreview();
+  }
+};
+$("#patDec").onclick = ()=>{
+  let v = +$("#patVal").textContent;
+  if(v>0){
+    $("#patVal").textContent = v-1;
+    updateUnitPreview();
+  }
+};
+
+$("#cheInc").onclick = ()=>{
+  let v = +$("#cheVal").textContent;
+  if(v<3){
+    $("#cheVal").textContent = v+1;
+    updateUnitPreview();
+  }
+};
+$("#cheDec").onclick = ()=>{
+  let v = +$("#cheVal").textContent;
+  if(v>0){
+    $("#cheVal").textContent = v-1;
+    updateUnitPreview();
+  }
+};
+
+$("#btnCancel").onclick = ()=>
+  $("#overlayCustomize").style.display="none";
+
+$("#btnAdd").onclick = ()=>{
+
+  const fries = document.querySelector("input[name='fries']:checked");
+  const friesValue = fries ? fries.value : "";
+  const friesName =
+      friesValue==="con_sazon" ? "Sazonadas" :
+      friesValue==="con_sal"   ? "Con sal" :
+      friesValue==="sin_sal"   ? "Sin sal" :
+      "Sin papas";
+
+  const entry = {
+    item: currentItem,
+    qty: 1,
+    fries: friesName,
+    friesRaw: friesValue,
+    extras: {
+      patty: Number($("#patVal").textContent),
+      cheddar: Number($("#cheVal").textContent)
+    },
+    notes: $("#notes").value.trim()
+  };
+
+  // ===========================
+  //   STACKEAR SI YA EXISTE
+  // ===========================
+  let existingId = null;
+
+  for(const id in cart.burger){
+    const b = cart.burger[id];
+
+    const same =
+      b.item.id === entry.item.id &&
+      b.friesRaw === entry.friesRaw &&
+      b.extras.patty === entry.extras.patty &&
+      b.extras.cheddar === entry.extras.cheddar &&
+      (b.notes || "") === (entry.notes || "");
+
+    if(same){
+      existingId = id;
+      break;
+    }
+  }
+
+  if(currentMode==="edit" && currentEditId){
+    // si estoy editando, reemplazo
+    cart.burger[currentEditId] = {...entry, qty: cart.burger[currentEditId].qty};
+  } 
+  else if(existingId){
+    // si ya existe, stackeo
+    cart.burger[existingId].qty++;
+  }
+  else {
+    // si es nuevo item
+    const newId = currentItem.id + "_" + Date.now();
+    cart.burger[newId] = entry;
+  }
+
+  $("#overlayCustomize").style.display="none";
+  renderCart();
+};
+
+/* ============================
+   TURNOS MOSTRADOR (CON GRAMOS COMO pedido_cliente)
+============================ */
 
 const SLOT_START = "19:15";
 const SLOT_END   = "23:45";
-const SLOT_INTERVAL = 15;
+const SLOT_INTERVAL_MIN = 15;
 
-function parseHHMM(s){
-  const [h,m]=s.split(":").map(Number);
+function parseHHMM(str){
+  const [h, m] = str.split(":").map(Number);
   const now = new Date();
-  return new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
 }
-function formatHHMM(d){
-  return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+function formatHHMM(date){
+  return date.toLocaleTimeString("es-AR", {
+    hour:"2-digit", minute:"2-digit", hour12:false
+  });
 }
 
-function generateSlots(){
-  let arr = [];
-  let cur = parseHHMM(SLOT_START);
-  const end= parseHHMM(SLOT_END);
+function generateDailySlots(){
+  const out=[];
+  let cur=parseHHMM(SLOT_START);
+  const end=parseHHMM(SLOT_END);
 
   while(cur<=end){
-    arr.push(new Date(cur));
-    cur = new Date(cur.getTime()+SLOT_INTERVAL*60000);
+    out.push(new Date(cur));
+    cur = new Date(cur.getTime() + SLOT_INTERVAL_MIN*60000);
   }
-  return arr;
+  return out;
 }
 
-let rawSlots = generateSlots();
-let slotData = [];  // {key, date, gramsUsed, full}
+let slotsRaw = generateDailySlots();
+let slots = []; 
 let currentSlotIndex = 0;
 
-function slotKey(d){
-  const y=d.getFullYear();
-  const M=String(d.getMonth()+1).padStart(2,"0");
-  const D=String(d.getDate()).padStart(2,"0");
-  const H=String(d.getHours()).padStart(2,"0");
-  const m=String(d.getMinutes()).padStart(2,"0");
-  return `${y}${M}${D}_${H}${m}`;
+function slotKeyOf(d){
+  const Y=d.getFullYear();
+  const M=("0"+(d.getMonth()+1)).slice(-2);
+  const D=("0"+d.getDate()).slice(-2);
+  const h=("0"+d.getHours()).slice(-2);
+  const m=("0"+d.getMinutes()).slice(-2);
+  return `${Y}${M}${D}_${h}${m}`;
 }
 
-// carga en vivo
-async function loadSlotUsage(){
-  slotData = rawSlots.map(d=>({
+async function loadSlots(){
+  slots = slotsRaw.map(d=>({
     date:d,
-    key:slotKey(d),
+    key:slotKeyOf(d),
     gramsUsed:0,
-    full:false
+    full:false,
+    canHandle:true
   }));
 
-  slotData.forEach(s=>{
+  slots.forEach(s=>{
     db.collection("slots_grams").doc(s.key).onSnapshot(doc=>{
-      const data = doc.data();
-      s.gramsUsed = data?.gramsUsed || 0;
+      s.gramsUsed = doc.exists ? (doc.data().gramsUsed||0) : 0;
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
-
-      refreshSlotUI();
+      updateSlotAvailability();
     });
   });
 }
 
-function refreshSlotUI(){
-  const gramsPedido = gramosDelPedido();
+function updateSlotAvailability(){
+  const pedidoGr = gramosDelPedido();
 
-  // 1. mostramos siempre todos
-  // 2. marcamos cuál soporta los gramos
-  slotData.forEach(s=>{
+  slots.forEach(s=>{
     const restante = GRAMOS_POR_BLOQUE - s.gramsUsed;
-
-    s.canHandle = restante >= gramsPedido;
+    s.canHandle = restante >= pedidoGr;
   });
+
+  // Selecciona automáticamente el primer horario disponible
+  const firstOK = slots.findIndex(s=>s.canHandle);
+  if(firstOK >= 0) currentSlotIndex = firstOK;
 
   renderSlot();
 }
 
 function renderSlot(){
-  const slot = slotData[currentSlotIndex];
-  if(!slot){
-    $("#slotLabel").textContent="Sin horarios";
-    return;
-  }
+  const lbl = $("#slotLabel");
+  const sub = $("#miniSlotSub");
 
-  let txt = formatHHMM(slot.date);
+  const s = slots[currentSlotIndex];
+  if(!s){ lbl.textContent="Sin horarios"; return; }
 
-  if(!slot.canHandle){
-    txt = txt + " ⚠";
-  }
+  let txt = formatHHMM(s.date);
 
-  if(slot.full){
-    $("#slotLabel").classList.add("slot-full");
-  } else {
-    $("#slotLabel").classList.remove("slot-full");
-  }
+  if(s.full) txt += " (lleno)";
+  else if(!s.canHandle) txt += " (ajustado)";
 
-  $("#slotLabel").textContent = txt;
+  lbl.textContent = txt;
+  window.selectedSlot = { pretty: formatHHMM(s.date), iso:s.date.toISOString() };
+  sub.textContent = "Seleccionado: " + window.selectedSlot.pretty;
 
-  window.selectedSlot = {
-    key: slot.key,
-    pretty: formatHHMM(slot.date)
-  };
-
-  $("#miniSlotSub").textContent = "Seleccionado: "+window.selectedSlot.pretty;
-
-  $("#slotPrev").classList.toggle("disabled",currentSlotIndex===0);
-  $("#slotNext").classList.toggle("disabled",currentSlotIndex===slotData.length-1);
+  $("#slotPrev").classList.toggle("disabled", currentSlotIndex===0);
+  $("#slotNext").classList.toggle("disabled", currentSlotIndex===slots.length-1);
 }
 
 $("#slotPrev").onclick = ()=>{
-  if(currentSlotIndex>0){
-    currentSlotIndex--;
-    renderSlot();
-  }
+  if(currentSlotIndex>0){ currentSlotIndex--; renderSlot(); }
 };
 $("#slotNext").onclick = ()=>{
-  if(currentSlotIndex<slotData.length-1){
-    currentSlotIndex++;
-    renderSlot();
-  }
+  if(currentSlotIndex<slots.length-1){ currentSlotIndex++; renderSlot(); }
 };
 
+/* ============= ENVIAR PEDIDO A FIRESTORE ============= */
+async function sendToFirestore(){
 
-
-///////////////////////////////////////////////////////////
-///   📤 ENVIAR PEDIDO
-///////////////////////////////////////////////////////////
-
-async function sendOrder(){
   const nombre = $("#inpNombre").value.trim();
-  if(!nombre) return alert("Ingresá el nombre");
+  if(!nombre){
+    alert("Ingresá el nombre");
+    return;
+  }
 
-  const pago = $("#selPago").value.trim() || "efectivo";
+  const pago = $("#selPago").value.trim() || "sin_especificar";
 
   let slot = window.selectedSlot;
 
-  const manual = $("#manualTime").value;
+  const manual = document.getElementById("manualTime").value;
   if(manual){
     const now = new Date();
     slot = {
       pretty: manual,
-      iso: new Date(now.getFullYear(),now.getMonth(),now.getDate(),
-                    manual.split(":")[0],manual.split(":")[1])
-            .toISOString()
+      iso: new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        manual.split(":")[0],
+        manual.split(":")[1],
+        0
+      ).toISOString()
     };
   }
 
   if(!slot){
-    alert("Elegí horario");
+    alert("Elegí un horario");
     return;
   }
 
-  // armar items
-  const items=[];
-  let total=0;
+  // validar papas
+  for (const id in cart.burger){
+    const b = cart.burger[id];
+    if(!b.friesRaw || b.friesRaw === ""){
+      alert(`La hamburguesa "${b.item.name}" no tiene papas seleccionadas.`);
+      return;
+    }
+  }
+
+  const tel = $("#inpTel").value.trim();
+
+  const items = [];
+  let rawTotal = 0;
 
   for(const id in cart.burger){
-    const b=cart.burger[id];
-    const unit = b.item.price +
-      b.extras.patty*EXTRA_PRICE_PATTY +
-      b.extras.cheddar*EXTRA_PRICE_CHEDDAR;
+    const b = cart.burger[id];
 
-    total += unit*b.qty;
+    const unit =
+      b.item.price +
+      (b.extras.patty   * EXTRA_PRICE_PATTY) +
+      (b.extras.cheddar * EXTRA_PRICE_CHEDDAR);
+
+    rawTotal += unit * b.qty;
 
     items.push({
-      type:"burger",
-      id:b.item.id,
-      name:b.item.name,
-      qty:b.qty,
-      price:b.item.price,
-      fries:b.fries,
-      extras:b.extras,
-      notes:b.notes||""
+      type: "burger",
+      id: b.item.id,
+      name: b.item.name,
+      qty: b.qty,
+      price: b.item.price,
+      fries: b.fries,
+      extras: {
+        patty: b.extras.patty,
+        cheddar: b.extras.cheddar,
+        EXTRA_PRICE_PATTY,
+        EXTRA_PRICE_CHEDDAR
+      },
+      notes: b.notes || ""
     });
   }
 
   for(const id in cart.drink){
-    const d=cart.drink[id];
-    total+=d.item.price*d.qty;
+    const d = cart.drink[id];
+    rawTotal += d.item.price * d.qty;
     items.push({
       type:"drink",
       id:d.item.id,
@@ -740,8 +1048,8 @@ async function sendOrder(){
   }
 
   for(const id in cart.side){
-    const s=cart.side[id];
-    total+=s.item.price*s.qty;
+    const s = cart.side[id];
+    rawTotal += s.item.price * s.qty;
     items.push({
       type:"side",
       id:s.item.id,
@@ -751,67 +1059,87 @@ async function sendOrder(){
     });
   }
 
-  // generar número de pedido
-  async function nextOrder(){
-    const ref=db.collection("config").doc("counters");
-    let last=0;
-    try{
-      const qs=await db.collection("orders")
-        .orderBy("orderNumber","desc")
-        .limit(1).get();
-      if(!qs.empty) last=qs.docs[0].data().orderNumber||0;
-    }catch{}
+  async function getNextOrderNumber(){
+    let lastKnown = 0;
+    try {
+      const qs = await db.collection('orders')
+        .orderBy('orderNumber','desc')
+        .limit(1)
+        .get();
+      if(!qs.empty) lastKnown = Number(qs.docs[0].data().orderNumber)||0;
+    }catch(_){}
 
-    const n = await db.runTransaction(async tx=>{
-      const snap=await tx.get(ref);
-      const cur=snap.exists? (snap.data().orderNumber||0):0;
-      const base=Math.max(cur,last);
-      const next=base+1;
-      tx.set(ref,{orderNumber:next},{merge:true});
-      return next;
+    const ref = db.collection("config").doc("counters");
+
+    const next = await db.runTransaction(async tx=>{
+      const snap = await tx.get(ref);
+      const cur  = snap.exists ? Number(snap.data().orderNumber||0) : 0;
+      const base = Math.max(cur,lastKnown);
+      const nxt  = base + 1;
+
+      tx.set(ref,{ orderNumber:nxt },{merge:true});
+      return nxt;
     });
 
-    return n;
+    return next;
   }
 
-  const orderNumber = await nextOrder();
+  const orderNumber = await getNextOrderNumber();
 
-  const order={
+  const order = {
     orderNumber,
+    number: orderNumber,
     nombre,
-    telefono:$("#inpTel").value.trim(),
-    entrega:"take_away",
+    telefono: tel,
+    entrega: "take_away",
     pago,
-    pickup_slot:slot.pretty,
-    pickup_time:slot.iso || new Date().toISOString(),
-    status:(pago==="mercado_pago"?"pending_payment":"accepted"),
-    payment_status:(pago==="mercado_pago"?"pending_payment":"paid"),
+    notes: "",
+    pickup_slot: slot.pretty,   // lo que ve el mostrador
+    pickup_time: slot.iso,      // ISO para tracking
+    status: (pago==="mercado_pago" ? "pending_payment" : "accepted"),
+    payment_status: (pago==="mercado_pago" ? "pending_payment" : "paid"),
     items,
-    total,
-    source:"mostrador",
-    createdAt:firebase.firestore.FieldValue.serverTimestamp()
+    total: rawTotal,
+    rawTotal,
+    source: "mostrador",
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
   };
 
-  await db.collection("orders").add(order);
+  try{
+   await db.collection("orders").doc().set(order);
+alert(`Pedido cargado ✔️\nNúmero de pedido: #${orderNumber}`);
 
-  alert("Pedido cargado ✔️  #" + orderNumber);
+// Vaciar carrito
+cart = { burger:{}, drink:{}, side:{} };
+localStorage.removeItem("rb_cart_mostrador");
+renderCart();
 
-  cart = {burger:{},drink:{},side:{}};
-  renderCart();
+// Limpiar inputs del cliente
+$("#inpNombre").value = "";
+$("#inpTel").value = "";
+$("#selPago").value = "";
+
+// Limpiar horario
+window.selectedSlot = null;
+$("#manualTime").value = "";
+$("#slotLabel").textContent = "--:--";
+$("#miniSlotSub").textContent = "Seleccionado: —";
+
+// Forzar regeneración de horarios disponibles
+refreshSlotsUI();
+  }catch(e){
+    console.error(e);
+    alert("Error cargando pedido");
+  }
 }
 
-$("#btnCargarPedido").onclick = sendOrder;
+$("#btnCargarPedido").onclick = sendToFirestore;
 
-
-
-///////////////////////////////////////////////////////////
-///   INIT
-///////////////////////////////////////////////////////////
+/* init */
 document.addEventListener("DOMContentLoaded", ()=>{
   renderCart();
-  loadSlotUsage();
+  loadSlots();
 });
 </script>
-
 </body>
 </html>
