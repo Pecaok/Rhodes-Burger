@@ -706,16 +706,6 @@ let slotObjects = [];
 let currentSlotIndex = 0;
 let slot_unsubs = [];
 
-/* 🔥 FUNCIÓN PARA IR AL PRIMER SLOT DISPONIBLE */
-function goToFirstAvailableSlot(){
-  const idx = slotObjects.findIndex(s => !s.full);
-  if (idx === -1){
-    currentSlotIndex = 0;   // si todos están llenos → primer horario
-  } else {
-    currentSlotIndex = idx; // primer horario no lleno
-  }
-}
-
 function clearSlotSubs(){
   slot_unsubs.forEach(u=>{ try{u();}catch{} });
   slot_unsubs=[];
@@ -732,74 +722,61 @@ function loadSlotsMostrador(){
     full: false
   }));
 
-  $("#slotLabel").textContent = "Cargando…";
-  $("#miniSlotSub").textContent = "Seleccionado: —";
+  $("#slotLabel").textContent="Cargando…";
+  $("#miniSlotSub").textContent="Seleccionado: —";
 
-  slotObjects.forEach(s => {
-    const ref = db.collection("slots_grams").doc(s.key);
+  slotObjects.forEach(s=>{
+    const ref=db.collection("slots_grams").doc(s.key);
 
-    const unsub = ref.onSnapshot(doc => {
+    const unsub=ref.onSnapshot(doc=>{
       if(!doc.exists){
         ref.set({gramsUsed:0},{merge:true});
       }
-
-      const d = doc.data() || {};
-      s.gramsUsed = Number(d.gramsUsed || 0);
+      const d=doc.data()||{};
+      s.gramsUsed = Number(d.gramsUsed||0);
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
 
-      // vuelvo a renderizar
       renderSlotMostrador();
     });
 
     slot_unsubs.push(unsub);
   });
-
-  // 🔥 Después de cargar todo → moverse al primer disponible
-  goToFirstAvailableSlot();
-  renderSlotMostrador();
 }
 
 function renderSlotMostrador(){
-
-  // si no hay slots todavía
-  if(slotObjects.length === 0){
-    $("#slotLabel").textContent = "Sin horarios";
-    window.selectedSlot = null;
+  if(slotObjects.length===0){
+    $("#slotLabel").textContent="Sin horarios";
+    window.selectedSlot=null;
     return;
   }
 
-  // asegurar que quede dentro del rango
-  if(currentSlotIndex < 0) currentSlotIndex = 0;
-  if(currentSlotIndex >= slotObjects.length) 
-      currentSlotIndex = slotObjects.length - 1;
+  if(currentSlotIndex < 0) currentSlotIndex=0;
+  if(currentSlotIndex >= slotObjects.length) currentSlotIndex=slotObjects.length-1;
 
-  const s = slotObjects[currentSlotIndex];
-  const pretty = formatHHMM(s.date);
+  const s=slotObjects[currentSlotIndex];
+  const pretty=formatHHMM(s.date);
 
-  // mostrar el horario
   $("#slotLabel").textContent = pretty;
 
-  // marcar en rojo si está lleno
   if(s.full){
-    $("#slotLabel").style.background = "#ffeaea";
-    $("#slotLabel").style.borderColor = "#ffb5b5";
+    $("#slotLabel").style.background="#ffeaea";
+    $("#slotLabel").style.borderColor="#ffb5b5";
   } else {
-    $("#slotLabel").style.background = "#fff";
-    $("#slotLabel").style.borderColor = "var(--ring)";
+    $("#slotLabel").style.background="#fff";
+    $("#slotLabel").style.borderColor="var(--ring)";
   }
 
-  window.selectedSlot = {
-    key: s.key,
+  window.selectedSlot={
+    key:s.key,
     pretty,
-    iso: s.date.toISOString(),
-    full: s.full
+    iso:s.date.toISOString(),
+    full:s.full
   };
 
-  $("#miniSlotSub").textContent = "Seleccionado: " + pretty;
+  $("#miniSlotSub").textContent="Seleccionado: "+pretty;
 
-  // habilitar / deshabilitar flechas
-  $("#slotPrev").classList.toggle("disabled", currentSlotIndex === 0);
-  $("#slotNext").classList.toggle("disabled", currentSlotIndex === slotObjects.length - 1);
+  $("#slotPrev").classList.toggle("disabled", currentSlotIndex===0);
+  $("#slotNext").classList.toggle("disabled", currentSlotIndex===slotObjects.length-1);
 }
 
 $("#slotPrev").onclick=()=>{ if(currentSlotIndex>0){currentSlotIndex--; renderSlotMostrador();} };
