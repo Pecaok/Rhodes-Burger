@@ -126,41 +126,27 @@
     }
     .price{ font-weight:800; }
 
-    aside.side{
-      background:var(--card);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
-      padding:16px;
-      position:sticky;
-      top:80px;
-      height:fit-content;
-    }
+ aside.side{
+  background:var(--card);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:16px;
 
-    .field{
-      margin-top:10px;
-      display:flex;
-      flex-direction:column;
-      gap:4px;
-    }
-    .field label{
-      font-weight:600;
-      font-size:14px;
-    }
-    .field input,
-    .field select{
-      padding:12px;
-      border-radius:12px;
-      border:1px solid var(--ring);
-      font-size:15px;
-    }
+  position:sticky;
+  top:80px;
 
-    .total{
-      font-size:22px;
-      font-weight:800;
-      margin-bottom:12px;
-      display:flex;
-      justify-content:space-between;
-    }
+  height:calc(100vh - 120px); /* 🔥 ALTURA FIJA */
+  display:flex;
+  flex-direction:column;
+}
+
+/* Caja scroll solo del listado */
+#cartItems{
+  flex:1;
+  overflow-y:auto;
+  padding-right:6px;
+  margin-bottom:16px;
+}
 
     .muted{
       color:var(--muted);
@@ -781,34 +767,55 @@ $("#btnAdd").onclick = ()=>{
       friesValue==="sin_sal"   ? "Sin sal" :
       "Sin papas";
 
-  const entry = {
-    item: currentItem,
-    qty: 1,
-    fries: friesName,
-    friesRaw: friesValue,
-    extras: {
-      patty: Number($("#patVal").textContent),
-      cheddar: Number($("#cheVal").textContent)
-    },
-    notes: $("#notes").value.trim()
-  };
+  const patties = Number($("#patVal").textContent);
+  const cheddar = Number($("#cheVal").textContent);
+  const notes   = $("#notes").value.trim();
 
-  // 👇 Si estoy editando → reemplazo, NO duplico
+  const extrasKey = `${patties}_${cheddar}_${friesValue}_${notes}`;
+
+  /* ✔ Si estoy editando */
   if(currentMode==="edit" && currentEditId){
-    entry.qty = cart.burger[currentEditId].qty;
-    cart.burger[currentEditId] = entry;
+    cart.burger[currentEditId].extras.patty = patties;
+    cart.burger[currentEditId].extras.cheddar = cheddar;
+    cart.burger[currentEditId].fries = friesName;
+    cart.burger[currentEditId].friesRaw = friesValue;
+    cart.burger[currentEditId].notes = notes;
+    $("#overlayCustomize").style.display = "none";
+    renderCart();
+    return;
+  }
 
+  /* ✔ Buscar si ya existe un item igual */
+  let foundId = null;
+
+  for (const id in cart.burger){
+    const b = cart.burger[id];
+    const key = `${b.extras.patty}_${b.extras.cheddar}_${b.friesRaw}_${b.notes}`;
+
+    if(b.item.id === currentItem.id && key === extrasKey){
+      foundId = id;
+      break;
+    }
+  }
+
+  if(foundId){
+    cart.burger[foundId].qty++;
   } else {
-
-    // 👇 NUEVA CLAVE ÚNICA
     const newId = currentItem.id + "_" + Date.now();
-    cart.burger[newId] = entry;
+    cart.burger[newId] = {
+      item: currentItem,
+      qty: 1,
+      fries: friesName,
+      friesRaw: friesValue,
+      extras: { patty: patties, cheddar: cheddar },
+      notes
+    };
   }
 
   $("#overlayCustomize").style.display="none";
   renderCart();
 };
-
+  
 /* ============================
    TURNOS MOSTRADOR (SIN BLOQUEOS)
    SIEMPRE MUESTRA TODOS LOS HORARIOS
