@@ -888,18 +888,37 @@ function generateDailySlots(){
 ------------------------------------------- */
 
 function loadSlotConfig(){
-  db.collection("config").doc("slots").onSnapshot(snap=>{
-    if(!snap.exists){
-      console.warn("⚠ No existe config/slots en Firestore");
-      return;
-    }
+  /* ============================
+   CARGA DE GRAMOS POR HORARIO
+   DESDE slots_grams
+============================ */
 
+async function loadGramsForToday() {
+  gramsBySlot = new Map();  // reiniciamos
+
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth()+1).padStart(2,"0");
+  const d = String(today.getDate()).padStart(2,"0");
+  const prefix = `${y}${m}${d}_`;   // ej: 20251121_
+
+  const snap = await db.collection("slots_grams").get();
+
+  snap.forEach(doc => {
+    if (doc.id.startsWith(prefix)) {
+      const slotId = doc.id;                 // ej: 20251121_1915
+      const grams = doc.data().gramsUsed||0; // ej: 1500
+      gramsBySlot.set(slotId, grams);
+    }
+  });
+
+  console.log("Slots gramos cargados:", gramsBySlot);
+}
     const d = snap.data();
     globalSlotLimit = d.globalSlotLimit || 2000;
     slotCap = d.slotCap || {};
 
     recomputeSlots();
-  });
 }
 
 /* -------------------------------------------
@@ -952,25 +971,58 @@ function recomputeSlots(){
   renderSlot();
 }
 
+  function getCartGrams() {
+  let grams = 0;
+
+  for (const id in cart.burger) {
+    const b = cart.burger[id];
+    grams += b.qty * GRAMS_PER_BURGER;
+  }
+
+  return grams;
+}
+
 /* -------------------------------------------
       5) Render del turno actual
 ------------------------------------------- */
 
-function renderSlot(){
+function renderSlot() {
   const label = document.getElementById("slotLabel");
-  const sub   = document.getElementById("miniSlotSub");
+  const sub = document.getElementById("miniSlotSub");
 
-  const d = allSlots[currentSlotIndex];
-  const pretty = formatHHMM(d);
+  for (let i = currentSlotIndex; i < allSlots.length; i++) {
+    const d = allSlots[i];
+    const pretty = formatHHMM(d);
 
-  label.textContent = pretty;
+    // construir ID Firestore (ej: 20251121_1915)
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth()+1).padStart(2,"0");
+    const dd = String(today.getDate()).padStart(2,"0");
+    const slotId = `${y}${m}${dd}_${pretty.replace(":","")}`;
 
-  window.selectedSlot = {
-    iso: d.toISOString(),
-    pretty
-  };
+    const used = gramsBySlot.get(slotId) || 0;
+    const free = SLOT_CAPACITY - used;
 
-  sub.textContent = "Seleccionado: " + pretty;
+    const requiredGrams = getCartGrams(); // hamburguesas del carrito
+
+    if (free >= requiredGrams) {
+      currentSlotIndex = i;
+
+      label.textContent = pretty;
+      window.selectedSlot = { iso: d.toISOString(), pretty };
+      sub.textContent = "Seleccionado: " + pretty;
+
+      updateArrows();
+      return;
+    }
+  }
+
+  // si no encontró ningún horario válido
+  label.textContent = "Sin horarios";
+  window.selectedSlot = null;
+  sub.textContent = "Seleccionado: —";
+}
 
   /* Habilitar botones prev/next SIEMPRE */
   document.getElementById("slotPrev").classList.remove("disabled");
