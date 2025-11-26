@@ -162,25 +162,7 @@
     };
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
-   const db = firebase.firestore();   // ← ACA ABAJO MISMITO
-
-/* ====== lector de pedidos ====== */
-db.collection("orders")
-  .orderBy("createdAt", "desc")
-  .limit(50)
-  .onSnapshot((snap)=>{
-    lastSnap = snap;
-    idToDoc.clear();
-
-    snap.forEach(doc => idToDoc.set(doc.id, doc));
-
-    renderList(snap);
-    playBeepTriple();
-  }, (err)=>{
-    console.error(err);
-    document.getElementById("ordersError").textContent = "Error al cargar pedidos";
-    document.getElementById("ordersError").style.display = "block";
-  });
+    const db = firebase.firestore();
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
@@ -223,35 +205,39 @@ db.collection("orders")
       return null;
     }
     function getPickupPretty(o){
-      if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "")
-        return o.pickup_time_pretty;
+  // 1) Prioridad absoluta: pretty explícito
+  if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "")
+    return o.pickup_time_pretty;
 
-      if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot))
-        return o.pickup_slot;
+  // 2) Mostrador: guarda pickup_slot como "HH:MM"
+  if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot))
+    return o.pickup_slot;
 
-      const t = o.pickup_time || o.pickupTime || o.pickup;
-      if (t) {
-        try{
-          if (typeof t?.toDate === "function")
-            return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+  // 3) Si pickup_time viene como timestamp / string válida
+  const t = o.pickup_time || o.pickupTime || o.pickup;
+  if (t) {
+    try{
+      if (typeof t?.toDate === "function")
+        return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
 
-          const d = new Date(t);
-          if (!isNaN(d))
-            return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
-        }catch(_){}
-      }
+      const d = new Date(t);
+      if (!isNaN(d))
+        return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+    }catch(_){}
+  }
 
-      if (typeof o.pickup_slot === "string") {
-        const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/);
-        if (m) return `${m[1]}:${m[2]}`;
-      }
+  // 4) Si es formato "HHMM" (web vieja)
+  if (typeof o.pickup_slot === "string") {
+    const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/);
+    if (m) return `${m[1]}:${m[2]}`;
+  }
 
-      if (o.pickup_asap === true)
-        return "A la brevedad";
+  // 5) ASAP
+  if (o.pickup_asap === true)
+    return "A la brevedad";
 
-      return null;
-    }
-
+  return null;
+}
     /* ===== sonido ===== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let audioCtx = null, audioReady = false;
@@ -345,215 +331,120 @@ db.collection("orders")
       return '';
     }
 
-    /* ===== Agrupar hamburguesas idénticas y separar papas (vista grande) ===== */
-    function groupItemsForScreen(items){
-      const burgers = {};   // hamburguesas
-      const friesMap = {};  // papas
-
-      function normalizeFriesLabelInner(raw){
-        if(!raw && raw !== 0) return '';
-        let s = String(raw).toLowerCase()
-          .replace(/[_-]/g,' ')
-          .replace(/\s+/g,' ')
-          .trim();
-
-        if(!s) return '';
-        if(s.includes("sazon")) return "Sazonadas";
-        if(s.includes("sin sal")) return "Sin sal";
-        if(s.includes("con sal")) return "Con sal";
-        if(s.includes("sal")) return "Con sal";
-        return s;
-      }
-
-      function hasPaidExtras(ex){
-        if(!ex) return false;
-        const patty = Number(ex.patty || 0);
-        const cheddar = Number(ex.cheddar || 0);
-        // Si en el futuro agregás más extras pagos, sumalos acá.
-        return (patty > 0 || cheddar > 0);
-      }
-
-      items.forEach((it, idx)=>{
-        const qty   = it.qty || 1;
-        const name  = it.name || "";
-        const price = it.price || 0;
-        const extras = it.extras || {};
-
-        const friesLabel = normalizeFriesLabelInner(
-          it.fries || it.side || extras.fries || ""
-        );
-
-        // PAPAS siempre aparte
-        if(friesLabel){
-          if(!friesMap[friesLabel]) friesMap[friesLabel] = 0;
-          friesMap[friesLabel] += qty;
-        }
-
-        // Nota normalizada
-        let note = "";
-        if(Array.isArray(it.notes)) note = it.notes.join(" | ");
-        else if(typeof it.notes === "string") note = it.notes.trim();
-        else if(typeof it.comment === "string") note = it.comment.trim();
-
-        const simpleBurger = !hasPaidExtras(extras); // sin extras pagos
-
-        // Si es simple, agrupamos por nombre + precio + nota
-        // Si tiene extras, nunca agrupamos (key única por índice)
-        const key = simpleBurger
-          ? JSON.stringify({ name, price, note })
-          : `extra-${idx}`;
-
-        if(!burgers[key]){
-          burgers[key] = {
-            qty: 0,
-            name,
-            extras,
-            notes: note,
-            price
-          };
-        }
-
-        burgers[key].qty += qty;
-      });
-
-      const fries = Object.entries(friesMap).map(([label, qty])=>({
-        qty,
-        name: "Papas",
-        friesLabel: label
-      }));
-
-      return {
-        burgers: Object.values(burgers),
-        fries
-      };
-    }
-
     /* ========== renderOrder: ahora muestra HORARIO en el chip ========== */
     function renderOrder(doc){
-      const o = doc.data();
-      const dt = pickDocDate(o);
-      const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
-
+      const o = doc.data(); const dt = pickDocDate(o);
+      const dtText = dt? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
       const items = Array.isArray(o.items) ? o.items : [];
 
-      const groups = groupItemsForScreen(items);
+      const pickupPretty = getPickupPretty(o);   // <<<<<<<<<<<<<<
 
-      /* ==== Render Burgers ==== */
-      const burgerHTML = groups.burgers.map(it=>{
+      const lines = items.map(it=>{
+        const qty = it.qty||1;
+        const subtotal = (it.price||0)*qty
+          + (it.extras?.patty||0)*(it.extras?.EXTRA_PRICE_PATTY||0)*qty
+          + (it.extras?.cheddar||0)*(it.extras?.EXTRA_PRICE_CHEDDAR||0)*qty;
+
         const extras = [];
+        if (it.extras?.patty) extras.push(`+${it.extras.patty} medallón(es)`);
+        if (it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
+        const extrasLine = extras.length ? ` · Extras: ${extras.join(' · ')}` : '';
 
-        if(it.extras?.patty)
-          extras.push(`+${it.extras.patty} medallones`);
-        if(it.extras?.cheddar)
-          extras.push(`+${it.extras.cheddar} cheddar`);
+        const friesRaw = it.fries || it.side || (Array.isArray(it.sides)? it.sides.join(' '): '') || (it.extras && it.extras.fries) || '';
+        const friesText = normalizeFriesLabel(friesRaw) || '—';
 
-        const extrasLine = extras.length ? `<div class="sub">Extras: ${extras.join(" · ")}</div>` : "";
-        const notesLine = it.notes ? `<div class="sub">Nota: ${it.notes}</div>` : "";
+        let perUnitNotes = null;
+        if (Array.isArray(it.notes)) perUnitNotes = it.notes;
+        else if (Array.isArray(it.comments)) perUnitNotes = it.comments;
+        else if (Array.isArray(it.comment)) perUnitNotes = it.comment;
 
-        const subtotal =
-          (it.qty * it.price) +
-          (it.extras?.patty || 0) * (it.extras?.EXTRA_PRICE_PATTY || 0) * it.qty +
-          (it.extras?.cheddar || 0) * (it.extras?.EXTRA_PRICE_CHEDDAR || 0) * it.qty;
+        let commentHtml = '';
+        if (perUnitNotes && perUnitNotes.length){
+          commentHtml = perUnitNotes.map((c,i)=>`<div class="sub">• Nota ${i+1}: ${c}</div>`).join('');
+        } else {
+          const single = (typeof it.notes === 'string' && it.notes.trim()) ? it.notes.trim()
+                       : (typeof it.comment === 'string' && it.comment.trim()) ? it.comment.trim()
+                       : (typeof it.notes === 'number' ? String(it.notes) : null);
+          if (single){
+            commentHtml = `<div class="sub">• Nota: ${single}${qty>1?' <small style="color:#666">(aplica a todas)</small>':''}</div>`;
+          }
+        }
 
-        return `
-          <div class="item">
-            <strong>• ${it.qty}× ${it.name}</strong>
-            ${extrasLine}
-            ${notesLine}
-            <div class="sub">Subtotal: ${money(subtotal)}</div>
-          </div>
-        `;
+        return `<div class="item">
+          <div>• <strong>${qty}× ${it.name||''}</strong></div>
+          <div class="sub">Papas: ${friesText}${extrasLine ? (' · '+extrasLine.replace(/^ · /,'')) : ''}</div>
+          ${commentHtml}
+          <div class="sub">Subtotal: ${money(subtotal)}</div>
+        </div>`;
       }).join("");
 
-      /* ==== Render Fries ==== */
-      const friesHTML = groups.fries.length
-        ? `<h4 style="margin-top:12px">🍟 Papas</h4>` +
-          groups.fries.map(f=>`
-            <div class="item">
-              <strong>• ${f.qty}× ${f.name}</strong>
-              ${f.friesLabel ? `<div class="sub">Papas: ${f.friesLabel}</div>` : ""}
-            </div>
-          `).join("")
-        : "";
-
-      const pickupPretty = getPickupPretty(o);
+      const generalNote = (o.comment || o.notes || o.note || o.notes_general || o.comentario || o.comments || '').toString().trim();
 
       const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
       const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
-
-      const generalNote = (o.comment || o.notes || "").toString().trim();
       const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
 
       const st = o.status ?? "accepted";
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
+      const stateBtns = `<div class="stateBtns">
+        ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${STATE_LABEL[key]||key}</button>`).join('')}
+      </div>`;
 
-      const stateBtns = `
-        <div class="stateBtns">
-          ${STATE_SEQ.map((key,idx)=>`
-            <button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">
-              ${STATE_LABEL[key]}
-            </button>
-          `).join('')}
-        </div>
-      `;
-
-      const isPaid = ((o.payment_status === "paid") || o.paid === true);
+      const forcePaidInDeliveredTab = (currentFilter === 'entregados');
+      const isPaid = forcePaidInDeliveredTab || ((o.payment_status==='paid' || o.paid) === true);
+      const payBtnAttrs = forcePaidInDeliveredTab ? 'disabled' : '';
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
-
       const payLine = `
-        <div class="pay-line">
-          <select class="btn" data-select-pago style="min-width:200px">
-            <option value="" disabled ${(!o.pago)?'selected':''}>Seleccioná medio de pago</option>
-            <option value="efectivo" ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
-            <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>Mercado Pago</option>
-            <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
-          </select>
+  <div class="pay-line">
+    
+    <select class="btn" data-select-pago style="min-width:200px">
+      <option value="" disabled ${(!o.pago || o.pago==="sin_especificar")?'selected':''}>
+  Seleccioná medio de pago
+</option>
+      <option value="efectivo" ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
+      <option value="debito" ${o.pago==="debito"?"selected":""}>Débito</option>
+      <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>Mercado Pago</option>
+      <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
+    </select>
 
-          <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}">
-            ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
-          </button>
+    <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}" ${payBtnAttrs}>
+      ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
+    </button>
 
-          <button class="btn" data-print>🖨 Imprimir</button>
-        </div>
-      `;
+    <button class="btn" data-print>🖨 Imprimir</button>
+  </div>`;
 
-      return `
-        <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
-          <div class="order-head">
-            <div>
-              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre ?? 'Cliente'}</div>
-              <div class="muted">N° interno: ${o.orderNumber ?? '—'}</div>
-              <div class="muted">${dtText}</div>
-
-              <div class="chips">
-                <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
-                <span class="chip">Estado: ${st}</span>
-                <span class="chip">Retiro: ${o.entrega||"take_away"}</span>
-                <span class="chip">Horario: ${pickupPretty || "—"}</span>
-                ${telChip}${srcChip}${cmtChip}
-              </div>
-
-              ${stateBtns}
+      return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
+        <div class="order-head">
+          <div>
+            <div class="order-title">
+  ${displayOrderNumber(doc)} — 
+  ${o.nombre ?? 'Cliente'}
+  ${o.source === "mostrador" ? ' <span style="color:#625A45">(mostrador)</span>' : ''}
+</div>
+            <div class="muted">N° interno: ${o.orderNumber ?? '—'}</div>
+            <div class="muted">${dtText}</div>
+            <div class="chips">
+              <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
+              <span class="chip">Estado: ${st}</span>
+              <span class="chip">Retiro: ${o.entrega || 'mostrador'}</span>
+              <span class="chip">Horario: ${pickupPretty || '—'}</span>
+              ${telChip}${srcChip}${cmtChip}
             </div>
-
-            <div>
-              <div class="right-total">${money(computeOrderTotal(o))}</div>
-              ${payLine}
-            </div>
+            ${stateBtns}
           </div>
-
-          <div class="divider"></div>
-
-          <div class="items">
-            ${burgerHTML}
-            ${friesHTML}
+          <div>
+            <div class="right-total">${money(computeOrderTotal(o))}</div>
+            ${payLine}
           </div>
         </div>
-      `;
+        <div class="divider"></div>
+        <div class="items">${lines || '<div class="muted">Sin ítems.</div>'}</div>
+      </div>`;
     }
 
     /* ===========================================================
-   TICKET 58MM — MISMO DISEÑO QUE MOSTRADOR (CORREGIDO)
+   TICKET 58MM — MISMO DISEÑO QUE MOSTRADOR.HTML (VERSIÓN FINAL)
    =========================================================== */
 
 function buildTicketHTML(docSnap){
@@ -568,14 +459,14 @@ function buildTicketHTML(docSnap){
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
 
-  const moneyT = n =>
+  const money = n =>
     (Number(n) || 0).toLocaleString("es-AR", {
       style: "currency",
       currency: "ARS",
       maximumFractionDigits: 0
     });
 
-  /* ==== Número ==== */
+  /* ==== Número de pedido ==== */
   const orderDisplay = (() => {
     const possible = [
       o.orderNumber, o.number, o.numero, o.num, o.numPedido, o.nro,
@@ -608,32 +499,41 @@ function buildTicketHTML(docSnap){
   const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
 
   /* ==== Pickup ==== */
-  function resolvePickupPretty(o2){
-    if (o2.pickup_time_pretty) return o2.pickup_time_pretty;
-    if (o2.pickup_slot && /^\d{2}:\d{2}$/.test(o2.pickup_slot))
-      return o2.pickup_slot;
+ // ==== HORARIO UNIFICADO ====
+function resolvePickupPretty(o){
+  // 1) Prioridad máxima (index web)
+  if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "")
+    return o.pickup_time_pretty;
 
-    const t = o2.pickup_time || o2.pickupTime || o2.pickup;
-    if (t) {
-      try {
-        if (typeof t?.toDate === "function")
-          return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
-        const d = new Date(t);
-        if (!isNaN(d))
-          return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
-      }catch(_){}
-    }
+  // 2) Mostrador: guarda directo "HH:MM"
+  if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot))
+    return o.pickup_slot;
 
-    if (typeof o2.pickup_slot === "string"){
-      const m = o2.pickup_slot.match(/^(\d{2})(\d{2})$/);
-      if (m) return `${m[1]}:${m[2]}`;
-    }
-
-    if (o2.pickup_asap) return "A la brevedad";
-    return null;
+  // 3) Timestamps / ISO de ambos sistemas
+  const t = o.pickup_time || o.pickupTime || o.pickup;
+  if (t) {
+    try {
+      if (typeof t?.toDate === "function")
+        return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+      const d = new Date(t);
+      if (!isNaN(d))
+        return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+    } catch(_){}
   }
 
-  const pickupPretty = resolvePickupPretty(o);
+  // 4) Formato “2210”
+  if (typeof o.pickup_slot === "string") {
+    const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/);
+    if (m) return `${m[1]}:${m[2]}`;
+  }
+
+  // 5) ASAP
+  if (o.pickup_asap === true) return "A la brevedad";
+
+  return null;
+}
+
+const pickupPretty = resolvePickupPretty(o);
 
   const pickupBlockLarge = pickupPretty
     ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">
@@ -643,130 +543,148 @@ function buildTicketHTML(docSnap){
          Retiro: A la brevedad
        </div>`;
 
-  /* ===== NORMALIZAR PAPAS ===== */
-  function normalizeFries(raw){
+  /* ==== Items ==== */
+  function normalizeFriesLabel(raw){
     if(!raw && raw !== 0) return '';
-    let s = String(raw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+    let s = String(raw).toLowerCase();
+    s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
     if(!s) return '';
-    if(s.includes("sazon")) return "Sazonadas";
-    if(s.includes("sin sal")) return "Sin sal";
-    if(s.includes("con sal")) return "Con sal";
-    if(s.includes("sal")) return "Con sal";
-    return s;
+    if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) return 'Sin sal';
+    if(/\bsazon\b/.test(s)) return 'Sazonadas';
+    if(/\bsal\b/.test(s)) return 'Con sal';
+    if(s.includes('sazon')) return 'Sazonadas';
+    if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
+    if(s.includes('sal')) return 'Con sal';
+    return '';
   }
 
-  /* ===== PROCESAR ÍTEMS ===== */
   const items = Array.isArray(o.items) ? o.items : [];
 
-  const burgers = {};
-  const friesMap = {};
+  const linesHTML =
+    items
+      .map(it => {
+        const qty = it.qty || 1;
+        const name = escapeHtml(it.name || "");
 
-  function hasPaidExtras(ex){
-    if(!ex) return false;
-    return (ex.patty > 0) || (ex.cheddar > 0);
-  }
+        const base = it.price || 0;
+        const baseSubtotal = base * qty;
 
-  items.forEach((it,idx)=>{
-    const qty = it.qty || 1;
-    const name = it.name || "";
-    const price = it.price || 0;
-    const ex = it.extras || {};
+        /* Extras */
+        const pattyCount = it.extras?.patty || 0;
+        const cheddarCount = it.extras?.cheddar || 0;
+        const pattyUnit = it.extras?.EXTRA_PRICE_PATTY || 0;
+        const cheddarUnit = it.extras?.EXTRA_PRICE_CHEDDAR || 0;
 
-    const friesLabel = normalizeFries(
-      it.fries || it.side || ex.fries || (Array.isArray(it.sides)? it.sides.join(" "): "")
-    );
+        const pattySum = qty * pattyCount * pattyUnit;
+        const cheddarSum = qty * cheddarCount * cheddarUnit;
 
-    if(friesLabel){
-      if(!friesMap[friesLabel]) friesMap[friesLabel] = 0;
-      friesMap[friesLabel] += qty;
-    }
+        const friesRaw =
+          it.fries ||
+          it.side ||
+          (Array.isArray(it.sides) ? it.sides.join(" ") : "") ||
+          it.extras?.fries ||
+          "";
 
-    let note = "";
-    if(Array.isArray(it.notes)) note = it.notes.join(" | ");
-    else if(typeof it.notes === "string") note = it.notes.trim();
-    else if(typeof it.comment === "string") note = it.comment.trim();
+        const friesLabel = normalizeFriesLabel(friesRaw);
+        const friesHTML = friesLabel
+          ? `<div class="sub">• Papas: ${escapeHtml(friesLabel)}</div>`
+          : "";
 
-    const isSimple = !hasPaidExtras(ex);
+        /* Comentarios */
+        let notesHTML = "";
+        let notesArr = null;
 
-    const key = isSimple
-      ? JSON.stringify({name, price, note})
-      : `extra-${idx}`;
+        if (Array.isArray(it.notes)) notesArr = it.notes;
+        else if (Array.isArray(it.comments)) notesArr = it.comments;
 
-    if(!burgers[key]){
-      burgers[key] = {
-        qty: 0,
-        name,
-        price,
-        extras: ex,
-        note
-      };
-    }
+        if (notesArr?.length) {
+          notesHTML = notesArr
+            .map((c, i) => `<div class="sub">• Nota ${i + 1}: ${escapeHtml(c)}</div>`)
+            .join("");
+        } else {
+          const single =
+            (typeof it.notes === "string" && it.notes.trim()) ||
+            (typeof it.comment === "string" && it.comment.trim()) ||
+            null;
 
-    burgers[key].qty += qty;
-  });
+          if (single) {
+            notesHTML = `<div class="sub">• Nota: ${escapeHtml(single)}${
+              qty > 1 ? ` (todas)` : ""
+            }</div>`;
+          }
+        }
 
-  /* ==== GENERAR HTML ==== */
+        const extrasRows = [];
 
-  const burgerLines = Object.values(burgers).map(b=>{
-    const qty = b.qty;
-    const name = escapeHtml(b.name);
+        if (cheddarCount) {
+          extrasRows.push(
+            `<div class="row extra"><div class="l">+${cheddarCount} × Cheddar</div><div class="r">${money(
+              cheddarSum
+            )}</div></div>`
+          );
+        }
 
-    let extrasHTML = "";
-    if(hasPaidExtras(b.extras)){
-      const ex = b.extras;
-      const arr = [];
-      if(ex.patty) arr.push(`+${ex.patty} medallones`);
-      if(ex.cheddar) arr.push(`+${ex.cheddar} cheddar`);
-      extrasHTML = `<div class="sub">• Extras: ${escapeHtml(arr.join(" · "))}</div>`;
-    }
+        if (pattyCount) {
+          const plural = pattyCount > 1 ? "Medallones extra" : "Medallón extra";
+          extrasRows.push(
+            `<div class="row extra"><div class="l">+${pattyCount} × ${plural}</div><div class="r">${money(
+              pattySum
+            )}</div></div>`
+          );
+        }
 
-    const noteHTML = b.note ? `<div class="sub">• Nota: ${escapeHtml(b.note)}</div>` : "";
-
-    return `
-      <div class="row name">
-        <div class="l">${qty} × ${name}</div>
-      </div>
-      ${extrasHTML}
-      ${noteHTML}
-      <div class="sep"></div>
-    `;
-  }).join("");
-
-  const friesLines = Object.entries(friesMap).length
-    ? `
-      <div class="hr"></div>
-      <div class="blk"><div class="lbl">PAPAS</div></div>
-      ${Object.entries(friesMap).map(([label, qty]) => `
+        return `
         <div class="row name">
-          <div class="l">${qty} × Papas</div>
+          <div class="l">${qty} × ${name}</div>
         </div>
-        <div class="sub">• ${escapeHtml(label)}</div>
+        ${friesHTML}
+        ${notesHTML}
+        <div class="row amount"><div class="l"></div><div class="r">${money(baseSubtotal)}</div></div>
+        ${extrasRows.join("")}
+        <div class="row amount final"><div class="l"></div><div class="r">${money(
+          baseSubtotal + pattySum + cheddarSum
+        )}</div></div>
         <div class="sep"></div>
-      `).join("")}
-    `
-    : "";
+        `;
+      })
+      .join("") || `<div class="sub">Sin ítems.</div>`;
 
-  const subtotal = items.reduce((tot,it)=>{
-    const qty = it.qty||1;
-    const base = it.price * qty;
+  /* ==== Totales ==== */
+  const subtotal = items.reduce((t, it) => {
+    const qty = it.qty || 1;
+    const base = (it.price || 0) * qty;
     const patty = (it.extras?.patty || 0) * (it.extras?.EXTRA_PRICE_PATTY || 0) * qty;
-    const cheddar = (it.extras?.cheddar || 0) * (it.extras?.EXTRA_PRICE_CHEDDAR || 0) * qty;
-    return tot + base + patty + cheddar;
-  },0);
+    const cheddar =
+      (it.extras?.cheddar || 0) * (it.extras?.EXTRA_PRICE_CHEDDAR || 0) * qty;
+    return t + base + patty + cheddar;
+  }, 0);
+
+  const total = typeof o.total === "number" ? o.total : subtotal;
+
+  const discountLine = o.descuento
+    ? `<div class="row subtotal"><div class="l">DESCUENTO</div><div class="r">-${money(
+        o.descuento
+      )}</div></div>`
+    : "";
 
   const generalNote =
-    (o.comment || o.notes || o.note || o.notes_general ||
-     o.comentario || o.comments || "").toString().trim();
+    (o.comment ||
+      o.notes ||
+      o.note ||
+      o.notes_general ||
+      o.comentario ||
+      o.comments ||
+      "")
+      .toString()
+      .trim();
 
   const commentBlock = generalNote
-    ? `<div class="hr"></div>
-       <div class="blk">
-         <div class="lbl">COMENTARIO</div>
-         <div>${escapeHtml(generalNote)}</div>
-       </div>
-       <div class="hr"></div>`
+    ? `<div class="hr"></div><div class="blk"><div class="lbl">COMENTARIO</div><div>${escapeHtml(
+        generalNote
+      )}</div></div><div class="hr"></div>`
     : "";
 
+  /* ==== HTML FINAL ==== */
   return `
 <!doctype html>
 <html>
@@ -780,13 +698,16 @@ function buildTicketHTML(docSnap){
   .ticket{ width:48mm; margin:0 auto; padding:2mm 3mm 10mm 2mm; }
   .c{text-align:center}
   .brand{ font-size:16px; }
+  .orderNo{ font-size:14px; margin:1mm 0 }
   .hr{ border-top:1px solid #000; margin:4px 0 }
   .lbl{ font-size:11px; text-transform:uppercase; }
   .blk{ margin:2px 0 2mm 0; }
   .row{ display:flex; justify-content:space-between; }
   .row .l{ flex:1; }
-  .sub{ font-size:11px; margin-left:2mm; }
-  .sep{ border-top:1px dashed #000; opacity:.4; margin:2mm 0 }
+  .row .r{ flex:0; text-align:right; min-width:18mm; white-space:nowrap; }
+  .row.name .r{ display:none; }
+  .sub{ font-size:11px; margin:1px 0 0 2mm; }
+  .sep{ border-top:1px dashed #000; opacity:.5; margin:2mm 0 1.2mm 0; }
   .total{ font-size:16px; margin-top:3mm; }
   .foot{ margin-top:3mm; text-align:center; font-size:10px; font-weight:400; }
 </style>
@@ -795,40 +716,33 @@ function buildTicketHTML(docSnap){
 <body>
   <div class="ticket">
     <div class="c brand">Rhodes Burgers</div>
-    <div class="c">${escapeHtml(orderDisplay)}</div>
+    <div class="orderNo c">${escapeHtml(orderDisplay)}</div>
 
     <div class="hr"></div>
 
-    ${o.nombre ? `
-      <div class="blk">
-        <div class="lbl">CLIENTE</div>
-        <div>${escapeHtml(o.nombre)}</div>
-      </div>` 
-      : ""
-    }
+    ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
 
     ${pickupBlockLarge}
 
-    ${(o.pago || o.payment_method) ? `
-      <div class="blk">
-        <div class="lbl">MEDIO DE PAGO</div>
-        <div>${escapeHtml(o.pago || o.payment_method)}</div>
-      </div>` : ""
-    }
+    ${(o.pago || o.payment_method)
+      ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(
+          o.pago || o.payment_method
+        )}</div></div>`
+      : ""}
+
+    ${o.cupon
+      ? `<div class="blk"><div class="lbl">CUPÓN</div><div>${escapeHtml(o.cupon)}</div></div>`
+      : ""}
 
     ${commentBlock}
 
     <div class="hr"></div>
-
-    <!-- HAMBURGUESAS -->
-    ${burgerLines}
-
-    <!-- PAPAS -->
-    ${friesLines}
-
+    ${linesHTML}
     <div class="hr"></div>
 
-    <div class="row"><div class="l">TOTAL</div><div>${moneyT(subtotal)}</div></div>
+    <div class="row subtotal"><div class="l">SUBTOTAL</div><div class="r">${money(subtotal)}</div></div>
+    ${discountLine}
+    <div class="row total"><div class="l">TOTAL</div><div class="r">${money(total)}</div></div>
 
     <div class="foot">
       ${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}
@@ -845,26 +759,26 @@ function buildTicketHTML(docSnap){
   `;
 }
 
-    /* ======== Print en iframe ======== */
-    function printInIframe(docSnap){
-      const html = buildTicketHTML(docSnap);
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
-      iframe.setAttribute('aria-hidden','true');
-      document.body.appendChild(iframe);
+/* ======== Print en iframe ======== */
+function printInIframe(docSnap){
+  const html = buildTicketHTML(docSnap);
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.setAttribute('aria-hidden','true');
+  document.body.appendChild(iframe);
 
-      const doc = iframe.contentWindow.document;
-      doc.open(); doc.write(html); doc.close();
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
 
-      const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
-      iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150);
-      setTimeout(cleanup, 15000);
-    }
+  const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
+  iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150);
+  setTimeout(cleanup, 15000);
+}
 
     function trySilentPrint(docSnap){ printInIframe(docSnap); }
 
@@ -879,22 +793,23 @@ function buildTicketHTML(docSnap){
         const id=card.dataset.id;
         card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
 
+        // Botón único de pago (toggle)
         const payToggle=card.querySelector("[data-pay-toggle]");
-
-        const selPago = card.querySelector("[data-select-pago]");
-        if(selPago){
-          selPago.addEventListener("change", async ()=>{
-            const pago = selPago.value;
-            try{
-              await db.collection("orders").doc(id).update({
-                pago: pago,
-                payment_method: pago
-              });
-            }catch(e){
-              alert("No se pudo guardar el método de pago");
-            }
-          });
-        }
+        // Cambio de medio de pago
+const selPago = card.querySelector("[data-select-pago]");
+if(selPago){
+  selPago.addEventListener("change", async ()=>{
+    const pago = selPago.value;
+    try{
+      await db.collection("orders").doc(id).update({
+        pago: pago,
+        payment_method: pago
+      });
+    }catch(e){
+      alert("No se pudo guardar el método de pago");
+    }
+  });
+}
         if(payToggle && currentFilter!=="entregados"){
           payToggle.addEventListener("click", async ()=>{
             const wasPaid = payToggle.dataset.payToggle === "paid";
