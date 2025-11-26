@@ -809,103 +809,135 @@ $("#btnAdd").onclick = ()=>{
   renderCart();
 };
 
-/* ============================
-   TURNOS MOSTRADOR (SIN BLOQUEOS)
-   SIEMPRE MUESTRA TODOS LOS HORARIOS
-============================ */
+/* ============= TURNOS MOSTRADOR ============= */
+const OPEN_TIME_MOSTRADOR  = "19:10";
+const CLOSE_TIME_MOSTRADOR = "02:00";
+const INTERVAL_MIN = 10;
+const MINUTES_AHEAD = 2;
 
-const SLOT_START = "19:15";
-const SLOT_END   = "23:45";
-const SLOT_INTERVAL_MIN = 15;
-
-let allSlots = [];
+let visibleSlots = [];
 let currentSlotIndex = 0;
 
-function parseHHMM(str){
-  const [h, m] = str.split(":").map(Number);
+function parseHHMM(s){
+  const [h,m] = s.split(":").map(Number);
+  return {h,m};
+}
+function dateTodayAt(hhmm){
+  const {h,m} = parseHHMM(hhmm);
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0, 0);
+}
+function dateTomorrowAt(hhmm){
+  const {h,m} = parseHHMM(hhmm);
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, h, m, 0, 0);
+}
+function slotPretty(d){
+  return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
 }
 
-function formatHHMM(date){
-  return date.toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  });
-}
+function generateAllSlots(){
+  const now = new Date();
 
-function generateDailySlots(){
-  const start = parseHHMM(SLOT_START);
-  const end   = parseHHMM(SLOT_END);
+  const open = dateTodayAt(OPEN_TIME_MOSTRADOR);
+  const close = CLOSE_TIME_MOSTRADOR.startsWith("0")
+                ? dateTomorrowAt(CLOSE_TIME_MOSTRADOR)
+                : dateTodayAt(CLOSE_TIME_MOSTRADOR);
 
-  const arr = [];
-  let cur = new Date(start);
+  const slots = [];
+  let cur = new Date(open.getTime());
 
-  while(cur <= end){
-    arr.push(new Date(cur));
-    cur = new Date(cur.getTime() + SLOT_INTERVAL_MIN * 60000);
+  while(cur <= close){
+    if(cur >= new Date(now.getTime() + MINUTES_AHEAD*60000)){
+      slots.push(new Date(cur));
+    }
+    cur = new Date(cur.getTime() + INTERVAL_MIN*60000);
   }
-
-  return arr;
+  return slots;
 }
 
 function refreshSlotsUI(){
-  allSlots = generateDailySlots();
+  visibleSlots = generateAllSlots();
 
-  if(allSlots.length === 0){
-    document.getElementById("slotLabel").textContent = "Sin horarios";
+  if(visibleSlots.length === 0){
+    $("#slotLabel").textContent = "Sin horarios";
+    $("#slotPrev").classList.add("disabled");
+    $("#slotNext").classList.add("disabled");
     window.selectedSlot = null;
+    $("#miniSlotSub").textContent = "Seleccionado: —";
     return;
   }
 
+  if(currentSlotIndex >= visibleSlots.length) currentSlotIndex = visibleSlots.length - 1;
   if(currentSlotIndex < 0) currentSlotIndex = 0;
-  if(currentSlotIndex >= allSlots.length) currentSlotIndex = allSlots.length - 1;
 
   renderSlot();
 }
 
 function renderSlot(){
-  const label = document.getElementById("slotLabel");
-  const sub   = document.getElementById("miniSlotSub");
+  if(visibleSlots.length === 0){
+    $("#slotLabel").textContent = "Sin horarios";
+    window.selectedSlot = null;
+    $("#miniSlotSub").textContent = "Seleccionado: —";
+    return;
+  }
 
-  const d = allSlots[currentSlotIndex];
-  const pretty = formatHHMM(d);
+  const d = visibleSlots[currentSlotIndex];
 
-  label.textContent = pretty;
+  $("#slotLabel").textContent = slotPretty(d);
 
   window.selectedSlot = {
     iso: d.toISOString(),
-    pretty
+    pretty: slotPretty(d)
   };
 
-  if(sub) sub.textContent = "Seleccionado: " + pretty;
+  $("#miniSlotSub").textContent = "Seleccionado: " + window.selectedSlot.pretty;
 
-  document.getElementById("slotPrev")
-    .classList.toggle("disabled", currentSlotIndex === 0);
-
-  document.getElementById("slotNext")
-    .classList.toggle("disabled", currentSlotIndex === allSlots.length - 1);
+  $("#slotPrev").classList.toggle("disabled", currentSlotIndex === 0);
+  $("#slotNext").classList.toggle("disabled", currentSlotIndex === visibleSlots.length - 1);
 }
 
-document.getElementById("slotPrev").onclick = () => {
+document.getElementById("manualTime").addEventListener("input", e=>{
+  const val = e.target.value;
+
+  if(!val){
+    refreshSlotsUI();
+    return;
+  }
+
+  const now = new Date();
+  const manualISO = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    val.split(":")[0],
+    val.split(":")[1],
+    0
+  ).toISOString();
+
+  window.selectedSlot = {
+    iso: manualISO,
+    pretty: val
+  };
+
+  $("#slotLabel").textContent = val;
+  $("#miniSlotSub").textContent = "Seleccionado: " + val;
+});
+
+$("#slotPrev").onclick = ()=>{
   if(currentSlotIndex > 0){
     currentSlotIndex--;
     renderSlot();
   }
 };
-
-document.getElementById("slotNext").onclick = () => {
-  if(currentSlotIndex < allSlots.length - 1){
+$("#slotNext").onclick = ()=>{
+  if(currentSlotIndex < visibleSlots.length - 1){
     currentSlotIndex++;
     renderSlot();
   }
 };
 
-/* Init */
-document.addEventListener("DOMContentLoaded", () => {
-  refreshSlotsUI();
-});
+setInterval(refreshSlotsUI, 30000);
 
 /* ============= ENVIAR PEDIDO A FIRESTORE ============= */
 async function sendToFirestore(){
