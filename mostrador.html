@@ -552,14 +552,21 @@ function renderCart(){
     if(b.notes) extras.push("Nota: "+b.notes);
 
     html += `
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
-        <div style="max-width:260px">
-          <strong>${b.qty}× ${b.item.name}</strong><br>
-          <span class="muted">${extras.join(" · ")}</span>
-        </div>
-        <span>${money(unit*b.qty)}</span>
-      </div>
-    `;
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+    <div style="max-width:260px">
+      <strong>${b.qty}× ${b.item.name}</strong><br>
+      <span class="muted">${extras.join(" · ")}</span>
+    </div>
+
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <span>${money(unit * b.qty)}</span>
+      <button 
+        onclick="editBurger('${id}')" 
+        style="background:none;border:none;cursor:pointer;font-size:18px;color:#444"
+        title="Editar">✏️</button>
+    </div>
+  </div>
+`;
   }
 
   for(const id in cart.drink){
@@ -606,6 +613,55 @@ function openCustomize(item){
   updatePreview();
 
   $("#overlayCustomize").style.display="flex";
+}
+
+  function editBurger(id){
+  const b = cart.burger[id];
+  if(!b) return;
+
+  currentItem = b.item;
+
+  // aplicar valores existentes
+  document.querySelectorAll("input[name='fries']").forEach(x=> x.checked = (x.value === b.friesRaw));
+  $("#patVal").textContent = b.extras.patty;
+  $("#cheVal").textContent = b.extras.cheddar;
+  $("#notes").value = b.notes || "";
+  $("#notesCount").textContent = (b.notes || "").length + "/200";
+
+  // mostrar opciones correctas según tipo de burger
+  const name = b.item.name.toLowerCase();
+  $("#rowPatties").style.display = name.includes("doble") ? "flex" : "none";
+  $("#rowCheddar").style.display = (name.includes("doble") || name.includes("pollo")) ? "flex" : "none";
+
+  updatePreview();
+
+  // abrir modal
+  $("#overlayCustomize").style.display = "flex";
+
+  // cuando agrega → no crear uno nuevo, actualizar el actual
+  $("#btnAdd").onclick = () => {
+    const fries = document.querySelector("input[name='fries']:checked");
+    const friesRaw = fries ? fries.value : "";
+    const friesName =
+      friesRaw==="con_sazon" ? "Sazonadas" :
+      friesRaw==="con_sal"   ? "Con sal" :
+      friesRaw==="sin_sal"   ? "Sin sal" :
+      "Sin papas";
+
+    cart.burger[id] = {
+      ...b,
+      fries: friesName,
+      friesRaw,
+      extras:{
+        patty:+$("#patVal").textContent,
+        cheddar:+$("#cheVal").textContent
+      },
+      notes: $("#notes").value.trim()
+    };
+
+    $("#overlayCustomize").style.display = "none";
+    renderCart();
+  };
 }
 
 function updatePreview(){
