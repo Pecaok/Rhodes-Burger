@@ -818,6 +818,12 @@ $("#btnAdd").onclick = ()=>{
 };
 </script>
 <script>
+
+/* === CONFIG PESOS === */
+const GRAMS_PER_BURGER = 200;  // 1 hamburguesa = 200 g
+let gramsBySlot = new Map();   // carga desde slots_grams
+let SLOT_CAPACITY = 2000;      // limite por turno
+  
 /* ======================================================
       BLOQUE 5 — TURNOS INTELIGENTES (slots_grams)
 ====================================================== */
@@ -887,18 +893,24 @@ function todayPrefix(){
 /* ======================================================
       Cargar gramos desde Firestore (slots_grams)
 ====================================================== */
-async function loadSlotGrams(){
+async function loadSlotConfig() {
+
   gramsBySlot = new Map();
-  const prefix = todayPrefix();
+
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth()+1).padStart(2,"0");
+  const d = String(today.getDate()).padStart(2,"0");
+  const prefix = `${y}${m}${d}_`;
 
   const snap = await db.collection("slots_grams").get();
-  snap.forEach(x=>{
-    if(x.id.startsWith(prefix)){
-      const grams = x.data().gramsUsed || 0;
-      gramsBySlot.set(x.id, grams);
+
+  snap.forEach(doc=>{
+    if(doc.id.startsWith(prefix)){
+      gramsBySlot.set(doc.id, doc.data().gramsUsed || 0);
     }
   });
-
+}
   console.log("Gramos por slot cargados:", gramsBySlot);
 }
 
@@ -939,22 +951,40 @@ function findFirstAvailableSlot(){
 /* ======================================================
       Render de slot actual
 ====================================================== */
-function renderSlot(){
-  if(allSlots.length === 0){
-    elSlotLabel.textContent = "Sin horarios";
-    window.selectedSlot = null;
-    elSlotSub.textContent = "Seleccionado: —";
-    return;
+function renderSlot() {
+  const label = $("#slotLabel");
+  const sub = $("#miniSlotSub");
+
+  const required = getCartGrams();
+
+  for(let i = currentSlotIndex; i < allSlots.length; i++){
+    const d = allSlots[i];
+    const pretty = formatHHMM(d);
+
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth()+1).padStart(2,"0");
+    const dd = String(today.getDate()).padStart(2,"0");
+
+    const slotId = `${y}${m}${dd}_${pretty.replace(":","")}`;
+
+    const used = gramsBySlot.get(slotId) || 0;
+    const free = SLOT_CAPACITY - used;
+
+    if(free >= required){
+      currentSlotIndex = i;
+      label.textContent = pretty;
+      window.selectedSlot = { iso: d.toISOString(), pretty };
+      sub.textContent = "Seleccionado: " + pretty;
+      updateArrows();
+      return;
+    }
   }
 
-  const d = allSlots[currentSlotIndex];
-  const pretty = fmt(d);
-
-  elSlotLabel.textContent = pretty;
-  window.selectedSlot = { iso:d.toISOString(), pretty };
-  elSlotSub.textContent = "Seleccionado: " + pretty;
-
-  updateArrows();
+  label.textContent = "Sin horarios";
+  window.selectedSlot = null;
+  sub.textContent = "Seleccionado: —";
+}
 }
 
 /* ======================================================
@@ -1200,15 +1230,19 @@ async function sendToFirestore(){
 
   const slotId = `${y}${m}${d}_${slot.pretty.replace(":","")}`;
 
-  const ref = db.collection("slots_grams").doc(slotId);
+  const today = new Date();
+const y = today.getFullYear();
+const m = String(today.getMonth()+1).padStart(2,"0");
+const d = String(today.getDate()).padStart(2,"0");
 
-  await db.runTransaction(async tx=>{
-    const snap = await tx.get(ref);
-    const prev = snap.exists ? (snap.data().gramsUsed||0) : 0;
-    const next = prev + totalGrams;
+const slotId = `${y}${m}${d}_${slot.pretty.replace(":","")}`;
+const ref = db.collection("slots_grams").doc(slotId);
 
-    tx.set(ref,{ gramsUsed: next },{ merge:true });
-  });
+await db.runTransaction(async tx=>{
+  const snap = await tx.get(ref);
+  const prev = snap.exists ? (snap.data().gramsUsed || 0) : 0;
+  tx.set(ref, { gramsUsed: prev + totalGrams }, { merge:true });
+});
 
   /* =====================================================
                 RESETEAR CARRITO / UI
