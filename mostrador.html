@@ -849,94 +849,142 @@ $("#btnAdd").onclick = ()=>{
    TURNOS MOSTRADOR (SIN BLOQUEOS)
    SIEMPRE MUESTRA TODOS LOS HORARIOS
 ============================ */
+/* ============================
+   SLOTS MOSTRADOR (con ocupación real)
+   Igual que pedido_cliente pero SIN FILTRAR
+============================ */
 
-const SLOT_START = "19:15";
-const SLOT_END   = "23:45";
-const SLOT_INTERVAL_MIN = 15;
+// mismos parámetros que en pedido_cliente
+const GRAMOS_POR_BLOQUE = 1500;
+const G_POR_BURGER = 200;
+const G_POR_SIDE = 700;
 
-let allSlots = [];
+function gramosDelPedido(){
+  let g=0;
+  for(const id in cart.burger) g += cart.burger[id].qty * G_POR_BURGER;
+  for(const id in cart.side)   g += cart.side[id].qty * G_POR_SIDE;
+  return g;
+}
+
+function slotKey(date){
+  const y=date.getFullYear();
+  const M=String(date.getMonth()+1).padStart(2,"0");
+  const d=String(date.getDate()).padStart(2,"0");
+  const H=String(date.getHours()).padStart(2,"0");
+  const m=String(date.getMinutes()).padStart(2,"0");
+  return `${y}${M}${d}_${H}${m}`;
+}
+
+let slotObjects = [];
 let currentSlotIndex = 0;
-
-function parseHHMM(str){
-  const [h, m] = str.split(":").map(Number);
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
-}
-
-function formatHHMM(date){
-  return date.toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  });
-}
 
 function generateDailySlots(){
   const start = parseHHMM(SLOT_START);
   const end   = parseHHMM(SLOT_END);
 
-  const arr = [];
-  let cur = new Date(start);
+  const arr=[];
+  let cur=new Date(start);
 
-  while(cur <= end){
+  while(cur<=end){
     arr.push(new Date(cur));
-    cur = new Date(cur.getTime() + SLOT_INTERVAL_MIN * 60000);
+    cur=new Date(cur.getTime()+SLOT_INTERVAL_MIN*60000);
   }
-
   return arr;
 }
 
-function refreshSlotsUI(){
-  allSlots = generateDailySlots();
+let listeners = [];
+function clearSlotListeners(){
+  listeners.forEach(u=>{ try{u();}catch{} });
+  listeners=[];
+}
 
-  if(allSlots.length === 0){
-    document.getElementById("slotLabel").textContent = "Sin horarios";
-    window.selectedSlot = null;
+async function loadSlotsMostrador(){
+  clearSlotListeners();
+
+  const slots = generateDailySlots();
+  slotObjects = slots.map(date => ({
+    date,
+    key: slotKey(date),
+    gramsUsed: 0,
+    full: false
+  }));
+
+  // UI inicial
+  $("#slotLabel").textContent = "Cargando…";
+  $("#miniSlotSub").textContent = "Seleccionado: —";
+
+  slotObjects.forEach(s=>{
+    const ref = db.collection("slots_grams").doc(s.key);
+
+    const unsub = ref.onSnapshot(doc=>{
+      const d = doc.exists ? doc.data() : {gramsUsed:0};
+      s.gramsUsed = Number(d.gramsUsed || 0);
+      s.full = (s.gramsUsed >= GRAMOS_POR_BLOQUE);
+
+      renderSlotMostrador();
+    });
+
+    listeners.push(unsub);
+  });
+}
+
+function renderSlotMostrador(){
+  if(slotObjects.length===0){
+    $("#slotLabel").textContent = "Sin horarios";
+    window.selectedSlot=null;
     return;
   }
 
   if(currentSlotIndex < 0) currentSlotIndex = 0;
-  if(currentSlotIndex >= allSlots.length) currentSlotIndex = allSlots.length - 1;
+  if(currentSlotIndex >= slotObjects.length) currentSlotIndex = slotObjects.length-1;
 
-  renderSlot();
-}
+  const s = slotObjects[currentSlotIndex];
+  const pretty = formatHHMM(s.date);
 
-function renderSlot(){
-  const label = document.getElementById("slotLabel");
-  const sub   = document.getElementById("miniSlotSub");
+  $("#slotLabel").textContent = pretty;
 
-  const d = allSlots[currentSlotIndex];
-  const pretty = formatHHMM(d);
-
-  label.textContent = pretty;
+  // Mostrar si está lleno (pero NO bloquear)
+  if(s.full){
+    $("#slotLabel").style.background = "#ffe0e0";
+    $("#slotLabel").style.borderColor = "#ffbcbc";
+  } else {
+    $("#slotLabel").style.background = "#fff";
+    $("#slotLabel").style.borderColor = "var(--ring)";
+  }
 
   window.selectedSlot = {
-    iso: d.toISOString(),
-    pretty
+    key: s.key,
+    pretty,
+    iso: s.date.toISOString(),
+    full: s.full
   };
 
-  if(sub) sub.textContent = "Seleccionado: " + pretty;
+  $("#miniSlotSub").textContent = "Seleccionado: " + pretty;
 
-  document.getElementById("slotPrev")
-    .classList.toggle("disabled", currentSlotIndex === 0);
-
-  document.getElementById("slotNext")
-    .classList.toggle("disabled", currentSlotIndex === allSlots.length - 1);
+  $("#slotPrev").classList.toggle("disabled", currentSlotIndex===0);
+  $("#slotNext").classList.toggle("disabled", currentSlotIndex===slotObjects.length-1);
 }
 
-document.getElementById("slotPrev").onclick = () => {
-  if(currentSlotIndex > 0){
+$("#slotPrev").onclick = ()=>{
+  if(currentSlotIndex>0){
     currentSlotIndex--;
-    renderSlot();
+    renderSlotMostrador();
   }
 };
 
-document.getElementById("slotNext").onclick = () => {
-  if(currentSlotIndex < allSlots.length - 1){
+$("#slotNext").onclick = ()=>{
+  if(currentSlotIndex < slotObjects.length-1){
     currentSlotIndex++;
-    renderSlot();
+    renderSlotMostrador();
   }
 };
+
+// INIT
+document.addEventListener("DOMContentLoaded", ()=>{
+  loadSlotsMostrador();
+  renderSlotMostrador();
+});
+
 
 /* ============= ENVIAR PEDIDO A FIRESTORE ============= */
 async function sendToFirestore(){
