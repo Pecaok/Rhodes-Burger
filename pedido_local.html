@@ -165,17 +165,16 @@
     };
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
-    // Variables globales
     window.db = firebase.firestore();
     window.firebase = firebase;
     window.idToDoc = new Map();
   });
 
-  /* --- FUNCIONES GLOBALES DE ACCIÓN --- */
+  /* --- FUNCIONES GLOBALES --- */
   
   async function setOrderStatus(id, next, isPaid){
       if (next === 'delivered' && !isPaid) {
-          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
+          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobre el pedido antes de marcarlo como entregado.");
           return;
       }
       try{ 
@@ -207,14 +206,14 @@
       if(doc) window.trySilentPrint(doc);
   }
   
-  // Exponer a window
+  // Exponer
   window.setOrderStatus = setOrderStatus;
   window.setPaymentStatus = setPaymentStatus;
   window.updatePago = updatePago;
   window.printOrder = printOrder;
 
 
-  /* --- LÓGICA PRINCIPAL --- */
+  /* --- APP LOGIC --- */
   window.addEventListener('DOMContentLoaded', () => {
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
@@ -341,7 +340,6 @@
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       
-      // Botones Estado
       const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
         `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
       ).join('')}</div>`;
@@ -349,24 +347,14 @@
       const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
 
-      const payLine = `
-        <div class="pay-line">
-          <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
-            <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
-            <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
-            <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
-            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>Mercado Pago</option>
-            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transferencia</option>
-          </select>
-          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
-          <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
-        </div>`;
+      // 🔥 AÑADIMOS "(Mostrador)" al nombre si viene de ahí
+      const displayName = (o.source === "mostrador") ? `${o.nombre} (Mostrador)` : (o.nombre || "Cliente");
 
       return `
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
           <div class="order-head">
             <div>
-              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}</div>
+              <div class="order-title">${displayOrderNumber(doc)} — ${displayName}</div>
               <div class="muted">N° interno: ${o.orderNumber || '—'}</div>
               <div class="muted">${dtText}</div>
               <div class="chips">${srcChip}<span class="chip">Retiro: ${o.entrega||"take_away"}</span><span class="chip">⏰ ${pickupPretty || "—"}</span>${noteGeneral}</div>
@@ -374,9 +362,20 @@
             </div>
             <div>
               <div class="right-total">${money(computeOrderTotal(o))}</div>
-              ${payLine}
+              <div class="pay-line">
+                <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
+                  <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
+                  <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
+                  <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
+                  <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>Mercado Pago</option>
+                  <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transferencia</option>
+                </select>
+                <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
+                <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
+              </div>
             </div>
           </div>
+          <div class="divider"></div>
           <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
         </div>
       `;
@@ -444,6 +443,9 @@
       const note = o.comment || o.notes || "";
       const commentBlock = note ? `<div class="hr"></div><div class="blk"><div class="lbl">NOTA</div><div>${escapeHtml(note)}</div></div>` : "";
 
+      // 🔥 AÑADIR (Mostrador) AL TICKET TAMBIÉN
+      const clientName = (o.source === "mostrador") ? `${o.nombre} (Mostrador)` : (o.nombre || "");
+
       const html = `
         <!doctype html><html><head><meta charset="utf-8"><title>Ticket</title>
         <style>
@@ -464,7 +466,7 @@
           <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
           <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
           <div class="hr"></div>
-          ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
+          ${clientName ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(clientName)}</div></div>` : ""}
           ${pickupBlockLarge}
           ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
           ${commentBlock}
