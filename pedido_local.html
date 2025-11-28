@@ -80,12 +80,18 @@
     .chip{background:#f0f0f0;border:1px solid #ddd;color:#333;border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600}
     .right-total{font-weight:800;font-size:18px;white-space:nowrap}
     
-    /* ITEMS CATEGORIZADOS (Interfáz visual) */
+    /* ITEMS CATEGORIZADOS */
     .cat-section { margin-top: 15px; border-top: 1px solid #f0f0f0; padding-top: 10px; }
     .cat-header {
-        font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #888;
-        margin-bottom: 8px; font-weight: 800; display: flex; align-items: center; gap: 6px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: #888;
+        margin-bottom: 8px;
+        font-weight: 800;
+        display: flex; align-items: center; gap: 6px;
     }
+    
     .item-row { display: flex; gap: 12px; margin-bottom: 12px; font-size: 15px; align-items: flex-start; }
     .item-qty { font-weight: 800; font-size: 16px; color: var(--primary); min-width: 24px; }
     .item-det { flex: 1; }
@@ -132,7 +138,6 @@
         <a href="mostrador.html" class="btn" title="Mostrador">🧾 Mostrador</a>
         <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
       </nav>
-      <button id="btnInstall" class="btn" style="display:none" title="Instalar app">➕ Instalar app</button>
       <button id="btnBell" class="btn" title="Activar/desactivar sonido">🔔 Sonido</button>
       <button id="btnAutoPrint" class="btn" title="Autoimprimir nuevos pedidos">🖨️ Autoimprimir</button>
       <button id="btnLogout" class="btn danger" title="Cerrar sesión">⏻ Cerrar sesión</button>
@@ -170,7 +175,6 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-    /* ===== helpers ===== */
     function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
@@ -234,9 +238,21 @@
       return true;
     };
 
-    async function setOrderStatus(id,next){
-      try{ await db.collection("orders").doc(id).update({ status: next, statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) }); }catch(e){ alert("Error: "+e); }
+    /* ====== Acciones (Con validación de Pago) ====== */
+    async function setOrderStatus(id, next, isPaid){
+      // 🔥 BLOQUEO: No dejar pasar a 'delivered' si no está pagado
+      if (next === 'delivered' && !isPaid) {
+        alert("⚠️ ALERTA:\n\nEl pedido figura como PENDIENTE DE PAGO.\nCobralo primero antes de entregarlo.");
+        return;
+      }
+      try{ 
+        await db.collection("orders").doc(id).update({ 
+          status: next, 
+          statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
+        }); 
+      }catch(e){ alert("Error: "+e); }
     }
+
     async function setPaymentStatus(id, paid){
       try{ await db.collection("orders").doc(id).update({ paid: !!paid, payment_status: paid ? "paid" : "pending_payment", statusHistory: firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()}) }); }catch(e){ alert("Error pago: "+e); }
     }
@@ -330,18 +346,24 @@
       const st = o.status ?? "accepted";
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       
-      const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${STATE_LABEL[key]}</button>`).join('')}</div>`;
-
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
+      
+      // 🔥 PASAMOS isPaid al onclick
+      const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`).join('')}</div>`;
+
+      // 🔥 LÓGICA DE PAGO VACÍO
+      // Si es "mostrador_sin_especificar", lo tratamos como string vacío "" para que el select muestre el placeholder
+      const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
+
       const payLine = `
         <div class="pay-line">
           <select class="btn" data-select-pago style="min-width:140px">
-            <option value="" disabled ${(!o.pago)?'selected':''}>Método...</option>
-            <option value="efectivo" ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
-            <option value="debito" ${o.pago==="debito"?"selected":""}>Debito</option>
-            <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>MP</option>
-            <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transf</option>
+            <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
+            <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
+            <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
+            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
+            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
           </select>
           <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
           <button class="btn" data-print>🖨</button>
@@ -375,28 +397,21 @@
     }
 
     /* =================================================================
-       🔥 TICKET 58MM CORREGIDO (PAGADO/PENDIENTE + A COBRAR EN CAJA)
+       🔥 TICKET 58MM CORREGIDO
        ================================================================= */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
       const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
       const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
-
-      /* ==== Número ==== */
       const orderDisplay = o.orderNumber ? `#${o.orderNumber}` : `#${docSnap.id.slice(-5).toUpperCase()}`;
-
-      /* ==== Fecha ==== */
+      
       const dt = pickDocDate(o) || new Date();
       const dateStr = dt.toLocaleDateString("es-AR");
       const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
+      
+      const pickup = getPickupPretty(o) || "A la brevedad";
+      const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
-      /* ==== Pickup ==== */
-      let pickupPretty = getPickupPretty(o);
-      const pickupBlockLarge = pickupPretty
-        ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickupPretty)}</div>`
-        : `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retiro: A la brevedad</div>`;
-
-      /* ==== MÉTODOS DE PAGO (Traducción) ==== */
       const PAGO_MAP = {
           "mostrador_sin_especificar": "A COBRAR EN CAJA",
           "efectivo": "EFECTIVO",
@@ -405,13 +420,12 @@
           "transferencia": "TRANSFERENCIA"
       };
       let pagoTxt = o.pago || "";
-      if(PAGO_MAP[pagoTxt]) pagoTxt = PAGO_MAP[pagoTxt]; // Corrige el nombre de variable aquí
+      if(PAGO_MAP[pagoTxt]) pagoTxt = PAGO_MAP[pagoTxt];
 
-      /* ==== ESTADO DE PAGO ==== */
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
-      /* ==== ITEMS CATEGORIZADOS ==== */
+      // SEPARAR ITEMS PARA TICKET
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
 
@@ -479,6 +493,7 @@
           <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
           <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
           <div class="hr"></div>
+          
           ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
           ${pickupBlockLarge}
           ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
@@ -535,7 +550,7 @@
       
       document.querySelectorAll(".order").forEach(card=>{
         const id=card.dataset.id;
-        card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
+        // Listeners ya se asignan en el HTML inline para setOrderStatus pero necesitamos select y toggle
         const payToggle=card.querySelector("[data-pay-toggle]");
         if(payToggle && currentFilter!=="entregados"){
           payToggle.addEventListener("click", ()=>{
@@ -551,5 +566,7 @@
     }
   });
   </script>
+
+  <script src="pwa.js"></script>
 </body>
 </html>
