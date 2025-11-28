@@ -62,36 +62,93 @@
     .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
     .btn.danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
 
-    .calendar-grid{
-      display:grid;
-      grid-template-columns: repeat(7, 1fr);
-      gap:6px;
-      margin-top:10px;
-    }
-    .cal-day{
-      border:1px solid var(--ring);
-      border-radius:10px;
-      padding:6px;
-      height:80px;
-      background:#fff;
-      display:flex;
-      flex-direction:column;
-      justify-content:flex-start;
-      font-size:13px;
-    }
-    .cal-day-header{
-      font-weight:700;
-      margin-bottom:4px;
-    }
-    .cal-mini{
-      font-size:11px;
-      line-height:14px;
-      color:#333;
-    }
-    .cal-empty{
-      background:#f2f2f2;
-      border:1px solid #e5e5e5;
-    }
+  /* --- PEGAR ESTO NUEVO --- */
+
+/* Grid con más espacio */
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px; /* Más espacio entre tarjetas */
+  margin-top: 16px;
+}
+
+/* La tarjeta del día */
+.cal-day {
+  position: relative;
+  background: #fff;
+  border-radius: 16px; /* Bordes más redondeados */
+  height: 96px; /* Un poco más altas */
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid rgba(0,0,0,0.04); /* Borde muy sutil */
+  box-shadow: 0 2px 4px rgba(0,0,0,0.03); /* Sombra suave */
+  transition: all 0.2s ease-out;
+  overflow: hidden;
+}
+
+/* Efecto al pasar el mouse (levanta la tarjeta) */
+.cal-day:hover:not(.cal-empty-day) {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 8px 16px rgba(0, 100, 0, 0.15); /* Sombra verdosa al levantar */
+  z-index: 2;
+}
+
+/* Día vacío (sin datos) */
+.cal-empty-day {
+  background: #fafafa !important; /* Forzar fondo gris claro */
+  border: 1px dashed #e0e0e0;
+  box-shadow: none;
+}
+.cal-empty-day .cal-day-header{ color: #ccc; }
+
+/* Celdas de relleno iniciales */
+.cal-filler { visibility: hidden; pointer-events: none; }
+
+/* Número del día */
+.cal-day-header {
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(0,0,0,0.4);
+}
+
+/* Contenedor de datos (centro de la tarjeta) */
+.cal-data-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
+/* El contador de hamburguesas grande con emoji */
+.cal-burger-hero {
+  display: flex; align-items: center; gap: 5px;
+  font-weight: 800;
+  font-size: 18px;
+  color: #2c3e50;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.5);
+}
+.burger-icon-lg { font-size: 24px; /* Emoji más grande */ line-height: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.15)); }
+
+/* La píldora del dinero */
+.cal-revenue-pill {
+  background: rgba(255,255,255,0.4); /* Fondo semi-transparente para que se lea sobre el verde */
+  backdrop-filter: blur(2px);
+  border-radius: 99px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a472a; /* Verde oscuro para el texto */
+  white-space: nowrap;
+}
+
+/* Icono gris para días sin ventas */
+.no-sales-icon { font-size: 28px; opacity: 0.1; filter: grayscale(1); margin-top: -10px;}
+/* --- FIN CSS NUEVO --- */
 
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
     h1{font-size:28px;margin:10px 0 18px}
@@ -870,30 +927,32 @@
     }
 
 
-    // --- 4. LÓGICA DEL CALENDARIO ---
+   // --- LOGICA DEL CALENDARIO (ESTÉTICA MEJORADA) ---
     async function renderCalendar(monthStr){
         const grid = document.getElementById("calendarGrid");
+        const err = document.getElementById("calError");
         if(!grid) return;
+
         grid.innerHTML = "";
-        
+        if(err) err.style.display = "none";
         if(!monthStr) return;
 
         const [y, m] = monthStr.split("-").map(Number);
         const daysInMonth = new Date(y, m, 0).getDate();
 
-        // Rango de fechas
+        // Rango de fechas para la consulta unificada
         const start = new Date(y, m - 1, 1);
-        const end   = new Date(y, m, 1); 
+        const end   = new Date(y, m, 1);
 
         const counts = Array(daysInMonth).fill(0);
         const totals = Array(daysInMonth).fill(0);
 
         try {
-            // 🔥 TRAER DATOS MEZCLADOS
+            // 🔥 TRAER DATOS MEZCLADOS (Viejos + Nuevos)
             const orders = await fetchUnifiedOrders(start, end);
 
             orders.forEach(data => {
-                const dt = parseDateAny(data.createdAt); 
+                const dt = parseDateAny(data.createdAt);
                 if(!dt) return;
 
                 // Doble chequeo de mes (por zona horaria)
@@ -901,10 +960,10 @@
 
                 const day = dt.getDate();
                 const idx = day - 1;
-                
+
                 if(idx >= 0 && idx < daysInMonth){
                     totals[idx] += Number(data.total || data.rawTotal || 0);
-                    
+
                     let bCount = 0;
                     const items = Array.isArray(data.items) ? data.items : [];
                     items.forEach(it => {
@@ -914,48 +973,72 @@
                     });
                     // Fallback para pedidos viejos que tenian burgerCount guardado directo
                     if(bCount===0 && typeof data.burgerCount === 'number') bCount = data.burgerCount;
-                    
+
                     counts[idx] += bCount;
                 }
             });
 
-            // Renderizar Grilla
+            // === RENDERIZADO VISUAL NUEVO ===
             const startDay = start.getDay(); // 0=Domingo
-            
-            // Espacios vacíos
+
+            // 1. Espacios vacíos iniciales (usamos clase .cal-filler)
             for(let i=0; i<startDay; i++){
-                grid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-empty"></div>`);
+                grid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-filler"></div>`);
             }
 
             const maxVal = Math.max(...counts, 1);
+            // Función de color ajustada para que sea más vibrante
             function colorIntensity(v, max){
-                if(v===0) return '#fff';
+                if(v===0) return ''; // Dejar que el CSS ponga el gris
                 const r = v/max;
-                if(r<0.25) return '#e8f5e9';
-                if(r<0.50) return '#c8e6c9';
-                if(r<0.75) return '#81c784';
-                return '#4caf50'; 
+                if(r<0.2) return '#dcedc8'; // Verde lima muy suave
+                if(r<0.4) return '#aed581'; // Lima suave
+                if(r<0.6) return '#81c784'; // Verde medio
+                if(r<0.8) return '#4caf50'; // Verde fuerte
+                return '#2e7d32';           // Verde intenso
             }
 
+            // 2. Dibujar los días
             for(let d=1; d<=daysInMonth; d++){
                 const c = counts[d-1];
                 const t = totals[d-1];
                 const bg = colorIntensity(c, maxVal);
-                
+                const hasData = c > 0;
+
+                // Definimos el contenido central de la tarjeta
+                let contentHTML = '';
+                if(hasData){
+                    contentHTML = `
+                     <div class="cal-burger-hero">
+                       <span class="burger-icon-lg">🍔</span> ${c}
+                     </div>
+                     <div class="cal-revenue-pill">
+                       💵 ${money(t)}
+                     </div>
+                    `;
+                } else {
+                    // Icono gris para días sin ventas
+                    contentHTML = `<div class="no-sales-icon">🍔</div>`;
+                }
+
+                const dayClass = hasData ? '' : 'cal-empty-day';
+                const bgStyle = hasData ? `style="background:${bg}"` : '';
+
                 grid.insertAdjacentHTML("beforeend", `
-                    <div class="cal-day" style="background:${bg}" title="$${money(t)}">
+                    <div class="cal-day ${dayClass}" ${bgStyle} title="${d}/${m}: ${c} hamburguesas, ${money(t)}">
                         <div class="cal-day-header">${d}</div>
-                        <div class="cal-mini">${c>0 ? '🍔 '+c : '-'}</div>
-                        <div class="cal-mini" style="font-weight:600; font-size:10px; margin-top:auto">${t>0 ? money(t) : ''}</div>
+                        <div class="cal-data-wrap">
+                          ${contentHTML}
+                        </div>
                     </div>
                 `);
             }
 
         } catch(e) {
             console.error("Error calendario:", e);
+            if(err) { err.textContent = "Error cargando calendario."; err.style.display="block"; }
         }
     }
-
 
     // --- 5. INICIALIZACIÓN ---
     document.addEventListener('DOMContentLoaded', ()=>{
