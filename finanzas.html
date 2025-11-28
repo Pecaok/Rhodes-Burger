@@ -671,7 +671,7 @@
   document.addEventListener('DOMContentLoaded', loadKPI);
   </script>
 
-  <script>
+ <script>
     // --- 1. HERRAMIENTAS COMUNES ---
     function monthRange(monthStr){
       const [y,m] = monthStr.split('-').map(Number);
@@ -686,15 +686,13 @@
       return ym2;
     }
 
-    // Esta función es vital: detecta si un ítem es hamburguesa
+    // Detecta hamburguesas por nombre, categoría o tipo
     function isBurgerItem(it){
       if(!it) return false;
       if(typeof it.type === 'string' && it.type.toLowerCase() === 'burger') return true;
       if(it.item && typeof it.item.type === 'string' && it.item.type.toLowerCase() === 'burger') return true;
       
       const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || it.sku || '').toString().toLowerCase();
-      
-      // Palabras clave ampliadas
       const burgerKeywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|bacon|doble|triple|simple|oklahoma|cebolla)/i;
       
       if(name && burgerKeywords.test(name)) return true;
@@ -713,6 +711,7 @@
     function getUnitPrice(it){
       if(!it) return 0;
       const n = v => (typeof v === 'number' ? v : (typeof v === 'string' && v.trim()!=='' ? Number(v) : NaN));
+      // Intentar varios campos de precio
       const candidates = [
         it.unit_price, it.unitPrice, it.price, it.prize, it.amount, it.value,
         it.item?.price, it.item?.unit_price, it.item?.amount, it.line_price, it.line_total,
@@ -738,17 +737,18 @@
       const range = document.getElementById("bmRange");
       const revenueEl = document.getElementById("bmRevenue");
       
-      if(!tbody) return; // Si no existe el elemento, salir.
+      if(!tbody) return; 
 
       tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando…</td></tr>`;
       totalEl.textContent = '0';
       revenueEl.textContent = money(0);
 
       try{
+        // 1. Detectar campo de fecha
         const probe = await db.collection('orders').limit(1).get();
         if (probe.empty){ tbody.innerHTML = `<tr><td colspan="4" class="muted">Sin datos.</td></tr>`; return; }
         
-        let dateField = 'createdAt'; // default
+        let dateField = 'createdAt'; 
         const sample = probe.docs[0].data();
         for (const k of ['createdAt','created_at','timestamp','date','fecha','time']){ if (sample[k]!=null){ dateField=k; break; } }
 
@@ -757,9 +757,14 @@
         const endDisplay = new Date(end.getTime() - 1);
         range.textContent = `${start.toLocaleDateString('es-AR')} → ${endDisplay.toLocaleDateString('es-AR')}`;
 
+        // 🔥 CORRECCIÓN CLAVE: Si el campo es 'createdAt' (Texto), convertimos las fechas a Texto ISO para buscar
+        const isStringDate = (dateField === 'createdAt' && typeof sample[dateField] === 'string');
+        const qStart = isStringDate ? start.toISOString() : start;
+        const qEnd   = isStringDate ? end.toISOString()   : end;
+
         let q = db.collection('orders')
-          .where(dateField, '>=', start)
-          .where(dateField, '<',  end)
+          .where(dateField, '>=', qStart)
+          .where(dateField, '<',  qEnd)
           .orderBy(dateField, 'asc');
 
         const snap = await q.get();
@@ -771,7 +776,7 @@
         snap.forEach(doc=>{
           const o = doc.data();
           const st = (o.status || "").toLowerCase();
-          if (st.includes("cancel")) return; // Ignorar cancelados
+          if (st.includes("cancel")) return; 
 
           const items = Array.isArray(o.items) ? o.items : [];
 
@@ -782,7 +787,6 @@
             if(!isBurgerItem(it)) return;
 
             const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || 'Hamburguesa').toString().trim();
-            // Normalizar nombre para agrupar mejor (quitar mayusculas sobrantes)
             const key = name || 'Hamburguesa'; 
 
             const unit = getUnitPrice(it);
@@ -819,14 +823,14 @@
       }catch(e){
         console.error('loadBurgersByMonth error:', e);
         if(err){
-            err.textContent = "No se pudo cargar las hamburguesas del mes.";
+            err.textContent = "Error al cargar datos.";
             err.style.display = 'block';
         }
-        tbody.innerHTML = `<tr><td colspan="4" class="muted">Error al cargar.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="muted">Error.</td></tr>`;
       }
     }
 
-    // --- 3. LOGICA DEL CALENDARIO POR DÍA (CORREGIDO) ---
+    // --- 3. LOGICA DEL CALENDARIO POR DÍA (CORREGIDO Y COMPATIBLE) ---
     function colorForIntensity(val, max){
         if(max <= 0) return "#fff";
         const r = val / max;
@@ -844,10 +848,7 @@
         grid.innerHTML = "";
         if(err) err.style.display = "none";
 
-        if(!monthStr){
-          if(err) { err.textContent = "Seleccioná un mes válido."; err.style.display = "block"; }
-          return;
-        }
+        if(!monthStr) return;
 
         const [y, m] = monthStr.split("-").map(Number);
         const start = new Date(y, m - 1, 1);
@@ -859,12 +860,15 @@
 
         // Detectar fecha
         let dateField = "createdAt";
+        let isStringDate = false;
         try {
             const probe = await db.collection("orders").limit(1).get();
             if(!probe.empty){
               const d = probe.docs[0].data();
               for(const k of ["createdAt","created_at","date","fecha","timestamp","time"])
                 if(d[k] != null) { dateField = k; break; }
+              
+              if(dateField === 'createdAt' && typeof d[dateField] === 'string') isStringDate = true;
             }
         } catch(e) {}
 
@@ -872,10 +876,14 @@
         const totals = Array(days).fill(0);
         const nextMonthDate = new Date(y, m, 1);
 
+        // 🔥 CORRECCIÓN CLAVE AQUÍ TAMBIÉN
+        const qStart = isStringDate ? start.toISOString() : start;
+        const qEnd   = isStringDate ? nextMonthDate.toISOString() : nextMonthDate;
+
         try {
             const snap = await db.collection("orders")
-              .where(dateField, ">=", start)
-              .where(dateField, "<", nextMonthDate)
+              .where(dateField, ">=", qStart)
+              .where(dateField, "<", qEnd)
               .get();
 
             snap.forEach(doc=>{
@@ -883,7 +891,6 @@
               const dt = pickDocDate(data);
               if(!dt) return;
 
-              // Excluir cancelados
               const st = (data.status || '').toString().toLowerCase();
               if(st.includes('cancel')) return; 
 
@@ -893,7 +900,6 @@
 
               totals[dayIndex] += Number(data.total || 0);
 
-              // Sumar hamburguesas (Usando isBurgerItem compartida)
               let burgCount = 0;
               const items = Array.isArray(data.items) ? data.items : [];
               items.forEach(it => {
@@ -911,7 +917,6 @@
 
             // Render visual
             const startWeekday = start.getDay(); 
-            // Ajuste visual para empezar la grilla correctamente
             for(let i=0; i<startWeekday; i++){
               grid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-empty"></div>`);
             }
@@ -938,7 +943,6 @@
 
     // --- 4. INICIALIZACIÓN GENERAL ---
     document.addEventListener('DOMContentLoaded', ()=>{
-      // Init Tabla Hamburguesas
       const m = document.getElementById("burgMonth");
       if(m){
           if(!m.value){ const d=new Date(); m.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
@@ -949,14 +953,11 @@
           loadBurgersByMonth();
       }
 
-      // Init Calendario
       const cal = document.getElementById("calMonth");
       if(cal){
         const d = new Date();
-        // Sincronizar con el mes actual si está vacío
         if(!cal.value) cal.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
         
-        // Retardo leve para asegurar DB lista
         setTimeout(() => renderCalendar(cal.value), 500);
 
         document.getElementById("calGo").onclick   = ()=> renderCalendar(cal.value);
