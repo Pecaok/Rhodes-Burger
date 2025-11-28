@@ -1,750 +1,1721 @@
-<!doctype html> 
+<!doctype html>
+
 <html lang="es">
+
   <script>
-  /* ======== SESIÓN COMPARTIDA ======== */
+
+  /* ======== SESIÓN COMPARTIDA (mismo esquema que login.html) ======== */
+
   const TTL_HOURS = 20;
+
   const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
 
+
+
   function sessionValid(){
+
     const ok = localStorage.getItem('rb_admin_ok') === 'true';
+
     const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+
     return ok && (Date.now() - ts) < TTL_MS;
+
   }
-  function bumpSession(){
+
+  function bumpSession(){  // renueva TTL con actividad
+
     if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
+
   }
+
   function logout(){
+
     try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
+
     try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
+
     try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
+
     try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
+
     const next = encodeURIComponent('pedido_local.html');
+
     location.replace('login.html?reason=logout&next=' + next);
+
   }
+
+
 
   (function requireSession(){
+
     if (!sessionValid()){
+
       const next = encodeURIComponent(
+
         (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
+
         (location.search || '') + (location.hash || '')
+
       );
+
       location.replace('login.html?next=' + next);
+
     } else {
+
       bumpSession();
+
     }
+
   })();
 
+
+
   ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
+
     window.addEventListener(evt, bumpSession, {passive:true});
+
   });
+
   </script>
 
+
+
 <head>
+
   <meta charset="utf-8" />
+
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+
   <title>Pedidos • Rhodes Burgers</title>
+
   <link rel="icon" href="images/logo.png" />
+
+
+
   <link rel="manifest" href="manifest.json">
+
   <meta name="theme-color" content="#625A45" />
 
+
+
   <style>
+
     :root{
+
       --primary:#625A45; --text:#111; --muted:#444; --bg:#f6f6f6; --card:#fff;
+
       --ring:#eaeaea; --shadow:0 12px 34px rgba(0,0,0,.10);
-      --font: Inter, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+
+      --font: Inter, system-ui, "Segoe UI", Roboto, Arial, "Helvetica Neue", "Noto Sans", sans-serif;
+
       --st-accepted:#FBC02D; --st-in_prep:#FB8C00; --st-ready:#00ACC1; --st-delivered:#2E7D32; --st-cancelled:#D32F2F;
+
       --pay-pending:#FFA000; --pay-paid:#625A45;
+
     }
+
     *{box-sizing:border-box}
+
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
+
     header{position:sticky;top:0;z-index:10;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+
     .topbar{max-width:1100px;margin:0 auto;padding:10px 12px;display:flex;align-items:center;gap:12px}
+
     .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700}
+
     .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain;margin-right:8px}
+
     .spacer{flex:1}
+
     .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600;text-decoration:none;color:inherit}
+
     .btn.active,.btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+
     .danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
+
     .container{max-width:1100px;margin:24px auto;padding:0 12px}
+
     h1{font-size:28px;margin:10px 0 18px}
+
     .tabs{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+
     .chipf{background:#f3f3f3;border:1px solid var(--ring);color:#111;border-radius:999px;padding:6px 10px;font-size:13px;cursor:pointer}
+
     .chipf.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+
     .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
+
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+
     .order-title{font-weight:800}
+
     .muted{color:var(--muted)}
+
     .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+
     .chip{background:#f3f3f3;border:1px solid var(--ring);color:#111;border-radius:999px;padding:6px 10px;font-size:13px}
+
     .right-total{font-weight:800;font-size:18px;white-space:nowrap}
+
     .items{margin-top:10px}
+
     .item{margin:8px 0 6px 0}
+
     .item .sub{color:#111;font-size:13px;margin-top:3px}
+
     .money{white-space:nowrap}
+
     .divider{height:1px;background:#efefef;margin:10px 0}
+
     .err{color:#b00020;font-weight:600}
 
+
+
     .stateBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
     .state-btn{border:2px solid #dcdcdc;background:#fff;color:#111;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;min-width:160px;text-align:center}
+
     .state-btn.on{color:#fff;border-color:var(--primary);background:var(--primary)}
+
     .state-accepted.on{background:var(--st-accepted);border-color:var(--st-accepted);color:#000}
+
     .state-in_prep.on{background:var(--st-in_prep);border-color:var(--st-in_prep);color:#fff}
+
     .state-ready.on{background:var(--st-ready);border-color:var(--st-ready);color:#fff}
+
     .state-delivered.on{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
+
     .state-cancelled.on{background:var(--st-cancelled);border-color:var(--st-cancelled);color:#fff}
 
+
+
     /* Línea de pago: botón único (toggle) */
+
     .pay-line{margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+
     .pay-toggle{min-width:200px;text-align:center}
+
     .pay-toggle.is-paid{ background:var(--pay-paid); color:#fff; border-color:var(--pay-paid); }
+
     .pay-toggle.is-pending{ background:var(--pay-pending); color:#fff; border-color:var(--pay-pending); }
+
     .pay-toggle[disabled]{opacity:.9; cursor:default;}
 
+
+
     .order.cancelled{opacity:.7}
+
     .order.cancelled .order-title{text-decoration:line-through}
 
+
+
     @media print{
+
       @page{size:A4 portrait;margin:12mm}
+
       header,.tabs,.stateBtns,.pay-line .btn,.danger,#btnBell,[title="Ver finanzas"],[title="Panel admin"],[title="Abrir mostrador"],#btnInstall,#btnAutoPrint{display:none!important}
+
       .order{break-inside:avoid;box-shadow:none;border:1px solid #eee}
+
     }
+
   </style>
+
 </head>
+
 <body>
+
   <header>
+
     <div class="topbar">
+
       <a class="brand" href="#"><img src="images/logo.png" alt="Rhodes Burgers">Pedidos</a>
+
+
 
       <div class="spacer"></div>
 
+
+
       <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+
         <a href="pedido_local.html" class="btn primary" title="Ver pedidos">📦 Pedidos</a>
+
         <a href="finanzas.html" class="btn" title="Finanzas">📈 Finanzas</a>
+
         <a href="mostrador.html" class="btn" title="Mostrador">🧾 Mostrador</a>
+
         <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
+
       </nav>
 
+
+
       <button id="btnInstall" class="btn" style="display:none" title="Instalar app">➕ Instalar app</button>
+
       <button id="btnBell" class="btn" title="Activar/desactivar sonido">🔔 Sonido</button>
+
       <button id="btnAutoPrint" class="btn" title="Autoimprimir nuevos pedidos">🖨️ Autoimprimir</button>
+
       <button id="btnLogout" class="btn danger" title="Cerrar sesión">⏻ Cerrar sesión</button>
+
     </div>
+
   </header>
 
+
+
   <main class="container">
+
     <h1>Últimos pedidos</h1>
 
+
+
     <div class="tabs" id="tabs">
+
       <span class="chipf active" data-f="recibidos">Recibidos</span>
+
       <span class="chipf" data-f="entregados">Entregados</span>
+
       <span class="chipf" data-f="cancelled">Cancelados</span>
+
       <span class="chipf" data-f="all">Todos</span>
+
     </div>
 
+
+
     <div id="orders"></div>
+
     <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
+
   </main>
 
+
+
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
+
+
   <script>
+
   window.addEventListener('DOMContentLoaded', () => {
+
     const firebaseConfig = {
+
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+
       authDomain: "rhodes-burguers.firebaseapp.com",
+
       projectId: "rhodes-burguers",
+
       storageBucket: "rhodes-burguers.firebasestorage.app",
+
       messagingSenderId: "951646688091",
+
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+
     };
+
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
+
+
     const db = firebase.firestore();
+
     const $ = s => document.querySelector(s);
+
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
+
+
     /* ===== helpers fecha/orden ===== */
+
     function chooseDateField(obj){
+
       const cand=['createdAt','created_at','timestamp','date','fecha','time'];
+
       for(const k of cand){ if(obj && obj[k] != null) return k; }
+
       return null;
+
     }
+
     function pickDocDate(obj){
+
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
+
       for (const k of cand){
+
         const v = obj[k];
+
         if (v?.toDate) return v.toDate();
+
         if (typeof v === 'number') return new Date(v);
+
         if (typeof v === 'string'){ const d=new Date(v); if(!isNaN(d)) return d; }
+
       }
+
       return null;
+
     }
+
     function displayOrderNumber(doc){
+
       const o=doc.data();
+
       const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
+
       for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
+
       return `#${doc.id.slice(-5).toUpperCase()}`;
+
     }
+
+
 
     /* ===== Horario de retiro (único para página + ticket) ===== */
+
     function formatSlotTime(raw){
+
       if(!raw) return null;
+
       try{
+
         if(typeof raw?.toDate === 'function') return raw.toDate().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+
         if(typeof raw?.seconds === 'number') return new Date(raw.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+
         if(typeof raw === 'string'){
+
           const d = new Date(raw);
+
           if(!isNaN(d)) return d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+
           const m = raw.match(/(\d{2})(\d{2})$/); if(m) return m[1]+':'+m[2];
+
         }
+
         if(raw instanceof Date) return raw.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
+
       }catch(e){}
+
       return null;
+
     }
+
     function getPickupPretty(o){
+
       if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "")
+
         return o.pickup_time_pretty;
 
+
+
       if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot))
+
         return o.pickup_slot;
 
+
+
       const t = o.pickup_time || o.pickupTime || o.pickup;
+
       if (t) {
+
         try{
+
           if (typeof t?.toDate === "function")
+
             return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
 
+
+
           const d = new Date(t);
+
           if (!isNaN(d))
+
             return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+
         }catch(_){}
+
       }
+
+
 
       if (typeof o.pickup_slot === "string") {
+
         const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/);
+
         if (m) return `${m[1]}:${m[2]}`;
+
       }
 
+
+
       if (o.pickup_asap === true)
+
         return "A la brevedad";
 
+
+
       return null;
+
     }
 
+
+
     /* ===== sonido ===== */
+
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
+
     let audioCtx = null, audioReady = false;
+
     function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
+
     async function ensureAudioReady(){ try{ const ctx=getAudioCtx(); if(ctx.state==='suspended') await ctx.resume(); audioReady=(ctx.state==='running'); }catch(e){ audioReady=false; } return audioReady; }
+
     function beepOnce(ctx, d=0.22, f=900, g=0.7){ const o=ctx.createOscillator(), ga=ctx.createGain(); o.type="square"; o.frequency.value=f; o.connect(ga); ga.connect(ctx.destination); ga.gain.setValueAtTime(0.0001, ctx.currentTime); ga.gain.exponentialRampToValueAtTime(g, ctx.currentTime+0.02); ga.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+d); o.start(); o.stop(ctx.currentTime+d+0.02); }
+
     async function playBeepTriple(){ if(!soundEnabled) return; const ok=await ensureAudioReady(); if(!ok) return; const ctx=getAudioCtx(); beepOnce(ctx); setTimeout(()=>beepOnce(ctx),320); setTimeout(()=>beepOnce(ctx),640); }
+
     ['click','touchstart','keydown'].forEach(evt=> window.addEventListener(evt, ()=>{ if(!audioReady) ensureAudioReady(); }, {passive:true}));
 
+
+
     const btnBell=$("#btnBell");
+
     const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
+
     updateBellUI();
+
     btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
+
+
 
     $("#btnLogout").onclick=()=>{ logout(); };
 
+
+
     /* ====== Filtros ====== */
+
     const tabs=$("#tabs");
+
     let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
 
+
+
     tabs.addEventListener("click",(e)=>{
+
       const el=e.target.closest("[data-f]"); if(!el) return;
+
       currentFilter = el.dataset.f;
+
       tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+
       el.classList.add("active");
+
       if (lastSnap) renderList(lastSnap);
+
     });
 
+
+
     const passFilter=o=>{
+
       const s = o.status ?? "accepted";
+
       if(currentFilter==="recibidos"){
+
         return s==="accepted" || s==="pending_payment" || s==="in_prep" || s==="ready";
+
       }
+
       if(currentFilter==="entregados"){
+
         return s==="delivered";
+
       }
+
       if(currentFilter==="cancelled"){
+
         return s==="cancelled";
+
       }
+
       return true;
+
     };
+
+
 
     /* ====== acciones ====== */
+
     async function setOrderStatus(id,next){
+
       try{
+
         await db.collection("orders").doc(id).update({
+
           status: next,
+
           statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()})
+
         });
+
       }catch(e){ alert("No se pudo actualizar el estado: "+(e?.message||e)); }
+
     }
+
     async function setPaymentStatus(id, paid){
+
       try{
+
         await db.collection("orders").doc(id).update({
+
           paid: !!paid,
+
           payment_status: paid ? "paid" : "pending_payment",
+
           statusHistory: firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()})
+
         });
+
       }catch(e){ alert("No se pudo actualizar el pago: "+(e?.message||e)); }
+
     }
+
+
 
     const btnStateClass=st=>`state-btn state-${st}`;
+
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
+
     const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
+
     const DISPLAY_LABEL = s => STATE_LABEL[s] || s;
 
+
+
     const computeRawSubtotal = o => {
+
       if (typeof o.rawTotal === "number") return o.rawTotal;
+
       const items = Array.isArray(o.items)?o.items:[];
+
       return items.reduce((t,it)=>{
+
         const qty = it.qty||1;
+
         const base = (it.price||0)*qty;
-        // Si tienes precios variables para extras, deberías tomarlos del item
-        // Aquí simplificamos asumiendo que ya viene en el precio o rawTotal
-        return t + base; 
+
+        const patty = (it.extras?.patty||0)*(2500)*qty; // Hardcode precio
+
+        const cheddar = (it.extras?.cheddar||0)*(300)*qty; // Hardcode precio
+
+        return t + base + patty + cheddar;
+
       },0);
+
     };
+
     const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
+
+
     function normalizeFriesLabel(raw){
+
       if(!raw && raw !== 0) return '';
+
       let s = String(raw).toLowerCase();
+
       s = s.replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+
       if(!s) return '';
-      if(s.includes("sazon")) return "Sazonadas";
-      if(s.includes("sin sal")) return "Sin sal";
-      if(s.includes("con sal")||s.includes("sal")) return "Con sal";
-      return s;
+
+      if(/\bsin\b/.test(s) && (/\bsal\b/.test(s) || /\bsazon\b/.test(s))) return 'Sin sal';
+
+      if(/\bsazon\b/.test(s)) return 'Sazonadas';
+
+      if(/\bsal\b/.test(s)) return 'Con sal';
+
+      if(s.includes('sazon')) return 'Sazonadas';
+
+      if(s.includes('sin') && s.includes('sal')) return 'Sin sal';
+
+      if(s.includes('sal')) return 'Con sal';
+
+      return '';
+
     }
 
+
+
     /* ===== Agrupar hamburguesas idénticas y separar papas (vista grande) ===== */
+
     function groupItemsForScreen(items){
+
       const burgers = {};   // hamburguesas
+
       const friesMap = {};  // papas
 
+
+
       function normalizeFriesLabelInner(raw){
+
         if(!raw && raw !== 0) return '';
-        let s = String(raw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+
+        let s = String(raw).toLowerCase()
+
+          .replace(/[_-]/g,' ')
+
+          .replace(/\s+/g,' ')
+
+          .trim();
+
+
+
         if(!s) return '';
+
         if(s.includes("sazon")) return "Sazonadas";
+
         if(s.includes("sin sal")) return "Sin sal";
-        if(s.includes("con sal")||s.includes("sal")) return "Con sal";
+
+        if(s.includes("con sal")) return "Con sal";
+
+        if(s.includes("sal")) return "Con sal";
+
         return s;
+
       }
+
+
 
       function hasPaidExtras(ex){
+
         if(!ex) return false;
+
         const patty = Number(ex.patty || 0);
+
         const cheddar = Number(ex.cheddar || 0);
+
         return (patty > 0 || cheddar > 0);
+
       }
 
+
+
       items.forEach((it, idx)=>{
+
         const qty   = it.qty || 1;
+
         const name  = it.name || "";
+
         const price = it.price || 0;
+
         const extras = it.extras || {};
 
-        const friesLabel = normalizeFriesLabelInner(it.fries || it.side || extras.fries || "");
+
+
+        const friesLabel = normalizeFriesLabelInner(
+
+          it.fries || it.side || extras.fries || ""
+
+        );
+
+
 
         // PAPAS siempre aparte
+
         if(friesLabel){
+
           if(!friesMap[friesLabel]) friesMap[friesLabel] = 0;
+
           friesMap[friesLabel] += qty;
+
         }
 
+
+
         // Nota normalizada
+
         let note = "";
+
         if(Array.isArray(it.notes)) note = it.notes.join(" | ");
+
         else if(typeof it.notes === "string") note = it.notes.trim();
+
         else if(typeof it.comment === "string") note = it.comment.trim();
+
+
 
         const simpleBurger = !hasPaidExtras(extras); 
 
-        const key = simpleBurger ? JSON.stringify({ name, price, note }) : `extra-${idx}`;
+
+
+        const key = simpleBurger
+
+          ? JSON.stringify({ name, price, note })
+
+          : `extra-${idx}`;
+
+
 
         if(!burgers[key]){
-          burgers[key] = { qty: 0, name, extras, notes: note, price };
+
+          burgers[key] = {
+
+            qty: 0,
+
+            name,
+
+            extras,
+
+            notes: note,
+
+            price
+
+          };
+
         }
+
+
+
         burgers[key].qty += qty;
+
       });
 
+
+
       const fries = Object.entries(friesMap).map(([label, qty])=>({
+
         qty,
+
         name: "Papas",
+
         friesLabel: label
+
       }));
 
-      return { burgers: Object.values(burgers), fries };
+
+
+      return {
+
+        burgers: Object.values(burgers),
+
+        fries
+
+      };
+
     }
 
-    /* ========== renderOrder: PÁGINA ========== */
+
+
+    /* ========== renderOrder: PÁGINA (Sin cambios visuales) ========== */
+
     function renderOrder(doc){
+
       const o = doc.data();
+
       const dt = pickDocDate(o);
+
       const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
 
+
+
       const items = Array.isArray(o.items) ? o.items : [];
+
+
+
       const groups = groupItemsForScreen(items);
 
+
+
       /* ==== Render Burgers ==== */
+
       const burgerHTML = groups.burgers.map(it=>{
+
         const extras = [];
-        if(it.extras?.patty) extras.push(`+${it.extras.patty} medallones`);
-        if(it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
+
+
+
+        if(it.extras?.patty)
+
+          extras.push(`+${it.extras.patty} medallones`);
+
+        if(it.extras?.cheddar)
+
+          extras.push(`+${it.extras.cheddar} cheddar`);
+
+
 
         const extrasLine = extras.length ? `<div class="sub">Extras: ${extras.join(" · ")}</div>` : "";
+
         const notesLine = it.notes ? `<div class="sub">Nota: ${it.notes}</div>` : "";
 
-        // Calculo aproximado subtotal visual
-        const subtotal = (it.qty * it.price) + (it.extras?.patty || 0) * (2500) * it.qty + (it.extras?.cheddar || 0) * (300) * it.qty;
+
+
+        const subtotal =
+
+          (it.qty * it.price) +
+
+          (it.extras?.patty || 0) * (2500) * it.qty +
+
+          (it.extras?.cheddar || 0) * (300) * it.qty;
+
+
 
         return `
+
           <div class="item">
+
             <strong>• ${it.qty}× ${it.name}</strong>
+
             ${extrasLine}
+
             ${notesLine}
+
             <div class="sub">Subtotal: ${money(subtotal)}</div>
+
           </div>
+
         `;
+
       }).join("");
 
+
+
       /* ==== Render Fries ==== */
+
       const friesHTML = groups.fries.length
+
         ? `<h4 style="margin-top:12px">🍟 Papas</h4>` +
+
           groups.fries.map(f=>`
+
             <div class="item">
+
               <strong>• ${f.qty}× ${f.name}</strong>
+
               ${f.friesLabel ? `<div class="sub">Papas: ${f.friesLabel}</div>` : ""}
+
             </div>
+
           `).join("")
+
         : "";
 
+
+
       const pickupPretty = getPickupPretty(o);
+
+
+
       const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
+
       const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
+
+
+
       const generalNote = (o.comment || o.notes || "").toString().trim();
+
       const cmtChip = generalNote ? `<span class="chip">Comentario: ${generalNote}</span>` : "";
 
+
+
       const st = o.status ?? "accepted";
+
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
 
+
+
       const stateBtns = `
+
         <div class="stateBtns">
+
           ${STATE_SEQ.map((key,idx)=>`
+
             <button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">
+
               ${STATE_LABEL[key]}
+
             </button>
+
           `).join('')}
+
         </div>
+
       `;
+
+
 
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
+
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
 
+
+
       const payLine = `
+
         <div class="pay-line">
+
           <select class="btn" data-select-pago style="min-width:200px">
+
             <option value="" disabled ${(!o.pago)?'selected':''}>Seleccioná medio de pago</option>
+
             <option value="efectivo" ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
+
             <option value="debito" ${o.pago==="debito"?"selected":""}>Debito</option>
+
             <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>Mercado Pago</option>
+
             <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
+
           </select>
 
+
+
           <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}">
+
             ${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}
+
           </button>
 
+
+
           <button class="btn" data-print>🖨 Imprimir</button>
+
         </div>
+
       `;
 
+
+
       return `
+
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
+
           <div class="order-head">
+
             <div>
+
               <div class="order-title">
-                ${displayOrderNumber(doc)} — ${ o.source === "mostrador" ? (o.nombre ?? "Cliente") + " (mostrador)" : (o.nombre ?? "Cliente") }
-              </div>
+
+  ${displayOrderNumber(doc)} — ${
+
+    o.source === "mostrador"
+
+      ? (o.nombre ?? "Cliente") + " (mostrador)"
+
+      : (o.nombre ?? "Cliente")
+
+  }
+
+</div>
+
               <div class="muted">N° interno: ${o.orderNumber ?? '—'}</div>
+
               <div class="muted">${dtText}</div>
 
+
+
               <div class="chips">
+
                 <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
+
                 <span class="chip">Estado: ${st}</span>
+
                 <span class="chip">Retiro: ${o.entrega||"take_away"}</span>
+
                 <span class="chip">Horario: ${pickupPretty || "—"}</span>
+
                 ${telChip}${srcChip}${cmtChip}
+
               </div>
 
+
+
               ${stateBtns}
+
             </div>
 
+
+
             <div>
+
               <div class="right-total">${money(computeOrderTotal(o))}</div>
+
               ${payLine}
+
             </div>
+
           </div>
+
+
 
           <div class="divider"></div>
 
+
+
           <div class="items">
+
             ${burgerHTML}
+
             ${friesHTML}
+
           </div>
+
         </div>
+
       `;
+
     }
 
-    /* ===========================================================
-       🔥 TICKET 58MM MEJORADO (PAGADO/PENDIENTE + A COBRAR)
-       =========================================================== */
-    function buildTicketHTML(docSnap){
-      const o = docSnap.data();
-      const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
-      /* ==== Número ==== */
-      const orderDisplay = (() => {
-        const possible = [o.orderNumber, o.number, o.numero, o.num];
-        for (const v of possible) { if (v != null) return `#${v}`; }
-        return `#${(docSnap.id || "").slice(-5).toUpperCase()}`;
-      })();
 
-      /* ==== Fecha ==== */
-      const dt = pickDocDate(o) || new Date();
-      const dateStr = dt.toLocaleDateString("es-AR");
-      const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
+/* =================================================================
 
-      /* ==== Pickup ==== */
-      let pickupPretty = getPickupPretty(o);
-      const pickupBlockLarge = pickupPretty
-        ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickupPretty)}</div>`
-        : `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retiro: A la brevedad</div>`;
+   🔥 TICKET CORREGIDO (58mm + PAGADO/PENDIENTE + A COBRAR EN CAJA)
 
-      /* ==== MÉTODOS DE PAGO (Traducción) ==== */
-      const PAY_MAP = {
-          "mostrador_sin_especificar": "A COBRAR EN CAJA",
-          "efectivo": "EFECTIVO",
-          "mercado_pago": "MERCADO PAGO",
-          "debito": "DÉBITO",
-          "transferencia": "TRANSFERENCIA"
-      };
-      let pagoTxt = o.pago || "";
-      if(PAY_MAP[pagoTxt]) pagoTxt = PAY_MAP[pagoTxt]; 
+   ================================================================= */
 
-      /* ==== ESTADO DE PAGO ==== */
-      const isPaid = (o.payment_status === "paid") || o.paid === true;
-      const payState = isPaid ? "PAGADO" : "PENDIENTE";
+function buildTicketHTML(docSnap){
 
-      /* ===== PROCESAR ÍTEMS ===== */
-      const items = Array.isArray(o.items) ? o.items : [];
-      const burgers = {};
-      const friesMap = {};
+  const o = docSnap.data();
 
-      function normalizeFries(raw){
-        if(!raw && raw !== 0) return '';
-        let s = String(raw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
-        if(!s) return '';
-        if(s.includes("sazon")) return "Sazonadas";
-        if(s.includes("sin sal")) return "Sin sal";
-        if(s.includes("con sal")||s.includes("sal")) return "Con sal";
-        return s;
-      }
 
-      function hasPaidExtras(ex){
-        if(!ex) return false;
-        return (ex.patty > 0) || (ex.cheddar > 0);
-      }
 
-      items.forEach((it,idx)=>{
-        const qty = it.qty || 1;
-        const name = it.name || "";
-        const price = it.price || 0;
-        const ex = it.extras || {};
+  const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-        const friesLabel = normalizeFries(
-          it.fries || it.side || ex.fries || (Array.isArray(it.sides)? it.sides.join(" "): "")
-        );
+  const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
-        if(friesLabel){
-          if(!friesMap[friesLabel]) friesMap[friesLabel] = 0;
-          friesMap[friesLabel] += qty;
-        }
 
-        let note = "";
-        if(Array.isArray(it.notes)) note = it.notes.join(" | ");
-        else if(typeof it.notes === "string") note = it.notes.trim();
 
-        const isSimple = !hasPaidExtras(ex);
-        const key = isSimple ? JSON.stringify({name, price, note}) : `extra-${idx}`;
+  /* ==== Número ==== */
 
-        if(!burgers[key]){
-          burgers[key] = { qty: 0, name, price, extras: ex, note };
-        }
-        burgers[key].qty += qty;
-      });
+  const orderDisplay = (() => {
 
-      /* ==== GENERAR LÍNEAS DE TICKET ==== */
-      const burgerLines = Object.values(burgers).map(b=>{
-        const qty = b.qty;
-        const name = escapeHtml(b.name);
-        let extrasHTML = "";
-        if(hasPaidExtras(b.extras)){
-          const ex = b.extras;
-          const arr = [];
-          if(ex.patty) arr.push(`+${ex.patty} carne`);
-          if(ex.cheddar) arr.push(`+${ex.cheddar} cheddar`);
-          extrasHTML = `<div class="sub">• ${escapeHtml(arr.join(" · "))}</div>`;
-        }
-        const noteHTML = b.note ? `<div class="sub">📝 ${escapeHtml(b.note)}</div>` : "";
-        return `<div class="row name"><div class="l">${qty} × ${name}</div></div>${extrasHTML}${noteHTML}<div class="sep"></div>`;
-      }).join("");
+    const possible = [o.orderNumber, o.number, o.numero, o.num];
 
-      const friesLines = Object.entries(friesMap).length
-        ? `<div class="hr"></div><div class="blk"><div class="lbl">PAPAS</div></div>` +
-          Object.entries(friesMap).map(([label, qty]) => `
-            <div class="row name"><div class="l">${qty} × Papas</div></div>
-            <div class="sub">• ${escapeHtml(label)}</div><div class="sep"></div>
-          `).join("")
-        : "";
+    for (const v of possible) { if (v != null) return `#${v}`; }
 
-      const subtotal = o.total || o.rawTotal || 0;
-      const note = o.comment || o.notes || "";
-      const commentBlock = note ? `<div class="hr"></div><div class="blk"><div class="lbl">NOTA</div><div>${escapeHtml(note)}</div></div>` : "";
+    return `#${(docSnap.id || "").slice(-5).toUpperCase()}`;
 
-      /* ==== HTML FINAL (58mm FORZADO) ==== */
-      return `
-    <!doctype html>
-    <html>
-    <head>
-    <meta charset="utf-8">
-    <title>Ticket ${escapeHtml(orderDisplay)}</title>
-    <style>
-      @page { size: 58mm auto; margin: 0; }
-      body { width: 58mm; max-width: 58mm; margin: 0; padding: 4px; font-family: Arial, sans-serif; font-size: 13px; font-weight: 700; color: #000; line-height: 1.3; box-sizing: border-box; }
-      .c { text-align: center; }
-      .brand { font-size: 16px; margin-bottom: 4px; }
-      .hr { border-top: 1px dashed #000; margin: 6px 0; }
-      .blk { margin: 4px 0; }
-      .lbl { font-size: 10px; text-transform: uppercase; margin-bottom: 2px; }
-      .row { display: flex; justify-content: space-between; }
-      .sub { font-size: 11px; margin-left: 4px; font-weight: normal; }
-      .sep { border-top: 1px dotted #999; margin: 4px 0; }
-      .foot { margin-top: 10px; text-align: center; font-size: 10px; font-weight: 400; }
-    </style>
-    </head>
-    <body>
-      <div class="c brand">Rhodes Burgers</div>
-      <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
-      <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
-      
-      <div class="hr"></div>
+  })();
 
-      ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
-      ${pickupBlockLarge}
-      ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
-      ${commentBlock}
 
-      <div class="hr"></div>
-      ${burgerLines}
-      ${friesLines}
-      <div class="hr"></div>
 
-      <div class="row"><div class="l">TOTAL</div><div>${moneyT(subtotal)}</div></div>
-      <div class="foot">${dateStr} — ${timeStr}</div>
+  /* ==== Fecha ==== */
 
-      <script>
-        window.addEventListener('load', () => {
-          setTimeout(() => { window.print(); }, 100);
-        });
-      <\/script>
-    </body>
-    </html>
-      `;
+  const dt = pickDocDate(o) || new Date();
+
+  const dateStr = dt.toLocaleDateString("es-AR");
+
+  const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
+
+
+
+  /* ==== Pickup ==== */
+
+  let pickupPretty = getPickupPretty(o);
+
+  
+
+  const pickupBlockLarge = pickupPretty
+
+    ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickupPretty)}</div>`
+
+    : `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retiro: A la brevedad</div>`;
+
+
+
+  /* ==== MÉTODOS DE PAGO (Traducción) ==== */
+
+  const PAY_MAP = {
+
+      "mostrador_sin_especificar": "A COBRAR EN CAJA",
+
+      "efectivo": "EFECTIVO",
+
+      "mercado_pago": "MERCADO PAGO",
+
+      "debito": "DÉBITO",
+
+      "transferencia": "TRANSFERENCIA"
+
+  };
+
+  let pagoTxt = o.pago || "";
+
+  if(PAY_MAP[pagoTxt]) pagoTxt = PAY_MAP[pagoTxt]; // Traducir si existe
+
+
+
+  /* ==== ESTADO DE PAGO ==== */
+
+  const isPaid = (o.payment_status === "paid") || o.paid === true;
+
+  const payState = isPaid ? "PAGADO" : "PENDIENTE";
+
+
+
+  /* ===== PROCESAR ÍTEMS ===== */
+
+  const items = Array.isArray(o.items) ? o.items : [];
+
+  const burgers = {};
+
+  const friesMap = {};
+
+
+
+  function normalizeFries(raw){
+
+    if(!raw && raw !== 0) return '';
+
+    let s = String(raw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
+
+    if(!s) return '';
+
+    if(s.includes("sazon")) return "Sazonadas";
+
+    if(s.includes("sin sal")) return "Sin sal";
+
+    if(s.includes("con sal")||s.includes("sal")) return "Con sal";
+
+    return s;
+
+  }
+
+
+
+  function hasPaidExtras(ex){
+
+    if(!ex) return false;
+
+    return (ex.patty > 0) || (ex.cheddar > 0);
+
+  }
+
+
+
+  items.forEach((it,idx)=>{
+
+    const qty = it.qty || 1;
+
+    const name = it.name || "";
+
+    const price = it.price || 0;
+
+    const ex = it.extras || {};
+
+
+
+    const friesLabel = normalizeFries(
+
+      it.fries || it.side || ex.fries || (Array.isArray(it.sides)? it.sides.join(" "): "")
+
+    );
+
+
+
+    if(friesLabel){
+
+      if(!friesMap[friesLabel]) friesMap[friesLabel] = 0;
+
+      friesMap[friesLabel] += qty;
+
     }
 
-    /* ======== Print en iframe ======== */
-    function printInIframe(docSnap){
-      const html = buildTicketHTML(docSnap);
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed'; iframe.style.right = '0'; iframe.style.bottom = '0'; iframe.style.width = '0'; iframe.style.height = '0'; iframe.style.border = '0';
-      document.body.appendChild(iframe);
-      const doc = iframe.contentWindow.document;
-      doc.open(); doc.write(html); doc.close();
-      setTimeout(() => { try{ document.body.removeChild(iframe); }catch(e){} }, 15000);
+
+
+    let note = "";
+
+    if(Array.isArray(it.notes)) note = it.notes.join(" | ");
+
+    else if(typeof it.notes === "string") note = it.notes.trim();
+
+
+
+    const isSimple = !hasPaidExtras(ex);
+
+    const key = isSimple ? JSON.stringify({name, price, note}) : `extra-${idx}`;
+
+
+
+    if(!burgers[key]){
+
+      burgers[key] = { qty: 0, name, price, extras: ex, note };
+
     }
-    function trySilentPrint(docSnap){ printInIframe(docSnap); }
 
-    let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
-    const btnAutoPrint = document.getElementById("btnAutoPrint");
-    const updateAP = ()=> btnAutoPrint.classList.toggle("active", autoPrint);
-    updateAP();
-    btnAutoPrint.onclick = ()=>{ autoPrint = !autoPrint; localStorage.setItem("rb_auto_print", JSON.stringify(autoPrint)); updateAP(); };
-
-    /* ======== Suscripción a pedidos (sin forzar pendiente) ======== */
-    (async function subscribeOrders(){
-      try{
-        const probe=await db.collection("orders").limit(1).get();
-        let q = db.collection("orders").orderBy("createdAt", "desc").orderBy(firebase.firestore.FieldPath.documentId(), "desc");
-        let firstSnapshot = true;
-
-        q.limit(500).onSnapshot(async snap=>{
-          lastSnap = snap;
-          document.getElementById("ordersError").style.display="none";
-          renderList(snap);
-
-          if (firstSnapshot) { firstSnapshot = false; return; }
-
-          for (const ch of snap.docChanges()){
-            if (ch.type === 'added') {
-              // 🔥 LÓGICA DE AUTO-PENDIENTE ELIMINADA. SE RESPETA LO QUE VIENE.
-              try{ playBeepTriple(); }catch(_){}
-              if (autoPrint) {
-                const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
-                trySilentPrint(snapDoc);
-              }
-            }
-          }
-        }, err=>{ console.error(err); document.getElementById("ordersError").style.display="block"; });
-
-      }catch(err){ console.error(err); document.getElementById("ordersError").style.display="block"; }
-    })();
-
-    function renderList(snap){
-      const docs=snap.docs.filter(d=>passFilter(d.data()));
-      idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
-      document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
-
-      document.querySelectorAll(".order").forEach(card=>{
-        const id=card.dataset.id;
-        card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
-
-        const payToggle=card.querySelector("[data-pay-toggle]");
-        if(payToggle && currentFilter!=="entregados"){
-          payToggle.addEventListener("click", ()=>{
-            const wasPaid = payToggle.dataset.payToggle === "paid";
-            setPaymentStatus(id, !wasPaid);
-          });
-        }
-        const selPago=card.querySelector("[data-select-pago]");
-        if(selPago){
-          selPago.addEventListener("change", ()=> db.collection("orders").doc(id).update({ pago: selPago.value }));
-        }
-        const pr=card.querySelector("[data-print]");
-        if(pr) pr.addEventListener("click",()=> trySilentPrint(idToDoc.get(id)));
-      });
-    }
+    burgers[key].qty += qty;
 
   });
+
+
+
+  /* ==== GENERAR LÍNEAS DE TICKET ==== */
+
+  const burgerLines = Object.values(burgers).map(b=>{
+
+    const qty = b.qty;
+
+    const name = escapeHtml(b.name);
+
+    let extrasHTML = "";
+
+    if(hasPaidExtras(b.extras)){
+
+      const ex = b.extras;
+
+      const arr = [];
+
+      if(ex.patty) arr.push(`+${ex.patty} carne`);
+
+      if(ex.cheddar) arr.push(`+${ex.cheddar} cheddar`);
+
+      extrasHTML = `<div class="sub">• ${escapeHtml(arr.join(" · "))}</div>`;
+
+    }
+
+    const noteHTML = b.note ? `<div class="sub">📝 ${escapeHtml(b.note)}</div>` : "";
+
+    return `<div class="row name"><div class="l">${qty} × ${name}</div></div>${extrasHTML}${noteHTML}<div class="sep"></div>`;
+
+  }).join("");
+
+
+
+  const friesLines = Object.entries(friesMap).length
+
+    ? `<div class="hr"></div><div class="blk"><div class="lbl">PAPAS</div></div>` +
+
+      Object.entries(friesMap).map(([label, qty]) => `
+
+        <div class="row name"><div class="l">${qty} × Papas</div></div>
+
+        <div class="sub">• ${escapeHtml(label)}</div><div class="sep"></div>
+
+      `).join("")
+
+    : "";
+
+
+
+  const subtotal = o.total || o.rawTotal || 0;
+
+  const note = o.comment || o.notes || "";
+
+  const commentBlock = note ? `<div class="hr"></div><div class="blk"><div class="lbl">NOTA</div><div>${escapeHtml(note)}</div></div>` : "";
+
+
+
+  /* ==== HTML FINAL (58mm FORZADO) ==== */
+
+  return `
+
+<!doctype html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8">
+
+<title>Ticket ${escapeHtml(orderDisplay)}</title>
+
+<style>
+
+  @page { size: 58mm auto; margin: 0; }
+
+  body { 
+
+      width: 58mm; 
+
+      max-width: 58mm;
+
+      margin: 0; 
+
+      padding: 4px; 
+
+      font-family: Arial, sans-serif; 
+
+      font-size: 13px; 
+
+      font-weight: 700; 
+
+      color: #000;
+
+      line-height: 1.3;
+
+  }
+
+  .c { text-align: center; }
+
+  .brand { font-size: 16px; margin-bottom: 4px; }
+
+  .hr { border-top: 1px dashed #000; margin: 6px 0; }
+
+  .blk { margin: 4px 0; }
+
+  .lbl { font-size: 10px; text-transform: uppercase; margin-bottom: 2px; }
+
+  .row { display: flex; justify-content: space-between; }
+
+  .sub { font-size: 11px; margin-left: 4px; font-weight: normal; }
+
+  .sep { border-top: 1px dotted #999; margin: 4px 0; }
+
+  .foot { margin-top: 10px; text-align: center; font-size: 10px; font-weight: 400; }
+
+</style>
+
+</head>
+
+<body>
+
+  <div class="c brand">Rhodes Burgers</div>
+
+  <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
+
+  <div class="c" style="font-size:16px; margin: 5px 0">[ ${payState} ]</div>
+
+  
+
+  <div class="hr"></div>
+
+
+
+  ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
+
+  
+
+  ${pickupBlockLarge}
+
+
+
+  ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
+
+
+
+  ${commentBlock}
+
+
+
+  <div class="hr"></div>
+
+
+
+  ${burgerLines}
+
+  ${friesLines}
+
+
+
+  <div class="hr"></div>
+
+
+
+  <div class="row"><div class="l">TOTAL</div><div>${moneyT(subtotal)}</div></div>
+
+
+
+  <div class="foot">
+
+    ${escapeHtml(dateStr)} — ${escapeHtml(timeStr)}
+
+  </div>
+
+
+
+  <script>
+
+    window.addEventListener('load', () => {
+
+      setTimeout(() => { window.print(); }, 100);
+
+    });
+
+  <\/script>
+
+</body>
+
+</html>
+
+  `;
+
+}
+
+
+
+    /* ======== Print en iframe ======== */
+
+    function printInIframe(docSnap){
+
+      const html = buildTicketHTML(docSnap);
+
+      const iframe = document.createElement('iframe');
+
+      iframe.style.position = 'fixed';
+
+      iframe.style.right = '0';
+
+      iframe.style.bottom = '0';
+
+      iframe.style.width = '0';
+
+      iframe.style.height = '0';
+
+      iframe.style.border = '0';
+
+      iframe.setAttribute('aria-hidden','true');
+
+      document.body.appendChild(iframe);
+
+
+
+      const doc = iframe.contentWindow.document;
+
+      doc.open(); doc.write(html); doc.close();
+
+
+
+      const cleanup = () => { try{ document.body.removeChild(iframe); }catch(e){} };
+
+      iframe.contentWindow.onafterprint = () => setTimeout(cleanup, 150);
+
+      setTimeout(cleanup, 15000);
+
+    }
+
+
+
+    function trySilentPrint(docSnap){ printInIframe(docSnap); }
+
+
+
+    let initialLoaded = false;
+
+
+
+    function renderList(snap){
+
+      const docs=snap.docs.filter(d=>passFilter(d.data()));
+
+      idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
+
+      document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted">No hay pedidos.</p>';
+
+
+
+      document.querySelectorAll(".order").forEach(card=>{
+
+        const id=card.dataset.id;
+
+        card.querySelectorAll("[data-act]").forEach(btn=>btn.addEventListener("click",()=>setOrderStatus(id,btn.dataset.act)));
+
+
+
+        const payToggle=card.querySelector("[data-pay-toggle]");
+
+
+
+        const selPago = card.querySelector("[data-select-pago]");
+
+        if(selPago){
+
+          selPago.addEventListener("change", async ()=>{
+
+            const pago = selPago.value;
+
+            try{
+
+              await db.collection("orders").doc(id).update({
+
+                pago: pago,
+
+                payment_method: pago
+
+              });
+
+            }catch(e){
+
+              alert("No se pudo guardar el método de pago");
+
+            }
+
+          });
+
+        }
+
+        if(payToggle && currentFilter!=="entregados"){
+
+          payToggle.addEventListener("click", async ()=>{
+
+            const wasPaid = payToggle.dataset.payToggle === "paid";
+
+            payToggle.disabled = true;
+
+            payToggle.classList.toggle("is-paid", !wasPaid);
+
+            payToggle.classList.toggle("is-pending", wasPaid);
+
+            payToggle.textContent = !wasPaid ? "PAGADO ✓" : "PENDIENTE DE PAGO";
+
+            payToggle.dataset.payToggle = !wasPaid ? "paid" : "pending";
+
+            try{
+
+              await setPaymentStatus(id, !wasPaid);
+
+            }catch(e){
+
+              alert("No se pudo actualizar el pago: " + (e?.message||e));
+
+            }finally{
+
+              payToggle.disabled = false;
+
+            }
+
+          });
+
+        }
+
+
+
+        const pr=card.querySelector("[data-print]");
+
+        if(pr) pr.addEventListener("click",()=> trySilentPrint(idToDoc.get(id)));
+
+      });
+
+    }
+
+
+
+    /* ========= Toggle Autoimprimir ========= */
+
+    let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
+
+    const btnAutoPrint = document.getElementById("btnAutoPrint");
+
+    const updateAP = ()=> btnAutoPrint.classList.toggle("active", autoPrint);
+
+    updateAP();
+
+    btnAutoPrint.onclick = ()=>{
+
+      autoPrint = !autoPrint;
+
+      localStorage.setItem("rb_auto_print", JSON.stringify(autoPrint));
+
+      updateAP();
+
+    };
+
+
+
+    /* ======== Suscripción a pedidos (sin forzar pendiente) ======== */
+
+    (async function subscribeOrders(){
+
+      try{
+
+        const probe=await db.collection("orders").limit(1).get();
+
+       let q = db.collection("orders")
+
+  .orderBy("createdAt", "desc")
+
+  .orderBy(firebase.firestore.FieldPath.documentId(), "desc");
+
+        let firstSnapshot = true;
+
+
+
+        q.limit(500).onSnapshot(async snap=>{
+
+          lastSnap = snap;
+
+          document.getElementById("ordersError").style.display="none";
+
+          document.getElementById("ordersError").textContent="";
+
+          renderList(snap);
+
+
+
+          if (firstSnapshot) {
+
+            firstSnapshot = false;
+
+            initialLoaded = true;
+
+            return;
+
+          }
+
+
+
+          for (const ch of snap.docChanges()){
+
+            if (ch.type === 'added') {
+
+              // 🔥 IMPORTANTE: ELIMINADA LÓGICA QUE FORZABA "PENDING"
+
+              try{ playBeepTriple(); }catch(_){}
+
+              if (autoPrint) {
+
+                const snapDoc = idToDoc.get(ch.doc.id) || ch.doc;
+
+                trySilentPrint(snapDoc);
+
+              }
+
+            }
+
+          }
+
+        }, err=>{
+
+          console.error(err);
+
+          document.getElementById("ordersError").textContent="No se pudo cargar la lista de pedidos.";
+
+          document.getElementById("ordersError").style.display="block";
+
+        });
+
+
+
+      }catch(err){
+
+        console.error(err);
+
+        document.getElementById("ordersError").textContent="No se pudo inicializar la lista de pedidos.";
+
+        document.getElementById("ordersError").style.display="block";
+
+      }
+
+    })();
+
+
+
+  });
+
   </script>
 
-  <script src="pwa.js"></script>
+
+
+    <script src="pwa.js"></script>
+
 </body>
+
 </html>
