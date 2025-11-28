@@ -82,33 +82,11 @@
     
     /* ITEMS CATEGORIZADOS */
     .cat-section { margin-top: 15px; border-top: 1px solid #f0f0f0; padding-top: 10px; }
-    .cat-header {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #888;
-        margin-bottom: 8px;
-        font-weight: 800;
-        display: flex; align-items: center; gap: 6px;
-    }
-    
-    .item-row { 
-        display: flex; 
-        gap: 12px; 
-        margin-bottom: 12px; 
-        font-size: 15px; 
-        align-items: flex-start;
-    }
-    .item-qty { 
-        font-weight: 800; 
-        font-size: 16px;
-        color: var(--primary);
-        min-width: 24px;
-    }
+    .cat-header { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px; font-weight: 800; display: flex; align-items: center; gap: 6px; }
+    .item-row { display: flex; gap: 12px; margin-bottom: 12px; font-size: 15px; align-items: flex-start; }
+    .item-qty { font-weight: 800; font-size: 16px; color: var(--primary); min-width: 24px; }
     .item-det { flex: 1; }
     .item-name { font-weight: 700; color: #111; line-height: 1.2; }
-    
-    /* Extras visuales */
     .item-extras { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
     .extra-line { font-size: 13px; color: #555; display: flex; align-items: center; gap: 6px; }
     .note-line { color: #d32f2f; font-style: italic; font-weight: 600; font-size: 13px; margin-top: 4px; }
@@ -275,14 +253,13 @@
     };
     const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ========== RENDER CATEGORIZADO (LIMPIO) ========== */
+    /* ========== RENDER CATEGORIZADO ========== */
     function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
       const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
       const items = Array.isArray(o.items) ? o.items : [];
 
-      // SEPARAR POR CATEGORÍA
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
 
       items.forEach(it => {
@@ -292,12 +269,9 @@
           
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
-              
-              // EXTRAER PAPAS Y MANDARLAS A SU SECCIÓN
               if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty }); // Sin origin
+                  cats.fries.push({ name: it.fries, qty: qty }); // Papas aparte
               }
-
           } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
               cats.fries.push(it);
           } else if (type === 'drink' || name.includes('coca') || name.includes('agua') || name.includes('cerveza') || name.includes('sprite')) {
@@ -307,22 +281,15 @@
           }
       });
 
-      // HELPER PARA RENDERIZAR
       const renderSection = (title, list, icon) => {
           if(!list.length) return "";
           const rows = list.map(it => {
               const qty = it.qty || it.quantity || 1;
               const name = it.name || "Ítem";
-              
-              // Extras visuales (papas ya no están acá)
               let extras = [];
               if(it.extras?.patty) extras.push(`🥩 +${it.extras.patty} carne`);
               if(it.extras?.cheddar) extras.push(`🧀 +${it.extras.cheddar} cheddar`);
-              
-              const extrasHTML = extras.length 
-                ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` 
-                : "";
-                
+              const extrasHTML = extras.length ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` : "";
               const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
 
               return `
@@ -336,33 +303,22 @@
                 </div>
               `;
           }).join("");
-
-          return `
-            <div class="cat-section">
-                <div class="cat-header">${icon} ${title}</div>
-                ${rows}
-            </div>
-          `;
+          return `<div class="cat-section"><div class="cat-header">${icon} ${title}</div>${rows}</div>`;
       };
 
-      const burgersHTML = renderSection("HAMBURGUESAS", cats.burgers, "🍔");
-      const sidesHTML   = renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟");
-      const drinksHTML  = renderSection("BEBIDAS", cats.drinks, "🥤");
-      const othersHTML  = renderSection("OTROS", cats.others, "🔸");
+      const htmlBody = 
+        renderSection("HAMBURGUESAS", cats.burgers, "🍔") +
+        renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟") +
+        renderSection("BEBIDAS", cats.drinks, "🥤") +
+        renderSection("OTROS", cats.others, "🔸");
 
-      const fullItemsHTML = burgersHTML + sidesHTML + drinksHTML + othersHTML;
-
-      // Resto igual...
       const pickupPretty = getPickupPretty(o);
       const srcChip = o.source === "mostrador" ? `<span class="chip" style="background:#e3f2fd;color:#0d47a1">🖥️ Mostrador</span>` : "";
       const noteGeneral = (o.comment || o.notes || "").toString().trim() ? `<span class="chip">📝 ${o.comment || o.notes}</span>` : "";
       const st = o.status ?? "accepted";
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       
-      const stateBtns = `
-        <div class="stateBtns">
-          ${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${STATE_LABEL[key]}</button>`).join('')}
-        </div>`;
+      const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" data-act="${key}">${STATE_LABEL[key]}</button>`).join('')}</div>`;
 
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
@@ -383,9 +339,7 @@
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
           <div class="order-head">
             <div>
-              <div class="order-title">
-                ${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}
-              </div>
+              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}</div>
               <div class="muted">N° interno: ${o.orderNumber || '—'}</div>
               <div class="muted">${dtText}</div>
               <div class="chips">
@@ -401,15 +355,13 @@
               ${payLine}
             </div>
           </div>
-          <div class="items-body">
-            ${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}
-          </div>
+          <div class="items-body">${htmlBody || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
         </div>
       `;
     }
 
     /* ===========================================================
-       TICKET 58MM (REPLICANDO ESTRUCTURA LIMPIA)
+       TICKET 58MM ESTILIZADO
        =========================================================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
@@ -424,6 +376,18 @@
       const pickup = getPickupPretty(o) || "A la brevedad";
       const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
+      // MAPA DE PAGOS
+      const PAGO_MAP = {
+        "mostrador_sin_especificar": "A COBRAR EN CAJA",
+        "efectivo": "EFECTIVO",
+        "mercado_pago": "MERCADO PAGO",
+        "debito": "DÉBITO",
+        "transferencia": "TRANSFERENCIA"
+      };
+      const pagoReal = o.pago || "";
+      const pagoShow = PAGO_MAP[pagoReal] || escapeHtml(pagoReal) || "";
+
+      // SEPARAR ITEMS
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
 
@@ -435,7 +399,7 @@
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
               if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty }); // Sin origin
+                  cats.fries.push({ name: it.fries, qty: qty }); 
               }
           } else if (type === 'side' || name.includes('papas')) {
               cats.fries.push(it);
@@ -451,7 +415,7 @@
           const rows = list.map(it => {
               const qty = it.qty||1;
               let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
-              // Extras (solo si no es papa)
+              // Extras solo si no es papa
               if(!title.includes("PAPAS")) {
                   if(it.extras?.patty) h += `<div class="sub">• +${it.extras.patty} carne</div>`;
                   if(it.extras?.cheddar) h += `<div class="sub">• +${it.extras.cheddar} cheddar</div>`;
@@ -460,7 +424,7 @@
               h += `<div class="sep"></div>`;
               return h;
           }).join("");
-          return `<div class="blk"><div class="lbl" style="border-bottom:1px solid #000; display:inline-block; margin-bottom:4px">${title}</div></div>${rows}`;
+          return `<div class="blk"><div class="lbl" style="border-bottom:1px solid #000; display:inline-block; margin-bottom:4px; margin-top:8px">${title}</div></div>${rows}`;
       };
 
       const htmlBody = 
@@ -474,7 +438,19 @@
 
       return `
         <!doctype html><html><head><meta charset="utf-8"><title>Ticket</title>
-        <style>@page{size:58mm auto;margin:0}body{font-family:Arial,sans-serif;font-size:13px;font-weight:700;margin:0;padding:2mm;color:#000}.c{text-align:center}.brand{font-size:16px}.hr{border-top:1px solid #000;margin:4px 0}.blk{margin:2px 0}.lbl{font-size:11px;text-transform:uppercase}.row{display:flex;justify-content:space-between}.sub{font-size:11px;margin-left:2mm}.sep{border-top:1px dashed #000;opacity:.4;margin:2mm 0}.foot{margin-top:3mm;text-align:center;font-size:10px;font-weight:400}</style>
+        <style>
+          @page{size:58mm auto;margin:0}
+          body{width:58mm;font-family:Arial,sans-serif;font-size:13px;font-weight:700;margin:0;padding:2mm;color:#000;box-sizing:border-box}
+          .c{text-align:center}
+          .brand{font-size:16px}
+          .hr{border-top:1px solid #000;margin:4px 0}
+          .blk{margin:2px 0}
+          .lbl{font-size:11px;text-transform:uppercase}
+          .row{display:flex;justify-content:space-between}
+          .sub{font-size:11px;margin-left:2mm}
+          .sep{border-top:1px dashed #000;opacity:.4;margin:2mm 0}
+          .foot{margin-top:3mm;text-align:center;font-size:10px;font-weight:400}
+        </style>
         </head><body>
           <div class="c brand">Rhodes Burgers</div>
           <div class="c">${escapeHtml(orderDisplay)}</div>
@@ -482,7 +458,7 @@
           <div class="hr"></div>
           ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
           ${pickupBlockLarge}
-          ${(o.pago)?`<div class="blk"><div class="lbl">PAGO</div><div>${escapeHtml(o.pago)}</div></div>`:""}
+          ${(pagoShow)?`<div class="blk"><div class="lbl">PAGO</div><div>${pagoShow}</div></div>`:""}
           <div class="hr"></div>
           ${htmlBody}
           <div class="hr"></div>
