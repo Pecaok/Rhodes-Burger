@@ -1,4 +1,4 @@
-<!doctype html> 
+<!doctype html>
 <html lang="es">
   <script>
   /* ======== SESIÓN COMPARTIDA ======== */
@@ -80,35 +80,16 @@
     .chip{background:#f0f0f0;border:1px solid #ddd;color:#333;border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600}
     .right-total{font-weight:800;font-size:18px;white-space:nowrap}
     
-    /* ITEMS CATEGORIZADOS */
+    /* ITEMS CATEGORIZADOS (Interfáz visual) */
     .cat-section { margin-top: 15px; border-top: 1px solid #f0f0f0; padding-top: 10px; }
     .cat-header {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #888;
-        margin-bottom: 8px;
-        font-weight: 800;
-        display: flex; align-items: center; gap: 6px;
+        font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #888;
+        margin-bottom: 8px; font-weight: 800; display: flex; align-items: center; gap: 6px;
     }
-    
-    .item-row { 
-        display: flex; 
-        gap: 12px; 
-        margin-bottom: 12px; 
-        font-size: 15px; 
-        align-items: flex-start;
-    }
-    .item-qty { 
-        font-weight: 800; 
-        font-size: 16px;
-        color: var(--primary);
-        min-width: 24px;
-    }
+    .item-row { display: flex; gap: 12px; margin-bottom: 12px; font-size: 15px; align-items: flex-start; }
+    .item-qty { font-weight: 800; font-size: 16px; color: var(--primary); min-width: 24px; }
     .item-det { flex: 1; }
     .item-name { font-weight: 700; color: #111; line-height: 1.2; }
-    
-    /* Extras visuales */
     .item-extras { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
     .extra-line { font-size: 13px; color: #555; display: flex; align-items: center; gap: 6px; }
     .note-line { color: #d32f2f; font-style: italic; font-weight: 600; font-size: 13px; margin-top: 4px; }
@@ -151,6 +132,7 @@
         <a href="mostrador.html" class="btn" title="Mostrador">🧾 Mostrador</a>
         <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
       </nav>
+      <button id="btnInstall" class="btn" style="display:none" title="Instalar app">➕ Instalar app</button>
       <button id="btnBell" class="btn" title="Activar/desactivar sonido">🔔 Sonido</button>
       <button id="btnAutoPrint" class="btn" title="Autoimprimir nuevos pedidos">🖨️ Autoimprimir</button>
       <button id="btnLogout" class="btn danger" title="Cerrar sesión">⏻ Cerrar sesión</button>
@@ -235,7 +217,6 @@
     btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
     $("#btnLogout").onclick=()=>{ logout(); };
 
-    /* ====== Filtros ====== */
     const tabs=$("#tabs");
     let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
     tabs.addEventListener("click",(e)=>{
@@ -253,7 +234,6 @@
       return true;
     };
 
-    /* ====== Acciones ====== */
     async function setOrderStatus(id,next){
       try{ await db.collection("orders").doc(id).update({ status: next, statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) }); }catch(e){ alert("Error: "+e); }
     }
@@ -274,7 +254,7 @@
     };
     const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ========== RENDER CATEGORIZADO ========== */
+    /* ========== RENDER CATEGORIZADO (UI PANTALLA) ========== */
     function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
@@ -291,7 +271,7 @@
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
               if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty }); // Papas aparte
+                  cats.fries.push({ name: it.fries, qty: qty });
               }
           } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
               cats.fries.push(it);
@@ -394,36 +374,44 @@
       `;
     }
 
-    /* ===========================================================
-       🔥 TICKET 58MM CENTRADO + CATEGORÍAS + PAGO
-       =========================================================== */
+    /* =================================================================
+       🔥 TICKET 58MM CORREGIDO (PAGADO/PENDIENTE + A COBRAR EN CAJA)
+       ================================================================= */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
-      const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", {style: "currency", currency: "ARS", maximumFractionDigits: 0});
+      const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+      const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
+
+      /* ==== Número ==== */
       const orderDisplay = o.orderNumber ? `#${o.orderNumber}` : `#${docSnap.id.slice(-5).toUpperCase()}`;
-      
+
+      /* ==== Fecha ==== */
       const dt = pickDocDate(o) || new Date();
       const dateStr = dt.toLocaleDateString("es-AR");
       const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
-      
-      const pickup = getPickupPretty(o) || "A la brevedad";
-      const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
+      /* ==== Pickup ==== */
+      let pickupPretty = getPickupPretty(o);
+      const pickupBlockLarge = pickupPretty
+        ? `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickupPretty)}</div>`
+        : `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retiro: A la brevedad</div>`;
+
+      /* ==== MÉTODOS DE PAGO (Traducción) ==== */
       const PAGO_MAP = {
-        "mostrador_sin_especificar": "A COBRAR EN CAJA",
-        "efectivo": "EFECTIVO",
-        "mercado_pago": "MERCADO PAGO",
-        "debito": "DÉBITO",
-        "transferencia": "TRANSFERENCIA"
+          "mostrador_sin_especificar": "A COBRAR EN CAJA",
+          "efectivo": "EFECTIVO",
+          "mercado_pago": "MERCADO PAGO",
+          "debito": "DÉBITO",
+          "transferencia": "TRANSFERENCIA"
       };
       let pagoTxt = o.pago || "";
-      if(PAY_MAP[pagoTxt]) pagoTxt = PAY_MAP[pagoTxt];
+      if(PAGO_MAP[pagoTxt]) pagoTxt = PAGO_MAP[pagoTxt]; // Corrige el nombre de variable aquí
 
+      /* ==== ESTADO DE PAGO ==== */
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
-      // SEPARAR ITEMS PARA TICKET
+      /* ==== ITEMS CATEGORIZADOS ==== */
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
 
@@ -475,17 +463,7 @@
         <!doctype html><html><head><meta charset="utf-8"><title>Ticket</title>
         <style>
           @page { size: 58mm auto; margin: 0; }
-          body { 
-              width: 58mm; 
-              margin: 0 auto; /* 🔥 CENTRADO */
-              padding: 4px; 
-              font-family: Arial, sans-serif; 
-              font-size: 13px; 
-              font-weight: 700; 
-              color: #000; 
-              line-height: 1.3; 
-              box-sizing: border-box;
-          }
+          body { width: 58mm; margin: 0 auto; padding: 4px; font-family: Arial, sans-serif; font-size: 13px; font-weight: 700; color: #000; line-height: 1.3; box-sizing: border-box; }
           .c { text-align: center; }
           .brand { font-size: 16px; margin-bottom: 4px; }
           .hr { border-top: 1px dashed #000; margin: 6px 0; }
@@ -501,19 +479,16 @@
           <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
           <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
           <div class="hr"></div>
-          
           ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
           ${pickupBlockLarge}
           ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
           ${commentBlock}
-          
           <div class="hr"></div>
           ${htmlBody}
           <div class="hr"></div>
-          
           <div class="row"><div class="l">TOTAL</div><div>${moneyT(o.total||0)}</div></div>
           <div class="foot">${dateStr} — ${timeStr}</div>
-          <script>window.onload=()=>{setTimeout(()=>{window.print()},30);}<\/script>
+          <script>window.onload=()=>{setTimeout(()=>{window.print()},100);}<\/script>
         </body></html>
       `;
     }
@@ -576,7 +551,5 @@
     }
   });
   </script>
-
-  <script src="pwa.js"></script>
 </body>
 </html>
