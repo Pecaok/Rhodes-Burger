@@ -703,12 +703,13 @@
 
     function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-    // Función robusta para leer fechas de CUALQUIER formato (String ISO, Timestamp o Date)
+   // Función para manejar fechas mixtas (Texto o Timestamp)
     function parseDateAny(val){
         if(!val) return null;
         if(val instanceof Date) return val;
         if(val.toDate && typeof val.toDate === 'function') return val.toDate(); // Firestore Timestamp
         if(typeof val === 'string') {
+            // Intenta leer la fecha de texto ISO
             const d = new Date(val);
             if(!isNaN(d.getTime())) return d;
         }
@@ -716,17 +717,85 @@
         return null;
     }
 
-    // --- 2. LOGICA DE LA TABLA "HAMBURGUESAS POR MES" ---
+    function addMonths(ym, delta){
+      const [y,m] = ym.split('-').map(Number);
+      const d = new Date(y, m-1+delta, 1);
+      const ym2 = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      return ym2;
+    }
+
+    function isBurgerItem(it){
+      if(!it) return false;
+      if(typeof it.type === 'string' && it.type.toLowerCase() === 'burger') return true;
+      
+      const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || '').toString().toLowerCase();
+      // Palabras clave que cubren lo viejo y lo nuevo
+      const keywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|bacon|doble|triple|simple|oklahoma|cebolla|royal|cuarto)/i;
+      
+      if(name && keywords.test(name)) return true;
+      if(it.category && typeof it.category === 'string' && it.category.toLowerCase().includes('burg')) return true;
+      return false;
+    }
+
+    function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    
+    // (Nota: 'money' ya existe arriba en tu código, usamos esa. Si no existiera, descomentar abajo)
+    // const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+
+
+    // --- 2. FUNCIÓN DE CARGA UNIFICADA (HACE LAS 2 CONSULTAS) ---
+    async function fetchUnifiedOrders(startObj, endObj){
+        // Preparamos rango para TEXTO (Pedidos nuevos)
+        // Formato YYYY-MM-DD para comparación alfabética en DB
+        const startStr = startObj.toISOString().split('T')[0]; 
+        const endStr   = endObj.toISOString().split('T')[0];
+
+        // Consulta 1: Busca Texto (Nuevos)
+        const p1 = db.collection('orders')
+            .where('createdAt', '>=', startStr)
+            .where('createdAt', '<', endStr)
+            .get();
+
+        // Consulta 2: Busca Timestamp (Viejos)
+        const p2 = db.collection('orders')
+            .where('createdAt', '>=', startObj)
+            .where('createdAt', '<', endObj)
+            .get();
+
+        // Ejecutamos ambas a la vez
+        const [snapStr, snapTime] = await Promise.all([p1, p2]);
+
+        // Unificamos en un Map para evitar duplicados (por si acaso)
+        const merged = new Map();
+
+        const processDoc = (doc) => {
+            const d = doc.data();
+            // Validamos que no sea cancelado
+            const st = (d.status || '').toString().toLowerCase();
+            if(!st.includes('cancel')) {
+                merged.set(doc.id, d);
+            }
+        };
+
+        snapStr.forEach(processDoc);
+        snapTime.forEach(processDoc);
+
+        return Array.from(merged.values());
+    }
+
+
+    // --- 3. LÓGICA DE LA TABLA ---
     async function loadBurgersByMonth(){
       const tbody = document.getElementById("bmBody"); 
       const totalEl = document.getElementById("bmTotal"); 
       const revenueEl = document.getElementById("bmRevenue");
+      const rangeEl = document.getElementById("bmRange");
       const err = document.getElementById("bmErr"); 
       
       if(err) err.style.display='none';
       if(!tbody) return;
 
-      tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando datos...</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando todo (viejos y nuevos)...</td></tr>`;
       totalEl.textContent = '—';
       revenueEl.textContent = '—';
 
@@ -734,34 +803,21 @@
         const ym = document.getElementById("burgMonth").value || new Date().toISOString().slice(0,7);
         const [year, month] = ym.split('-').map(Number);
 
-        const startStr = `${year}-${String(month).padStart(2,'0')}-01`;
-        
-        let nextM = month + 1;
-        let nextY = year;
-        if(nextM > 12) { nextM = 1; nextY++; }
-        const endStr = `${nextY}-${String(nextM).padStart(2,'0')}-01`;
+        // Definir rango exacto del mes
+        const start = new Date(year, month - 1, 1);
+        const end   = new Date(year, month, 1); // 1ro del mes siguiente
 
-        document.getElementById("bmRange").textContent = `Mes: ${month}/${year}`;
+        rangeEl.textContent = `Mes: ${month}/${year}`;
 
-        // BUSQUEDA POR TEXTO (Para coincidir con mostrador)
-        let q = db.collection('orders')
-          .where('createdAt', '>=', startStr)
-          .where('createdAt', '<',  endStr)
-          .orderBy('createdAt', 'asc');
-
-        const snap = await q.get();
+        // 🔥 TRAER DATOS MEZCLADOS
+        const orders = await fetchUnifiedOrders(start, end);
 
         const counter = new Map();
         let totalQty = 0;
         let totalRevenue = 0;
 
-        snap.forEach(doc => {
-            const o = doc.data();
-            const st = (o.status || "").toLowerCase();
-            if(st.includes("cancel")) return; 
-
+        orders.forEach(o => {
             const items = Array.isArray(o.items) ? o.items : [];
-
             items.forEach(it => {
                 const rawQty = it.qty || it.quantity || it.cantidad || 1;
                 const qty = Number(rawQty) || 1;
@@ -769,7 +825,8 @@
                 if(isBurgerItem(it)){
                     const name = (it.name || it.item?.name || 'Hamburguesa').toString().trim();
                     const key = name;
-
+                    
+                    // Precio aproximado de la línea
                     let lineTotal = (Number(it.price)||0) * qty;
                     
                     const prev = counter.get(key) || { qty:0, revenue:0 };
@@ -795,55 +852,52 @@
                 </tr>`;
             }).join('');
 
-        tbody.innerHTML = rows || `<tr><td colspan="4" class="muted">No se encontraron hamburguesas.</td></tr>`;
+        if(orders.length === 0){
+             tbody.innerHTML = `<tr><td colspan="4" class="muted">Sin datos para este mes.</td></tr>`;
+        } else if (totalQty === 0) {
+             tbody.innerHTML = `<tr><td colspan="4" class="muted">Hay pedidos, pero no son hamburguesas.</td></tr>`;
+        } else {
+             tbody.innerHTML = rows;
+        }
+
         totalEl.textContent = totalQty;
         revenueEl.textContent = money(totalRevenue);
 
       } catch(e){
         console.error(e);
-        tbody.innerHTML = `<tr><td colspan="4" class="muted">Error de carga.</td></tr>`;
-        if(err) { err.textContent = "Error consultando DB."; err.style.display='block'; }
+        tbody.innerHTML = `<tr><td colspan="4" class="muted">Error al cargar.</td></tr>`;
       }
     }
 
-    // --- 3. LOGICA DEL CALENDARIO (FIX TEXTO + ZONA HORARIA) ---
+
+    // --- 4. LÓGICA DEL CALENDARIO ---
     async function renderCalendar(monthStr){
         const grid = document.getElementById("calendarGrid");
-        const err = document.getElementById("calError");
         if(!grid) return;
-        
         grid.innerHTML = "";
-        if(err) err.style.display = "none";
+        
         if(!monthStr) return;
 
         const [y, m] = monthStr.split("-").map(Number);
         const daysInMonth = new Date(y, m, 0).getDate();
 
-        const startStr = `${y}-${String(m).padStart(2,'0')}-01`;
-        let nextM = m + 1; let nextY = y;
-        if(nextM > 12) { nextM = 1; nextY++; }
-        const endStr = `${nextY}-${String(nextM).padStart(2,'0')}-01`;
+        // Rango de fechas
+        const start = new Date(y, m - 1, 1);
+        const end   = new Date(y, m, 1); 
 
         const counts = Array(daysInMonth).fill(0);
         const totals = Array(daysInMonth).fill(0);
 
         try {
-            // Forzamos búsqueda por String en 'createdAt'
-            const snap = await db.collection("orders")
-              .where('createdAt', '>=', startStr)
-              .where('createdAt', '<', endStr)
-              .get();
+            // 🔥 TRAER DATOS MEZCLADOS
+            const orders = await fetchUnifiedOrders(start, end);
 
-            snap.forEach(doc => {
-                const data = doc.data();
+            orders.forEach(data => {
                 const dt = parseDateAny(data.createdAt); 
                 if(!dt) return;
 
-                const st = (data.status || '').toString().toLowerCase();
-                if(st.includes('cancel')) return;
-
-                // Verificamos mes correcto (timezone fix)
-                if(dt.getMonth() + 1 !== m) return; 
+                // Doble chequeo de mes (por zona horaria)
+                if(dt.getMonth() + 1 !== m) return;
 
                 const day = dt.getDate();
                 const idx = day - 1;
@@ -858,22 +912,22 @@
                             bCount += (Number(it.qty||it.quantity||1) || 1);
                         }
                     });
-                    if(bCount===0 && data.burgerCount) bCount = data.burgerCount;
+                    // Fallback para pedidos viejos que tenian burgerCount guardado directo
+                    if(bCount===0 && typeof data.burgerCount === 'number') bCount = data.burgerCount;
                     
                     counts[idx] += bCount;
                 }
             });
 
             // Renderizar Grilla
-            const firstDate = new Date(y, m-1, 1);
-            const startDay = firstDate.getDay(); 
+            const startDay = start.getDay(); // 0=Domingo
             
+            // Espacios vacíos
             for(let i=0; i<startDay; i++){
                 grid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-empty"></div>`);
             }
 
             const maxVal = Math.max(...counts, 1);
-
             function colorIntensity(v, max){
                 if(v===0) return '#fff';
                 const r = v/max;
@@ -898,17 +952,15 @@
             }
 
         } catch(e) {
-            console.error(e);
-            if(err) { err.textContent = "Error cargando calendario."; err.style.display="block"; }
+            console.error("Error calendario:", e);
         }
     }
 
-    // --- 4. INICIALIZACIÓN ---
+
+    // --- 5. INICIALIZACIÓN ---
     document.addEventListener('DOMContentLoaded', ()=>{
-        // Init Month Selectors
+        // Init Tabla
         const mTable = document.getElementById("burgMonth");
-        const mCal   = document.getElementById("calMonth");
-        
         const now = new Date();
         const currentYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
 
@@ -924,6 +976,8 @@
             loadTable();
         }
 
+        // Init Calendario
+        const mCal = document.getElementById("calMonth");
         if(mCal) {
             if(!mCal.value) mCal.value = currentYM;
 
@@ -942,6 +996,7 @@
             };
             document.getElementById("calGo").onclick = loadCal;
             
+            // Delay para asegurar que la conexión DB esté lista
             setTimeout(loadCal, 500);
         }
     });
