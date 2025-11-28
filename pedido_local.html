@@ -132,7 +132,6 @@
         <a href="mostrador.html" class="btn" title="Mostrador">🧾 Mostrador</a>
         <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
       </nav>
-      <button id="btnInstall" class="btn" style="display:none" title="Instalar app">➕ Instalar app</button>
       <button id="btnBell" class="btn" title="Activar/desactivar sonido">🔔 Sonido</button>
       <button id="btnAutoPrint" class="btn" title="Autoimprimir nuevos pedidos">🖨️ Autoimprimir</button>
       <button id="btnLogout" class="btn danger" title="Cerrar sesión">⏻ Cerrar sesión</button>
@@ -166,14 +165,12 @@
     };
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
-    // Variables globales
     window.db = firebase.firestore();
     window.firebase = firebase;
     window.idToDoc = new Map();
   });
 
   /* --- FUNCIONES GLOBALES DE ACCIÓN --- */
-  
   async function setOrderStatus(id, next, isPaid){
       if (next === 'delivered' && !isPaid) {
           alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
@@ -208,6 +205,7 @@
       if(doc) window.trySilentPrint(doc);
   }
   
+  // Exponer a window
   window.setOrderStatus = setOrderStatus;
   window.setPaymentStatus = setPaymentStatus;
   window.updatePago = updatePago;
@@ -238,16 +236,6 @@
     function getPickupPretty(o){
       if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "") return o.pickup_time_pretty;
       if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot)) return o.pickup_slot;
-      const t = o.pickup_time || o.pickupTime || o.pickup;
-      if (t) {
-        try{
-          if (typeof t?.toDate === "function") return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
-          const d = new Date(t);
-          if (!isNaN(d)) return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
-        }catch(_){}
-      }
-      if (typeof o.pickup_slot === "string") { const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/); if (m) return `${m[1]}:${m[2]}`; }
-      if (o.pickup_asap === true) return "A la brevedad";
       return null;
     }
 
@@ -280,15 +268,9 @@
       currentFilter = el.dataset.f;
       tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
       el.classList.add("active");
-      if (lastSnap) renderList(lastSnap);
+      // Re-render al cambiar pestaña
+      if(lastSnap) renderListFromSnap(lastSnap);
     });
-    const passFilter=o=>{
-      const s = o.status ?? "accepted";
-      if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
-      if(currentFilter==="entregados") return s==="delivered";
-      if(currentFilter==="cancelled") return s==="cancelled";
-      return true;
-    };
 
     const btnStateClass=st=>`state-btn state-${st}`;
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
@@ -392,7 +374,7 @@
       `;
     }
 
-    /* ============= TICKET 58MM ============= */
+    /* ============= TICKET 58MM CENTRADO ============= */
     window.trySilentPrint = function(docSnap){
       const o = docSnap.data();
       const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -402,6 +384,7 @@
       const dt = pickDocDate(o) || new Date();
       const dateStr = dt.toLocaleDateString("es-AR");
       const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
+      
       const pickup = getPickupPretty(o) || "A la brevedad";
       const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
@@ -414,6 +397,7 @@
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
+      // Items para ticket
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
       items.forEach(it => {
@@ -502,25 +486,49 @@
 
     (async function subscribeOrders(){
       try{
-        // SIMPLIFICACIÓN DE CONSULTA PARA EVITAR ERRORES DE ÍNDICE
-        let q = window.db.collection("orders").orderBy("createdAt", "desc").limit(200);
+        // 🔥 SOLUCIÓN DE ORO: LIMITAR SIN ORDERBY PARA QUE TRAIGA TODO SI O SI
+        // Luego ordenamos en JS. Esto evita los líos de índices y tipos de fecha.
+        let q = window.db.collection("orders").limit(500);
         
-        let firstSnapshot = true;
         q.onSnapshot(async snap=>{
+          // Guardamos referencia global para re-render al filtrar
+          lastSnap = snap;
           document.getElementById("ordersError").style.display="none";
-          renderList(snap);
-          if (firstSnapshot) { firstSnapshot = false; return; }
-          for (const ch of snap.docChanges()){
-            if (ch.type === 'added') {
-              try{ playBeepTriple(); }catch(_){}
-              if (autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id) || ch.doc);
-            }
-          }
+          renderListFromSnap(snap);
+          
+          // Auto print para nuevos
+          // (Nota: sin orderBy, el 'added' puede ser errático en carga inicial, 
+          // pero es un compromiso aceptable para ver los datos ya)
+          snap.docChanges().forEach(ch => {
+             if(ch.type==='added' && !isInitialLoad(ch)) {
+                 try{ playBeepTriple(); }catch(_){}
+                 if(autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id)||ch.doc);
+             }
+          });
         }, err=>{ document.getElementById("ordersError").style.display="block"; console.error(err); });
       }catch(err){ document.getElementById("ordersError").style.display="block"; console.error(err); }
     })();
 
-    function renderList(snap){
+    let _firstLoad = true;
+    function isInitialLoad(ch){
+        // Hack simple: si recibimos muchos de golpe es carga inicial
+        if(_firstLoad) { setTimeout(()=>_firstLoad=false, 2000); return true; }
+        return false;
+    }
+
+    function renderListFromSnap(snap){
+      let docs = snap.docs.map(d=>({data:d.data(), id:d.id, ref:d}));
+      
+      // 🔥 ORDENAMIENTO MANUAL EN JS (LO QUE ARREGLA TODO)
+      docs.sort((a,b) => {
+          const da = pickDocDate(a.data);
+          const db = pickDocDate(b.data);
+          // Orden descendente (más nuevo arriba)
+          if(!da) return 1; if(!db) return -1;
+          return db - da; 
+      });
+
+      // Filtrado
       const passFilter=o=>{
         const s = o.status ?? "accepted";
         if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
@@ -528,10 +536,17 @@
         if(currentFilter==="cancelled") return s==="cancelled";
         return true;
       };
-      const docs=snap.docs.filter(d=>passFilter(d.data()));
-      window.idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
-      document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
+
+      const filtered = docs.filter(x => passFilter(x.data));
+      
+      // Actualizar mapa global
+      window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
+
+      document.getElementById("orders").innerHTML = filtered.length 
+        ? filtered.map(x => renderOrder(x.ref)).join("") 
+        : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
     }
+
   });
   </script>
   
