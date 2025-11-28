@@ -72,36 +72,19 @@
     .chipf.active{background:var(--primary);color:#fff;border-color:var(--primary)}
     
     /* Order Card */
-    .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:20px;margin:16px 0; border:1px solid transparent}
+    .order{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;margin:14px 0}
     .order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-    .order-title{font-weight:800; font-size: 1.1rem;}
+    .order-title{font-weight:800}
     .muted{color:var(--muted)}
     .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-    .chip{background:#f0f0f0;border:1px solid #ddd;color:#333;border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600}
+    .chip{background:#f3f3f3;border:1px solid var(--ring);color:#111;border-radius:999px;padding:6px 10px;font-size:13px}
     .right-total{font-weight:800;font-size:18px;white-space:nowrap}
-    
-    /* ITEMS CATEGORIZADOS */
-    .cat-section { margin-top: 15px; border-top: 1px solid #f0f0f0; padding-top: 10px; }
-    .cat-header {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #888;
-        margin-bottom: 8px;
-        font-weight: 800;
-        display: flex; align-items: center; gap: 6px;
-    }
-    
-    .item-row { display: flex; gap: 12px; margin-bottom: 12px; font-size: 15px; align-items: flex-start; }
-    .item-qty { font-weight: 800; font-size: 16px; color: var(--primary); min-width: 24px; }
-    .item-det { flex: 1; }
-    .item-name { font-weight: 700; color: #111; line-height: 1.2; }
-    
-    .item-extras { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
-    .extra-line { font-size: 13px; color: #555; display: flex; align-items: center; gap: 6px; }
-    .note-line { color: #d32f2f; font-style: italic; font-weight: 600; font-size: 13px; margin-top: 4px; }
+    .items{margin-top:10px}
+    .item{margin:8px 0 6px 0}
+    .item .sub{color:#111;font-size:13px;margin-top:3px}
+    .divider{height:1px;background:#efefef;margin:10px 0}
+    .err{color:#b00020;font-weight:600}
 
-    /* Botones Estado */
     .stateBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
     .state-btn{border:2px solid #dcdcdc;background:#fff;color:#111;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;min-width:160px;text-align:center}
     .state-btn.on{color:#fff;border-color:var(--primary);background:var(--primary)}
@@ -193,7 +176,7 @@
       return `#${doc.id.slice(-5).toUpperCase()}`;
     }
     function getPickupPretty(o){
-      if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "") return o.pickup_time_pretty;
+      if (o.pickup_time_pretty) return o.pickup_time_pretty;
       if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot)) return o.pickup_slot;
       const t = o.pickup_time || o.pickupTime || o.pickup;
       if (t) {
@@ -254,84 +237,42 @@
       const items = Array.isArray(o.items)?o.items:[];
       return items.reduce((t,it)=>{
         const qty = it.qty||1; const base = (it.price||0)*qty;
-        return t + base; 
+        const patty = (it.extras?.patty||0)*(2500)*qty;
+        const cheddar = (it.extras?.cheddar||0)*(300)*qty; 
+        return t + base + patty + cheddar;
       },0);
     };
     const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ========== RENDER CATEGORIZADO (LIMPIO) ========== */
     function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
       const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
       const items = Array.isArray(o.items) ? o.items : [];
 
-      const cats = { burgers:[], fries:[], drinks:[], others:[] };
+      const itemsHTML = items.map(it=>{
+        const qty = it.qty || it.quantity || 1;
+        const name = it.name || "Item";
+        let extras = [];
+        if(it.fries && it.fries !== 'sin_papas') extras.push(`🍟 ${it.fries}`);
+        if(it.extras?.patty) extras.push(`+${it.extras.patty} med`);
+        if(it.extras?.cheddar) extras.push(`+${it.extras.cheddar} che`);
+        
+        const extrasLine = extras.length ? `<div class="sub">${extras.join(" · ")}</div>` : "";
+        const notesLine = it.notes ? `<div class="sub">📝 ${it.notes}</div>` : "";
 
-      items.forEach(it => {
-          const name = (it.name||"").toLowerCase();
-          const type = (it.type||"").toLowerCase();
-          const qty  = it.qty || it.quantity || 1;
-          
-          if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
-              cats.burgers.push(it);
-              // EXTRAER PAPAS
-              if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty }); // SIN REFERENCIA DE ORIGEN
-              }
-          } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
-              cats.fries.push(it);
-          } else if (type === 'drink' || name.includes('coca') || name.includes('agua') || name.includes('cerveza') || name.includes('sprite')) {
-              cats.drinks.push(it);
-          } else {
-              cats.others.push(it);
-          }
-      });
-
-      const renderSection = (title, list, icon) => {
-          if(!list.length) return "";
-          const rows = list.map(it => {
-              const qty = it.qty || it.quantity || 1;
-              const name = it.name || "Ítem";
-              let extras = [];
-              if(it.extras?.patty) extras.push(`🥩 +${it.extras.patty} carne`);
-              if(it.extras?.cheddar) extras.push(`🧀 +${it.extras.cheddar} cheddar`);
-              
-              const extrasHTML = extras.length 
-                ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` 
-                : "";
-                
-              const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
-
-              return `
-                <div class="item-row">
-                   <div class="item-qty">${qty}</div>
-                   <div class="item-det">
-                      <div class="item-name">${name}</div>
-                      ${extrasHTML}
-                      ${notesHTML}
-                   </div>
-                </div>
-              `;
-          }).join("");
-
-          return `
-            <div class="cat-section">
-                <div class="cat-header">${icon} ${title}</div>
-                ${rows}
-            </div>
-          `;
-      };
-
-      const burgersHTML = renderSection("HAMBURGUESAS", cats.burgers, "🍔");
-      const sidesHTML   = renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟");
-      const drinksHTML  = renderSection("BEBIDAS", cats.drinks, "🥤");
-      const othersHTML  = renderSection("OTROS", cats.others, "🔸");
-
-      const fullItemsHTML = burgersHTML + sidesHTML + drinksHTML + othersHTML;
+        return `
+          <div class="item">
+            <strong>${qty}× ${name}</strong>
+            ${extrasLine}
+            ${notesLine}
+          </div>
+        `;
+      }).join("");
 
       const pickupPretty = getPickupPretty(o);
-      const srcChip = o.source === "mostrador" ? `<span class="chip" style="background:#e3f2fd;color:#0d47a1">🖥️ Mostrador</span>` : "";
+      const telChip = o.telefono ? `<span class="chip">Tel: ${o.telefono}</span>` : "";
+      const srcChip = o.source ? `<span class="chip">Origen: ${o.source}</span>` : "";
       const noteGeneral = (o.comment || o.notes || "").toString().trim() ? `<span class="chip">📝 ${o.comment || o.notes}</span>` : "";
       const st = o.status ?? "accepted";
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
@@ -342,15 +283,15 @@
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
       const payLine = `
         <div class="pay-line">
-          <select class="btn" data-select-pago style="min-width:140px">
+          <select class="btn" data-select-pago style="min-width:200px">
             <option value="" disabled ${(!o.pago)?'selected':''}>Método...</option>
             <option value="efectivo" ${o.pago==="efectivo"?"selected":""}>Efectivo</option>
             <option value="debito" ${o.pago==="debito"?"selected":""}>Debito</option>
-            <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>MP</option>
-            <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transf</option>
+            <option value="mercado_pago" ${o.pago==="mercado_pago"?"selected":""}>Mercado Pago</option>
+            <option value="transferencia" ${o.pago==="transferencia"?"selected":""}>Transferencia</option>
           </select>
-          <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
-          <button class="btn" data-print>🖨</button>
+          <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}">${isPaid ? 'PAGADO ✓' : 'PENDIENTE DE PAGO'}</button>
+          <button class="btn" data-print>🖨 Imprimir</button>
         </div>`;
 
       return `
@@ -361,10 +302,11 @@
               <div class="muted">N° interno: ${o.orderNumber || '—'}</div>
               <div class="muted">${dtText}</div>
               <div class="chips">
-                ${srcChip}
+                <span class="chip">Pedido: ${displayOrderNumber(doc)}</span>
+                <span class="chip">Estado: ${st}</span>
                 <span class="chip">Retiro: ${o.entrega||"take_away"}</span>
-                <span class="chip">⏰ ${pickupPretty || "—"}</span>
-                ${noteGeneral}
+                <span class="chip">Horario: ${pickupPretty || "—"}</span>
+                ${telChip}${srcChip}${noteGeneral}
               </div>
               ${stateBtns}
             </div>
@@ -373,13 +315,14 @@
               ${payLine}
             </div>
           </div>
-          <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
+          <div class="divider"></div>
+          <div class="items">${itemsHTML}</div>
         </div>
       `;
     }
 
     /* ===========================================================
-       TICKET 58MM LIMPIO (SIN REFERENCIAS)
+       TICKET 58MM ESTILIZADO ORIGINAL + LÓGICA NUEVA
        =========================================================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
@@ -405,52 +348,19 @@
       const pagoReal = o.pago || "";
       const pagoShow = PAGO_MAP[pagoReal] || escapeHtml(pagoReal) || "";
 
-      // SEPARAR ITEMS
       const items = Array.isArray(o.items) ? o.items : [];
-      const cats = { burgers:[], fries:[], drinks:[], others:[] };
-
-      items.forEach(it => {
-          const name = (it.name||"").toLowerCase();
-          const type = (it.type||"").toLowerCase();
-          const qty  = it.qty || it.quantity || 1;
-          
-          if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
-              cats.burgers.push(it);
-              // EXTRAER PAPAS Y MANDARLAS A SU SECCIÓN
-              if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty }); // SIN REFERENCIA
-              }
-          } else if (type === 'side' || name.includes('papas')) {
-              cats.fries.push(it);
-          } else if (type === 'drink' || name.includes('coca')) {
-              cats.drinks.push(it);
-          } else {
-              cats.others.push(it);
-          }
-      });
-
-      const renderTktSection = (title, list) => {
-          if(!list.length) return "";
-          const rows = list.map(it => {
-              const qty = it.qty||1;
-              let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
-              // Extras (solo si no es papa, para evitar duplicar info)
-              if(!title.includes("PAPAS")) {
-                  if(it.extras?.patty) h += `<div class="sub">• +${it.extras.patty} carne</div>`;
-                  if(it.extras?.cheddar) h += `<div class="sub">• +${it.extras.cheddar} cheddar</div>`;
-              }
-              if(it.notes) h += `<div class="sub">📝 ${escapeHtml(it.notes)}</div>`;
-              h += `<div class="sep"></div>`;
-              return h;
-          }).join("");
-          return `<div class="blk"><div class="lbl" style="border-bottom:1px solid #000; display:inline-block; margin-bottom:4px; margin-top:8px">${title}</div></div>${rows}`;
-      };
-
-      const htmlBody = 
-        renderTktSection("HAMBURGUESAS", cats.burgers) +
-        renderTktSection("PAPAS", cats.fries) +
-        renderTktSection("BEBIDAS", cats.drinks) +
-        renderTktSection("OTROS", cats.others);
+      const lines = items.map(it=>{
+        const qty = it.qty || it.quantity || 1;
+        let extras = [];
+        if(it.fries && it.fries !== "sin_papas") extras.push(it.fries);
+        if(it.extras?.patty) extras.push(`+${it.extras.patty} carne`);
+        if(it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
+        let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
+        if(extras.length) h += `<div class="sub">• ${escapeHtml(extras.join(" + "))}</div>`;
+        if(it.notes) h += `<div class="sub">📝 ${escapeHtml(it.notes)}</div>`;
+        h += `<div class="sep"></div>`;
+        return h;
+      }).join("");
 
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
@@ -479,7 +389,7 @@
           ${pickupBlockLarge}
           ${(pagoShow)?`<div class="blk"><div class="lbl">PAGO</div><div>${pagoShow}</div></div>`:""}
           <div class="hr"></div>
-          ${htmlBody}
+          ${lines}
           <div class="hr"></div>
           <div class="row"><div class="l">TOTAL</div><div>${moneyT(o.total||0)}</div></div>
           <div class="foot">${dateStr} — ${timeStr}</div>
