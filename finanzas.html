@@ -408,49 +408,37 @@
   try{ firebase.initializeApp(firebaseConfig);}catch(e){}
   const db = firebase.firestore();
 
-  // Helpers
-  const $ = s=>document.querySelector(s);
-  const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-
-  function pickDocDate(obj){
-    const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
-    for (const k of cand){
-      const v = obj[k];
-      if (v?.toDate) return v.toDate();
-      if (typeof v === 'number') return new Date(v);
-      if (typeof v === 'string'){ const d=new Date(v); if(!isNaN(d)) return d; }
+  <script>
+  // Helper para fechas mixtas (reutilizable)
+  function parseDateKPI(val){
+    if(!val) return null;
+    if(val instanceof Date) return val;
+    if(val.toDate && typeof val.toDate === 'function') return val.toDate();
+    if(typeof val === 'string') {
+        const d = new Date(val);
+        if(!isNaN(d.getTime())) return d;
     }
+    if(typeof val === 'number') return new Date(val);
     return null;
   }
-  function monthKey(){
-    const d = $("#monthPicker").value ? new Date($("#monthPicker").value+'-01T00:00:00') : new Date();
-    return {y:d.getFullYear(), m:d.getMonth()+1, days:new Date(d.getFullYear(), d.getMonth()+1, 0).getDate()};
-  }
-  function dateRange(){
-    const from = $("#fromDate").value ? new Date($("#fromDate").value+'T00:00:00') : null;
-    const to   = $("#toDate").value   ? new Date($("#toDate").value  +'T23:59:59') : null;
-    return {from, to};
-  }
-  (function initMonth(){
-    const d = new Date(); const m = String(d.getMonth()+1).padStart(2,'0');
-    try{
-      $("#monthPicker").value = `${d.getFullYear()}-${m}`;
-      $("#burgMonth").value   = `${d.getFullYear()}-${m}`;
-    }catch(_){}
-  })();
 
-  // Heatmap utils
+  // Helpers de Heatmap
   function colorFor(val, max){
-    if(max<=0) return '#e8f5e9';
+    if(max<=0) return '#ffffff'; // Blanco si es 0
     const r = val/max;
-    if (r < 0.25) return '#e8f5e9';
-    if (r < 0.50) return '#a5d6a7';
-    if (r < 0.75) return '#66bb6a';
+    // Misma paleta de verdes que el calendario nuevo
+    if (r < 0.20) return '#dcedc8'; 
+    if (r < 0.40) return '#aed581';
+    if (r < 0.60) return '#81c784';
+    if (r < 0.80) return '#4caf50';
     return '#2e7d32';
   }
+
   function renderHeatmapWeekByDay(matrix, colLabels){
     const host = document.getElementById("heatmap");
+    if(!host) return;
     host.innerHTML = '';
+    // Ajustar columnas
     host.style.gridTemplateColumns = `90px repeat(${colLabels.length}, 1fr)`;
 
     host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head"></div>`);
@@ -459,73 +447,23 @@
     }
 
     const weekNames = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-
     let max=0; matrix.forEach(row=> row.forEach(v=>{ if(v>max) max=v; }));
 
     for(let r=0;r<7;r++){
       host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-day">${weekNames[r]}</div>`);
       for(let c=0;c<colLabels.length;c++){
         const v = matrix[r][c] || 0;
-        const bg = colorFor(v, max);
+        const bg = v > 0 ? colorFor(v, max) : '#fafafa';
         host.insertAdjacentHTML('beforeend', `<div class="hm-cell" title="${v} pedidos" style="background:${bg}">${v? v : ''}</div>`);
       }
     }
   }
 
-  // Charts
-  let ordersChart, payChart, statusChart;
-  function ensureOrdersChart(labels, orders, revenue){
-    const ctx = document.getElementById("ordersChart").getContext("2d");
-    if(ordersChart) ordersChart.destroy();
-    ordersChart = new Chart(ctx,{
-      type:'bar',
-      data:{ labels,
-        datasets:[
-          {type:'bar',label:'Pedidos',data:orders,backgroundColor:'rgba(98,90,69,.35)',borderColor:'#625A45',borderWidth:1,yAxisID:'y'},
-          {type:'line',label:'Ingresos ($)',data:revenue,borderColor:'#625A45',backgroundColor:'rgba(98,90,69,.10)',borderWidth:2,tension:.25,yAxisID:'y2'}
-        ]
-      },
-      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-        scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
-    });
-  }
-  const PAY_COLOR_MAP = {efectivo:'#625A45', mercado_pago:'#1E88E5', credito:'#8E24AA', debito:'#43A047', transferencia:'#26A69A', otro:'#FFA000'};
-  const STATUS_COLOR_MAP = {accepted:'#FBC02D', pending_payment:'#FFA000', in_prep:'#FB8C00', ready:'#00ACC1', delivered:'#2E7D32', cancelled:'#D32F2F'};
-  const colorsFrom = (labels, map) => labels.map(l => map[l] || '#9E9E9E');
-  function ensurePayChart(labels, vals){
-    const ctx = document.getElementById("payChart").getContext("2d");
-    if(payChart) payChart.destroy();
-    payChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, PAY_COLOR_MAP), borderColor: colorsFrom(labels, PAY_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
-      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
-    });
-  }
-  function ensureStatusChart(labels, vals){
-    const ctx = document.getElementById("statusChart").getContext("2d");
-    if(statusChart) statusChart.destroy();
-    statusChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP), borderColor: colorsFrom(labels, STATUS_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
-      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
-    });
-  }
-
-  /* ============== HEATMAP POR HORAS (19 → 00) ============== */
-  const HOUR_START = 19;  // inclusive
-  const HOUR_END   = 24;  // exclusivo (24 ~ 00)
+  /* ============== HEATMAP POR HORAS (19–00) ============== */
+  const HOUR_START = 19; 
+  const HOUR_END   = 24; 
   const HOUR_COUNT = HOUR_END - HOUR_START;
 
-  function buildDateLabels(from, to){
-    const labels=[], keys=[];
-    if(!from || !to) return {labels, keys};
-    const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-    while(d <= to){
-      const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
-      labels.push(day);
-      keys.push(`${y}-${m}-${day}`);
-      d.setDate(d.getDate()+1);
-    }
-    return {labels, keys};
-  }
   function renderHourHeatmap(matrix, colLabels){
     const host=document.getElementById("hourmap");
     if(!host) return;
@@ -545,189 +483,235 @@
       host.insertAdjacentHTML('beforeend',`<div class="hm-cell hm-day">${label}</div>`);
       for(let c=0;c<colLabels.length;c++){
         const v=matrix[hr-HOUR_START][c]||0;
-        const bg=colorFor(v,max);
+        const bg = v > 0 ? colorFor(v, max) : '#fafafa';
         host.insertAdjacentHTML('beforeend',`<div class="hm-cell" title="${v} pedidos" style="background:${bg}">${v? v:''}</div>`);
       }
     }
   }
-  function summarizeHourMatrix(matrix, daysCount){
+
+  function printHourSummary(matrix, colLabels){
     const cols = matrix[0]?.length || 0;
-    const effectiveCols = Math.max(1, daysCount || cols);
+    const effectiveCols = Math.max(1, colLabels.length || cols);
     const avgs = matrix.map(row=>{
       const sum = row.reduce((a,b)=>a+(b||0),0);
       return sum / effectiveCols;
     });
     let peakIdx = 0; let peakVal = -1;
     avgs.forEach((v,i)=>{ if(v>peakVal){ peakVal=v; peakIdx=i; } });
-    return {avgs, peakHour: (HOUR_START + peakIdx), peakVal};
-  }
-  function printHourSummary(matrix, colLabels){
-    const {avgs, peakHour, peakVal} = summarizeHourMatrix(matrix, colLabels.length);
+    
     const fmtHour = h => `${String(h).padStart(2,'0')}:00`;
     const avgText = avgs.map((v,i)=> `${fmtHour(HOUR_START+i)}: ${v.toFixed(2)}`).join(' · ');
-    const peakText = `Hora pico: <strong>${fmtHour(peakHour)}</strong> (prom. ${peakVal.toFixed(2)} pedidos)`;
+    const peakText = `Hora pico: <strong>${fmtHour(HOUR_START + peakIdx)}</strong> (prom. ${peakVal.toFixed(2)} pedidos)`;
+    
     const el = document.getElementById('hourSummary');
     if(el) el.innerHTML = `${peakText}<br><span class="muted">${avgText}</span>`;
   }
-  /* ============== /HEATMAP POR HORAS ============== */
 
-  // KPI + Proyección + Heatmaps
+  // --- CHART.JS SETUP ---
+  let ordersChart, payChart, statusChart;
+  const PAY_COLOR_MAP = {efectivo:'#625A45', mercado_pago:'#009ee3', credito:'#8E24AA', debito:'#43A047', transferencia:'#26A69A', otro:'#FFA000'};
+  const STATUS_COLOR_MAP = {accepted:'#FBC02D', pending_payment:'#FFA000', in_prep:'#FB8C00', ready:'#00ACC1', delivered:'#2E7D32', cancelled:'#D32F2F'};
+  const colorsFrom = (labels, map) => labels.map(l => map[l] || '#9E9E9E');
+
+  function ensureOrdersChart(labels, orders, revenue){
+    const ctx = document.getElementById("ordersChart").getContext("2d");
+    if(ordersChart) ordersChart.destroy();
+    ordersChart = new Chart(ctx,{
+      type:'bar',
+      data:{ labels,
+        datasets:[
+          {type:'bar',label:'Pedidos',data:orders,backgroundColor:'rgba(98,90,69,.65)',borderColor:'#625A45',borderWidth:1,yAxisID:'y'},
+          {type:'line',label:'Ingresos ($)',data:revenue,borderColor:'#2e7d32',backgroundColor:'rgba(46, 125, 50, 0.1)',borderWidth:2,tension:.25,yAxisID:'y2', pointRadius:3}
+        ]
+      },
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
+    });
+  }
+  function ensurePayChart(labels, vals){
+    const ctx = document.getElementById("payChart").getContext("2d");
+    if(payChart) payChart.destroy();
+    payChart = new Chart(ctx,{ type:'doughnut',
+      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, PAY_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
+    });
+  }
+  function ensureStatusChart(labels, vals){
+    const ctx = document.getElementById("statusChart").getContext("2d");
+    if(statusChart) statusChart.destroy();
+    statusChart = new Chart(ctx,{ type:'doughnut',
+      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
+    });
+  }
+
+  // --- CARGA DE DATOS UNIFICADA (KPI) ---
   async function loadKPI(){
-    const err = $("#kpiError"); err.style.display='none'; err.textContent='';
+    const err = document.getElementById("kpiError"); 
+    if(err) { err.style.display='none'; err.textContent=''; }
+
     try{
-      const probe = await db.collection('orders').limit(1).get();
-      let dateField = null;
-      if (!probe.empty){
-        const d = probe.docs[0].data();
-        for (const k of ['createdAt','created_at','timestamp','date','fecha','time']){ if (d[k]!=null){ dateField=k; break; } }
-      }
-      let q = db.collection('orders');
-      if (dateField) q = q.orderBy(dateField,'desc'); else q = q.orderBy(firebase.firestore.FieldPath.documentId());
-      const snap = await q.limit(2000).get();
+      // 1. Determinar Fechas
+      const fromInp = document.getElementById("fromDate").value;
+      const toInp   = document.getElementById("toDate").value;
+      const monthInp = document.getElementById("monthPicker").value;
+      
+      let start, end;
+      let isRange = false;
 
-      const {from,to} = dateRange();
-      const useRange = !!(from || to);
-
-      const mk = monthKey();
-      const {y,m,days} = mk;
-      const labels = useRange ? [] : Array.from({length:days},(_,i)=>`${i+1}`);
-      const dayOrders = useRange ? [] : Array(days).fill(0);
-      const dayRevenue = useRange ? [] : Array(days).fill(0);
-
-      const hmMatrix = Array.from({length:7}, ()=> Array(useRange?0:days).fill(0));
-      const hmLabels = useRange ? [] : Array.from({length:days}, (_,i)=> String(i+1).padStart(2,'0'));
-
-      // === estructuras del mapa horario (19→00)
-      let hourColLabels=[], dateKeyIndex=null;
-      let hourMatrix;
-
-      if(!useRange){
-        hourColLabels = Array.from({length:days},(_,i)=>String(i+1).padStart(2,'0'));
-        hourMatrix = Array.from({length:HOUR_COUNT},()=>Array(days).fill(0));
-      }else{
-        const fromClean=from?new Date(from.getFullYear(),from.getMonth(),from.getDate()):null;
-        const toClean=to?new Date(to.getFullYear(),to.getMonth(),to.getDate()):null;
-        const built=buildDateLabels(fromClean,toClean);
-        hourColLabels=built.labels;
-        dateKeyIndex=new Map(built.keys.map((k,i)=>[k,i]));
-        hourMatrix=Array.from({length:HOUR_COUNT},()=>Array(hourColLabels.length).fill(0));
+      if(fromInp && toInp){
+         isRange = true;
+         start = new Date(fromInp + 'T00:00:00');
+         end   = new Date(toInp   + 'T23:59:59');
+      } else {
+         const d = monthInp ? new Date(monthInp + '-01T00:00:00') : new Date();
+         // Primer día del mes
+         start = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
+         // Primer día del mes siguiente
+         end   = new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0);
       }
 
+      // 2. Consulta DOBLE (Texto y Timestamp)
+      const startStr = start.toISOString().split('T')[0];
+      const endStr   = end.toISOString().split('T')[0];
+
+      const p1 = db.collection('orders').where('createdAt', '>=', startStr).where('createdAt', '<', endStr).get();
+      const p2 = db.collection('orders').where('createdAt', '>=', start).where('createdAt', '<', end).get();
+
+      const [snapStr, snapTime] = await Promise.all([p1, p2]);
+
+      // 3. Unificar resultados
+      const mergedMap = new Map();
+      const process = (doc) => { mergedMap.set(doc.id, doc.data()); };
+      snapStr.forEach(process);
+      snapTime.forEach(process);
+
+      // 4. Procesar Datos
       let count=0, revenue=0, pendingTotal=0;
       const payCount = new Map();
       const statusCount = new Map();
 
-      const inMonth = (d)=> d.getFullYear()===y && (d.getMonth()+1)===m;
+      // Arrays para gráficos
+      // Si es rango, no mostramos días específicos en las barras por ahora o simplificamos
+      // Si es mes, mostramos días del 1 al 31
+      const daysInMonth = new Date(start.getFullYear(), start.getMonth()+1, 0).getDate();
+      const labels = isRange ? [] : Array.from({length:daysInMonth},(_,i)=>`${i+1}`);
+      const dayOrders = Array(daysInMonth).fill(0);
+      const dayRevenue = Array(daysInMonth).fill(0);
 
-      snap.forEach(doc=>{
-        const data=doc.data();
-        const dt = pickDocDate(data); if(!dt) return;
+      const hmMatrix = Array.from({length:7}, ()=> Array(isRange?0:daysInMonth).fill(0));
+      // Heatmap Horas
+      const hourMatrix = Array.from({length:HOUR_COUNT},()=>Array(isRange?0:daysInMonth).fill(0));
+      const hourColLabels = isRange ? [] : Array.from({length:daysInMonth},(_,i)=>String(i+1).padStart(2,'0'));
 
-        if(useRange){
-          if (from && dt<from) return;
-          if (to   && dt>to)   return;
-        }else{
-          if (!inMonth(dt)) return;
-        }
+      mergedMap.forEach(d => {
+         const dt = parseDateKPI(d.createdAt);
+         if(!dt) return;
+         
+         // Filtro extra de fecha (por zona horaria del string)
+         if(dt < start || dt >= end) return;
 
-        const tot = (typeof data.total==="number") ? data.total : 0;
-        count++; revenue += tot;
+         const tot = Number(d.total || d.rawTotal || 0);
+         count++;
+         revenue += tot;
 
-        const paid = (data.payment_status==='paid') || !!data.paid;
-        if (!paid) pendingTotal += tot;
+         // Pago
+         const paid = (d.payment_status==='paid') || !!d.paid;
+         if (!paid && d.status !== 'cancelled') pendingTotal += tot;
 
-        const p = (data.pago||'otro'); payCount.set(p, (payCount.get(p)||0)+1);
-        const st= (data.status||'accepted'); statusCount.set(st, (statusCount.get(st)||0)+1);
+         const pMethod = (d.pago || d.payment_method || 'otro');
+         payCount.set(pMethod, (payCount.get(pMethod)||0)+1);
 
-        if(!useRange){
-          const dayIdx = dt.getDate()-1;
-          const weekRow= dt.getDay();
-          if(dayIdx>=0 && dayIdx<days){
-            dayOrders[dayIdx]  += 1;
-            dayRevenue[dayIdx] += tot;
-            hmMatrix[weekRow][dayIdx] = (hmMatrix[weekRow][dayIdx]||0)+1;
-          }
-        }
+         const st = (d.status || 'accepted');
+         statusCount.set(st, (statusCount.get(st)||0)+1);
 
-        // === sumar al mapa horario si está entre 19 y 23 (00 es 24 excluido)
-        const hr = dt.getHours();
-        if(hr>=HOUR_START && hr<HOUR_END){
-          if(!useRange){
-            if (dt.getFullYear()===y && (dt.getMonth()+1)===m){
-              const c = dt.getDate()-1;
-              if(c>=0 && c<days) hourMatrix[hr-HOUR_START][c] += 1;
+         // Llenar Arrays por día (solo si es vista mensual para no complicar el eje X)
+         if(!isRange){
+            const dayIdx = dt.getDate() - 1;
+            if(dayIdx >= 0 && dayIdx < daysInMonth){
+               dayOrders[dayIdx]++;
+               dayRevenue[dayIdx] += tot;
+               
+               // Heatmap Semanal
+               const weekRow = dt.getDay(); // 0=Dom
+               hmMatrix[weekRow][dayIdx]++;
+
+               // Heatmap Horario
+               const hr = dt.getHours();
+               if(hr >= HOUR_START && hr < HOUR_END){
+                 hourMatrix[hr - HOUR_START][dayIdx]++;
+               }
             }
-          }else{
-            const y2=dt.getFullYear(), m2=String(dt.getMonth()+1).padStart(2,'0'), d2=String(dt.getDate()).padStart(2,'0');
-            const key=`${y2}-${m2}-${d2}`;
-            const col=dateKeyIndex.get(key);
-            if(col!=null) hourMatrix[hr-HOUR_START][col] += 1;
-          }
-        }
+         }
       });
 
-      $("#kpiCount").textContent = count.toLocaleString("es-AR");
-      $("#kpiRevenue").textContent = money(revenue);
-      $("#kpiATV").textContent = count? money(revenue/count) : '—';
-      $("#kpiMargin").textContent = '—';
+      // 5. Renderizar KPIs Texto
+      document.getElementById("kpiCount").textContent = count;
+      document.getElementById("kpiRevenue").textContent = money(revenue); // Usa la fn global
+      document.getElementById("kpiATV").textContent = count ? money(revenue/count) : '—';
 
-      if(!useRange){ ensureOrdersChart(labels, dayOrders, dayRevenue); }
-      else{ ensureOrdersChart([], [], []); }
+      // Alerta de pendientes
+      const alertBox = document.getElementById("pendingAlert");
+      if(alertBox){
+          alertBox.innerHTML = '';
+          if(pendingTotal > 0){
+             const cls = pendingTotal > 50000 ? 'danger' : 'warn';
+             alertBox.innerHTML = `<span class="warn-pill ${cls}">Pendiente de cobro: ${money(pendingTotal)}</span>`;
+          }
+      }
+
+      // Proyección
+      const projBox = document.getElementById("projText");
+      if(projBox && !isRange){
+          const today = new Date();
+          // Solo proyectar si estamos viendo el mes actual
+          if(today.getMonth() === start.getMonth() && today.getFullYear() === start.getFullYear()){
+             const dayNum = today.getDate();
+             const avg = dayNum > 0 ? revenue / dayNum : 0;
+             const projected = avg * daysInMonth;
+             projBox.innerHTML = `
+               Ingreso prom. diario: <strong>${money(avg)}</strong> • 
+               Proyección fin de mes: <strong>${money(projected)}</strong>
+             `;
+          } else {
+             projBox.innerHTML = `<span class="muted">Mes cerrado.</span>`;
+          }
+      }
+
+      // 6. Renderizar Gráficos
+      if(!isRange){
+        ensureOrdersChart(labels, dayOrders, dayRevenue);
+        renderHeatmapWeekByDay(hmMatrix, hourColLabels); // Usamos las mismas etiquetas
+        renderHourHeatmap(hourMatrix, hourColLabels);
+        printHourSummary(hourMatrix, hourColLabels);
+      } else {
+        // Si es rango, limpiamos o mostramos mensaje (simplificación)
+        if(ordersChart) ordersChart.destroy(); // Ocultar si es rango custom
+        // Aquí podrías implementar lógica para rangos custom si quisieras
+      }
 
       const pLabels = Array.from(payCount.keys());
       const pVals   = pLabels.map(k=>payCount.get(k));
-      ensurePayChart(pLabels, pVals.length? pVals : [0]);
+      ensurePayChart(pLabels, pVals);
 
       const sLabels = Array.from(statusCount.keys());
       const sVals   = sLabels.map(k=>statusCount.get(k));
-      ensureStatusChart(sLabels, sVals.length? sVals : [0]);
-
-      renderHeatmapWeekByDay(hmMatrix, useRange?[]:hmLabels);
-
-      // === renderizar heatmap horario + resumen
-      renderHourHeatmap(hourMatrix, hourColLabels);
-      printHourSummary(hourMatrix, hourColLabels);
-
-      const projBox = $("#projText");
-      const alertBox = $("#pendingAlert");
-      alertBox.innerHTML = '';
-      if(!useRange){
-        const today = new Date();
-        const [yy,mm] = ($("#monthPicker").value||"").split('-').map(Number);
-        const isSameYM = (today.getFullYear()===yy && (today.getMonth()+1)===mm);
-        const dayOfMonth = isSameYM ? today.getDate() : Math.max(1, dayRevenue.findLastIndex ? dayRevenue.findLastIndex(v=>v>0)+1 : dayRevenue.length);
-        const revToDate = dayRevenue.slice(0, dayOfMonth).reduce((a,b)=>a+b,0);
-        const avg = dayOfMonth? (revToDate/dayOfMonth) : 0;
-        const projected = avg * days;
-
-        projBox.innerHTML = `Ingresos a la fecha: <strong>${money(revToDate)}</strong> • Ingresos diarios prom.: <strong>${money(avg)}</strong><br>
-        Proyección fin de mes: <strong>${money(projected)}</strong> (sobre ${days} días)`;
-
-        const PENDING_THRESHOLD = 80000;
-        if(pendingTotal > 0){
-          const cls = pendingTotal >= PENDING_THRESHOLD ? 'danger' : 'warn';
-          const msg = pendingTotal >= PENDING_THRESHOLD
-            ? `Pendientes elevados: ${money(pendingTotal)}`
-            : `Pendientes: ${money(pendingTotal)}`;
-          alertBox.innerHTML = `<span class="warn-pill ${cls}">${msg}</span>`;
-        }
-      }else{
-        projBox.textContent = 'Proyección disponible sólo con selección mensual.';
-      }
-
-      // guardar para Gastos/Neto si lo usás más abajo
-      window.__lastRevenue = revenue;
+      ensureStatusChart(sLabels, sVals);
 
     }catch(e){
-      console.error(e);
-      err.textContent = "No se pudo cargar el resumen.";
-      err.style.display='block';
+      console.error("Error loading KPI:", e);
+      if(err){ err.style.display='block'; err.textContent="Error cargando resumen."; }
     }
   }
+
+  // Listeners
   document.getElementById("btnReload").onclick = loadKPI;
   document.addEventListener('DOMContentLoaded', loadKPI);
-  </script>
+  
+  // Guardar referencia global para debug
+  window.loadKPI = loadKPI;
 
+  </script>
 <script>
     // --- 1. HERRAMIENTAS COMUNES ---
     function monthRange(monthStr){
