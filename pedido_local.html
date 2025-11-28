@@ -83,15 +83,9 @@
     /* ITEMS CATEGORIZADOS */
     .cat-section { margin-top: 15px; border-top: 1px solid #f0f0f0; padding-top: 10px; }
     .cat-header {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #888;
-        margin-bottom: 8px;
-        font-weight: 800;
-        display: flex; align-items: center; gap: 6px;
+        font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #888;
+        margin-bottom: 8px; font-weight: 800; display: flex; align-items: center; gap: 6px;
     }
-    
     .item-row { display: flex; gap: 12px; margin-bottom: 12px; font-size: 15px; align-items: flex-start; }
     .item-qty { font-weight: 800; font-size: 16px; color: var(--primary); min-width: 24px; }
     .item-det { flex: 1; }
@@ -171,10 +165,56 @@
     };
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
-    const db = firebase.firestore();
+    // Variables globales para los handlers
+    window.db = firebase.firestore();
+    window.firebase = firebase;
+  });
+
+  // --- FUNCIONES GLOBALES (PARA QUE LOS ONCLICK LAS VEAN) ---
+  
+  async function setOrderStatus(id, next, isPaid){
+      // 🔥 BLOQUEO DE ENTREGA SI NO ESTÁ PAGADO
+      if (next === 'delivered' && !isPaid) {
+          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobre el pedido antes de marcarlo como entregado.");
+          return;
+      }
+      try{ 
+          await window.db.collection("orders").doc(id).update({ 
+              status: next, 
+              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
+          }); 
+      }catch(e){ alert("Error: "+e); }
+  }
+
+  async function setPaymentStatus(id, isPaid){
+      try{ 
+          await window.db.collection("orders").doc(id).update({ 
+              paid: !!isPaid, 
+              payment_status: isPaid ? "paid" : "pending_payment", 
+              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to: isPaid?"paid":"pending_payment", at:new Date().toISOString()}) 
+          }); 
+      }catch(e){ alert("Error pago: "+e); }
+  }
+
+  async function updatePago(id, value){
+      try{ 
+          await window.db.collection("orders").doc(id).update({ pago: value }); 
+      }catch(e){ alert("Error actualizando pago: "+e); }
+  }
+
+  function printOrder(id){
+      // Buscamos el doc en el mapa local (definido abajo)
+      const doc = window.idToDoc.get(id);
+      if(doc) trySilentPrint(doc);
+  }
+
+  // ---------------------------------------------------------
+
+  window.addEventListener('DOMContentLoaded', () => {
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
+    /* ===== helpers ===== */
     function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
@@ -207,6 +247,7 @@
       return null;
     }
 
+    /* ===== sonido ===== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let audioCtx = null, audioReady = false;
     function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
@@ -222,7 +263,9 @@
     $("#btnLogout").onclick=()=>{ logout(); };
 
     const tabs=$("#tabs");
-    let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
+    let currentFilter="recibidos", lastSnap=null;
+    window.idToDoc = new Map(); // Global para que printOrder lo vea
+
     tabs.addEventListener("click",(e)=>{
       const el=e.target.closest("[data-f]"); if(!el) return;
       currentFilter = el.dataset.f;
@@ -238,28 +281,10 @@
       return true;
     };
 
-    /* ====== Acciones (Con validación de Pago) ====== */
-    async function setOrderStatus(id, next, isPaid){
-      // 🔥 BLOQUEO: No dejar pasar a 'delivered' si no está pagado
-      if (next === 'delivered' && !isPaid) {
-        alert("⚠️ ALERTA:\n\nEl pedido figura como PENDIENTE DE PAGO.\nCobralo primero antes de entregarlo.");
-        return;
-      }
-      try{ 
-        await db.collection("orders").doc(id).update({ 
-          status: next, 
-          statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
-        }); 
-      }catch(e){ alert("Error: "+e); }
-    }
-
-    async function setPaymentStatus(id, paid){
-      try{ await db.collection("orders").doc(id).update({ paid: !!paid, payment_status: paid ? "paid" : "pending_payment", statusHistory: firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()}) }); }catch(e){ alert("Error pago: "+e); }
-    }
-
     const btnStateClass=st=>`state-btn state-${st}`;
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
     const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
+    
     const computeRawSubtotal = o => {
       if (typeof o.rawTotal === "number") return o.rawTotal;
       const items = Array.isArray(o.items)?o.items:[];
@@ -270,7 +295,7 @@
     };
     const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ========== RENDER CATEGORIZADO (UI PANTALLA) ========== */
+    /* ========== RENDER ========== */
     function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
@@ -325,57 +350,49 @@
               `;
           }).join("");
 
-          return `
-            <div class="cat-section">
-                <div class="cat-header">${icon} ${title}</div>
-                ${rows}
-            </div>
-          `;
+          return `<div class="cat-section"><div class="cat-header">${icon} ${title}</div>${rows}</div>`;
       };
 
-      const burgersHTML = renderSection("HAMBURGUESAS", cats.burgers, "🍔");
-      const sidesHTML   = renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟");
-      const drinksHTML  = renderSection("BEBIDAS", cats.drinks, "🥤");
-      const othersHTML  = renderSection("OTROS", cats.others, "🔸");
-
-      const fullItemsHTML = burgersHTML + sidesHTML + drinksHTML + othersHTML;
+      const fullItemsHTML = 
+        renderSection("HAMBURGUESAS", cats.burgers, "🍔") +
+        renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟") +
+        renderSection("BEBIDAS", cats.drinks, "🥤") +
+        renderSection("OTROS", cats.others, "🔸");
 
       const pickupPretty = getPickupPretty(o);
       const srcChip = o.source === "mostrador" ? `<span class="chip" style="background:#e3f2fd;color:#0d47a1">🖥️ Mostrador</span>` : "";
       const noteGeneral = (o.comment || o.notes || "").toString().trim() ? `<span class="chip">📝 ${o.comment || o.notes}</span>` : "";
       const st = o.status ?? "accepted";
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
-      
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
-      const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
       
-      // 🔥 PASAMOS isPaid al onclick
-      const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`).join('')}</div>`;
+      // BOTONES ESTADO
+      const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
+        `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
+      ).join('')}</div>`;
 
-      // 🔥 LÓGICA DE PAGO VACÍO
-      // Si es "mostrador_sin_especificar", lo tratamos como string vacío "" para que el select muestre el placeholder
+      // SELECTOR PAGO
       const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
+      const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
 
       const payLine = `
         <div class="pay-line">
-          <select class="btn" data-select-pago style="min-width:140px">
+          <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
             <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
             <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
             <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
             <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
             <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
           </select>
-          <button class="${payBtnClasses}" data-pay-toggle="${isPaid?'paid':'pending'}">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
-          <button class="btn" data-print>🖨</button>
+          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
+          <button class="btn" onclick="printOrder('${doc.id}')">🖨</button>
         </div>`;
 
       return `
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
           <div class="order-head">
             <div>
-              <div class="order-title">
-                ${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}
-              </div>
+              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}</div>
               <div class="muted">N° interno: ${o.orderNumber || '—'}</div>
               <div class="muted">${dtText}</div>
               <div class="chips">
@@ -397,14 +414,14 @@
     }
 
     /* =================================================================
-       🔥 TICKET 58MM CORREGIDO
+       🔥 TICKET 58MM
        ================================================================= */
-    function buildTicketHTML(docSnap){
+    window.trySilentPrint = function(docSnap){
       const o = docSnap.data();
-      const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+      const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
+
       const orderDisplay = o.orderNumber ? `#${o.orderNumber}` : `#${docSnap.id.slice(-5).toUpperCase()}`;
-      
       const dt = pickDocDate(o) || new Date();
       const dateStr = dt.toLocaleDateString("es-AR");
       const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
@@ -414,18 +431,13 @@
 
       const PAGO_MAP = {
           "mostrador_sin_especificar": "A COBRAR EN CAJA",
-          "efectivo": "EFECTIVO",
-          "mercado_pago": "MERCADO PAGO",
-          "debito": "DÉBITO",
-          "transferencia": "TRANSFERENCIA"
+          "efectivo": "EFECTIVO", "mercado_pago": "MERCADO PAGO", "debito": "DÉBITO", "transferencia": "TRANSFERENCIA"
       };
-      let pagoTxt = o.pago || "";
-      if(PAGO_MAP[pagoTxt]) pagoTxt = PAGO_MAP[pagoTxt];
+      let pagoTxt = PAGO_MAP[o.pago] || escapeHtml(o.pago) || "";
 
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
-      // SEPARAR ITEMS PARA TICKET
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
 
@@ -433,12 +445,9 @@
           const name = (it.name||"").toLowerCase();
           const type = (it.type||"").toLowerCase();
           const qty  = it.qty || it.quantity || 1;
-          
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
-              if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty });
-              }
+              if(it.fries && it.fries !== 'sin_papas') cats.fries.push({ name: it.fries, qty: qty });
           } else if (type === 'side' || name.includes('papas')) {
               cats.fries.push(it);
           } else if (type === 'drink' || name.includes('coca')) {
@@ -464,16 +473,11 @@
           return `<div class="blk"><div class="lbl" style="border-bottom:1px solid #000; display:inline-block; margin-bottom:4px; margin-top:8px">${title}</div></div>${rows}`;
       };
 
-      const htmlBody = 
-        renderTktSection("HAMBURGUESAS", cats.burgers) +
-        renderTktSection("PAPAS", cats.fries) +
-        renderTktSection("BEBIDAS", cats.drinks) +
-        renderTktSection("OTROS", cats.others);
-
+      const htmlBody = renderTktSection("HAMBURGUESAS", cats.burgers) + renderTktSection("PAPAS", cats.fries) + renderTktSection("BEBIDAS", cats.drinks) + renderTktSection("OTROS", cats.others);
       const note = o.comment || o.notes || "";
       const commentBlock = note ? `<div class="hr"></div><div class="blk"><div class="lbl">NOTA</div><div>${escapeHtml(note)}</div></div>` : "";
 
-      return `
+      const html = `
         <!doctype html><html><head><meta charset="utf-8"><title>Ticket</title>
         <style>
           @page { size: 58mm auto; margin: 0; }
@@ -493,7 +497,6 @@
           <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
           <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
           <div class="hr"></div>
-          
           ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
           ${pickupBlockLarge}
           ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
@@ -506,17 +509,14 @@
           <script>window.onload=()=>{setTimeout(()=>{window.print()},100);}<\/script>
         </body></html>
       `;
-    }
 
-    function trySilentPrint(docSnap){ 
-      const html = buildTicketHTML(docSnap);
       const iframe = document.createElement('iframe');
       iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
       document.body.appendChild(iframe);
-      const doc = iframe.contentWindow.document;
-      doc.open(); doc.write(html); doc.close();
+      const idoc = iframe.contentWindow.document;
+      idoc.open(); idoc.write(html); idoc.close();
       setTimeout(()=>{ try{document.body.removeChild(iframe)}catch(e){} }, 15000);
-    }
+    };
 
     let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
     const btnAutoPrint = document.getElementById("btnAutoPrint");
@@ -526,17 +526,16 @@
 
     (async function subscribeOrders(){
       try{
-        let q = db.collection("orders").orderBy("createdAt", "desc").orderBy(firebase.firestore.FieldPath.documentId(), "desc");
+        let q = window.db.collection("orders").orderBy("createdAt", "desc").orderBy(window.firebase.firestore.FieldPath.documentId(), "desc");
         let firstSnapshot = true;
         q.limit(500).onSnapshot(async snap=>{
-          lastSnap = snap;
           document.getElementById("ordersError").style.display="none";
           renderList(snap);
           if (firstSnapshot) { firstSnapshot = false; return; }
           for (const ch of snap.docChanges()){
             if (ch.type === 'added') {
               try{ playBeepTriple(); }catch(_){}
-              if (autoPrint) trySilentPrint(idToDoc.get(ch.doc.id) || ch.doc);
+              if (autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id) || ch.doc);
             }
           }
         }, err=>{ document.getElementById("ordersError").style.display="block"; });
@@ -545,28 +544,12 @@
 
     function renderList(snap){
       const docs=snap.docs.filter(d=>passFilter(d.data()));
-      idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
+      window.idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
       document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
-      
-      document.querySelectorAll(".order").forEach(card=>{
-        const id=card.dataset.id;
-        // Listeners ya se asignan en el HTML inline para setOrderStatus pero necesitamos select y toggle
-        const payToggle=card.querySelector("[data-pay-toggle]");
-        if(payToggle && currentFilter!=="entregados"){
-          payToggle.addEventListener("click", ()=>{
-            const wasPaid = payToggle.dataset.payToggle === "paid";
-            setPaymentStatus(id, !wasPaid);
-          });
-        }
-        const selPago=card.querySelector("[data-select-pago]");
-        if(selPago) selPago.addEventListener("change", ()=> db.collection("orders").doc(id).update({ pago: selPago.value }));
-        const pr=card.querySelector("[data-print]");
-        if(pr) pr.addEventListener("click",()=> trySilentPrint(idToDoc.get(id)));
-      });
     }
   });
   </script>
-
+  
   <script src="pwa.js"></script>
 </body>
 </html>
