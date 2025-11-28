@@ -205,7 +205,6 @@
       if(doc) window.trySilentPrint(doc);
   }
   
-  // Exponer a window
   window.setOrderStatus = setOrderStatus;
   window.setPaymentStatus = setPaymentStatus;
   window.updatePago = updatePago;
@@ -268,9 +267,15 @@
       currentFilter = el.dataset.f;
       tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
       el.classList.add("active");
-      // Re-render al cambiar pestaña
-      if(lastSnap) renderListFromSnap(lastSnap);
+      if (lastSnap) renderList(lastSnap);
     });
+    const passFilter=o=>{
+      const s = o.status ?? "accepted";
+      if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
+      if(currentFilter==="entregados") return s==="delivered";
+      if(currentFilter==="cancelled") return s==="cancelled";
+      return true;
+    };
 
     const btnStateClass=st=>`state-btn state-${st}`;
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
@@ -285,6 +290,29 @@
       },0);
     };
 
+    /* ========== FUNCIÓN DE AGRUPADO (STACKING) ========== */
+    function stackItems(list) {
+        const grouped = {};
+        list.forEach(item => {
+            // Creamos una clave única basada en nombre, extras y notas
+            const key = JSON.stringify({
+                name: item.name,
+                extras: item.extras,
+                notes: item.notes
+            });
+
+            if (!grouped[key]) {
+                // Clonamos el ítem y aseguramos que qty sea número
+                grouped[key] = { ...item, qty: Number(item.qty || item.quantity || 1) };
+            } else {
+                // Si ya existe, sumamos la cantidad
+                grouped[key].qty += Number(item.qty || item.quantity || 1);
+            }
+        });
+        // Devolvemos el array de objetos agrupados
+        return Object.values(grouped);
+    }
+
     /* ========== RENDER UI ========== */
     function renderOrder(doc){
       const o = doc.data();
@@ -296,23 +324,37 @@
       items.forEach(it => {
           const name = (it.name||"").toLowerCase();
           const type = (it.type||"").toLowerCase();
-          const qty  = it.qty || it.quantity || 1;
+          const qty  = Number(it.qty || it.quantity || 1);
+          
+          // Clonamos para no afectar el original al agrupar luego
+          const item = { ...it, qty: qty };
+
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
-              cats.burgers.push(it);
-              if(it.fries && it.fries !== 'sin_papas') cats.fries.push({ name: it.fries, qty: qty });
+              cats.burgers.push(item);
+              if(item.fries && item.fries !== 'sin_papas') {
+                  // Papas separadas (sin origin)
+                  cats.fries.push({ name: item.fries, qty: qty }); 
+              }
           } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
-              cats.fries.push(it);
+              cats.fries.push(item);
           } else if (type === 'drink' || name.includes('coca')) {
-              cats.drinks.push(it);
+              cats.drinks.push(item);
           } else {
-              cats.others.push(it);
+              cats.others.push(item);
           }
       });
+
+      // 🔥 APLICAR AGRUPADO (STACKING) A CADA CATEGORÍA
+      cats.burgers = stackItems(cats.burgers);
+      cats.fries = stackItems(cats.fries);
+      cats.drinks = stackItems(cats.drinks);
+      cats.others = stackItems(cats.others);
+
 
       const renderSection = (title, list, icon) => {
           if(!list.length) return "";
           const rows = list.map(it => {
-              const qty = it.qty || it.quantity || 1;
+              const qty = it.qty;
               const name = it.name || "Ítem";
               let extras = [];
               if(it.extras?.patty) extras.push(`🥩 +${it.extras.patty} carne`);
@@ -333,7 +375,6 @@
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       
-      // Botones Estado
       const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
         `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
       ).join('')}</div>`;
@@ -347,8 +388,8 @@
             <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
             <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
             <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
-            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
-            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
+            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>Mercado Pago</option>
+            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transferencia</option>
           </select>
           <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
           <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
@@ -369,6 +410,7 @@
               ${payLine}
             </div>
           </div>
+          <div class="divider"></div>
           <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
         </div>
       `;
@@ -397,29 +439,37 @@
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
-      // Items para ticket
+      // Items para ticket (CON STACKING)
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
       items.forEach(it => {
           const name = (it.name||"").toLowerCase();
           const type = (it.type||"").toLowerCase();
-          const qty  = it.qty || it.quantity || 1;
+          const qty  = Number(it.qty || it.quantity || 1);
+          const item = { ...it, qty: qty };
+
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
-              cats.burgers.push(it);
-              if(it.fries && it.fries !== 'sin_papas') cats.fries.push({ name: it.fries, qty: qty });
+              cats.burgers.push(item);
+              if(item.fries && item.fries !== 'sin_papas') cats.fries.push({ name: item.fries, qty: qty });
           } else if (type === 'side' || name.includes('papas')) {
-              cats.fries.push(it);
+              cats.fries.push(item);
           } else if (type === 'drink' || name.includes('coca')) {
-              cats.drinks.push(it);
+              cats.drinks.push(item);
           } else {
-              cats.others.push(it);
+              cats.others.push(item);
           }
       });
+
+      // Aplicar Stacking
+      cats.burgers = stackItems(cats.burgers);
+      cats.fries = stackItems(cats.fries);
+      cats.drinks = stackItems(cats.drinks);
+      cats.others = stackItems(cats.others);
 
       const renderTktSection = (title, list) => {
           if(!list.length) return "";
           const rows = list.map(it => {
-              const qty = it.qty||1;
+              const qty = it.qty;
               let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
               if(!title.includes("PAPAS")) {
                   if(it.extras?.patty) h += `<div class="sub">• +${it.extras.patty} carne</div>`;
@@ -486,49 +536,36 @@
 
     (async function subscribeOrders(){
       try{
-        // 🔥 SOLUCIÓN DE ORO: LIMITAR SIN ORDERBY PARA QUE TRAIGA TODO SI O SI
-        // Luego ordenamos en JS. Esto evita los líos de índices y tipos de fecha.
         let q = window.db.collection("orders").limit(500);
-        
         q.onSnapshot(async snap=>{
-          // Guardamos referencia global para re-render al filtrar
-          lastSnap = snap;
           document.getElementById("ordersError").style.display="none";
-          renderListFromSnap(snap);
-          
-          // Auto print para nuevos
-          // (Nota: sin orderBy, el 'added' puede ser errático en carga inicial, 
-          // pero es un compromiso aceptable para ver los datos ya)
-          snap.docChanges().forEach(ch => {
-             if(ch.type==='added' && !isInitialLoad(ch)) {
-                 try{ playBeepTriple(); }catch(_){}
-                 if(autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id)||ch.doc);
-             }
-          });
+          renderList(snap);
+          for (const ch of snap.docChanges()){
+            if (ch.type === 'added' && !isInitialLoad(ch)) {
+              try{ playBeepTriple(); }catch(_){}
+              if (autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id) || ch.doc);
+            }
+          }
         }, err=>{ document.getElementById("ordersError").style.display="block"; console.error(err); });
       }catch(err){ document.getElementById("ordersError").style.display="block"; console.error(err); }
     })();
 
     let _firstLoad = true;
     function isInitialLoad(ch){
-        // Hack simple: si recibimos muchos de golpe es carga inicial
         if(_firstLoad) { setTimeout(()=>_firstLoad=false, 2000); return true; }
         return false;
     }
 
-    function renderListFromSnap(snap){
+    function renderList(snap){
       let docs = snap.docs.map(d=>({data:d.data(), id:d.id, ref:d}));
-      
-      // 🔥 ORDENAMIENTO MANUAL EN JS (LO QUE ARREGLA TODO)
+      // ORDENAMIENTO MANUAL
       docs.sort((a,b) => {
           const da = pickDocDate(a.data);
           const db = pickDocDate(b.data);
-          // Orden descendente (más nuevo arriba)
           if(!da) return 1; if(!db) return -1;
           return db - da; 
       });
 
-      // Filtrado
       const passFilter=o=>{
         const s = o.status ?? "accepted";
         if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
@@ -536,17 +573,10 @@
         if(currentFilter==="cancelled") return s==="cancelled";
         return true;
       };
-
       const filtered = docs.filter(x => passFilter(x.data));
-      
-      // Actualizar mapa global
-      window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
-
-      document.getElementById("orders").innerHTML = filtered.length 
-        ? filtered.map(x => renderOrder(x.ref)).join("") 
-        : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
+      window.idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
+      document.getElementById("orders").innerHTML = filtered.length ? filtered.map(x => renderOrder(x.ref)).join("") : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
     }
-
   });
   </script>
   
