@@ -826,10 +826,7 @@
       m.addEventListener('change', loadBurgersByMonth);
       loadBurgersByMonth();
     });
-  </script>
-
-  <!-- ============== CALENDARIO POR DÍA (SÓLO HAMBURGUESAS NO CANCELADAS) ============== -->
-  <script>
+ <script>
   function colorForIntensity(val, max){
     if(max <= 0) return "#fff";
     const r = val / max;
@@ -853,133 +850,152 @@
     }
 
     const [y, m] = monthStr.split("-").map(Number);
+    // Nota: en JS los meses van de 0 a 11.
+    // start: 1° del mes seleccionado
     const start = new Date(y, m - 1, 1);
-    const end   = new Date(y, m, 0);
+    // end: Último día del mes (día 0 del mes siguiente)
+    const end   = new Date(y, m, 0); 
     const days  = end.getDate();
 
     document.getElementById("calRange").textContent =
       `${start.toLocaleDateString("es-AR")} → ${end.toLocaleDateString("es-AR")}`;
 
-    // Probamos el campo fecha en Firebase
-    const probe = await db.collection("orders").limit(1).get();
-    let dateField = "createdAt";
-    if(!probe.empty){
-      const d = probe.docs[0].data();
-      for(const k of ["createdAt","created_at","date","fecha","timestamp","time"])
-        if(d[k] != null) dateField = k;
-    }
+    // Probamos el campo fecha en Firebase para asegurar compatibilidad
+    let dateField = "createdAt"; // default
+    try {
+        const probe = await db.collection("orders").limit(1).get();
+        if(!probe.empty){
+          const d = probe.docs[0].data();
+          // Buscamos cuál campo de fecha usa tu base de datos
+          for(const k of ["createdAt","created_at","date","fecha","timestamp","time"])
+            if(d[k] != null) { dateField = k; break; }
+        }
+    } catch(e) { console.error("Error detectando campo fecha", e); }
 
-    // Preparamos matriz
+    // Preparamos matriz de datos
     const counts = Array(days).fill(0);
     const totals = Array(days).fill(0);
 
-    // Query
-    const snap = await db.collection("orders")
-      .where(dateField, ">=", start)
-      .where(dateField, "<", new Date(y, m, 1))
-      .get();
+    // Definimos el límite superior de la query (1° del mes siguiente)
+    const nextMonthDate = new Date(y, m, 1);
 
-    // Procesar pedidos (ahora suma hamburguesas y EXCLUYE cancelados)
-    snap.forEach(doc=>{
-      const data = doc.data();
-      const dt = pickDocDate(data);
-      if(!dt) return;
+    try {
+        // Query
+        const snap = await db.collection("orders")
+          .where(dateField, ">=", start)
+          .where(dateField, "<", nextMonthDate)
+          .get();
 
-      // excluir pedidos cancelados
-      const st = (data.status || '').toString().toLowerCase();
-      if(st.includes('cancel')) return; // 'cancelled', 'cancelado', etc.
+        // Procesar pedidos
+        snap.forEach(doc=>{
+          const data = doc.data();
+          const dt = pickDocDate(data);
+          if(!dt) return;
 
-      const day = dt.getDate();
-      const dayIndex = day - 1;
-      if(dayIndex < 0 || dayIndex >= days) return;
+          // 1. Excluir pedidos cancelados (importante)
+          const st = (data.status || '').toString().toLowerCase();
+          if(st.includes('cancel')) return; 
 
-      // sumar ingresos
-      totals[dayIndex] += Number(data.total || 0);
+          // 2. Determinar el día del mes (1..31)
+          const day = dt.getDate();
+          const dayIndex = day - 1;
+          if(dayIndex < 0 || dayIndex >= days) return;
 
-      // sumar hamburguesas
-      let burgCount = 0;
+          // 3. Sumar ingresos totales del día
+          totals[dayIndex] += Number(data.total || 0);
 
-      const items = Array.isArray(data.items) ? data.items : [];
+          // 4. Sumar hamburguesas usando la lógica UNIFICADA (isBurgerItem)
+          let burgCount = 0;
+          const items = Array.isArray(data.items) ? data.items : [];
 
-      items.forEach(it=>{
-        const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
-        const name = (it.name || it.item?.name || "").toLowerCase();
+          items.forEach(it => {
+            // Usamos la misma función que usa la tabla de reportes
+            // Esto asegura que si sale en la tabla, sale en el calendario.
+            if(typeof isBurgerItem === 'function' && isBurgerItem(it)){
+               const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
+               burgCount += qty;
+            }
+          });
 
-        const isBurger =
-          name.includes("cheese")   ||
-          name.includes("burger")   ||
-          name.includes("bacon")    ||
-          name.includes("morgan")   ||
-          name.includes("rhodes")   ||
-          name.includes("pollo")    ||
-          name.includes("crispy")   ||
-          name.includes("big john") ||
-          name.includes("burguesa");
+          // Fallback: si no detectó items pero el pedido tiene "burgerCount" guardado
+          if(burgCount === 0 && typeof data.burgerCount === "number"){
+            burgCount = data.burgerCount;
+          }
 
-        if(isBurger) burgCount += qty;
-      });
+          counts[dayIndex] += burgCount;
+        });
 
-      // si no detectamos ítems, intentar fallback: burgerCount del pedido
-      if(burgCount === 0 && typeof data.burgerCount === "number"){
-        burgCount = data.burgerCount;
-      }
+        // --- Renderizado Visual ---
 
-      counts[dayIndex] += burgCount;
-    });
+        // Espacios vacíos antes del día 1 (para alinear días de la semana)
+        const startWeekday = start.getDay(); // 0=Dom, 1=Lun...
+        // Ajuste para empezar en Domingo (Dom=0) o Lunes según tu preferencia.
+        // Aquí asumimos Lunes como primer día de la grilla si tu CSS está así, 
+        // pero tu CSS (grid-template-columns: repeat(7...)) es estándar.
+        // Si la semana visual empieza en Domingo:
+        const emptyDays = startWeekday; 
+        
+        for(let i=0; i<emptyDays; i++){
+          grid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-empty"></div>`);
+        }
 
-    // Determinar día de la semana del 1°
-    const startWeekday = start.getDay(); // 0 = dom ... 6 = sáb
-    const adjustedStart = (startWeekday === 0 ? 6 : startWeekday - 1); // lunes = 0
+        // Calcular máximo para la escala de colores
+        const max = Math.max(...counts, 1); // Evitar división por 0
 
-    // Agregar días vacíos previos
-    for(let i=0; i<adjustedStart; i++){
-      grid.insertAdjacentHTML("beforeend",
-        `<div class="cal-day cal-empty"></div>`
-      );
-    }
+        // Dibujar los días
+        for(let d=1; d<=days; d++){
+          const c = counts[d-1];
+          const t = totals[d-1];
+          const bg = colorForIntensity(c, max);
 
-    // Máximo para color
-    const max = Math.max(...counts);
+          grid.insertAdjacentHTML("beforeend", `
+            <div class="cal-day" style="background:${bg}" title="Día ${d}: $${money(t)}">
+              <div class="cal-day-header">${d}</div>
+              <div class="cal-mini">🍔 ${c} u.</div>
+              <div class="cal-mini" style="font-weight:600">${money(t)}</div>
+            </div>
+          `);
+        }
 
-    // Renderizar días
-    for(let d=1; d<=days; d++){
-      const c = counts[d-1];
-      const t = totals[d-1];
-      const bg = colorForIntensity(c, max);
-
-      grid.insertAdjacentHTML("beforeend", `
-        <div class="cal-day" style="background:${bg}">
-          <div class="cal-day-header">${d}</div>
-          <div class="cal-mini">🟫 ${c} Hamburguesas</div>
-          <div class="cal-mini">💵 ${money(t)}</div>
-        </div>
-      `);
+    } catch(e) {
+        console.error("Error cargando calendario:", e);
+        err.textContent = "Error al cargar datos del calendario.";
+        err.style.display = "block";
     }
   }
 
-  // Init
+  // Inicialización
   document.addEventListener("DOMContentLoaded", ()=>{
     const cal = document.getElementById("calMonth");
+    // Poner mes actual por defecto
     const d = new Date();
     cal.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
 
-    renderCalendar(cal.value);
+    // Cargar inicial
+    // Esperamos un poco para asegurar que 'db' y 'isBurgerItem' estén listos
+    setTimeout(() => renderCalendar(cal.value), 500);
 
-    document.getElementById("calGo").onclick  = ()=> renderCalendar(cal.value);
+    // Eventos
+    document.getElementById("calGo").onclick   = ()=> renderCalendar(cal.value);
+    
     document.getElementById("calPrev").onclick = ()=>{
+      if(!cal.value) return;
       const [y,m] = cal.value.split("-").map(Number);
-      const newDate = new Date(y, m - 2, 1);
+      // Restar un mes
+      const newDate = new Date(y, m - 2, 1); 
       cal.value = `${newDate.getFullYear()}-${String(newDate.getMonth()+1).padStart(2,"0")}`;
       renderCalendar(cal.value);
     };
+
     document.getElementById("calNext").onclick = ()=>{
+      if(!cal.value) return;
       const [y,m] = cal.value.split("-").map(Number);
-      const newDate = new Date(y, m, 1);
+      // Sumar un mes (Date(y, m, 1) es el mes siguiente porque m es index 1-based en el input, pero indexado en Date constructor funciona como overflow positivo)
+      const newDate = new Date(y, m, 1); 
       cal.value = `${newDate.getFullYear()}-${String(newDate.getMonth()+1).padStart(2,"0")}`;
       renderCalendar(cal.value);
     };
   });
   </script>
-
 </body>
 </html>
