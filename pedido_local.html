@@ -82,11 +82,21 @@
     
     /* ITEMS CATEGORIZADOS */
     .cat-section { margin-top: 15px; border-top: 1px solid #f0f0f0; padding-top: 10px; }
-    .cat-header { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px; font-weight: 800; display: flex; align-items: center; gap: 6px; }
+    .cat-header {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: #888;
+        margin-bottom: 8px;
+        font-weight: 800;
+        display: flex; align-items: center; gap: 6px;
+    }
+    
     .item-row { display: flex; gap: 12px; margin-bottom: 12px; font-size: 15px; align-items: flex-start; }
     .item-qty { font-weight: 800; font-size: 16px; color: var(--primary); min-width: 24px; }
     .item-det { flex: 1; }
     .item-name { font-weight: 700; color: #111; line-height: 1.2; }
+    
     .item-extras { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
     .extra-line { font-size: 13px; color: #555; display: flex; align-items: center; gap: 6px; }
     .note-line { color: #d32f2f; font-style: italic; font-weight: 600; font-size: 13px; margin-top: 4px; }
@@ -166,7 +176,6 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-    /* ===== helpers ===== */
     function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
@@ -199,7 +208,6 @@
       return null;
     }
 
-    /* ===== Sonido ===== */
     let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
     let audioCtx = null, audioReady = false;
     function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
@@ -214,7 +222,6 @@
     btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
     $("#btnLogout").onclick=()=>{ logout(); };
 
-    /* ====== Filtros ====== */
     const tabs=$("#tabs");
     let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
     tabs.addEventListener("click",(e)=>{
@@ -232,7 +239,6 @@
       return true;
     };
 
-    /* ====== Acciones ====== */
     async function setOrderStatus(id,next){
       try{ await db.collection("orders").doc(id).update({ status: next, statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) }); }catch(e){ alert("Error: "+e); }
     }
@@ -253,7 +259,7 @@
     };
     const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ========== RENDER CATEGORIZADO ========== */
+    /* ========== RENDER CATEGORIZADO (LIMPIO) ========== */
     function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
@@ -269,8 +275,9 @@
           
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
+              // EXTRAER PAPAS
               if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty }); // Papas aparte
+                  cats.fries.push({ name: it.fries, qty: qty }); // SIN REFERENCIA DE ORIGEN
               }
           } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
               cats.fries.push(it);
@@ -289,7 +296,11 @@
               let extras = [];
               if(it.extras?.patty) extras.push(`🥩 +${it.extras.patty} carne`);
               if(it.extras?.cheddar) extras.push(`🧀 +${it.extras.cheddar} cheddar`);
-              const extrasHTML = extras.length ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` : "";
+              
+              const extrasHTML = extras.length 
+                ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` 
+                : "";
+                
               const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
 
               return `
@@ -303,14 +314,21 @@
                 </div>
               `;
           }).join("");
-          return `<div class="cat-section"><div class="cat-header">${icon} ${title}</div>${rows}</div>`;
+
+          return `
+            <div class="cat-section">
+                <div class="cat-header">${icon} ${title}</div>
+                ${rows}
+            </div>
+          `;
       };
 
-      const htmlBody = 
-        renderSection("HAMBURGUESAS", cats.burgers, "🍔") +
-        renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟") +
-        renderSection("BEBIDAS", cats.drinks, "🥤") +
-        renderSection("OTROS", cats.others, "🔸");
+      const burgersHTML = renderSection("HAMBURGUESAS", cats.burgers, "🍔");
+      const sidesHTML   = renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟");
+      const drinksHTML  = renderSection("BEBIDAS", cats.drinks, "🥤");
+      const othersHTML  = renderSection("OTROS", cats.others, "🔸");
+
+      const fullItemsHTML = burgersHTML + sidesHTML + drinksHTML + othersHTML;
 
       const pickupPretty = getPickupPretty(o);
       const srcChip = o.source === "mostrador" ? `<span class="chip" style="background:#e3f2fd;color:#0d47a1">🖥️ Mostrador</span>` : "";
@@ -355,13 +373,13 @@
               ${payLine}
             </div>
           </div>
-          <div class="items-body">${htmlBody || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
+          <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
         </div>
       `;
     }
 
     /* ===========================================================
-       TICKET 58MM ESTILIZADO
+       TICKET 58MM LIMPIO (SIN REFERENCIAS)
        =========================================================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
@@ -398,8 +416,9 @@
           
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
+              // EXTRAER PAPAS Y MANDARLAS A SU SECCIÓN
               if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty }); 
+                  cats.fries.push({ name: it.fries, qty: qty }); // SIN REFERENCIA
               }
           } else if (type === 'side' || name.includes('papas')) {
               cats.fries.push(it);
@@ -415,7 +434,7 @@
           const rows = list.map(it => {
               const qty = it.qty||1;
               let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
-              // Extras solo si no es papa
+              // Extras (solo si no es papa, para evitar duplicar info)
               if(!title.includes("PAPAS")) {
                   if(it.extras?.patty) h += `<div class="sub">• +${it.extras.patty} carne</div>`;
                   if(it.extras?.cheddar) h += `<div class="sub">• +${it.extras.cheddar} cheddar</div>`;
