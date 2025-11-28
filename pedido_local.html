@@ -1,4 +1,4 @@
-<!doctype html>
+<!doctype html> 
 <html lang="es">
   <script>
   /* ======== SESIÓN COMPARTIDA ======== */
@@ -92,11 +92,23 @@
         display: flex; align-items: center; gap: 6px;
     }
     
-    .item-row { display: flex; gap: 12px; margin-bottom: 12px; font-size: 15px; align-items: flex-start; }
-    .item-qty { font-weight: 800; font-size: 16px; color: var(--primary); min-width: 24px; }
+    .item-row { 
+        display: flex; 
+        gap: 12px; 
+        margin-bottom: 12px; 
+        font-size: 15px; 
+        align-items: flex-start;
+    }
+    .item-qty { 
+        font-weight: 800; 
+        font-size: 16px;
+        color: var(--primary);
+        min-width: 24px;
+    }
     .item-det { flex: 1; }
     .item-name { font-weight: 700; color: #111; line-height: 1.2; }
     
+    /* Extras visuales */
     .item-extras { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
     .extra-line { font-size: 13px; color: #555; display: flex; align-items: center; gap: 6px; }
     .note-line { color: #d32f2f; font-style: italic; font-weight: 600; font-size: 13px; margin-top: 4px; }
@@ -176,6 +188,7 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
+    /* ===== helpers ===== */
     function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
@@ -222,6 +235,7 @@
     btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
     $("#btnLogout").onclick=()=>{ logout(); };
 
+    /* ====== Filtros ====== */
     const tabs=$("#tabs");
     let currentFilter="recibidos", lastSnap=null, idToDoc=new Map();
     tabs.addEventListener("click",(e)=>{
@@ -239,6 +253,7 @@
       return true;
     };
 
+    /* ====== Acciones ====== */
     async function setOrderStatus(id,next){
       try{ await db.collection("orders").doc(id).update({ status: next, statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) }); }catch(e){ alert("Error: "+e); }
     }
@@ -259,7 +274,7 @@
     };
     const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ========== RENDER CATEGORIZADO (LIMPIO) ========== */
+    /* ========== RENDER CATEGORIZADO ========== */
     function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
@@ -275,9 +290,8 @@
           
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
-              // EXTRAER PAPAS
               if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty }); // SIN REFERENCIA DE ORIGEN
+                  cats.fries.push({ name: it.fries, qty: qty }); // Papas aparte
               }
           } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
               cats.fries.push(it);
@@ -357,7 +371,9 @@
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
           <div class="order-head">
             <div>
-              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}</div>
+              <div class="order-title">
+                ${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}
+              </div>
               <div class="muted">N° interno: ${o.orderNumber || '—'}</div>
               <div class="muted">${dtText}</div>
               <div class="chips">
@@ -379,7 +395,7 @@
     }
 
     /* ===========================================================
-       TICKET 58MM LIMPIO (SIN REFERENCIAS)
+       🔥 TICKET 58MM CENTRADO + CATEGORÍAS + PAGO
        =========================================================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
@@ -387,14 +403,13 @@
       const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", {style: "currency", currency: "ARS", maximumFractionDigits: 0});
       const orderDisplay = o.orderNumber ? `#${o.orderNumber}` : `#${docSnap.id.slice(-5).toUpperCase()}`;
       
-      let dateStr="", timeStr="";
-      const dt = pickDocDate(o);
-      if(dt){ dateStr=dt.toLocaleDateString("es-AR"); timeStr=dt.toLocaleTimeString("es-AR", { hour12: false }); }
+      const dt = pickDocDate(o) || new Date();
+      const dateStr = dt.toLocaleDateString("es-AR");
+      const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
       
       const pickup = getPickupPretty(o) || "A la brevedad";
       const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
-      // MAPA DE PAGOS
       const PAGO_MAP = {
         "mostrador_sin_especificar": "A COBRAR EN CAJA",
         "efectivo": "EFECTIVO",
@@ -402,10 +417,13 @@
         "debito": "DÉBITO",
         "transferencia": "TRANSFERENCIA"
       };
-      const pagoReal = o.pago || "";
-      const pagoShow = PAGO_MAP[pagoReal] || escapeHtml(pagoReal) || "";
+      let pagoTxt = o.pago || "";
+      if(PAY_MAP[pagoTxt]) pagoTxt = PAY_MAP[pagoTxt];
 
-      // SEPARAR ITEMS
+      const isPaid = ((o.payment_status === "paid") || o.paid === true);
+      const payState = isPaid ? "PAGADO" : "PENDIENTE";
+
+      // SEPARAR ITEMS PARA TICKET
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
 
@@ -416,9 +434,8 @@
           
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
-              // EXTRAER PAPAS Y MANDARLAS A SU SECCIÓN
               if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty }); // SIN REFERENCIA
+                  cats.fries.push({ name: it.fries, qty: qty });
               }
           } else if (type === 'side' || name.includes('papas')) {
               cats.fries.push(it);
@@ -434,7 +451,6 @@
           const rows = list.map(it => {
               const qty = it.qty||1;
               let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
-              // Extras (solo si no es papa, para evitar duplicar info)
               if(!title.includes("PAPAS")) {
                   if(it.extras?.patty) h += `<div class="sub">• +${it.extras.patty} carne</div>`;
                   if(it.extras?.cheddar) h += `<div class="sub">• +${it.extras.cheddar} cheddar</div>`;
@@ -452,35 +468,49 @@
         renderTktSection("BEBIDAS", cats.drinks) +
         renderTktSection("OTROS", cats.others);
 
-      const isPaid = ((o.payment_status === "paid") || o.paid === true);
-      const payState = isPaid ? "PAGADO" : "PENDIENTE";
+      const note = o.comment || o.notes || "";
+      const commentBlock = note ? `<div class="hr"></div><div class="blk"><div class="lbl">NOTA</div><div>${escapeHtml(note)}</div></div>` : "";
 
       return `
         <!doctype html><html><head><meta charset="utf-8"><title>Ticket</title>
         <style>
-          @page{size:58mm auto;margin:0}
-          body{width:58mm;font-family:Arial,sans-serif;font-size:13px;font-weight:700;margin:0;padding:2mm;color:#000;box-sizing:border-box}
-          .c{text-align:center}
-          .brand{font-size:16px}
-          .hr{border-top:1px solid #000;margin:4px 0}
-          .blk{margin:2px 0}
-          .lbl{font-size:11px;text-transform:uppercase}
-          .row{display:flex;justify-content:space-between}
-          .sub{font-size:11px;margin-left:2mm}
-          .sep{border-top:1px dashed #000;opacity:.4;margin:2mm 0}
-          .foot{margin-top:3mm;text-align:center;font-size:10px;font-weight:400}
+          @page { size: 58mm auto; margin: 0; }
+          body { 
+              width: 58mm; 
+              margin: 0 auto; /* 🔥 CENTRADO */
+              padding: 4px; 
+              font-family: Arial, sans-serif; 
+              font-size: 13px; 
+              font-weight: 700; 
+              color: #000; 
+              line-height: 1.3; 
+              box-sizing: border-box;
+          }
+          .c { text-align: center; }
+          .brand { font-size: 16px; margin-bottom: 4px; }
+          .hr { border-top: 1px dashed #000; margin: 6px 0; }
+          .blk { margin: 4px 0; }
+          .lbl { font-size: 10px; text-transform: uppercase; margin-bottom: 2px; }
+          .row { display: flex; justify-content: space-between; }
+          .sub { font-size: 11px; margin-left: 4px; font-weight: normal; }
+          .sep { border-top: 1px dotted #999; margin: 4px 0; }
+          .foot { margin-top: 10px; text-align: center; font-size: 10px; font-weight: 400; }
         </style>
         </head><body>
           <div class="c brand">Rhodes Burgers</div>
-          <div class="c">${escapeHtml(orderDisplay)}</div>
-          <div class="c" style="font-size:18px; margin:4px 0">[ ${payState} ]</div>
+          <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
+          <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
           <div class="hr"></div>
+          
           ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
           ${pickupBlockLarge}
-          ${(pagoShow)?`<div class="blk"><div class="lbl">PAGO</div><div>${pagoShow}</div></div>`:""}
+          ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
+          ${commentBlock}
+          
           <div class="hr"></div>
           ${htmlBody}
           <div class="hr"></div>
+          
           <div class="row"><div class="l">TOTAL</div><div>${moneyT(o.total||0)}</div></div>
           <div class="foot">${dateStr} — ${timeStr}</div>
           <script>window.onload=()=>{setTimeout(()=>{window.print()},30);}<\/script>
@@ -546,5 +576,7 @@
     }
   });
   </script>
+
+  <script src="pwa.js"></script>
 </body>
 </html>
