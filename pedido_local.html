@@ -1,44 +1,5 @@
 <!doctype html>
 <html lang="es">
-  <script>
-  /* ======== SESIÓN COMPARTIDA ======== */
-  const TTL_HOURS = 20;
-  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
-
-  function sessionValid(){
-    const ok = localStorage.getItem('rb_admin_ok') === 'true';
-    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
-    return ok && (Date.now() - ts) < TTL_MS;
-  }
-  function bumpSession(){
-    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
-  }
-  function logout(){
-    try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
-    try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
-    try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
-    try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
-    const next = encodeURIComponent('pedido_local.html');
-    location.replace('login.html?reason=logout&next=' + next);
-  }
-
-  (function requireSession(){
-    if (!sessionValid()){
-      const next = encodeURIComponent(
-        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
-        (location.search || '') + (location.hash || '')
-      );
-      location.replace('login.html?next=' + next);
-    } else {
-      bumpSession();
-    }
-  })();
-
-  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
-    window.addEventListener(evt, bumpSession, {passive:true});
-  });
-  </script>
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -120,6 +81,64 @@
       .order{break-inside:avoid;box-shadow:none;border:1px solid #eee}
     }
   </style>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    /* ======== SESIÓN ======== */
+    const TTL_HOURS = 20;
+    const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
+
+    function sessionValid(){
+      const ok = localStorage.getItem('rb_admin_ok') === 'true';
+      const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+      return ok && (Date.now() - ts) < TTL_MS;
+    }
+    function bumpSession(){
+      if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
+    }
+    function logout(){
+      try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
+      try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
+      try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
+      try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
+      const next = encodeURIComponent('pedido_local.html');
+      location.replace('login.html?reason=logout&next=' + next);
+    }
+    (function requireSession(){
+      if (!sessionValid()){
+        const next = encodeURIComponent(
+          (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
+          (location.search || '') + (location.hash || '')
+        );
+        location.replace('login.html?next=' + next);
+      } else {
+        bumpSession();
+      }
+    })();
+    ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
+      window.addEventListener(evt, bumpSession, {passive:true});
+    });
+
+    /* ======== FIREBASE INIT GLOBAL ======== */
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.firebasestorage.app",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+    };
+    try{ firebase.initializeApp(firebaseConfig);}catch(e){}
+    const db = firebase.firestore(); // Global para que las funciones lo vean
+
+    // Variables globales de estado
+    let currentFilter="recibidos";
+    let lastSnap=null;
+    let idToDoc = new Map();
+
+  </script>
 </head>
 <body>
   <header>
@@ -150,71 +169,11 @@
     <div id="ordersError" class="err" style="display:none;margin-top:8px"></div>
   </main>
 
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-
   <script>
-  window.addEventListener('DOMContentLoaded', () => {
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-      authDomain: "rhodes-burguers.firebaseapp.com",
-      projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-    };
-    try{ firebase.initializeApp(firebaseConfig);}catch(e){}
-
-    // Variables globales para los handlers
-    window.db = firebase.firestore();
-    window.firebase = firebase;
-  });
-
-  // --- FUNCIONES GLOBALES (PARA QUE LOS ONCLICK LAS VEAN) ---
-  
-  async function setOrderStatus(id, next, isPaid){
-      // 🔥 BLOQUEO DE ENTREGA SI NO ESTÁ PAGADO
-      if (next === 'delivered' && !isPaid) {
-          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobre el pedido antes de marcarlo como entregado.");
-          return;
-      }
-      try{ 
-          await window.db.collection("orders").doc(id).update({ 
-              status: next, 
-              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
-          }); 
-      }catch(e){ alert("Error: "+e); }
-  }
-
-  async function setPaymentStatus(id, isPaid){
-      try{ 
-          await window.db.collection("orders").doc(id).update({ 
-              paid: !!isPaid, 
-              payment_status: isPaid ? "paid" : "pending_payment", 
-              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to: isPaid?"paid":"pending_payment", at:new Date().toISOString()}) 
-          }); 
-      }catch(e){ alert("Error pago: "+e); }
-  }
-
-  async function updatePago(id, value){
-      try{ 
-          await window.db.collection("orders").doc(id).update({ pago: value }); 
-      }catch(e){ alert("Error actualizando pago: "+e); }
-  }
-
-  function printOrder(id){
-      // Buscamos el doc en el mapa local (definido abajo)
-      const doc = window.idToDoc.get(id);
-      if(doc) trySilentPrint(doc);
-  }
-
-  // ---------------------------------------------------------
-
-  window.addEventListener('DOMContentLoaded', () => {
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-    /* ===== helpers ===== */
+    /* --- HELPERS --- */
     function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
@@ -247,180 +206,48 @@
       return null;
     }
 
-    /* ===== sonido ===== */
-    let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
-    let audioCtx = null, audioReady = false;
-    function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
-    async function ensureAudioReady(){ try{ const ctx=getAudioCtx(); if(ctx.state==='suspended') await ctx.resume(); audioReady=(ctx.state==='running'); }catch(e){ audioReady=false; } return audioReady; }
-    function beepOnce(ctx, d=0.22, f=900, g=0.7){ const o=ctx.createOscillator(), ga=ctx.createGain(); o.type="square"; o.frequency.value=f; o.connect(ga); ga.connect(ctx.destination); ga.gain.setValueAtTime(0.0001, ctx.currentTime); ga.gain.exponentialRampToValueAtTime(g, ctx.currentTime+0.02); ga.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+d); o.start(); o.stop(ctx.currentTime+d+0.02); }
-    async function playBeepTriple(){ if(!soundEnabled) return; const ok=await ensureAudioReady(); if(!ok) return; const ctx=getAudioCtx(); beepOnce(ctx); setTimeout(()=>beepOnce(ctx),320); setTimeout(()=>beepOnce(ctx),640); }
-    ['click','touchstart','keydown'].forEach(evt=> window.addEventListener(evt, ()=>{ if(!audioReady) ensureAudioReady(); }, {passive:true}));
-
-    const btnBell=$("#btnBell");
-    const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
-    updateBellUI();
-    btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
-    $("#btnLogout").onclick=()=>{ logout(); };
-
-    const tabs=$("#tabs");
-    let currentFilter="recibidos", lastSnap=null;
-    window.idToDoc = new Map(); // Global para que printOrder lo vea
-
-    tabs.addEventListener("click",(e)=>{
-      const el=e.target.closest("[data-f]"); if(!el) return;
-      currentFilter = el.dataset.f;
-      tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
-      el.classList.add("active");
-      if (lastSnap) renderList(lastSnap);
-    });
-    const passFilter=o=>{
-      const s = o.status ?? "accepted";
-      if(currentFilter==="recibidos"){ return s==="accepted" || s==="pending_payment" || s==="in_prep" || s==="ready"; }
-      if(currentFilter==="entregados"){ return s==="delivered"; }
-      if(currentFilter==="cancelled"){ return s==="cancelled"; }
-      return true;
+    /* --- FUNCIONES GLOBALES DE ACCIÓN (PARA QUE LOS BOTONES FUNCIONEN) --- */
+    window.setOrderStatus = async function(id, next, isPaid){
+        // Bloqueo de seguridad
+        if (next === 'delivered' && !isPaid) {
+            alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
+            return;
+        }
+        try{ 
+            await db.collection("orders").doc(id).update({ 
+                status: next, 
+                statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
+            }); 
+        }catch(e){ alert("Error actualizando estado: "+e); }
     };
 
-    const btnStateClass=st=>`state-btn state-${st}`;
-    const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
-    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
-    
-    const computeRawSubtotal = o => {
-      if (typeof o.rawTotal === "number") return o.rawTotal;
-      const items = Array.isArray(o.items)?o.items:[];
-      return items.reduce((t,it)=>{
-        const qty = it.qty||1; const base = (it.price||0)*qty;
-        return t + base; 
-      },0);
+    window.setPaymentStatus = async function(id, paid){
+        try{ 
+            await db.collection("orders").doc(id).update({ 
+                paid: !!paid, 
+                payment_status: paid ? "paid" : "pending_payment", 
+                statusHistory: firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()}) 
+            }); 
+        }catch(e){ alert("Error actualizando pago: "+e); }
     };
-    const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ========== RENDER ========== */
-    function renderOrder(doc){
-      const o = doc.data();
-      const dt = pickDocDate(o);
-      const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
-      const items = Array.isArray(o.items) ? o.items : [];
+    window.updatePago = async function(id, value){
+        try{ 
+            await db.collection("orders").doc(id).update({ pago: value }); 
+        }catch(e){ alert("Error actualizando método: "+e); }
+    };
 
-      const cats = { burgers:[], fries:[], drinks:[], others:[] };
+    window.printOrder = function(id){
+        const doc = idToDoc.get(id);
+        if(doc) trySilentPrint(doc);
+    };
 
-      items.forEach(it => {
-          const name = (it.name||"").toLowerCase();
-          const type = (it.type||"").toLowerCase();
-          const qty  = it.qty || it.quantity || 1;
-          
-          if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
-              cats.burgers.push(it);
-              if(it.fries && it.fries !== 'sin_papas') {
-                  cats.fries.push({ name: it.fries, qty: qty });
-              }
-          } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
-              cats.fries.push(it);
-          } else if (type === 'drink' || name.includes('coca') || name.includes('agua') || name.includes('cerveza') || name.includes('sprite')) {
-              cats.drinks.push(it);
-          } else {
-              cats.others.push(it);
-          }
-      });
-
-      const renderSection = (title, list, icon) => {
-          if(!list.length) return "";
-          const rows = list.map(it => {
-              const qty = it.qty || it.quantity || 1;
-              const name = it.name || "Ítem";
-              let extras = [];
-              if(it.extras?.patty) extras.push(`🥩 +${it.extras.patty} carne`);
-              if(it.extras?.cheddar) extras.push(`🧀 +${it.extras.cheddar} cheddar`);
-              
-              const extrasHTML = extras.length 
-                ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` 
-                : "";
-                
-              const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
-
-              return `
-                <div class="item-row">
-                   <div class="item-qty">${qty}</div>
-                   <div class="item-det">
-                      <div class="item-name">${name}</div>
-                      ${extrasHTML}
-                      ${notesHTML}
-                   </div>
-                </div>
-              `;
-          }).join("");
-
-          return `<div class="cat-section"><div class="cat-header">${icon} ${title}</div>${rows}</div>`;
-      };
-
-      const fullItemsHTML = 
-        renderSection("HAMBURGUESAS", cats.burgers, "🍔") +
-        renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟") +
-        renderSection("BEBIDAS", cats.drinks, "🥤") +
-        renderSection("OTROS", cats.others, "🔸");
-
-      const pickupPretty = getPickupPretty(o);
-      const srcChip = o.source === "mostrador" ? `<span class="chip" style="background:#e3f2fd;color:#0d47a1">🖥️ Mostrador</span>` : "";
-      const noteGeneral = (o.comment || o.notes || "").toString().trim() ? `<span class="chip">📝 ${o.comment || o.notes}</span>` : "";
-      const st = o.status ?? "accepted";
-      const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
-      const isPaid = ((o.payment_status === "paid") || o.paid === true);
-      
-      // BOTONES ESTADO
-      const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
-        `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
-      ).join('')}</div>`;
-
-      // SELECTOR PAGO
-      const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
-      const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
-
-      const payLine = `
-        <div class="pay-line">
-          <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
-            <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
-            <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
-            <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
-            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
-            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
-          </select>
-          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
-          <button class="btn" onclick="printOrder('${doc.id}')">🖨</button>
-        </div>`;
-
-      return `
-        <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
-          <div class="order-head">
-            <div>
-              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}</div>
-              <div class="muted">N° interno: ${o.orderNumber || '—'}</div>
-              <div class="muted">${dtText}</div>
-              <div class="chips">
-                ${srcChip}
-                <span class="chip">Retiro: ${o.entrega||"take_away"}</span>
-                <span class="chip">⏰ ${pickupPretty || "—"}</span>
-                ${noteGeneral}
-              </div>
-              ${stateBtns}
-            </div>
-            <div>
-              <div class="right-total">${money(computeOrderTotal(o))}</div>
-              ${payLine}
-            </div>
-          </div>
-          <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
-        </div>
-      `;
-    }
-
-    /* =================================================================
-       🔥 TICKET 58MM
-       ================================================================= */
-    window.trySilentPrint = function(docSnap){
+    /* --- LOGICA DE TICKET --- */
+    function buildTicketHTML(docSnap){
       const o = docSnap.data();
       const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
-
+      
       const orderDisplay = o.orderNumber ? `#${o.orderNumber}` : `#${docSnap.id.slice(-5).toUpperCase()}`;
       const dt = pickDocDate(o) || new Date();
       const dateStr = dt.toLocaleDateString("es-AR");
@@ -430,14 +257,19 @@
       const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
       const PAGO_MAP = {
-          "mostrador_sin_especificar": "A COBRAR EN CAJA",
-          "efectivo": "EFECTIVO", "mercado_pago": "MERCADO PAGO", "debito": "DÉBITO", "transferencia": "TRANSFERENCIA"
+        "mostrador_sin_especificar": "A COBRAR EN CAJA",
+        "efectivo": "EFECTIVO",
+        "mercado_pago": "MERCADO PAGO",
+        "debito": "DÉBITO",
+        "transferencia": "TRANSFERENCIA"
       };
-      let pagoTxt = PAGO_MAP[o.pago] || escapeHtml(o.pago) || "";
+      let pagoTxt = o.pago || "";
+      if(PAGO_MAP[pagoTxt]) pagoTxt = PAGO_MAP[pagoTxt];
 
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
+      // SEPARAR ITEMS
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
 
@@ -477,7 +309,7 @@
       const note = o.comment || o.notes || "";
       const commentBlock = note ? `<div class="hr"></div><div class="blk"><div class="lbl">NOTA</div><div>${escapeHtml(note)}</div></div>` : "";
 
-      const html = `
+      return `
         <!doctype html><html><head><meta charset="utf-8"><title>Ticket</title>
         <style>
           @page { size: 58mm auto; margin: 0; }
@@ -509,47 +341,199 @@
           <script>window.onload=()=>{setTimeout(()=>{window.print()},100);}<\/script>
         </body></html>
       `;
+    }
 
+    function trySilentPrint(docSnap){ 
+      const html = buildTicketHTML(docSnap);
       const iframe = document.createElement('iframe');
       iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
       document.body.appendChild(iframe);
-      const idoc = iframe.contentWindow.document;
-      idoc.open(); idoc.write(html); idoc.close();
+      const doc = iframe.contentWindow.document;
+      doc.open(); doc.write(html); doc.close();
       setTimeout(()=>{ try{document.body.removeChild(iframe)}catch(e){} }, 15000);
+    }
+
+    /* --- INICIO DE LA UI --- */
+    window.addEventListener('DOMContentLoaded', () => {
+      
+      const tabs=$("#tabs");
+      tabs.addEventListener("click",(e)=>{
+        const el=e.target.closest("[data-f]"); if(!el) return;
+        currentFilter = el.dataset.f;
+        tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+        el.classList.add("active");
+        if (lastSnap) renderList(lastSnap);
+      });
+
+      $("#btnLogout").onclick=logout;
+
+      // Suscripción Firebase
+      (async function subscribeOrders(){
+        try{
+          let q = db.collection("orders").orderBy("createdAt", "desc").orderBy(firebase.firestore.FieldPath.documentId(), "desc");
+          let firstSnapshot = true;
+          q.limit(500).onSnapshot(async snap=>{
+            lastSnap = snap;
+            document.getElementById("ordersError").style.display="none";
+            renderList(snap);
+            if (firstSnapshot) { firstSnapshot = false; return; }
+            
+            // Nuevos pedidos (Sonido y Autoimprimir)
+            let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
+            for (const ch of snap.docChanges()){
+              if (ch.type === 'added') {
+                try{ 
+                    // Sonido
+                    let audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+                    const beep = () => {
+                        const o=audioCtx.createOscillator(); const g=audioCtx.createGain();
+                        o.type="square"; o.frequency.value=700; o.connect(g); g.connect(audioCtx.destination);
+                        o.start(); g.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime+0.15); o.stop(audioCtx.currentTime+0.15);
+                    };
+                    if(JSON.parse(localStorage.getItem("rb_bell_enabled")||"true")){
+                        beep(); setTimeout(beep,200); setTimeout(beep,400);
+                    }
+                }catch(_){}
+                
+                if (autoPrint) trySilentPrint(idToDoc.get(ch.doc.id) || ch.doc);
+              }
+            }
+          }, err=>{ document.getElementById("ordersError").style.display="block"; });
+        }catch(err){ document.getElementById("ordersError").style.display="block"; }
+      })();
+
+      // Toggle botones Header
+      const btnBell=$("#btnBell");
+      const updateBell=()=>{ 
+          const on = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
+          btnBell.classList.toggle("active", on); 
+      };
+      updateBell();
+      btnBell.onclick=()=>{ 
+          const curr = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
+          localStorage.setItem("rb_bell_enabled", !curr); updateBell(); 
+      };
+
+      const btnAutoPrint=$("#btnAutoPrint");
+      const updateAP=()=>{
+          const on = JSON.parse(localStorage.getItem("rb_auto_print")||"false");
+          btnAutoPrint.classList.toggle("active", on);
+      };
+      updateAP();
+      btnAutoPrint.onclick=()=>{
+          const curr = JSON.parse(localStorage.getItem("rb_auto_print")||"false");
+          localStorage.setItem("rb_auto_print", !curr); updateAP();
+      };
+    });
+
+    /* --- RENDERIZADO --- */
+    const btnStateClass=st=>`state-btn state-${st}`;
+    const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
+    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
+    const computeRawSubtotal = o => {
+      if (typeof o.rawTotal === "number") return o.rawTotal;
+      const items = Array.isArray(o.items)?o.items:[];
+      return items.reduce((t,it)=>{ const qty=it.qty||1; const base=(it.price||0)*qty; return t+base; },0);
     };
 
-    let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
-    const btnAutoPrint = document.getElementById("btnAutoPrint");
-    const updateAP = ()=> btnAutoPrint.classList.toggle("active", autoPrint);
-    updateAP();
-    btnAutoPrint.onclick = ()=>{ autoPrint = !autoPrint; localStorage.setItem("rb_auto_print", JSON.stringify(autoPrint)); updateAP(); };
-
-    (async function subscribeOrders(){
-      try{
-        let q = window.db.collection("orders").orderBy("createdAt", "desc").orderBy(window.firebase.firestore.FieldPath.documentId(), "desc");
-        let firstSnapshot = true;
-        q.limit(500).onSnapshot(async snap=>{
-          document.getElementById("ordersError").style.display="none";
-          renderList(snap);
-          if (firstSnapshot) { firstSnapshot = false; return; }
-          for (const ch of snap.docChanges()){
-            if (ch.type === 'added') {
-              try{ playBeepTriple(); }catch(_){}
-              if (autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id) || ch.doc);
-            }
-          }
-        }, err=>{ document.getElementById("ordersError").style.display="block"; });
-      }catch(err){ document.getElementById("ordersError").style.display="block"; }
-    })();
-
     function renderList(snap){
+      const passFilter=o=>{
+        const s = o.status ?? "accepted";
+        if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
+        if(currentFilter==="entregados") return s==="delivered";
+        if(currentFilter==="cancelled") return s==="cancelled";
+        return true;
+      };
+
       const docs=snap.docs.filter(d=>passFilter(d.data()));
-      window.idToDoc=new Map(snap.docs.map(d=>[d.id,d]));
+      idToDoc=new Map(snap.docs.map(d=>[d.id,d])); // Actualizar mapa global
       document.getElementById("orders").innerHTML = docs.length ? docs.map(renderOrder).join("") : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
     }
-  });
+
+    function renderOrder(doc){
+      const o = doc.data();
+      const dt = pickDocDate(o);
+      const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
+      const items = Array.isArray(o.items) ? o.items : [];
+
+      const cats = { burgers:[], fries:[], drinks:[], others:[] };
+      items.forEach(it => {
+          const name = (it.name||"").toLowerCase();
+          const type = (it.type||"").toLowerCase();
+          const qty  = it.qty || it.quantity || 1;
+          if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
+              cats.burgers.push(it);
+              if(it.fries && it.fries !== 'sin_papas') cats.fries.push({ name: it.fries, qty: qty });
+          } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
+              cats.fries.push(it);
+          } else if (type === 'drink' || name.includes('coca')) {
+              cats.drinks.push(it);
+          } else {
+              cats.others.push(it);
+          }
+      });
+
+      const renderSection = (title, list, icon) => {
+          if(!list.length) return "";
+          const rows = list.map(it => {
+              const qty = it.qty || it.quantity || 1;
+              const name = it.name || "Ítem";
+              let extras = [];
+              if(it.extras?.patty) extras.push(`🥩 +${it.extras.patty} carne`);
+              if(it.extras?.cheddar) extras.push(`🧀 +${it.extras.cheddar} cheddar`);
+              const extrasHTML = extras.length ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` : "";
+              const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
+              return `<div class="item-row"><div class="item-qty">${qty}</div><div class="item-det"><div class="item-name">${name}</div>${extrasHTML}${notesHTML}</div></div>`;
+          }).join("");
+          return `<div class="cat-section"><div class="cat-header">${icon} ${title}</div>${rows}</div>`;
+      };
+
+      const fullItemsHTML = renderSection("HAMBURGUESAS", cats.burgers, "🍔") + renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟") + renderSection("BEBIDAS", cats.drinks, "🥤") + renderSection("OTROS", cats.others, "🔸");
+      const pickupPretty = getPickupPretty(o);
+      const srcChip = o.source === "mostrador" ? `<span class="chip" style="background:#e3f2fd;color:#0d47a1">🖥️ Mostrador</span>` : "";
+      const noteGeneral = (o.comment || o.notes || "").toString().trim() ? `<span class="chip">📝 ${o.comment || o.notes}</span>` : "";
+      const st = o.status ?? "accepted";
+      const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
+      const isPaid = ((o.payment_status === "paid") || o.paid === true);
+      
+      const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>`<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`).join('')}</div>`;
+
+      const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
+      const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
+      const payLine = `
+        <div class="pay-line">
+          <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
+            <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
+            <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
+            <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
+            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
+            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
+          </select>
+          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
+          <button class="btn" onclick="printOrder('${doc.id}')">🖨</button>
+        </div>`;
+
+      return `
+        <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
+          <div class="order-head">
+            <div>
+              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}</div>
+              <div class="muted">N° interno: ${o.orderNumber || '—'}</div>
+              <div class="muted">${dtText}</div>
+              <div class="chips">${srcChip}<span class="chip">Retiro: ${o.entrega||"take_away"}</span><span class="chip">⏰ ${pickupPretty || "—"}</span>${noteGeneral}</div>
+              ${stateBtns}
+            </div>
+            <div>
+              <div class="right-total">${money(computeOrderTotal(o) || o.total || 0)}</div>
+              ${payLine}
+            </div>
+          </div>
+          <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
+        </div>
+      `;
+    }
   </script>
-  
+
   <script src="pwa.js"></script>
 </body>
 </html>
