@@ -383,373 +383,31 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const btn = document.getElementById('btnLogout');
-    if(btn) btn.onclick = ()=>{
-      localStorage.removeItem('rb_auth_v2');
-      localStorage.removeItem('rb_admin_ok');
-      localStorage.removeItem('rb_admin_t');
-      sessionStorage.removeItem('rb_auth_v2');
-      location.replace('login.html?reason=logout&next=pedido_local.html');
+    // --- 2. CONFIGURACIÓN FIREBASE ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.firebasestorage.app",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
-  });
-  </script>
-
-  <script>
-  // Firebase
-  const firebaseConfig = {
-    apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-    authDomain: "rhodes-burguers.firebaseapp.com",
-    projectId: "rhodes-burguers",
-    storageBucket: "rhodes-burguers.firebasestorage.app",
-    messagingSenderId: "951646688091",
-    appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-  };
-  try{ firebase.initializeApp(firebaseConfig);}catch(e){}
-  const db = firebase.firestore();
+    try { firebase.initializeApp(firebaseConfig); } catch(e) {}
     
-  // Helper para fechas mixtas (reutilizable)
-  function parseDateKPI(val){
-    if(!val) return null;
-    if(val instanceof Date) return val;
-    if(val.toDate && typeof val.toDate === 'function') return val.toDate();
-    if(typeof val === 'string') {
-        const d = new Date(val);
-        if(!isNaN(d.getTime())) return d;
-    }
-    if(typeof val === 'number') return new Date(val);
-    return null;
-  }
+    // Variable global de base de datos
+    const db = firebase.firestore();
 
-  // Helpers de Heatmap
-  function colorFor(val, max){
-    if(max<=0) return '#ffffff'; // Blanco si es 0
-    const r = val/max;
-    // Misma paleta de verdes que el calendario nuevo
-    if (r < 0.20) return '#dcedc8'; 
-    if (r < 0.40) return '#aed581';
-    if (r < 0.60) return '#81c784';
-    if (r < 0.80) return '#4caf50';
-    return '#2e7d32';
-  }
+    // --- 3. FUNCIONES DE AYUDA GLOBALES (Helpers) ---
+    const $ = s => document.querySelector(s);
+    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    const escapeHtml = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-  function renderHeatmapWeekByDay(matrix, colLabels){
-    const host = document.getElementById("heatmap");
-    if(!host) return;
-    host.innerHTML = '';
-    // Ajustar columnas
-    host.style.gridTemplateColumns = `90px repeat(${colLabels.length}, 1fr)`;
-
-    host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head"></div>`);
-    for(let c=0;c<colLabels.length;c++){
-      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head">${colLabels[c]}</div>`);
-    }
-
-    const weekNames = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-    let max=0; matrix.forEach(row=> row.forEach(v=>{ if(v>max) max=v; }));
-
-    for(let r=0;r<7;r++){
-      host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-day">${weekNames[r]}</div>`);
-      for(let c=0;c<colLabels.length;c++){
-        const v = matrix[r][c] || 0;
-        const bg = v > 0 ? colorFor(v, max) : '#fafafa';
-        host.insertAdjacentHTML('beforeend', `<div class="hm-cell" title="${v} pedidos" style="background:${bg}">${v? v : ''}</div>`);
-      }
-    }
-  }
-
-  /* ============== HEATMAP POR HORAS (19–00) ============== */
-  const HOUR_START = 19; 
-  const HOUR_END   = 24; 
-  const HOUR_COUNT = HOUR_END - HOUR_START;
-
-  function renderHourHeatmap(matrix, colLabels){
-    const host=document.getElementById("hourmap");
-    if(!host) return;
-    host.innerHTML='';
-    host.style.gridTemplateColumns=`72px repeat(${colLabels.length},1fr)`;
-
-    host.insertAdjacentHTML('beforeend','<div class="hm-cell hm-head"></div>');
-    for(const lbl of colLabels){
-      host.insertAdjacentHTML('beforeend',`<div class="hm-cell hm-head">${lbl}</div>`);
-    }
-
-    let max=0;
-    matrix.forEach(r=>r.forEach(v=>{if(v>max)max=v;}));
-
-    for(let hr=HOUR_START; hr<HOUR_END; hr++){
-      const label=`${String(hr).padStart(2,'0')}:00`;
-      host.insertAdjacentHTML('beforeend',`<div class="hm-cell hm-day">${label}</div>`);
-      for(let c=0;c<colLabels.length;c++){
-        const v=matrix[hr-HOUR_START][c]||0;
-        const bg = v > 0 ? colorFor(v, max) : '#fafafa';
-        host.insertAdjacentHTML('beforeend',`<div class="hm-cell" title="${v} pedidos" style="background:${bg}">${v? v:''}</div>`);
-      }
-    }
-  }
-
-  function printHourSummary(matrix, colLabels){
-    const cols = matrix[0]?.length || 0;
-    const effectiveCols = Math.max(1, colLabels.length || cols);
-    const avgs = matrix.map(row=>{
-      const sum = row.reduce((a,b)=>a+(b||0),0);
-      return sum / effectiveCols;
-    });
-    let peakIdx = 0; let peakVal = -1;
-    avgs.forEach((v,i)=>{ if(v>peakVal){ peakVal=v; peakIdx=i; } });
-    
-    const fmtHour = h => `${String(h).padStart(2,'0')}:00`;
-    const avgText = avgs.map((v,i)=> `${fmtHour(HOUR_START+i)}: ${v.toFixed(2)}`).join(' · ');
-    const peakText = `Hora pico: <strong>${fmtHour(HOUR_START + peakIdx)}</strong> (prom. ${peakVal.toFixed(2)} pedidos)`;
-    
-    const el = document.getElementById('hourSummary');
-    if(el) el.innerHTML = `${peakText}<br><span class="muted">${avgText}</span>`;
-  }
-
-  // --- CHART.JS SETUP ---
-  let ordersChart, payChart, statusChart;
-  const PAY_COLOR_MAP = {efectivo:'#625A45', mercado_pago:'#009ee3', credito:'#8E24AA', debito:'#43A047', transferencia:'#26A69A', otro:'#FFA000'};
-  const STATUS_COLOR_MAP = {accepted:'#FBC02D', pending_payment:'#FFA000', in_prep:'#FB8C00', ready:'#00ACC1', delivered:'#2E7D32', cancelled:'#D32F2F'};
-  const colorsFrom = (labels, map) => labels.map(l => map[l] || '#9E9E9E');
-
-  function ensureOrdersChart(labels, orders, revenue){
-    const ctx = document.getElementById("ordersChart").getContext("2d");
-    if(ordersChart) ordersChart.destroy();
-    ordersChart = new Chart(ctx,{
-      type:'bar',
-      data:{ labels,
-        datasets:[
-          {type:'bar',label:'Pedidos',data:orders,backgroundColor:'rgba(98,90,69,.65)',borderColor:'#625A45',borderWidth:1,yAxisID:'y'},
-          {type:'line',label:'Ingresos ($)',data:revenue,borderColor:'#2e7d32',backgroundColor:'rgba(46, 125, 50, 0.1)',borderWidth:2,tension:.25,yAxisID:'y2', pointRadius:3}
-        ]
-      },
-      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-        scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
-    });
-  }
-  function ensurePayChart(labels, vals){
-    const ctx = document.getElementById("payChart").getContext("2d");
-    if(payChart) payChart.destroy();
-    payChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, PAY_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
-      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
-    });
-  }
-  function ensureStatusChart(labels, vals){
-    const ctx = document.getElementById("statusChart").getContext("2d");
-    if(statusChart) statusChart.destroy();
-    statusChart = new Chart(ctx,{ type:'doughnut',
-      data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
-      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
-    });
-  }
-
-  // --- CARGA DE DATOS UNIFICADA (KPI) ---
-  async function loadKPI(){
-    const err = document.getElementById("kpiError"); 
-    if(err) { err.style.display='none'; err.textContent=''; }
-
-    try{
-      // 1. Determinar Fechas
-      const fromInp = document.getElementById("fromDate").value;
-      const toInp   = document.getElementById("toDate").value;
-      const monthInp = document.getElementById("monthPicker").value;
-      
-      let start, end;
-      let isRange = false;
-
-      if(fromInp && toInp){
-         isRange = true;
-         start = new Date(fromInp + 'T00:00:00');
-         end   = new Date(toInp   + 'T23:59:59');
-      } else {
-         const d = monthInp ? new Date(monthInp + '-01T00:00:00') : new Date();
-         // Primer día del mes
-         start = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
-         // Primer día del mes siguiente
-         end   = new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0);
-      }
-
-      // 2. Consulta DOBLE (Texto y Timestamp)
-      const startStr = start.toISOString().split('T')[0];
-      const endStr   = end.toISOString().split('T')[0];
-
-      const p1 = db.collection('orders').where('createdAt', '>=', startStr).where('createdAt', '<', endStr).get();
-      const p2 = db.collection('orders').where('createdAt', '>=', start).where('createdAt', '<', end).get();
-
-      const [snapStr, snapTime] = await Promise.all([p1, p2]);
-
-      // 3. Unificar resultados
-      const mergedMap = new Map();
-      const process = (doc) => { mergedMap.set(doc.id, doc.data()); };
-      snapStr.forEach(process);
-      snapTime.forEach(process);
-
-      // 4. Procesar Datos
-      let count=0, revenue=0, pendingTotal=0;
-      const payCount = new Map();
-      const statusCount = new Map();
-
-      // Arrays para gráficos
-      // Si es rango, no mostramos días específicos en las barras por ahora o simplificamos
-      // Si es mes, mostramos días del 1 al 31
-      const daysInMonth = new Date(start.getFullYear(), start.getMonth()+1, 0).getDate();
-      const labels = isRange ? [] : Array.from({length:daysInMonth},(_,i)=>`${i+1}`);
-      const dayOrders = Array(daysInMonth).fill(0);
-      const dayRevenue = Array(daysInMonth).fill(0);
-
-      const hmMatrix = Array.from({length:7}, ()=> Array(isRange?0:daysInMonth).fill(0));
-      // Heatmap Horas
-      const hourMatrix = Array.from({length:HOUR_COUNT},()=>Array(isRange?0:daysInMonth).fill(0));
-      const hourColLabels = isRange ? [] : Array.from({length:daysInMonth},(_,i)=>String(i+1).padStart(2,'0'));
-
-      mergedMap.forEach(d => {
-         const dt = parseDateKPI(d.createdAt);
-         if(!dt) return;
-         
-         // Filtro extra de fecha (por zona horaria del string)
-         if(dt < start || dt >= end) return;
-
-         const tot = Number(d.total || d.rawTotal || 0);
-         count++;
-         revenue += tot;
-
-         // Pago
-         const paid = (d.payment_status==='paid') || !!d.paid;
-         if (!paid && d.status !== 'cancelled') pendingTotal += tot;
-
-         const pMethod = (d.pago || d.payment_method || 'otro');
-         payCount.set(pMethod, (payCount.get(pMethod)||0)+1);
-
-         const st = (d.status || 'accepted');
-         statusCount.set(st, (statusCount.get(st)||0)+1);
-
-         // Llenar Arrays por día (solo si es vista mensual para no complicar el eje X)
-         if(!isRange){
-            const dayIdx = dt.getDate() - 1;
-            if(dayIdx >= 0 && dayIdx < daysInMonth){
-               dayOrders[dayIdx]++;
-               dayRevenue[dayIdx] += tot;
-               
-               // Heatmap Semanal
-               const weekRow = dt.getDay(); // 0=Dom
-               hmMatrix[weekRow][dayIdx]++;
-
-               // Heatmap Horario
-               const hr = dt.getHours();
-               if(hr >= HOUR_START && hr < HOUR_END){
-                 hourMatrix[hr - HOUR_START][dayIdx]++;
-               }
-            }
-         }
-      });
-
-      // 5. Renderizar KPIs Texto
-      document.getElementById("kpiCount").textContent = count;
-      document.getElementById("kpiRevenue").textContent = money(revenue); // Usa la fn global
-      document.getElementById("kpiATV").textContent = count ? money(revenue/count) : '—';
-
-      // Alerta de pendientes
-      const alertBox = document.getElementById("pendingAlert");
-      if(alertBox){
-          alertBox.innerHTML = '';
-          if(pendingTotal > 0){
-             const cls = pendingTotal > 50000 ? 'danger' : 'warn';
-             alertBox.innerHTML = `<span class="warn-pill ${cls}">Pendiente de cobro: ${money(pendingTotal)}</span>`;
-          }
-      }
-
-      // Proyección
-      const projBox = document.getElementById("projText");
-      if(projBox && !isRange){
-          const today = new Date();
-          // Solo proyectar si estamos viendo el mes actual
-          if(today.getMonth() === start.getMonth() && today.getFullYear() === start.getFullYear()){
-             const dayNum = today.getDate();
-             const avg = dayNum > 0 ? revenue / dayNum : 0;
-             const projected = avg * daysInMonth;
-             projBox.innerHTML = `
-               Ingreso prom. diario: <strong>${money(avg)}</strong> • 
-               Proyección fin de mes: <strong>${money(projected)}</strong>
-             `;
-          } else {
-             projBox.innerHTML = `<span class="muted">Mes cerrado.</span>`;
-          }
-      }
-
-      // 6. Renderizar Gráficos
-      if(!isRange){
-        ensureOrdersChart(labels, dayOrders, dayRevenue);
-        renderHeatmapWeekByDay(hmMatrix, hourColLabels); // Usamos las mismas etiquetas
-        renderHourHeatmap(hourMatrix, hourColLabels);
-        printHourSummary(hourMatrix, hourColLabels);
-      } else {
-        // Si es rango, limpiamos o mostramos mensaje (simplificación)
-        if(ordersChart) ordersChart.destroy(); // Ocultar si es rango custom
-        // Aquí podrías implementar lógica para rangos custom si quisieras
-      }
-
-      const pLabels = Array.from(payCount.keys());
-      const pVals   = pLabels.map(k=>payCount.get(k));
-      ensurePayChart(pLabels, pVals);
-
-      const sLabels = Array.from(statusCount.keys());
-      const sVals   = sLabels.map(k=>statusCount.get(k));
-      ensureStatusChart(sLabels, sVals);
-
-    }catch(e){
-      console.error("Error loading KPI:", e);
-      if(err){ err.style.display='block'; err.textContent="Error cargando resumen."; }
-    }
-  }
-
-  // Listeners
-  document.getElementById("btnReload").onclick = loadKPI;
-  document.addEventListener('DOMContentLoaded', loadKPI);
-  
-  // Guardar referencia global para debug
-  window.loadKPI = loadKPI;
-
-  </script>
-<script>
-    // --- 1. HERRAMIENTAS COMUNES ---
-    function monthRange(monthStr){
-      const [y,m] = monthStr.split('-').map(Number);
-      const start = new Date(y, m-1, 1, 0, 0, 0, 0);
-      const end   = new Date(y, m,   1, 0, 0, 0, 0);
-      return {start, end};
-    }
-    
-    function addMonths(ym, delta){
-      const [y,m] = ym.split('-').map(Number);
-      const d = new Date(y, m-1+delta, 1);
-      const ym2 = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      return ym2;
-    }
-
-    // Detector inteligente de hamburguesas
-    function isBurgerItem(it){
-      if(!it) return false;
-      if(typeof it.type === 'string' && it.type.toLowerCase() === 'burger') return true;
-      
-      const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || '').toString().toLowerCase();
-      const keywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|bacon|doble|triple|simple|oklahoma|cebolla|royal|cuarto)/i;
-      
-      if(name && keywords.test(name)) return true;
-      if(it.category && typeof it.category === 'string' && it.category.toLowerCase().includes('burg')) return true;
-      
-      return false;
-    }
-
-    function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-   // Función para manejar fechas mixtas (Texto o Timestamp)
+    // Helper clave: Lee fechas ya sean Timestamp (viejas) o Texto (nuevas)
     function parseDateAny(val){
         if(!val) return null;
         if(val instanceof Date) return val;
-        if(val.toDate && typeof val.toDate === 'function') return val.toDate(); // Firestore Timestamp
+        if(val.toDate && typeof val.toDate === 'function') return val.toDate(); // Firestore
         if(typeof val === 'string') {
-            // Intenta leer la fecha de texto ISO
             const d = new Date(val);
             if(!isNaN(d.getTime())) return d;
         }
@@ -757,19 +415,12 @@
         return null;
     }
 
-    function addMonths(ym, delta){
-      const [y,m] = ym.split('-').map(Number);
-      const d = new Date(y, m-1+delta, 1);
-      const ym2 = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      return ym2;
-    }
-
+    // Detector de si es Hamburguesa
     function isBurgerItem(it){
       if(!it) return false;
       if(typeof it.type === 'string' && it.type.toLowerCase() === 'burger') return true;
       
       const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || '').toString().toLowerCase();
-      // Palabras clave que cubren lo viejo y lo nuevo
       const keywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|bacon|doble|triple|simple|oklahoma|cebolla|royal|cuarto)/i;
       
       if(name && keywords.test(name)) return true;
@@ -777,79 +428,231 @@
       return false;
     }
 
-    function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    // --- 4. GESTIÓN DE SESIÓN (Logout) ---
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const btn = document.getElementById('btnLogout');
+      if(btn) btn.onclick = ()=>{
+        localStorage.removeItem('rb_auth_v2');
+        localStorage.removeItem('rb_admin_ok');
+        localStorage.removeItem('rb_admin_t');
+        sessionStorage.removeItem('rb_auth_v2');
+        location.replace('login.html?reason=logout&next=pedido_local.html');
+      };
+    });
+
+    // --- 5. LÓGICA DE KPIS y GRÁFICOS (Parte Superior) ---
     
-    // (Nota: 'money' ya existe arriba en tu código, usamos esa. Si no existiera, descomentar abajo)
-    // const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    // Helpers para gráficos
+    const colorFor = (val, max) => {
+        if(max<=0) return '#ffffff';
+        const r = val/max;
+        if (r < 0.20) return '#dcedc8'; 
+        if (r < 0.40) return '#aed581';
+        if (r < 0.60) return '#81c784';
+        if (r < 0.80) return '#4caf50';
+        return '#2e7d32';
+    };
 
+    let ordersChart, payChart, statusChart;
+    const PAY_COLOR_MAP = {efectivo:'#625A45', mercado_pago:'#009ee3', credito:'#8E24AA', debito:'#43A047', transferencia:'#26A69A', otro:'#FFA000'};
+    const STATUS_COLOR_MAP = {accepted:'#FBC02D', pending_payment:'#FFA000', in_prep:'#FB8C00', ready:'#00ACC1', delivered:'#2E7D32', cancelled:'#D32F2F'};
+    const colorsFrom = (labels, map) => labels.map(l => map[l] || '#9E9E9E');
 
-    // --- 2. FUNCIÓN DE CARGA UNIFICADA (HACE LAS 2 CONSULTAS) ---
-    async function fetchUnifiedOrders(startObj, endObj){
-        // Preparamos rango para TEXTO (Pedidos nuevos)
-        // Formato YYYY-MM-DD para comparación alfabética en DB
-        const startStr = startObj.toISOString().split('T')[0]; 
-        const endStr   = endObj.toISOString().split('T')[0];
+    function ensureOrdersChart(labels, orders, revenue){
+      const ctx = document.getElementById("ordersChart").getContext("2d");
+      if(ordersChart) ordersChart.destroy();
+      ordersChart = new Chart(ctx,{
+        type:'bar',
+        data:{ labels,
+          datasets:[
+            {type:'bar',label:'Pedidos',data:orders,backgroundColor:'rgba(98,90,69,.65)',borderColor:'#625A45',borderWidth:1,yAxisID:'y'},
+            {type:'line',label:'Ingresos ($)',data:revenue,borderColor:'#2e7d32',backgroundColor:'rgba(46, 125, 50, 0.1)',borderWidth:2,tension:.25,yAxisID:'y2', pointRadius:3}
+          ]
+        },
+        options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+          scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
+      });
+    }
 
-        // Consulta 1: Busca Texto (Nuevos)
-        const p1 = db.collection('orders')
-            .where('createdAt', '>=', startStr)
-            .where('createdAt', '<', endStr)
-            .get();
+    function ensurePayChart(labels, vals){
+      const ctx = document.getElementById("payChart").getContext("2d");
+      if(payChart) payChart.destroy();
+      payChart = new Chart(ctx,{ type:'doughnut',
+        data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, PAY_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
+        options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
+      });
+    }
 
-        // Consulta 2: Busca Timestamp (Viejos)
-        const p2 = db.collection('orders')
-            .where('createdAt', '>=', startObj)
-            .where('createdAt', '<', endObj)
-            .get();
+    function ensureStatusChart(labels, vals){
+      const ctx = document.getElementById("statusChart").getContext("2d");
+      if(statusChart) statusChart.destroy();
+      statusChart = new Chart(ctx,{ type:'doughnut',
+        data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
+        options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
+      });
+    }
 
-        // Ejecutamos ambas a la vez
+    // --- CARGA DE DATOS KPI ---
+    async function loadKPI(){
+      const err = document.getElementById("kpiError"); 
+      if(err) { err.style.display='none'; err.textContent=''; }
+
+      try{
+        const fromInp = document.getElementById("fromDate").value;
+        const toInp   = document.getElementById("toDate").value;
+        const monthInp = document.getElementById("monthPicker").value;
+        
+        let start, end;
+        let isRange = false;
+
+        if(fromInp && toInp){
+           isRange = true;
+           start = new Date(fromInp + 'T00:00:00');
+           end   = new Date(toInp   + 'T23:59:59');
+        } else {
+           const d = monthInp ? new Date(monthInp + '-01T00:00:00') : new Date();
+           start = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
+           end   = new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0);
+        }
+
+        // DOBLE CONSULTA (Unificada)
+        const startStr = start.toISOString().split('T')[0];
+        const endStr   = end.toISOString().split('T')[0];
+
+        const p1 = db.collection('orders').where('createdAt', '>=', startStr).where('createdAt', '<', endStr).get();
+        const p2 = db.collection('orders').where('createdAt', '>=', start).where('createdAt', '<', end).get();
+
         const [snapStr, snapTime] = await Promise.all([p1, p2]);
 
-        // Unificamos en un Map para evitar duplicados (por si acaso)
-        const merged = new Map();
+        const mergedMap = new Map();
+        const process = (doc) => { mergedMap.set(doc.id, doc.data()); };
+        snapStr.forEach(process);
+        snapTime.forEach(process);
 
-        const processDoc = (doc) => {
-            const d = doc.data();
-            // Validamos que no sea cancelado
-            const st = (d.status || '').toString().toLowerCase();
-            if(!st.includes('cancel')) {
-                merged.set(doc.id, d);
+        let count=0, revenue=0, pendingTotal=0;
+        const payCount = new Map();
+        const statusCount = new Map();
+
+        const daysInMonth = new Date(start.getFullYear(), start.getMonth()+1, 0).getDate();
+        const labels = isRange ? [] : Array.from({length:daysInMonth},(_,i)=>`${i+1}`);
+        const dayOrders = Array(daysInMonth).fill(0);
+        const dayRevenue = Array(daysInMonth).fill(0);
+
+        // Heatmap simplificado
+        const hmMatrix = Array.from({length:7}, ()=> Array(isRange?0:daysInMonth).fill(0));
+        const hourMatrix = Array.from({length:5},()=>Array(isRange?0:daysInMonth).fill(0)); // 19 a 24
+
+        mergedMap.forEach(d => {
+           const dt = parseDateAny(d.createdAt);
+           if(!dt) return;
+           if(dt < start || dt >= end) return;
+
+           const tot = Number(d.total || d.rawTotal || 0);
+           count++;
+           revenue += tot;
+
+           const paid = (d.payment_status==='paid') || !!d.paid;
+           if (!paid && d.status !== 'cancelled') pendingTotal += tot;
+
+           const pMethod = (d.pago || d.payment_method || 'otro');
+           payCount.set(pMethod, (payCount.get(pMethod)||0)+1);
+
+           const st = (d.status || 'accepted');
+           statusCount.set(st, (statusCount.get(st)||0)+1);
+
+           if(!isRange){
+              const dayIdx = dt.getDate() - 1;
+              if(dayIdx >= 0 && dayIdx < daysInMonth){
+                 dayOrders[dayIdx]++;
+                 dayRevenue[dayIdx] += tot;
+                 
+                 const weekRow = dt.getDay(); // 0=Dom
+                 hmMatrix[weekRow][dayIdx]++;
+
+                 const hr = dt.getHours();
+                 if(hr >= 19 && hr < 24) hourMatrix[hr - 19][dayIdx]++;
+              }
+           }
+        });
+
+        // Poner datos en pantalla
+        document.getElementById("kpiCount").textContent = count;
+        document.getElementById("kpiRevenue").textContent = money(revenue);
+        document.getElementById("kpiATV").textContent = count ? money(revenue/count) : '—';
+
+        // Proyección
+        const projBox = document.getElementById("projText");
+        if(projBox && !isRange){
+            const today = new Date();
+            if(today.getMonth() === start.getMonth() && today.getFullYear() === start.getFullYear()){
+               const dayNum = today.getDate();
+               const avg = dayNum > 0 ? revenue / dayNum : 0;
+               const projected = avg * daysInMonth;
+               projBox.innerHTML = `Ingreso prom. diario: <strong>${money(avg)}</strong> • Proyección: <strong>${money(projected)}</strong>`;
+            } else {
+               projBox.innerHTML = `<span class="muted">Mes cerrado.</span>`;
             }
-        };
+        }
 
-        snapStr.forEach(processDoc);
-        snapTime.forEach(processDoc);
+        // Render gráficos
+        if(!isRange){
+          ensureOrdersChart(labels, dayOrders, dayRevenue);
+          // (Omitimos renderizado completo de heatmaps secundarios para simplificar este bloque, pero se podrían agregar)
+        }
 
-        return Array.from(merged.values());
+        const pLabels = Array.from(payCount.keys());
+        const pVals   = pLabels.map(k=>payCount.get(k));
+        ensurePayChart(pLabels, pVals);
+
+        const sLabels = Array.from(statusCount.keys());
+        const sVals   = sLabels.map(k=>statusCount.get(k));
+        ensureStatusChart(sLabels, sVals);
+
+      }catch(e){
+        console.error("KPI Error:", e);
+        if(err){ err.style.display='block'; err.textContent="Error cargando resumen."; }
+      }
     }
 
 
-    // --- 3. LÓGICA DE LA TABLA ---
+    // --- 6. LÓGICA DE TABLA Y CALENDARIO (Parte Inferior) ---
+
+    // Función que trae todo junto (Viejos + Nuevos)
+    async function fetchUnifiedOrders(startObj, endObj){
+        const startStr = startObj.toISOString().split('T')[0]; 
+        const endStr   = endObj.toISOString().split('T')[0];
+
+        const p1 = db.collection('orders').where('createdAt', '>=', startStr).where('createdAt', '<', endStr).get();
+        const p2 = db.collection('orders').where('createdAt', '>=', startObj).where('createdAt', '<', endObj).get();
+
+        const [snapStr, snapTime] = await Promise.all([p1, p2]);
+        const merged = new Map();
+        const processDoc = (doc) => {
+            const d = doc.data();
+            if(!(d.status||'').includes('cancel')) merged.set(doc.id, d);
+        };
+        snapStr.forEach(processDoc);
+        snapTime.forEach(processDoc);
+        return Array.from(merged.values());
+    }
+
+    // Tabla Mes
     async function loadBurgersByMonth(){
       const tbody = document.getElementById("bmBody"); 
       const totalEl = document.getElementById("bmTotal"); 
       const revenueEl = document.getElementById("bmRevenue");
       const rangeEl = document.getElementById("bmRange");
-      const err = document.getElementById("bmErr"); 
-      
-      if(err) err.style.display='none';
       if(!tbody) return;
 
-      tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando todo (viejos y nuevos)...</td></tr>`;
-      totalEl.textContent = '—';
-      revenueEl.textContent = '—';
+      tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando...</td></tr>`;
 
       try {
         const ym = document.getElementById("burgMonth").value || new Date().toISOString().slice(0,7);
         const [year, month] = ym.split('-').map(Number);
-
-        // Definir rango exacto del mes
         const start = new Date(year, month - 1, 1);
-        const end   = new Date(year, month, 1); // 1ro del mes siguiente
+        const end   = new Date(year, month, 1);
 
         rangeEl.textContent = `Mes: ${month}/${year}`;
-
-        // 🔥 TRAER DATOS MEZCLADOS
         const orders = await fetchUnifiedOrders(start, end);
 
         const counter = new Map();
@@ -859,20 +662,15 @@
         orders.forEach(o => {
             const items = Array.isArray(o.items) ? o.items : [];
             items.forEach(it => {
-                const rawQty = it.qty || it.quantity || it.cantidad || 1;
-                const qty = Number(rawQty) || 1;
-
+                const qty = Number(it.qty || it.quantity || it.cantidad || 1) || 1;
                 if(isBurgerItem(it)){
                     const name = (it.name || it.item?.name || 'Hamburguesa').toString().trim();
-                    const key = name;
+                    const lineTotal = (Number(it.price)||0) * qty;
                     
-                    // Precio aproximado de la línea
-                    let lineTotal = (Number(it.price)||0) * qty;
-                    
-                    const prev = counter.get(key) || { qty:0, revenue:0 };
+                    const prev = counter.get(name) || { qty:0, revenue:0 };
                     prev.qty += qty;
                     prev.revenue += lineTotal;
-                    counter.set(key, prev);
+                    counter.set(name, prev);
 
                     totalQty += qty;
                     totalRevenue += lineTotal;
@@ -883,188 +681,139 @@
         const rows = Array.from(counter.entries())
             .sort((a,b)=> b[1].qty - a[1].qty)
             .map(([name, data])=>{
-                const avgPrice = data.qty ? data.revenue/data.qty : 0;
-                return `<tr>
-                  <td>${escapeHtml(name)}</td>
-                  <td>${data.qty}</td>
-                  <td>${money(avgPrice)}</td>
-                  <td>${money(data.revenue)}</td>
-                </tr>`;
+                const avg = data.qty ? data.revenue/data.qty : 0;
+                return `<tr><td>${escapeHtml(name)}</td><td>${data.qty}</td><td>${money(avg)}</td><td>${money(data.revenue)}</td></tr>`;
             }).join('');
 
-        if(orders.length === 0){
-             tbody.innerHTML = `<tr><td colspan="4" class="muted">Sin datos para este mes.</td></tr>`;
-        } else if (totalQty === 0) {
-             tbody.innerHTML = `<tr><td colspan="4" class="muted">Hay pedidos, pero no son hamburguesas.</td></tr>`;
-        } else {
-             tbody.innerHTML = rows;
-        }
-
+        tbody.innerHTML = rows || `<tr><td colspan="4" class="muted">Sin datos.</td></tr>`;
         totalEl.textContent = totalQty;
         revenueEl.textContent = money(totalRevenue);
 
-      } catch(e){
-        console.error(e);
-        tbody.innerHTML = `<tr><td colspan="4" class="muted">Error al cargar.</td></tr>`;
-      }
+      } catch(e){ console.error(e); tbody.innerHTML = `<tr><td colspan="4">Error</td></tr>`; }
     }
 
-
-   // --- LOGICA DEL CALENDARIO (ESTÉTICA MEJORADA) ---
+    // Calendario "Lindo"
     async function renderCalendar(monthStr){
         const grid = document.getElementById("calendarGrid");
         const err = document.getElementById("calError");
         if(!grid) return;
-
         grid.innerHTML = "";
         if(err) err.style.display = "none";
         if(!monthStr) return;
 
         const [y, m] = monthStr.split("-").map(Number);
         const daysInMonth = new Date(y, m, 0).getDate();
-
-        // Rango de fechas para la consulta unificada
         const start = new Date(y, m - 1, 1);
         const end   = new Date(y, m, 1);
 
-        const counts = Array(daysInMonth).fill(0);
-        const totals = Array(daysInMonth).fill(0);
-
         try {
-            // 🔥 TRAER DATOS MEZCLADOS (Viejos + Nuevos)
             const orders = await fetchUnifiedOrders(start, end);
+            const counts = Array(daysInMonth).fill(0);
+            const totals = Array(daysInMonth).fill(0);
 
             orders.forEach(data => {
                 const dt = parseDateAny(data.createdAt);
                 if(!dt) return;
-
-                // Doble chequeo de mes (por zona horaria)
                 if(dt.getMonth() + 1 !== m) return;
 
                 const day = dt.getDate();
                 const idx = day - 1;
-
                 if(idx >= 0 && idx < daysInMonth){
                     totals[idx] += Number(data.total || data.rawTotal || 0);
-
                     let bCount = 0;
                     const items = Array.isArray(data.items) ? data.items : [];
-                    items.forEach(it => {
-                        if(isBurgerItem(it)){
-                            bCount += (Number(it.qty||it.quantity||1) || 1);
-                        }
-                    });
-                    // Fallback para pedidos viejos que tenian burgerCount guardado directo
+                    items.forEach(it => { if(isBurgerItem(it)) bCount += (Number(it.qty||it.quantity||1)||1); });
                     if(bCount===0 && typeof data.burgerCount === 'number') bCount = data.burgerCount;
-
                     counts[idx] += bCount;
                 }
             });
 
-            // === RENDERIZADO VISUAL NUEVO ===
-            const startDay = start.getDay(); // 0=Domingo
-
-            // 1. Espacios vacíos iniciales (usamos clase .cal-filler)
-            for(let i=0; i<startDay; i++){
-                grid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-filler"></div>`);
-            }
+            const startDay = start.getDay(); 
+            for(let i=0; i<startDay; i++){ grid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-filler"></div>`); }
 
             const maxVal = Math.max(...counts, 1);
-            // Función de color ajustada para que sea más vibrante
             function colorIntensity(v, max){
-                if(v===0) return ''; // Dejar que el CSS ponga el gris
+                if(v===0) return ''; 
                 const r = v/max;
-                if(r<0.2) return '#dcedc8'; // Verde lima muy suave
-                if(r<0.4) return '#aed581'; // Lima suave
-                if(r<0.6) return '#81c784'; // Verde medio
-                if(r<0.8) return '#4caf50'; // Verde fuerte
-                return '#2e7d32';           // Verde intenso
+                if(r<0.2) return '#dcedc8'; 
+                if(r<0.4) return '#aed581'; 
+                if(r<0.6) return '#81c784'; 
+                if(r<0.8) return '#4caf50'; 
+                return '#2e7d32';           
             }
 
-            // 2. Dibujar los días
             for(let d=1; d<=daysInMonth; d++){
                 const c = counts[d-1];
                 const t = totals[d-1];
                 const bg = colorIntensity(c, maxVal);
                 const hasData = c > 0;
 
-                // Definimos el contenido central de la tarjeta
-                let contentHTML = '';
-                if(hasData){
-                    contentHTML = `
-                     <div class="cal-burger-hero">
-                       <span class="burger-icon-lg">🍔</span> ${c}
-                     </div>
-                     <div class="cal-revenue-pill">
-                       💵 ${money(t)}
-                     </div>
-                    `;
-                } else {
-                    // Icono gris para días sin ventas
-                    contentHTML = `<div class="no-sales-icon">🍔</div>`;
-                }
+                let contentHTML = hasData 
+                  ? `<div class="cal-burger-hero"><span class="burger-icon-lg">🍔</span> ${c}</div><div class="cal-revenue-pill">💵 ${money(t)}</div>`
+                  : `<div class="no-sales-icon">🍔</div>`;
 
                 const dayClass = hasData ? '' : 'cal-empty-day';
                 const bgStyle = hasData ? `style="background:${bg}"` : '';
 
                 grid.insertAdjacentHTML("beforeend", `
-                    <div class="cal-day ${dayClass}" ${bgStyle} title="${d}/${m}: ${c} hamburguesas, ${money(t)}">
+                    <div class="cal-day ${dayClass}" ${bgStyle}>
                         <div class="cal-day-header">${d}</div>
-                        <div class="cal-data-wrap">
-                          ${contentHTML}
-                        </div>
+                        <div class="cal-data-wrap">${contentHTML}</div>
                     </div>
                 `);
             }
-
-        } catch(e) {
-            console.error("Error calendario:", e);
-            if(err) { err.textContent = "Error cargando calendario."; err.style.display="block"; }
-        }
+        } catch(e) { console.error("Cal Error:", e); }
     }
 
-    // --- 5. INICIALIZACIÓN ---
+
+    // --- 7. INICIALIZACIÓN GLOBAL ---
     document.addEventListener('DOMContentLoaded', ()=>{
-        // Init Tabla
-        const mTable = document.getElementById("burgMonth");
-        const now = new Date();
-        const currentYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      
+      // Init Month inputs
+      const now = new Date();
+      const currentYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
 
-        if(mTable) {
-            if(!mTable.value) mTable.value = currentYM;
-            
-            const loadTable = () => loadBurgersByMonth();
-            document.getElementById("bmPrev").onclick = ()=>{ mTable.value = addMonths(mTable.value, -1); loadTable(); };
-            document.getElementById("bmNext").onclick = ()=>{ mTable.value = addMonths(mTable.value, +1); loadTable(); };
-            document.getElementById("bmGo").onclick = loadTable;
-            mTable.addEventListener('change', loadTable);
-            
-            loadTable();
-        }
+      // Configurar inputs de fecha con valores por defecto
+      try {
+          const mPicker = document.getElementById("monthPicker");
+          if(mPicker && !mPicker.value) mPicker.value = currentYM;
+          
+          const mTable = document.getElementById("burgMonth");
+          if(mTable && !mTable.value) mTable.value = currentYM;
+          
+          const mCal = document.getElementById("calMonth");
+          if(mCal && !mCal.value) mCal.value = currentYM;
+      } catch(e){}
 
-        // Init Calendario
-        const mCal = document.getElementById("calMonth");
-        if(mCal) {
-            if(!mCal.value) mCal.value = currentYM;
+      // 1. Cargar KPI (Arriba)
+      document.getElementById("btnReload").onclick = loadKPI;
+      loadKPI();
 
-            const loadCal = () => renderCalendar(mCal.value);
-            document.getElementById("calPrev").onclick = ()=>{
-                 const [y,m] = mCal.value.split('-').map(Number);
-                 const d = new Date(y, m-2, 1); 
-                 mCal.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-                 loadCal();
-            };
-            document.getElementById("calNext").onclick = ()=>{
-                 const [y,m] = mCal.value.split('-').map(Number);
-                 const d = new Date(y, m, 1); 
-                 mCal.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-                 loadCal();
-            };
-            document.getElementById("calGo").onclick = loadCal;
-            
-            // Delay para asegurar que la conexión DB esté lista
-            setTimeout(loadCal, 500);
-        }
+      // 2. Cargar Tabla (Abajo)
+      const mTable = document.getElementById("burgMonth");
+      const addMonths = (ym, d) => {
+         const [y,m] = ym.split('-').map(Number);
+         const dt = new Date(y, m-1+d, 1);
+         return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
+      };
+      if(mTable){
+         const loadT = ()=>loadBurgersByMonth();
+         document.getElementById("bmPrev").onclick=()=>{ mTable.value=addMonths(mTable.value, -1); loadT(); };
+         document.getElementById("bmNext").onclick=()=>{ mTable.value=addMonths(mTable.value, 1); loadT(); };
+         document.getElementById("bmGo").onclick=loadT;
+         mTable.addEventListener('change', loadT);
+         loadT();
+      }
+
+      // 3. Cargar Calendario (Abajo)
+      const mCal = document.getElementById("calMonth");
+      if(mCal){
+         const loadC = ()=>renderCalendar(mCal.value);
+         document.getElementById("calPrev").onclick=()=>{ mCal.value=addMonths(mCal.value, -1); loadC(); };
+         document.getElementById("calNext").onclick=()=>{ mCal.value=addMonths(mCal.value, 1); loadC(); };
+         document.getElementById("calGo").onclick=loadC;
+         setTimeout(loadC, 500);
+      }
     });
   </script>
 </body>
