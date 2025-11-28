@@ -393,20 +393,17 @@
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
     try { firebase.initializeApp(firebaseConfig); } catch(e) {}
-    
-    // Variable global de base de datos
     const db = firebase.firestore();
 
-    // --- 3. FUNCIONES DE AYUDA GLOBALES (Helpers) ---
+    // --- 3. HELPERS GLOBALES ---
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     const escapeHtml = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-    // Helper clave: Lee fechas ya sean Timestamp (viejas) o Texto (nuevas)
     function parseDateAny(val){
         if(!val) return null;
         if(val instanceof Date) return val;
-        if(val.toDate && typeof val.toDate === 'function') return val.toDate(); // Firestore
+        if(val.toDate && typeof val.toDate === 'function') return val.toDate();
         if(typeof val === 'string') {
             const d = new Date(val);
             if(!isNaN(d.getTime())) return d;
@@ -415,34 +412,30 @@
         return null;
     }
 
-    // Detector de si es Hamburguesa
     function isBurgerItem(it){
       if(!it) return false;
       if(typeof it.type === 'string' && it.type.toLowerCase() === 'burger') return true;
-      
       const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || '').toString().toLowerCase();
       const keywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|bacon|doble|triple|simple|oklahoma|cebolla|royal|cuarto)/i;
-      
       if(name && keywords.test(name)) return true;
       if(it.category && typeof it.category === 'string' && it.category.toLowerCase().includes('burg')) return true;
       return false;
     }
 
-    // --- 4. GESTIÓN DE SESIÓN (Logout) ---
+    // Logout
     document.addEventListener('DOMContentLoaded', ()=>{
       const btn = document.getElementById('btnLogout');
       if(btn) btn.onclick = ()=>{
         localStorage.removeItem('rb_auth_v2');
         localStorage.removeItem('rb_admin_ok');
         localStorage.removeItem('rb_admin_t');
-        sessionStorage.removeItem('rb_auth_v2');
         location.replace('login.html?reason=logout&next=pedido_local.html');
       };
     });
 
-    // --- 5. LÓGICA DE KPIS y GRÁFICOS (Parte Superior) ---
+    // --- 4. FUNCIONES DE DIBUJADO (GRÁFICOS Y HEATMAPS) ---
     
-    // Helpers para gráficos
+    // Colores
     const colorFor = (val, max) => {
         if(max<=0) return '#ffffff';
         const r = val/max;
@@ -453,6 +446,71 @@
         return '#2e7d32';
     };
 
+    // Render Heatmap Semanal
+    function renderHeatmapWeekByDay(matrix, colLabels){
+        const host = document.getElementById("heatmap");
+        if(!host) return;
+        host.innerHTML = '';
+        host.style.gridTemplateColumns = `90px repeat(${colLabels.length}, 1fr)`;
+
+        // Headers
+        host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head"></div>`);
+        for(let c=0;c<colLabels.length;c++){
+          host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-head">${colLabels[c]}</div>`);
+        }
+
+        const weekNames = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+        let max=0; matrix.forEach(row=> row.forEach(v=>{ if(v>max) max=v; }));
+
+        for(let r=0;r<7;r++){
+          host.insertAdjacentHTML('beforeend', `<div class="hm-cell hm-day">${weekNames[r]}</div>`);
+          for(let c=0;c<colLabels.length;c++){
+            const v = matrix[r][c] || 0;
+            const bg = v > 0 ? colorFor(v, max) : '#fafafa';
+            host.insertAdjacentHTML('beforeend', `<div class="hm-cell" title="${v}" style="background:${bg}">${v?v:''}</div>`);
+          }
+        }
+    }
+
+    // Render Heatmap Horario
+    const HOUR_START = 19;
+    const HOUR_END = 24; // Hasta 00:00
+    function renderHourHeatmap(matrix, colLabels){
+        const host=document.getElementById("hourmap");
+        if(!host) return;
+        host.innerHTML='';
+        host.style.gridTemplateColumns=`72px repeat(${colLabels.length},1fr)`;
+
+        host.insertAdjacentHTML('beforeend','<div class="hm-cell hm-head"></div>');
+        for(const lbl of colLabels){
+          host.insertAdjacentHTML('beforeend',`<div class="hm-cell hm-head">${lbl}</div>`);
+        }
+
+        let max=0;
+        matrix.forEach(r=>r.forEach(v=>{if(v>max)max=v;}));
+
+        for(let hr=HOUR_START; hr<HOUR_END; hr++){
+          const label=`${String(hr).padStart(2,'0')}:00`;
+          host.insertAdjacentHTML('beforeend',`<div class="hm-cell hm-day">${label}</div>`);
+          for(let c=0;c<colLabels.length;c++){
+            const v=matrix[hr-HOUR_START][c]||0;
+            const bg = v > 0 ? colorFor(v, max) : '#fafafa';
+            host.insertAdjacentHTML('beforeend',`<div class="hm-cell" title="${v}" style="background:${bg}">${v?v:''}</div>`);
+          }
+        }
+    }
+    
+    function printHourSummary(matrix, colLabels){
+        const cols = matrix[0]?.length || 1;
+        const avgs = matrix.map(row => row.reduce((a,b)=>a+(b||0),0) / cols);
+        let peakIdx=0, peakVal=-1;
+        avgs.forEach((v,i)=>{ if(v>peakVal){ peakVal=v; peakIdx=i; } });
+        
+        const el = document.getElementById('hourSummary');
+        if(el) el.innerHTML = `Hora pico: <strong>${HOUR_START+peakIdx}:00</strong> (prom. ${peakVal.toFixed(1)})`;
+    }
+
+    // ChartJS
     let ordersChart, payChart, statusChart;
     const PAY_COLOR_MAP = {efectivo:'#625A45', mercado_pago:'#009ee3', credito:'#8E24AA', debito:'#43A047', transferencia:'#26A69A', otro:'#FFA000'};
     const STATUS_COLOR_MAP = {accepted:'#FBC02D', pending_payment:'#FFA000', in_prep:'#FB8C00', ready:'#00ACC1', delivered:'#2E7D32', cancelled:'#D32F2F'};
@@ -473,26 +531,19 @@
           scales:{y:{beginAtZero:true},y2:{beginAtZero:true,position:'right'},x:{grid:{display:false}}}}
       });
     }
-
     function ensurePayChart(labels, vals){
       const ctx = document.getElementById("payChart").getContext("2d");
       if(payChart) payChart.destroy();
-      payChart = new Chart(ctx,{ type:'doughnut',
-        data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, PAY_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
-        options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
-      });
+      payChart = new Chart(ctx,{ type:'doughnut', data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, PAY_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]}, options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}} });
     }
-
     function ensureStatusChart(labels, vals){
       const ctx = document.getElementById("statusChart").getContext("2d");
       if(statusChart) statusChart.destroy();
-      statusChart = new Chart(ctx,{ type:'doughnut',
-        data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]},
-        options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}}
-      });
+      statusChart = new Chart(ctx,{ type:'doughnut', data:{labels, datasets:[{ data: vals, backgroundColor: colorsFrom(labels, STATUS_COLOR_MAP), borderWidth: 2, hoverOffset: 6 }]}, options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom'}}} });
     }
 
-    // --- CARGA DE DATOS KPI ---
+
+    // --- 5. CARGA DE KPIS (RESUMEN SUPERIOR) ---
     async function loadKPI(){
       const err = document.getElementById("kpiError"); 
       if(err) { err.style.display='none'; err.textContent=''; }
@@ -515,7 +566,7 @@
            end   = new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0);
         }
 
-        // DOBLE CONSULTA (Unificada)
+        // DOBLE CONSULTA (Texto + Timestamp)
         const startStr = start.toISOString().split('T')[0];
         const endStr   = end.toISOString().split('T')[0];
 
@@ -523,12 +574,12 @@
         const p2 = db.collection('orders').where('createdAt', '>=', start).where('createdAt', '<', end).get();
 
         const [snapStr, snapTime] = await Promise.all([p1, p2]);
-
         const mergedMap = new Map();
         const process = (doc) => { mergedMap.set(doc.id, doc.data()); };
         snapStr.forEach(process);
         snapTime.forEach(process);
 
+        // Variables de Acumulación
         let count=0, revenue=0, pendingTotal=0;
         const payCount = new Map();
         const statusCount = new Map();
@@ -538,14 +589,15 @@
         const dayOrders = Array(daysInMonth).fill(0);
         const dayRevenue = Array(daysInMonth).fill(0);
 
-        // Heatmap simplificado
+        // Matrices para Heatmaps
         const hmMatrix = Array.from({length:7}, ()=> Array(isRange?0:daysInMonth).fill(0));
-        const hourMatrix = Array.from({length:5},()=>Array(isRange?0:daysInMonth).fill(0)); // 19 a 24
+        const hourMatrix = Array.from({length:(HOUR_END-HOUR_START)},()=>Array(isRange?0:daysInMonth).fill(0)); 
+        const dayLabels = Array.from({length:daysInMonth},(_,i)=>String(i+1).padStart(2,'0'));
 
         mergedMap.forEach(d => {
            const dt = parseDateAny(d.createdAt);
            if(!dt) return;
-           if(dt < start || dt >= end) return;
+           if(dt < start || dt >= end) return; // Filtrar por rango estricto
 
            const tot = Number(d.total || d.rawTotal || 0);
            count++;
@@ -566,21 +618,31 @@
                  dayOrders[dayIdx]++;
                  dayRevenue[dayIdx] += tot;
                  
-                 const weekRow = dt.getDay(); // 0=Dom
+                 // Heatmap Semanal
+                 const weekRow = dt.getDay(); 
                  hmMatrix[weekRow][dayIdx]++;
 
+                 // Heatmap Horario
                  const hr = dt.getHours();
-                 if(hr >= 19 && hr < 24) hourMatrix[hr - 19][dayIdx]++;
+                 if(hr >= HOUR_START && hr < HOUR_END) hourMatrix[hr - HOUR_START][dayIdx]++;
               }
            }
         });
 
-        // Poner datos en pantalla
+        // Render KPI
         document.getElementById("kpiCount").textContent = count;
         document.getElementById("kpiRevenue").textContent = money(revenue);
         document.getElementById("kpiATV").textContent = count ? money(revenue/count) : '—';
 
-        // Proyección
+        const alertBox = document.getElementById("pendingAlert");
+        if(alertBox){
+            alertBox.innerHTML = '';
+            if(pendingTotal > 0){
+               const cls = pendingTotal > 50000 ? 'danger' : 'warn';
+               alertBox.innerHTML = `<span class="warn-pill ${cls}">Pendiente: ${money(pendingTotal)}</span>`;
+            }
+        }
+
         const projBox = document.getElementById("projText");
         if(projBox && !isRange){
             const today = new Date();
@@ -588,16 +650,20 @@
                const dayNum = today.getDate();
                const avg = dayNum > 0 ? revenue / dayNum : 0;
                const projected = avg * daysInMonth;
-               projBox.innerHTML = `Ingreso prom. diario: <strong>${money(avg)}</strong> • Proyección: <strong>${money(projected)}</strong>`;
+               projBox.innerHTML = `Prom. diario: <strong>${money(avg)}</strong> • Proyección: <strong>${money(projected)}</strong>`;
             } else {
                projBox.innerHTML = `<span class="muted">Mes cerrado.</span>`;
             }
         }
 
-        // Render gráficos
+        // 🔥 AQUÍ RENDERIZAMOS LOS GRÁFICOS Y HEATMAPS
         if(!isRange){
           ensureOrdersChart(labels, dayOrders, dayRevenue);
-          // (Omitimos renderizado completo de heatmaps secundarios para simplificar este bloque, pero se podrían agregar)
+          renderHeatmapWeekByDay(hmMatrix, dayLabels); // ✅ AHORA SÍ
+          renderHourHeatmap(hourMatrix, dayLabels);    // ✅ AHORA SÍ
+          printHourSummary(hourMatrix, dayLabels);
+        } else {
+          if(ordersChart) ordersChart.destroy();
         }
 
         const pLabels = Array.from(payCount.keys());
@@ -608,23 +674,16 @@
         const sVals   = sLabels.map(k=>statusCount.get(k));
         ensureStatusChart(sLabels, sVals);
 
-      }catch(e){
-        console.error("KPI Error:", e);
-        if(err){ err.style.display='block'; err.textContent="Error cargando resumen."; }
-      }
+      }catch(e){ console.error("KPI Error:", e); if(err) err.textContent="Error cargando."; }
     }
 
 
-    // --- 6. LÓGICA DE TABLA Y CALENDARIO (Parte Inferior) ---
-
-    // Función que trae todo junto (Viejos + Nuevos)
+    // --- 6. FUNCIÓN FETCH UNIFICADA (Para Tabla y Calendario) ---
     async function fetchUnifiedOrders(startObj, endObj){
         const startStr = startObj.toISOString().split('T')[0]; 
         const endStr   = endObj.toISOString().split('T')[0];
-
         const p1 = db.collection('orders').where('createdAt', '>=', startStr).where('createdAt', '<', endStr).get();
         const p2 = db.collection('orders').where('createdAt', '>=', startObj).where('createdAt', '<', endObj).get();
-
         const [snapStr, snapTime] = await Promise.all([p1, p2]);
         const merged = new Map();
         const processDoc = (doc) => {
@@ -636,14 +695,13 @@
         return Array.from(merged.values());
     }
 
-    // Tabla Mes
+    // --- 7. TABLA MENSUAL ---
     async function loadBurgersByMonth(){
       const tbody = document.getElementById("bmBody"); 
       const totalEl = document.getElementById("bmTotal"); 
       const revenueEl = document.getElementById("bmRevenue");
       const rangeEl = document.getElementById("bmRange");
       if(!tbody) return;
-
       tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando...</td></tr>`;
 
       try {
@@ -656,8 +714,7 @@
         const orders = await fetchUnifiedOrders(start, end);
 
         const counter = new Map();
-        let totalQty = 0;
-        let totalRevenue = 0;
+        let totalQty = 0; let totalRevenue = 0;
 
         orders.forEach(o => {
             const items = Array.isArray(o.items) ? o.items : [];
@@ -666,14 +723,10 @@
                 if(isBurgerItem(it)){
                     const name = (it.name || it.item?.name || 'Hamburguesa').toString().trim();
                     const lineTotal = (Number(it.price)||0) * qty;
-                    
                     const prev = counter.get(name) || { qty:0, revenue:0 };
-                    prev.qty += qty;
-                    prev.revenue += lineTotal;
+                    prev.qty += qty; prev.revenue += lineTotal;
                     counter.set(name, prev);
-
-                    totalQty += qty;
-                    totalRevenue += lineTotal;
+                    totalQty += qty; totalRevenue += lineTotal;
                 }
             });
         });
@@ -684,15 +737,13 @@
                 const avg = data.qty ? data.revenue/data.qty : 0;
                 return `<tr><td>${escapeHtml(name)}</td><td>${data.qty}</td><td>${money(avg)}</td><td>${money(data.revenue)}</td></tr>`;
             }).join('');
-
         tbody.innerHTML = rows || `<tr><td colspan="4" class="muted">Sin datos.</td></tr>`;
         totalEl.textContent = totalQty;
         revenueEl.textContent = money(totalRevenue);
-
       } catch(e){ console.error(e); tbody.innerHTML = `<tr><td colspan="4">Error</td></tr>`; }
     }
 
-    // Calendario "Lindo"
+    // --- 8. CALENDARIO LINDO ---
     async function renderCalendar(monthStr){
         const grid = document.getElementById("calendarGrid");
         const err = document.getElementById("calError");
@@ -715,9 +766,7 @@
                 const dt = parseDateAny(data.createdAt);
                 if(!dt) return;
                 if(dt.getMonth() + 1 !== m) return;
-
-                const day = dt.getDate();
-                const idx = day - 1;
+                const idx = dt.getDate() - 1;
                 if(idx >= 0 && idx < daysInMonth){
                     totals[idx] += Number(data.total || data.rawTotal || 0);
                     let bCount = 0;
@@ -735,28 +784,23 @@
             function colorIntensity(v, max){
                 if(v===0) return ''; 
                 const r = v/max;
-                if(r<0.2) return '#dcedc8'; 
-                if(r<0.4) return '#aed581'; 
-                if(r<0.6) return '#81c784'; 
-                if(r<0.8) return '#4caf50'; 
+                if(r<0.2) return '#dcedc8'; if(r<0.4) return '#aed581'; 
+                if(r<0.6) return '#81c784'; if(r<0.8) return '#4caf50'; 
                 return '#2e7d32';           
             }
 
             for(let d=1; d<=daysInMonth; d++){
-                const c = counts[d-1];
-                const t = totals[d-1];
+                const c = counts[d-1]; const t = totals[d-1];
                 const bg = colorIntensity(c, maxVal);
                 const hasData = c > 0;
-
                 let contentHTML = hasData 
                   ? `<div class="cal-burger-hero"><span class="burger-icon-lg">🍔</span> ${c}</div><div class="cal-revenue-pill">💵 ${money(t)}</div>`
                   : `<div class="no-sales-icon">🍔</div>`;
-
                 const dayClass = hasData ? '' : 'cal-empty-day';
                 const bgStyle = hasData ? `style="background:${bg}"` : '';
 
                 grid.insertAdjacentHTML("beforeend", `
-                    <div class="cal-day ${dayClass}" ${bgStyle}>
+                    <div class="cal-day ${dayClass}" ${bgStyle} title="Día ${d}: $${t}">
                         <div class="cal-day-header">${d}</div>
                         <div class="cal-data-wrap">${contentHTML}</div>
                     </div>
@@ -766,51 +810,45 @@
     }
 
 
-    // --- 7. INICIALIZACIÓN GLOBAL ---
+    // --- 9. INICIALIZACIÓN GLOBAL ---
     document.addEventListener('DOMContentLoaded', ()=>{
-      
-      // Init Month inputs
       const now = new Date();
       const currentYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
 
-      // Configurar inputs de fecha con valores por defecto
-      try {
-          const mPicker = document.getElementById("monthPicker");
-          if(mPicker && !mPicker.value) mPicker.value = currentYM;
-          
-          const mTable = document.getElementById("burgMonth");
-          if(mTable && !mTable.value) mTable.value = currentYM;
-          
-          const mCal = document.getElementById("calMonth");
-          if(mCal && !mCal.value) mCal.value = currentYM;
-      } catch(e){}
+      // Config inputs
+      ['monthPicker','burgMonth','calMonth'].forEach(id=>{
+        const el = document.getElementById(id);
+        if(el && !el.value) el.value = currentYM;
+      });
 
-      // 1. Cargar KPI (Arriba)
+      // 1. Cargar Arriba (KPI + Heatmaps)
       document.getElementById("btnReload").onclick = loadKPI;
       loadKPI();
 
-      // 2. Cargar Tabla (Abajo)
-      const mTable = document.getElementById("burgMonth");
-      const addMonths = (ym, d) => {
+      // Helper para sumar meses
+      const addM = (ym, d) => {
          const [y,m] = ym.split('-').map(Number);
          const dt = new Date(y, m-1+d, 1);
          return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
       };
+
+      // 2. Tabla
+      const mTable = document.getElementById("burgMonth");
       if(mTable){
          const loadT = ()=>loadBurgersByMonth();
-         document.getElementById("bmPrev").onclick=()=>{ mTable.value=addMonths(mTable.value, -1); loadT(); };
-         document.getElementById("bmNext").onclick=()=>{ mTable.value=addMonths(mTable.value, 1); loadT(); };
+         document.getElementById("bmPrev").onclick=()=>{ mTable.value=addM(mTable.value, -1); loadT(); };
+         document.getElementById("bmNext").onclick=()=>{ mTable.value=addM(mTable.value, 1); loadT(); };
          document.getElementById("bmGo").onclick=loadT;
          mTable.addEventListener('change', loadT);
          loadT();
       }
 
-      // 3. Cargar Calendario (Abajo)
+      // 3. Calendario
       const mCal = document.getElementById("calMonth");
       if(mCal){
          const loadC = ()=>renderCalendar(mCal.value);
-         document.getElementById("calPrev").onclick=()=>{ mCal.value=addMonths(mCal.value, -1); loadC(); };
-         document.getElementById("calNext").onclick=()=>{ mCal.value=addMonths(mCal.value, 1); loadC(); };
+         document.getElementById("calPrev").onclick=()=>{ mCal.value=addM(mCal.value, -1); loadC(); };
+         document.getElementById("calNext").onclick=()=>{ mCal.value=addM(mCal.value, 1); loadC(); };
          document.getElementById("calGo").onclick=loadC;
          setTimeout(loadC, 500);
       }
