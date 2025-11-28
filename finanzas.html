@@ -693,17 +693,12 @@
       if(typeof it.type === 'string' && it.type.toLowerCase() === 'burger') return true;
       
       const name = (it.name || it.item?.name || it.item?.title || it.id || it.item?.id || '').toString().toLowerCase();
-      // Lista de palabras clave expandida
       const keywords = /(bigjohn|burguesa|burger|cheese|cheesebacon|cheeseburger|rhodes|morgan|pollo|crispy|bacon|doble|triple|simple|oklahoma|cebolla|royal|cuarto)/i;
       
       if(name && keywords.test(name)) return true;
       if(it.category && typeof it.category === 'string' && it.category.toLowerCase().includes('burg')) return true;
       
       return false;
-    }
-
-    function money(n){
-      return (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     }
 
     function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -714,7 +709,6 @@
         if(val instanceof Date) return val;
         if(val.toDate && typeof val.toDate === 'function') return val.toDate(); // Firestore Timestamp
         if(typeof val === 'string') {
-            // Intenta parsear ISO string
             const d = new Date(val);
             if(!isNaN(d.getTime())) return d;
         }
@@ -740,12 +734,8 @@
         const ym = document.getElementById("burgMonth").value || new Date().toISOString().slice(0,7);
         const [year, month] = ym.split('-').map(Number);
 
-        // 🔥 FIX: Generamos Strings ISO para buscar en la base de datos
-        // Buscamos desde el principio del mes hasta el principio del siguiente
-        // Usamos formato "YYYY-MM-DD" que funciona lexicográficamente con ISO Strings
         const startStr = `${year}-${String(month).padStart(2,'0')}-01`;
         
-        // Calcular mes siguiente para el límite
         let nextM = month + 1;
         let nextY = year;
         if(nextM > 12) { nextM = 1; nextY++; }
@@ -753,8 +743,7 @@
 
         document.getElementById("bmRange").textContent = `Mes: ${month}/${year}`;
 
-        // Hacemos la query asumiendo createdAt es STRING (como en tu foto)
-        // Si hay mix de datos, esto traerá los string. 
+        // BUSQUEDA POR TEXTO (Para coincidir con mostrador)
         let q = db.collection('orders')
           .where('createdAt', '>=', startStr)
           .where('createdAt', '<',  endStr)
@@ -781,16 +770,7 @@
                     const name = (it.name || it.item?.name || 'Hamburguesa').toString().trim();
                     const key = name;
 
-                    // Precio: intentamos calcular lo que costó esta línea
-                    // A veces precio unitario * cantidad, a veces total de línea
-                    let lineTotal = 0;
-                    if(it.price) lineTotal = Number(it.price) * qty;
-                    // Sumar extras si están desglosados y no incluidos en el precio base
-                    // (Depende de tu estructura, asumimos price base por ahora o usamos lógica simple)
-                    
-                    // Simple logic:
-                    lineTotal = (Number(it.price)||0) * qty;
-                    // Si tienes extras en el objeto y no en el precio unitario, podrías sumarlos acá
+                    let lineTotal = (Number(it.price)||0) * qty;
                     
                     const prev = counter.get(key) || { qty:0, revenue:0 };
                     prev.qty += qty;
@@ -815,7 +795,7 @@
                 </tr>`;
             }).join('');
 
-        tbody.innerHTML = rows || `<tr><td colspan="4" class="muted">No se encontraron hamburguesas (formato texto).</td></tr>`;
+        tbody.innerHTML = rows || `<tr><td colspan="4" class="muted">No se encontraron hamburguesas.</td></tr>`;
         totalEl.textContent = totalQty;
         revenueEl.textContent = money(totalRevenue);
 
@@ -839,13 +819,11 @@
         const [y, m] = monthStr.split("-").map(Number);
         const daysInMonth = new Date(y, m, 0).getDate();
 
-        // Query Strings
         const startStr = `${y}-${String(m).padStart(2,'0')}-01`;
         let nextM = m + 1; let nextY = y;
         if(nextM > 12) { nextM = 1; nextY++; }
         const endStr = `${nextY}-${String(nextM).padStart(2,'0')}-01`;
 
-        // Arrays de datos
         const counts = Array(daysInMonth).fill(0);
         const totals = Array(daysInMonth).fill(0);
 
@@ -858,17 +836,13 @@
 
             snap.forEach(doc => {
                 const data = doc.data();
-                // Parsear fecha
                 const dt = parseDateAny(data.createdAt); 
                 if(!dt) return;
 
-                // Excluir cancelados
                 const st = (data.status || '').toString().toLowerCase();
                 if(st.includes('cancel')) return;
 
-                // Ajuste de día: OJO, dt puede estar en UTC si vino del string "Z"
-                // .getDate() usa la zona horaria del navegador, lo cual es CORRECTO para mostrarlo en local.
-                // Verificamos si es del mes correcto (por si el timezone shift lo movió)
+                // Verificamos mes correcto (timezone fix)
                 if(dt.getMonth() + 1 !== m) return; 
 
                 const day = dt.getDate();
@@ -877,7 +851,6 @@
                 if(idx >= 0 && idx < daysInMonth){
                     totals[idx] += Number(data.total || data.rawTotal || 0);
                     
-                    // Contar Hamburguesas
                     let bCount = 0;
                     const items = Array.isArray(data.items) ? data.items : [];
                     items.forEach(it => {
@@ -885,7 +858,6 @@
                             bCount += (Number(it.qty||it.quantity||1) || 1);
                         }
                     });
-                    // Fallback antiguo
                     if(bCount===0 && data.burgerCount) bCount = data.burgerCount;
                     
                     counts[idx] += bCount;
@@ -894,10 +866,8 @@
 
             // Renderizar Grilla
             const firstDate = new Date(y, m-1, 1);
-            const startDay = firstDate.getDay(); // 0=Dom
+            const startDay = firstDate.getDay(); 
             
-            // Rellenar vacíos iniciales
-            // (Asumimos grid CSS standard de 7 columnas)
             for(let i=0; i<startDay; i++){
                 grid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-empty"></div>`);
             }
@@ -907,10 +877,10 @@
             function colorIntensity(v, max){
                 if(v===0) return '#fff';
                 const r = v/max;
-                if(r<0.25) return '#e8f5e9'; // muy suave
+                if(r<0.25) return '#e8f5e9';
                 if(r<0.50) return '#c8e6c9';
                 if(r<0.75) return '#81c784';
-                return '#4caf50'; // fuerte
+                return '#4caf50'; 
             }
 
             for(let d=1; d<=daysInMonth; d++){
@@ -945,37 +915,33 @@
         if(mTable) {
             if(!mTable.value) mTable.value = currentYM;
             
-            // Botones Tabla
             const loadTable = () => loadBurgersByMonth();
             document.getElementById("bmPrev").onclick = ()=>{ mTable.value = addMonths(mTable.value, -1); loadTable(); };
             document.getElementById("bmNext").onclick = ()=>{ mTable.value = addMonths(mTable.value, +1); loadTable(); };
             document.getElementById("bmGo").onclick = loadTable;
             mTable.addEventListener('change', loadTable);
             
-            // Primera carga tabla
             loadTable();
         }
 
         if(mCal) {
             if(!mCal.value) mCal.value = currentYM;
 
-            // Botones Calendario
             const loadCal = () => renderCalendar(mCal.value);
             document.getElementById("calPrev").onclick = ()=>{
                  const [y,m] = mCal.value.split('-').map(Number);
-                 const d = new Date(y, m-2, 1); // mes anterior
+                 const d = new Date(y, m-2, 1); 
                  mCal.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
                  loadCal();
             };
             document.getElementById("calNext").onclick = ()=>{
                  const [y,m] = mCal.value.split('-').map(Number);
-                 const d = new Date(y, m, 1); // mes siguiente
+                 const d = new Date(y, m, 1); 
                  mCal.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
                  loadCal();
             };
             document.getElementById("calGo").onclick = loadCal;
             
-            // Primera carga calendario (con leve delay para asegurar DB)
             setTimeout(loadCal, 500);
         }
     });
