@@ -132,6 +132,7 @@
         <a href="mostrador.html" class="btn" title="Mostrador">🧾 Mostrador</a>
         <a href="admin.html" class="btn" title="Panel admin">⚙️ Admin</a>
       </nav>
+      <button id="btnInstall" class="btn" style="display:none" title="Instalar app">➕ Instalar app</button>
       <button id="btnBell" class="btn" title="Activar/desactivar sonido">🔔 Sonido</button>
       <button id="btnAutoPrint" class="btn" title="Autoimprimir nuevos pedidos">🖨️ Autoimprimir</button>
       <button id="btnLogout" class="btn danger" title="Cerrar sesión">⏻ Cerrar sesión</button>
@@ -165,16 +166,17 @@
     };
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
+    // Variables globales
     window.db = firebase.firestore();
     window.firebase = firebase;
     window.idToDoc = new Map();
   });
 
-  /* --- FUNCIONES GLOBALES --- */
+  /* --- FUNCIONES GLOBALES DE ACCIÓN --- */
   
   async function setOrderStatus(id, next, isPaid){
       if (next === 'delivered' && !isPaid) {
-          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobre el pedido antes de marcarlo como entregado.");
+          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
           return;
       }
       try{ 
@@ -206,14 +208,13 @@
       if(doc) window.trySilentPrint(doc);
   }
   
-  // Exponer
   window.setOrderStatus = setOrderStatus;
   window.setPaymentStatus = setPaymentStatus;
   window.updatePago = updatePago;
   window.printOrder = printOrder;
 
 
-  /* --- APP LOGIC --- */
+  /* --- LÓGICA PRINCIPAL --- */
   window.addEventListener('DOMContentLoaded', () => {
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
@@ -237,6 +238,16 @@
     function getPickupPretty(o){
       if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "") return o.pickup_time_pretty;
       if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot)) return o.pickup_slot;
+      const t = o.pickup_time || o.pickupTime || o.pickup;
+      if (t) {
+        try{
+          if (typeof t?.toDate === "function") return t.toDate().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+          const d = new Date(t);
+          if (!isNaN(d)) return d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+        }catch(_){}
+      }
+      if (typeof o.pickup_slot === "string") { const m = o.pickup_slot.match(/^(\d{2})(\d{2})$/); if (m) return `${m[1]}:${m[2]}`; }
+      if (o.pickup_asap === true) return "A la brevedad";
       return null;
     }
 
@@ -340,6 +351,7 @@
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       
+      // Botones Estado
       const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
         `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
       ).join('')}</div>`;
@@ -347,14 +359,24 @@
       const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
 
-      // 🔥 AÑADIMOS "(Mostrador)" al nombre si viene de ahí
-      const displayName = (o.source === "mostrador") ? `${o.nombre} (Mostrador)` : (o.nombre || "Cliente");
+      const payLine = `
+        <div class="pay-line">
+          <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
+            <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
+            <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
+            <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
+            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
+            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
+          </select>
+          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
+          <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
+        </div>`;
 
       return `
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
           <div class="order-head">
             <div>
-              <div class="order-title">${displayOrderNumber(doc)} — ${displayName}</div>
+              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}</div>
               <div class="muted">N° interno: ${o.orderNumber || '—'}</div>
               <div class="muted">${dtText}</div>
               <div class="chips">${srcChip}<span class="chip">Retiro: ${o.entrega||"take_away"}</span><span class="chip">⏰ ${pickupPretty || "—"}</span>${noteGeneral}</div>
@@ -362,26 +384,15 @@
             </div>
             <div>
               <div class="right-total">${money(computeOrderTotal(o))}</div>
-              <div class="pay-line">
-                <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
-                  <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
-                  <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
-                  <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
-                  <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>Mercado Pago</option>
-                  <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transferencia</option>
-                </select>
-                <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
-                <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
-              </div>
+              ${payLine}
             </div>
           </div>
-          <div class="divider"></div>
           <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
         </div>
       `;
     }
 
-    /* ============= TICKET 58MM CENTRADO ============= */
+    /* ============= TICKET 58MM ============= */
     window.trySilentPrint = function(docSnap){
       const o = docSnap.data();
       const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -391,7 +402,6 @@
       const dt = pickDocDate(o) || new Date();
       const dateStr = dt.toLocaleDateString("es-AR");
       const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
-      
       const pickup = getPickupPretty(o) || "A la brevedad";
       const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
@@ -404,7 +414,6 @@
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
-      // Items para ticket
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
       items.forEach(it => {
@@ -443,9 +452,6 @@
       const note = o.comment || o.notes || "";
       const commentBlock = note ? `<div class="hr"></div><div class="blk"><div class="lbl">NOTA</div><div>${escapeHtml(note)}</div></div>` : "";
 
-      // 🔥 AÑADIR (Mostrador) AL TICKET TAMBIÉN
-      const clientName = (o.source === "mostrador") ? `${o.nombre} (Mostrador)` : (o.nombre || "");
-
       const html = `
         <!doctype html><html><head><meta charset="utf-8"><title>Ticket</title>
         <style>
@@ -466,7 +472,7 @@
           <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
           <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
           <div class="hr"></div>
-          ${clientName ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(clientName)}</div></div>` : ""}
+          ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
           ${pickupBlockLarge}
           ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
           ${commentBlock}
@@ -496,9 +502,11 @@
 
     (async function subscribeOrders(){
       try{
-        let q = window.db.collection("orders").orderBy("createdAt", "desc").orderBy(window.firebase.firestore.FieldPath.documentId(), "desc");
+        // SIMPLIFICACIÓN DE CONSULTA PARA EVITAR ERRORES DE ÍNDICE
+        let q = window.db.collection("orders").orderBy("createdAt", "desc").limit(200);
+        
         let firstSnapshot = true;
-        q.limit(500).onSnapshot(async snap=>{
+        q.onSnapshot(async snap=>{
           document.getElementById("ordersError").style.display="none";
           renderList(snap);
           if (firstSnapshot) { firstSnapshot = false; return; }
@@ -508,8 +516,8 @@
               if (autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id) || ch.doc);
             }
           }
-        }, err=>{ document.getElementById("ordersError").style.display="block"; });
-      }catch(err){ document.getElementById("ordersError").style.display="block"; }
+        }, err=>{ document.getElementById("ordersError").style.display="block"; console.error(err); });
+      }catch(err){ document.getElementById("ordersError").style.display="block"; console.error(err); }
     })();
 
     function renderList(snap){
