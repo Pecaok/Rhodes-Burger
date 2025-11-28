@@ -175,7 +175,7 @@
   
   async function setOrderStatus(id, next, isPaid){
       if (next === 'delivered' && !isPaid) {
-          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobre el pedido antes de marcarlo como entregado.");
+          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
           return;
       }
       try{ 
@@ -207,7 +207,7 @@
       if(doc) window.trySilentPrint(doc);
   }
   
-  // Exponer a window para que el HTML los vea
+  // Exponer a window
   window.setOrderStatus = setOrderStatus;
   window.setPaymentStatus = setPaymentStatus;
   window.updatePago = updatePago;
@@ -284,7 +284,6 @@
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
     const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
 
-    // 🔥 CÁLCULO TOTAL
     const computeOrderTotal = o => {
       if (typeof o.rawTotal === "number") return o.rawTotal;
       const items = Array.isArray(o.items)?o.items:[];
@@ -311,7 +310,7 @@
               if(it.fries && it.fries !== 'sin_papas') cats.fries.push({ name: it.fries, qty: qty });
           } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
               cats.fries.push(it);
-          } else if (type === 'drink' || name.includes('coca') || name.includes('agua') || name.includes('cerveza') || name.includes('sprite')) {
+          } else if (type === 'drink' || name.includes('coca')) {
               cats.drinks.push(it);
           } else {
               cats.others.push(it);
@@ -342,13 +341,26 @@
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       
-      // Botones Estado (llamada a global)
+      // Botones Estado
       const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
         `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
       ).join('')}</div>`;
 
       const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
+
+      const payLine = `
+        <div class="pay-line">
+          <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
+            <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
+            <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
+            <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
+            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>Mercado Pago</option>
+            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transferencia</option>
+          </select>
+          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
+          <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
+        </div>`;
 
       return `
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
@@ -362,20 +374,9 @@
             </div>
             <div>
               <div class="right-total">${money(computeOrderTotal(o))}</div>
-              <div class="pay-line">
-                <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
-                  <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
-                  <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
-                  <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
-                  <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
-                  <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
-                </select>
-                <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
-                <button class="btn" onclick="printOrder('${doc.id}')">🖨</button>
-              </div>
+              ${payLine}
             </div>
           </div>
-          <div class="divider"></div>
           <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
         </div>
       `;
