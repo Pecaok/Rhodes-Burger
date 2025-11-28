@@ -80,7 +80,7 @@
     .chip{background:#f0f0f0;border:1px solid #ddd;color:#333;border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600}
     .right-total{font-weight:800;font-size:18px;white-space:nowrap}
     
-    /* ITEMS CATEGORIZADOS - NUEVO DISEÑO LIMPIO */
+    /* ITEMS CATEGORIZADOS */
     .cat-section { margin-top: 15px; border-top: 1px solid #f0f0f0; padding-top: 10px; }
     .cat-header {
         font-size: 11px;
@@ -108,11 +108,11 @@
     .item-det { flex: 1; }
     .item-name { font-weight: 700; color: #111; line-height: 1.2; }
     
-    /* Detalles (Papas, Extras) como lista limpia */
+    /* Extras visuales */
     .item-extras { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
     .extra-line { font-size: 13px; color: #555; display: flex; align-items: center; gap: 6px; }
-    .extra-icon { font-size: 12px; opacity: 0.7; }
     .note-line { color: #d32f2f; font-style: italic; font-weight: 600; font-size: 13px; margin-top: 4px; }
+    .fries-origin { font-size: 12px; color: #777; font-weight: 400; margin-left: 4px; }
 
     /* Botones Estado */
     .stateBtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -276,22 +276,36 @@
     };
     const computeOrderTotal = o => (typeof o.total === "number") ? o.total : computeRawSubtotal(o);
 
-    /* ========== RENDER CATEGORIZADO LIMPIO ========== */
+    /* ========== RENDER CATEGORIZADO (SEPARANDO PAPAS) ========== */
     function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
       const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
       const items = Array.isArray(o.items) ? o.items : [];
 
-      // SEPARAR POR CATEGORÍA
+      // ESTRUCTURA: BURGERS | FRIES (Stand alone + sides) | DRINKS | OTHERS
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
 
       items.forEach(it => {
           const name = (it.name||"").toLowerCase();
           const type = (it.type||"").toLowerCase();
+          const qty  = it.qty || it.quantity || 1;
           
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
+              // Es una hamburguesa. La agregamos a la lista de Burgers.
               cats.burgers.push(it);
+
+              // 🔥 LÓGICA DE EXTRACCIÓN DE PAPAS
+              // Si la hamburguesa trae papas elegidas, creamos un item "fantasma" en la lista de papas
+              if(it.fries && it.fries !== 'sin_papas') {
+                  cats.fries.push({
+                      is_extract: true, // Marca interna para saber que vino de una burger
+                      name: it.fries,
+                      qty: qty,
+                      origin: it.name // Para mostrar "de Morgan Simple"
+                  });
+              }
+
           } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
               cats.fries.push(it);
           } else if (type === 'drink' || name.includes('coca') || name.includes('agua') || name.includes('cerveza') || name.includes('sprite')) {
@@ -301,16 +315,16 @@
           }
       });
 
-      // HELPER PARA RENDERIZAR CADA SECCIÓN
+      // HELPER PARA RENDERIZAR
       const renderSection = (title, list, icon) => {
           if(!list.length) return "";
           const rows = list.map(it => {
               const qty = it.qty || it.quantity || 1;
               const name = it.name || "Ítem";
               
-              // Extras visuales (Lista limpia, sin badges)
               let extras = [];
-              if(it.fries && it.fries !== 'sin_papas') extras.push(`🍟 Guarnición: ${it.fries}`); // <--- CLAVE: Texto claro
+              // OJO: Ya NO mostramos las papas en la hamburguesa, porque están en su propia sección
+              
               if(it.extras?.patty) extras.push(`🥩 +${it.extras.patty} carne`);
               if(it.extras?.cheddar) extras.push(`🧀 +${it.extras.cheddar} cheddar`);
               
@@ -318,13 +332,16 @@
                 ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` 
                 : "";
                 
-              const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
+              const notesHTML = (it.notes && !it.is_extract) ? `<div class="note-line">📝 ${it.notes}</div>` : "";
+              
+              // Si es una papa extraída de una burger, mostramos de dónde viene
+              const originHTML = it.is_extract ? `<span class="fries-origin">(${it.origin})</span>` : "";
 
               return `
                 <div class="item-row">
                    <div class="item-qty">${qty}</div>
                    <div class="item-det">
-                      <div class="item-name">${name}</div>
+                      <div class="item-name">${name} ${originHTML}</div>
                       ${extrasHTML}
                       ${notesHTML}
                    </div>
@@ -341,13 +358,13 @@
       };
 
       const burgersHTML = renderSection("HAMBURGUESAS", cats.burgers, "🍔");
-      const sidesHTML   = renderSection("GUARNICIONES / EXTRAS", cats.fries, "🍟");
+      const sidesHTML   = renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟");
       const drinksHTML  = renderSection("BEBIDAS", cats.drinks, "🥤");
       const othersHTML  = renderSection("OTROS", cats.others, "🔸");
 
       const fullItemsHTML = burgersHTML + sidesHTML + drinksHTML + othersHTML;
 
-      // Resto de la tarjeta...
+      // Resto igual...
       const pickupPretty = getPickupPretty(o);
       const srcChip = o.source === "mostrador" ? `<span class="chip" style="background:#e3f2fd;color:#0d47a1">🖥️ Mostrador</span>` : "";
       const noteGeneral = (o.comment || o.notes || "").toString().trim() ? `<span class="chip">📝 ${o.comment || o.notes}</span>` : "";
@@ -397,14 +414,14 @@
             </div>
           </div>
           <div class="items-body">
-            ${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems (Error de datos)</div></div>'}
+            ${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}
           </div>
         </div>
       `;
     }
 
     /* ===========================================================
-       TICKET 58MM
+       TICKET 58MM (REPLICANDO ESTRUCTURA SEPARADA)
        =========================================================== */
     function buildTicketHTML(docSnap){
       const o = docSnap.data();
@@ -419,19 +436,49 @@
       const pickup = getPickupPretty(o) || "A la brevedad";
       const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
+      // REPLICAR LÓGICA DE SEPARACIÓN PARA TICKET
       const items = Array.isArray(o.items) ? o.items : [];
-      const lines = items.map(it=>{
-        const qty = it.qty || it.quantity || 1;
-        let extras = [];
-        if(it.fries && it.fries !== "sin_papas") extras.push(it.fries);
-        if(it.extras?.patty) extras.push(`+${it.extras.patty} carne`);
-        if(it.extras?.cheddar) extras.push(`+${it.extras.cheddar} cheddar`);
-        let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
-        if(extras.length) h += `<div class="sub">• ${escapeHtml(extras.join(" + "))}</div>`;
-        if(it.notes) h += `<div class="sub">📝 ${escapeHtml(it.notes)}</div>`;
-        h += `<div class="sep"></div>`;
-        return h;
-      }).join("");
+      const cats = { burgers:[], fries:[], drinks:[], others:[] };
+
+      items.forEach(it => {
+          const name = (it.name||"").toLowerCase();
+          const type = (it.type||"").toLowerCase();
+          const qty  = it.qty || it.quantity || 1;
+          
+          if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
+              cats.burgers.push(it);
+              if(it.fries && it.fries !== 'sin_papas') {
+                  cats.fries.push({ name: it.fries, qty: qty, origin: it.name });
+              }
+          } else if (type === 'side' || name.includes('papas')) {
+              cats.fries.push(it);
+          } else if (type === 'drink' || name.includes('coca')) {
+              cats.drinks.push(it);
+          } else {
+              cats.others.push(it);
+          }
+      });
+
+      const renderTktSection = (title, list) => {
+          if(!list.length) return "";
+          const rows = list.map(it => {
+              const qty = it.qty||1;
+              let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)} ${it.origin ? `(${escapeHtml(it.origin)})` : ''}</div></div>`;
+              // Extras solo si no son papas extraídas
+              if(!it.origin && it.extras?.patty) h += `<div class="sub">• +${it.extras.patty} carne</div>`;
+              if(!it.origin && it.extras?.cheddar) h += `<div class="sub">• +${it.extras.cheddar} cheddar</div>`;
+              if(it.notes) h += `<div class="sub">📝 ${escapeHtml(it.notes)}</div>`;
+              h += `<div class="sep"></div>`;
+              return h;
+          }).join("");
+          return `<div class="blk"><div class="lbl" style="border-bottom:1px solid #000; display:inline-block; margin-bottom:4px">${title}</div></div>${rows}`;
+      };
+
+      const htmlBody = 
+        renderTktSection("HAMBURGUESAS", cats.burgers) +
+        renderTktSection("PAPAS", cats.fries) +
+        renderTktSection("BEBIDAS", cats.drinks) +
+        renderTktSection("OTROS", cats.others);
 
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
@@ -448,7 +495,7 @@
           ${pickupBlockLarge}
           ${(o.pago)?`<div class="blk"><div class="lbl">PAGO</div><div>${escapeHtml(o.pago)}</div></div>`:""}
           <div class="hr"></div>
-          ${lines}
+          ${htmlBody}
           <div class="hr"></div>
           <div class="row"><div class="l">TOTAL</div><div>${moneyT(o.total||0)}</div></div>
           <div class="foot">${dateStr} — ${timeStr}</div>
