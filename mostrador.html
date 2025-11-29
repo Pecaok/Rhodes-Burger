@@ -662,7 +662,7 @@ $("#notes").oninput=()=> $("#notesCount").textContent = $("#notes").value.length
 $("#btnCancel").onclick=()=>{ $("#overlayCustomize").style.display="none"; };
 
 
-/* ============= SLOTS (TIEMPO REAL + 20 MIN BUFFER) ============= */
+/* ============= SLOTS (TIEMPO REAL + REGLA 30M/15M) ============= */
 const SLOT_START = "19:15";
 const SLOT_END   = "23:45";
 const SLOT_INTERVAL_MIN = 15;
@@ -700,7 +700,8 @@ function loadSlotsMostrador(){
   slotObjects = arr.map(d => ({ date:d, key:slotKey(d), gramsUsed:0, full:false }));
   $("#slotLabel").textContent="Cargando...";
   
-  // Cargar datos Firebase
+  updateRealTimeSlot();
+  
   slotObjects.forEach(s=>{
     const ref = db.collection("slots_grams").doc(s.key);
     const unsub = ref.onSnapshot(doc=>{
@@ -708,33 +709,39 @@ function loadSlotsMostrador(){
       const d = doc.data()||{};
       s.gramsUsed = Number(d.gramsUsed || 0);
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
-      
-      // Actualizar visual
       updateRealTimeSlot();
     });
     slotSubs.push(unsub);
   });
 }
 
-// 🔥 FUNCIÓN TIEMPO REAL (20 MIN BUFFER)
+// 🔥 LOGICA EXACTA DE INTERVALOS DE 15 MINUTOS
 function updateRealTimeSlot(){
     const now = new Date();
-    const BUFFER_MINUTES = 25; 
-    const cutoff = new Date(now.getTime() + BUFFER_MINUTES * 60000);
+    const minutes = now.getMinutes();
+    
+    // "Aterrizamos" en el cuarto de hora actual (0, 15, 30, 45)
+    const quarter = Math.floor(minutes / 15) * 15;
+    
+    // Construimos la hora base "limpia"
+    const baseTime = new Date(now);
+    baseTime.setMinutes(quarter);
+    baseTime.setSeconds(0);
+    baseTime.setMilliseconds(0);
+    
+    // Sumamos exactamente 30 minutos
+    const targetTime = new Date(baseTime.getTime() + 30 * 60000);
 
-    let futureIdx = slotObjects.findIndex(s => s.date >= cutoff && !s.full);
+    let futureIdx = slotObjects.findIndex(s => s.date.getTime() >= targetTime.getTime() && !s.full);
 
     if (futureIdx === -1) {
-        // Si es muy temprano (antes de abrir), mostrar el primero
-        if (now < slotObjects[0].date) futureIdx = 0;
-        // Si es muy tarde (cerrado), mostrar el último
-        else futureIdx = slotObjects.length - 1;
+        if (now < slotObjects[0].date) futureIdx = 0; 
+        else futureIdx = slotObjects.length - 1; 
     }
     currentSlotIndex = futureIdx;
     renderSlotMostrador();
 }
 
-// Actualizar cada 10 segundos para que sea "en vivo"
 setInterval(updateRealTimeSlot, 10000);
 
 function renderSlotMostrador(){
@@ -857,7 +864,6 @@ async function sendToFirestore(){
         return nxt;
       });
 
-      // ESTADO
       const statusFinal = 'accepted'; 
       const payStatusFinal = isOrderPaid ? 'paid' : 'pending_payment';
 
@@ -890,9 +896,7 @@ async function sendToFirestore(){
       $("#inpNombre").value="";
       $("#selPago").value="";
       $("#manualTime").value="";
-      // RESET A PENDIENTE
       setPaymentStatus(false);
-      // RE-CALCULAR HORARIO
       updateRealTimeSlot();
 
   } catch(e) {
