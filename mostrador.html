@@ -662,7 +662,7 @@ $("#notes").oninput=()=> $("#notesCount").textContent = $("#notes").value.length
 $("#btnCancel").onclick=()=>{ $("#overlayCustomize").style.display="none"; };
 
 
-/* ============= SLOTS (TIEMPO REAL + BUFFER 30M) ============= */
+/* ============= SLOTS (TIEMPO REAL + BUFFER 20M) ============= */
 const SLOT_START = "19:15";
 const SLOT_END   = "23:45";
 const SLOT_INTERVAL_MIN = 15;
@@ -700,18 +700,17 @@ function loadSlotsMostrador(){
   slotObjects = arr.map(d => ({ date:d, key:slotKey(d), gramsUsed:0, full:false }));
   $("#slotLabel").textContent="Cargando...";
   
-  // 🔥 LOGICA BUFFER 30 MINUTOS
+  // 🔥 LOGICA BUFFER 20 MINUTOS
   const now = new Date();
-  const BUFFER_MINUTES = 30;
+  const BUFFER_MINUTES = 20;
   const cutoff = new Date(now.getTime() + BUFFER_MINUTES * 60000);
 
   // Buscar primer slot DISPONIBLE que sea DESPUÉS del buffer
   let futureIdx = slotObjects.findIndex(s => s.date >= cutoff);
 
-  // Si no encontramos (porque es muy tarde), ponemos el último por seguridad (o el primero si es temprano)
   if (futureIdx === -1) {
-      if (now < slotObjects[0].date) futureIdx = 0; // Estamos antes de abrir
-      else futureIdx = slotObjects.length - 1; // Estamos cerrando
+      if (now < slotObjects[0].date) futureIdx = 0; // Antes de abrir
+      else futureIdx = slotObjects.length - 1; // Cierre
   }
 
   currentSlotIndex = futureIdx;
@@ -724,7 +723,7 @@ function loadSlotsMostrador(){
       s.gramsUsed = Number(d.gramsUsed || 0);
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
       
-      // Si el seleccionado se llenó, avanzar al siguiente libre
+      // Si el seleccionado se llenó, avanzar
       if(s.full && currentSlotIndex === slotObjects.indexOf(s)){
           const nextFree = slotObjects.findIndex((x, i) => i > currentSlotIndex && !x.full);
           if(nextFree !== -1) currentSlotIndex = nextFree;
@@ -782,6 +781,7 @@ async function sendToFirestore(){
   }
   if(!slot){ alert("Elegí un horario"); return; }
 
+  // CHECK PAPAS
   for (const id in cart.burger) {
     const burger = cart.burger[id];
     const name = burger.item.name.toLowerCase();
@@ -855,7 +855,7 @@ async function sendToFirestore(){
         return nxt;
       });
 
-      // ESTADO PREDETERMINADO PENDIENTE (isOrderPaid arranca en false)
+      // ESTADO DEFAULT PENDIENTE
       const statusFinal = 'accepted'; 
       const payStatusFinal = isOrderPaid ? 'paid' : 'pending_payment';
 
@@ -888,7 +888,7 @@ async function sendToFirestore(){
       $("#inpNombre").value="";
       $("#selPago").value="";
       $("#manualTime").value="";
-      // 🔥 RESETEAR A PENDIENTE PARA EL PRÓXIMO
+      // RESETEAR A PENDIENTE
       setPaymentStatus(false);
 
   } catch(e) {
