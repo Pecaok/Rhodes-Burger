@@ -162,41 +162,17 @@
       text-transform: uppercase; letter-spacing: 1px; border-radius: 12px;
     }
 
-    /* --- NUEVOS ESTILOS PARA ESTADO DE PAGO --- */
-    .payment-status-toggle {
-        display: flex;
-        gap: 10px;
-    }
+    /* --- ESTILOS PAGO --- */
+    .payment-status-toggle { display: flex; gap: 10px; }
     .toggle-btn {
-        flex: 1;
-        padding: 12px;
-        border: 1px solid #ddd;
-        background: #f5f5f5;
-        border-radius: 12px;
-        cursor: pointer;
-        font-weight: 700;
-        font-size: 14px;
-        transition: all 0.2s;
-        opacity: 0.7;
+        flex: 1; padding: 12px; border: 1px solid #ddd; background: #f5f5f5;
+        border-radius: 12px; cursor: pointer; font-weight: 700; font-size: 14px;
+        transition: all 0.2s; opacity: 0.7;
     }
     .toggle-btn:hover { opacity: 1; }
     
-    /* Estado ACTIVO: Pagado */
-    .toggle-btn.paid.active {
-        background: #e8f5e9;
-        border-color: var(--success);
-        color: var(--success);
-        opacity: 1;
-        box-shadow: 0 2px 8px rgba(46, 125, 50, 0.2);
-    }
-    /* Estado ACTIVO: Pendiente */
-    .toggle-btn.pending.active {
-        background: #fff3e0;
-        border-color: var(--warn);
-        color: #e65100;
-        opacity: 1;
-        box-shadow: 0 2px 8px rgba(255, 152, 0, 0.2);
-    }
+    .toggle-btn.paid.active { background: #e8f5e9; border-color: var(--success); color: var(--success); opacity: 1; box-shadow: 0 2px 8px rgba(46, 125, 50, 0.2); }
+    .toggle-btn.pending.active { background: #fff3e0; border-color: var(--warn); color: #e65100; opacity: 1; box-shadow: 0 2px 8px rgba(255, 152, 0, 0.2); }
 
 
     /* Modal */
@@ -374,7 +350,7 @@ const EXTRA_PRICE_PATTY   = 2500;
 const EXTRA_PRICE_CHEDDAR = 300;
 
 /* ============= LOGICA PAGO (DEFAULT PENDIENTE) ============= */
-let isOrderPaid = false; // 🔥 Default FALSE
+let isOrderPaid = false; // 🔥 Default FALSE (Pendiente)
 
 window.setPaymentStatus = function(isPaid){
     isOrderPaid = isPaid;
@@ -686,7 +662,7 @@ $("#notes").oninput=()=> $("#notesCount").textContent = $("#notes").value.length
 $("#btnCancel").onclick=()=>{ $("#overlayCustomize").style.display="none"; };
 
 
-/* ============= SLOTS ============= */
+/* ============= SLOTS (TIEMPO REAL) ============= */
 const SLOT_START = "19:15";
 const SLOT_END   = "23:45";
 const SLOT_INTERVAL_MIN = 15;
@@ -724,6 +700,11 @@ function loadSlotsMostrador(){
   slotObjects = arr.map(d => ({ date:d, key:slotKey(d), gramsUsed:0, full:false }));
   $("#slotLabel").textContent="Cargando...";
   
+  // 🔥 LOGICA TIEMPO REAL: Seleccionar primer slot futuro
+  const now = new Date();
+  const futureIdx = slotObjects.findIndex(s => s.date > now);
+  currentSlotIndex = futureIdx !== -1 ? futureIdx : 0;
+  
   slotObjects.forEach(s=>{
     const ref = db.collection("slots_grams").doc(s.key);
     const unsub = ref.onSnapshot(doc=>{
@@ -731,9 +712,11 @@ function loadSlotsMostrador(){
       const d = doc.data()||{};
       s.gramsUsed = Number(d.gramsUsed || 0);
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
-      if(currentSlotIndex===0 && s.full) {
-         const idx = slotObjects.findIndex(x => !x.full);
-         if(idx !== -1) currentSlotIndex = idx;
+      
+      // Si el seleccionado se llenó o ya pasó, avanzar
+      if(s.full && currentSlotIndex === slotObjects.indexOf(s)){
+          const nextFree = slotObjects.findIndex((x, i) => i > currentSlotIndex && !x.full);
+          if(nextFree !== -1) currentSlotIndex = nextFree;
       }
       renderSlotMostrador();
     });
@@ -777,6 +760,7 @@ async function sendToFirestore(){
   const nombre=$("#inpNombre").value.trim();
   if(!nombre){ alert("⚠️ Faltó el nombre del cliente."); $("#inpNombre").focus(); return; }
   
+  // PAGO OPCIONAL
   let pago=$("#selPago").value.trim();
   if(!pago) pago = "mostrador_sin_especificar";
 
@@ -788,6 +772,7 @@ async function sendToFirestore(){
   }
   if(!slot){ alert("Elegí un horario"); return; }
 
+  // CHECK PAPAS
   for (const id in cart.burger) {
     const burger = cart.burger[id];
     const name = burger.item.name.toLowerCase();
@@ -861,7 +846,7 @@ async function sendToFirestore(){
         return nxt;
       });
 
-      // LÓGICA DE ESTADO SEGÚN BOTONES (DEFAULT PENDIENTE)
+      // ESTADO
       const statusFinal = 'accepted'; 
       const payStatusFinal = isOrderPaid ? 'paid' : 'pending_payment';
 
@@ -894,7 +879,7 @@ async function sendToFirestore(){
       $("#inpNombre").value="";
       $("#selPago").value="";
       $("#manualTime").value="";
-      // Resetear estado pago a PENDIENTE para el próximo
+      // RESET A PENDIENTE
       setPaymentStatus(false);
 
   } catch(e) {
