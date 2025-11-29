@@ -662,7 +662,7 @@ $("#notes").oninput=()=> $("#notesCount").textContent = $("#notes").value.length
 $("#btnCancel").onclick=()=>{ $("#overlayCustomize").style.display="none"; };
 
 
-/* ============= SLOTS (TIEMPO REAL + BUFFER 20M) ============= */
+/* ============= SLOTS (TIEMPO REAL + 20 MIN BUFFER) ============= */
 const SLOT_START = "19:15";
 const SLOT_END   = "23:45";
 const SLOT_INTERVAL_MIN = 15;
@@ -700,21 +700,9 @@ function loadSlotsMostrador(){
   slotObjects = arr.map(d => ({ date:d, key:slotKey(d), gramsUsed:0, full:false }));
   $("#slotLabel").textContent="Cargando...";
   
-  // 🔥 LOGICA BUFFER 20 MINUTOS
-  const now = new Date();
-  const BUFFER_MINUTES = 20;
-  const cutoff = new Date(now.getTime() + BUFFER_MINUTES * 60000);
-
-  // Buscar primer slot DISPONIBLE que sea DESPUÉS del buffer
-  let futureIdx = slotObjects.findIndex(s => s.date >= cutoff);
-
-  if (futureIdx === -1) {
-      if (now < slotObjects[0].date) futureIdx = 0; // Antes de abrir
-      else futureIdx = slotObjects.length - 1; // Cierre
-  }
-
-  currentSlotIndex = futureIdx;
+  updateRealTimeSlot(); // Primera carga
   
+  // Cargar datos Firebase
   slotObjects.forEach(s=>{
     const ref = db.collection("slots_grams").doc(s.key);
     const unsub = ref.onSnapshot(doc=>{
@@ -723,16 +711,32 @@ function loadSlotsMostrador(){
       s.gramsUsed = Number(d.gramsUsed || 0);
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
       
-      // Si el seleccionado se llenó, avanzar
-      if(s.full && currentSlotIndex === slotObjects.indexOf(s)){
-          const nextFree = slotObjects.findIndex((x, i) => i > currentSlotIndex && !x.full);
-          if(nextFree !== -1) currentSlotIndex = nextFree;
-      }
-      renderSlotMostrador();
+      // Re-verificar si el actual se llenó
+      updateRealTimeSlot();
     });
     slotSubs.push(unsub);
   });
 }
+
+// 🔥 FUNCIÓN TIEMPO REAL (20 MIN BUFFER)
+function updateRealTimeSlot(){
+    const now = new Date();
+    const BUFFER_MINUTES = 20; 
+    const cutoff = new Date(now.getTime() + BUFFER_MINUTES * 60000);
+
+    let futureIdx = slotObjects.findIndex(s => s.date >= cutoff && !s.full);
+
+    if (futureIdx === -1) {
+        // Si todo lleno o tarde, mostrar el último o primero
+        if (now < slotObjects[0].date) futureIdx = 0; 
+        else futureIdx = slotObjects.length - 1; 
+    }
+    currentSlotIndex = futureIdx;
+    renderSlotMostrador();
+}
+
+// Actualizar cada minuto el "Ahora"
+setInterval(updateRealTimeSlot, 60000);
 
 function renderSlotMostrador(){
   if(slotObjects.length===0){ $("#slotLabel").textContent="Cerrado"; return; }
@@ -781,7 +785,6 @@ async function sendToFirestore(){
   }
   if(!slot){ alert("Elegí un horario"); return; }
 
-  // CHECK PAPAS
   for (const id in cart.burger) {
     const burger = cart.burger[id];
     const name = burger.item.name.toLowerCase();
@@ -890,6 +893,8 @@ async function sendToFirestore(){
       $("#manualTime").value="";
       // RESETEAR A PENDIENTE
       setPaymentStatus(false);
+      // RESETEAR HORARIO AL ACTUAL
+      updateRealTimeSlot();
 
   } catch(e) {
       console.error(e);
