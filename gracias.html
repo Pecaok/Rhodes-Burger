@@ -222,7 +222,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
-/* FIREBASE */
+/* CONFIG */
 const firebaseConfig={
   apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
   authDomain:"rhodes-burguers.firebaseapp.com",
@@ -234,103 +234,40 @@ const firebaseConfig={
 firebase.initializeApp(firebaseConfig);
 const db=firebase.firestore();
 
-/* CONSTANTES */
 const CART_KEY="rhodes_cart_v3";
 const GRAMOS_POR_BLOQUE=1500;
 const G_POR_BURGER=200;
 const G_POR_SIDE=700;
-const SLOT_START="19:15";
-const SLOT_END="23:45";
-const SLOT_INTERVAL_MIN=15;
-const WHATSAPP_NUMBER = "5491170596483"; // Tu número
+const SLOT_START="19:15"; const SLOT_END="23:45"; const SLOT_INTERVAL_MIN=15;
+const WHATSAPP_NUMBER = "5491170596483"; 
 
 function $(s){ return document.querySelector(s); }
+function parseHHMM(str){ const [h,m]=str.split(":").map(Number); const now=new Date(); return new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0); }
+function slotKey(date){ const y=date.getFullYear(); const M=String(date.getMonth()+1).padStart(2,"0"); const d=String(date.getDate()).padStart(2,"0"); const H=String(date.getHours()).padStart(2,"0"); const m=String(date.getMinutes()).padStart(2,"0"); return `${y}${M}${d}_${H}${m}`; }
+function formatHHMM(date){ return date.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false}); }
+function normalizeFriesLabel(raw){ if(!raw) return ''; let s=String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes("sazon"))return "Sazonadas"; if(s.includes("sin sal"))return "Sin sal"; if(s.includes("con sal")||s.includes("sal"))return "Con Sal"; return ''; }
+function generateToken() { return Math.random().toString(36).substr(2) + Date.now().toString(36); }
 
-/* ============================
-   FUNCIONES UTILITARIAS
-============================ */
-function parseHHMM(str){
-  const [h,m]=str.split(":").map(Number);
-  const now=new Date();
-  return new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0);
-}
-function slotKey(date){
-  const y=date.getFullYear();
-  const M=String(date.getMonth()+1).padStart(2,"0");
-  const d=String(date.getDate()).padStart(2,"0");
-  const H=String(date.getHours()).padStart(2,"0");
-  const m=String(date.getMinutes()).padStart(2,"0");
-  return `${y}${M}${d}_${H}${m}`;
-}
-function formatHHMM(date){
-  return date.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
-}
-function generateToken() {
-  return Math.random().toString(36).substr(2) + Date.now().toString(36);
-}
+/* CARRITO */
+function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{},side:{}}; }catch{ return {burger:{},drink:{},side:{}}; } }
+function gramosDelPedido(){ const c=loadCart(); let g=0; for(const k in c.burger) g+=(c.burger[k].qty||0)*G_POR_BURGER; for(const k in c.side) g+=(c.side[k].qty||0)*G_POR_SIDE; return g; }
 
-function normalizeFriesLabel(raw){
-  if(!raw && raw !== 0) return '';
-  let s = String(raw).toLowerCase().replace(/[_-]/g,' ').replace(/\s+/g,' ').trim();
-  if(!s) return '';
-  if(s.includes("sazon")) return "Sazonadas";
-  if(s.includes("sin sal")) return "Sin sal";
-  if(s.includes("con sal")) return "Con Sal";
-  if(s.includes("sal")) return "Con sal";
-  return '';
-}
-
-/* ============================
-   CARRITO
-============================ */
-function loadCart(){
-  try{
-    return JSON.parse(localStorage.getItem(CART_KEY)) || {burger:{},drink:{},side:{}};
-  }catch{
-    return {burger:{},drink:{},side:{}};
-  }
-}
-function gramosDelPedido(){
-  const c=loadCart();
-  let g=0;
-  for(const k in c.burger) g+=(c.burger[k].qty||0)*G_POR_BURGER;
-  for(const k in c.side)   g+=(c.side[k].qty||0)*G_POR_SIDE;
-  return g;
-}
-
-/* ============================
-   SLOTS (TIEMPO REAL + 20 MIN)
-============================ */
-let slotObjects=[];
-let visibles=[];
-let listeners=[];
-let currentIndex=0;
-
-function limpiarListeners(){ listeners.forEach(u=>{ try{u();}catch{} }); listeners=[]; }
-
+/* SLOTS */
+let slotObjects=[], visibles=[], listeners=[], currentIndex=0;
+function limpiarListeners(){ listeners.forEach(u=>{try{u()}catch{}}); listeners=[]; }
 async function cargarSlots(){
   limpiarListeners();
-
-  // Generar slots del día
-  const start=parseHHMM(SLOT_START);
-  const end=parseHHMM(SLOT_END);
-  const arr=[];
-  let cur=new Date(start);
-  while(cur<=end){ arr.push(new Date(cur)); cur=new Date(cur.getTime()+SLOT_INTERVAL_MIN*60000); }
-
-  slotObjects = arr.map(d=>({ date:d, key:slotKey(d), gramsUsed:0, full:false }));
-
+  const slots=[]; let cur=new Date(parseHHMM(SLOT_START)); const end=parseHHMM(SLOT_END);
+  while(cur<=end){ slots.push(new Date(cur)); cur=new Date(cur.getTime()+SLOT_INTERVAL_MIN*60000); }
+  
+  slotObjects=slots.map(d=>({date:d, key:slotKey(d), gramsUsed:0, full:false}));
   $("#slotLabel").textContent="Cargando…";
-  $("#slotNote").textContent="Cargando disponibilidad...";
-
-  // Escuchar cambios en Firebase
+  
   slotObjects.forEach(s=>{
     const ref=db.collection("slots_grams").doc(s.key);
     const unsub=ref.onSnapshot(doc=>{
       if(!doc.exists) ref.set({gramsUsed:0},{merge:true});
-      const data=doc.data() || {};
-      s.gramsUsed=Number(data.gramsUsed||0);
-      s.full=false;
+      const data=doc.data()||{}; s.gramsUsed=Number(data.gramsUsed||0); s.full=false;
       reconstruirVisibles();
     });
     listeners.push(unsub);
@@ -339,8 +276,6 @@ async function cargarSlots(){
 
 function reconstruirVisibles(){
   const pedidoGramos = gramosDelPedido();
-
-  // Filtrar por capacidad
   visibles = slotObjects.filter(s=>{
     const restante = GRAMOS_POR_BLOQUE - s.gramsUsed;
     if(restante<=0) return false;
@@ -348,110 +283,40 @@ function reconstruirVisibles(){
     return restante>=pedidoGramos;
   });
 
-  // Filtrar por Hora Actual + 20 Minutos
-  const now = new Date();
-  const m = now.getMinutes();
-  const quarter = Math.floor(m / 15) * 15;
-  const base = new Date(now);
-  base.setMinutes(quarter); base.setSeconds(0); base.setMilliseconds(0);
+  // Filtro Tiempo Real + 20 min (Intervalos Fijos)
+  const now=new Date(); const m=now.getMinutes(); const q=Math.floor(m/15)*15;
+  const base=new Date(now); base.setMinutes(q); base.setSeconds(0); base.setMilliseconds(0);
+  const cutoff=new Date(base.getTime()+20*60000);
   
-  const cutoff = new Date(base.getTime() + 20 * 60000); // 20 min buffer
-
-  visibles = visibles.filter(s => s.date >= cutoff);
-  visibles.sort((a,b)=>a.date-b.date);
-
-  if(visibles.length===0) currentIndex=-1;
-  else if(currentIndex<0||currentIndex>=visibles.length) currentIndex=0;
-
+  visibles = visibles.filter(s=>s.date>=cutoff).sort((a,b)=>a.date-b.date);
+  if(visibles.length===0) currentIndex=-1; else if(currentIndex<0||currentIndex>=visibles.length) currentIndex=0;
   actualizarUI();
 }
 
 function actualizarUI(){
-  const label=$("#slotLabel");
-  const count=$("#slotCount");
-  const prev=$("#slotPrev");
-  const next=$("#slotNext");
-  const car=$("#slotsCarousel");
-
-  if(visibles.length===0){
-    label.innerHTML="<div class='no-slots'>No hay turnos</div>";
-    count.textContent="";
-    prev.classList.add("disabled");
-    next.classList.add("disabled");
-    car.selectedSlot=null;
-    return;
-  }
-
+  const label=$("#slotLabel"), car=$("#slotsCarousel");
+  if(visibles.length===0){ label.innerHTML="<div class='no-slots'>No hay turnos</div>"; car.selectedSlot=null; return; }
   const s=visibles[currentIndex];
-  label.textContent=formatHHMM(s.date);
-  $("#slotNote").textContent = "Disponibles";
-
-  prev.classList.toggle("disabled",currentIndex===0);
-  next.classList.toggle("disabled",currentIndex===visibles.length-1);
-
+  label.textContent=formatHHMM(s.date); $("#slotNote").textContent="Disponibles";
   car.selectedSlot={ key:s.key, pretty:formatHHMM(s.date) };
 }
 
-$("#slotPrev").onclick=()=>{ if(currentIndex>0){currentIndex--;actualizarUI();} };
-$("#slotNext").onclick=()=>{ if(currentIndex<visibles.length-1){currentIndex++;actualizarUI();} };
+$("#slotPrev").onclick=()=>{if(currentIndex>0){currentIndex--;actualizarUI()}};
+$("#slotNext").onclick=()=>{if(currentIndex<visibles.length-1){currentIndex++;actualizarUI()}};
 $("#btnRefreshSlots").onclick=cargarSlots;
+setInterval(reconstruirVisibles,10000);
 
-setInterval(reconstruirVisibles, 10000); // Refresco cada 10s
-
-/* ============================
-   MULTI-BLOQUE (Reserva)
-============================ */
-async function reservarMultiBloque(horaInicioKey, gramosTotales) {
-  const indexInicio=slotObjects.findIndex(s=>s.key===horaInicioKey);
-  if(indexInicio===-1) throw new Error("NO_SLOT");
-
-  const bloquesNecesarios=Math.ceil(gramosTotales/GRAMOS_POR_BLOQUE);
-  let bloques=[];
-  let restante=gramosTotales;
-
-  for(let i=0;i<bloquesNecesarios;i++){
-    const slot=slotObjects[indexInicio+i];
-    if(!slot) throw new Error("SIN_BLOQUES");
-    let carga=Math.min(restante,GRAMOS_POR_BLOQUE);
-    bloques.push({ key:slot.key, carga:carga, usados:slot.gramsUsed });
-    restante-=carga;
-  }
-
-  for(const b of bloques){
-    if(b.usados + b.carga > GRAMOS_POR_BLOQUE) throw new Error("NO_CAPACIDAD");
-  }
-
-  for(const b of bloques){
-    await db.runTransaction(async tx=>{
-      const ref=db.collection("slots_grams").doc(b.key);
-      const snap=await tx.get(ref);
-      const actuales=snap.exists?Number(snap.data().gramsUsed||0):0;
-      tx.set(ref,{gramsUsed:actuales+b.carga},{merge:true});
-    });
-  }
-  return bloques.map(b=>b.key);
-}
-
-/* ============================
-   RESUMEN
-============================ */
+/* RESUMEN */
 function renderResumen(){
-  const c=loadCart();
-  const box=$("#resumen");
-  const totalEl=$("#resTotal");
-  box.innerHTML="";
-  let t=0;
+  const c=loadCart(); const box=$("#resumen"); box.innerHTML=""; let t=0;
   for(const o of Object.values(c.burger)){
-    const subt=o.qty*o.item.price;
-    t+=subt;
+    const subt=o.qty*o.item.price; t+=subt;
     box.innerHTML+=`<div style="margin-bottom:8px"><strong>${o.item.name} x${o.qty}</strong><div class="muted">Papas: ${normalizeFriesLabel(o.fries)}</div><div class="muted">Subtotal: $${subt.toLocaleString("es-AR")}</div></div>`;
   }
-  totalEl.textContent="$ "+t.toLocaleString("es-AR");
+  $("#resTotal").textContent="$ "+t.toLocaleString("es-AR");
 }
 
-/* ============================
-   CONTADOR
-============================ */
+/* CONFIRMAR PEDIDO */
 async function obtenerYIncrementarOrderNumber() {
   const ref = db.collection("config").doc("counters");
   let nuevoNumero = null;
@@ -459,18 +324,37 @@ async function obtenerYIncrementarOrderNumber() {
     const snap = await tx.get(ref);
     const actual = snap.exists ? snap.data().orderNumber || 0 : 0;
     nuevoNumero = actual + 1;
-    tx.set(ref, { orderNumber: nuevoNumero, updatedAt: new Date().toISOString() }, {merge:true});
+    tx.set(ref, { orderNumber: nuevoNumero }, {merge:true});
   });
   return nuevoNumero;
 }
 
-/* ============================
-   CONFIRMAR PEDIDO
-============================ */
+async function reservarMultiBloque(horaInicioKey, gramosTotales) {
+  const idx=slotObjects.findIndex(s=>s.key===horaInicioKey);
+  if(idx===-1) throw new Error("NO_SLOT");
+  const cant=Math.ceil(gramosTotales/GRAMOS_POR_BLOQUE);
+  let blqs=[]; let rest=gramosTotales;
+  for(let i=0;i<cant;i++){
+    const s=slotObjects[idx+i]; if(!s) throw new Error("SIN_BLOQUES");
+    let carga=Math.min(rest,GRAMOS_POR_BLOQUE);
+    blqs.push({key:s.key, carga:carga, usados:s.gramsUsed});
+    rest-=carga;
+  }
+  for(const b of blqs){ if(b.usados+b.carga>GRAMOS_POR_BLOQUE) throw new Error("NO_CAPACIDAD"); }
+  for(const b of blqs){
+    await db.runTransaction(async tx=>{
+      const ref=db.collection("slots_grams").doc(b.key);
+      const snap=await tx.get(ref);
+      const act=snap.exists?Number(snap.data().gramsUsed||0):0;
+      tx.set(ref,{gramsUsed:act+b.carga},{merge:true});
+    });
+  }
+}
+
 $("#btnConfirmar").onclick=async()=>{
-  const btn = $("#btnConfirmar");
+  const btn=$("#btnConfirmar");
   const nombre=$("#inpNombre").value.trim();
-  const telefono=$("#inpTelefono").value.trim();
+  const tel=$("#inpTelefono").value.trim();
   const pago=document.querySelector("input[name='pago']:checked");
   const notas=$("#inpNotas").value.trim();
   const slot=$("#slotsCarousel").selectedSlot;
@@ -479,101 +363,71 @@ $("#btnConfirmar").onclick=async()=>{
   if(!nombre){alert("Ingresá tu nombre");return;}
   if(!pago){alert("Elegí el medio de pago");return;}
   if(!slot){alert("Elegí un horario de retiro");return;}
+  
+  let items=0; Object.values(cart.burger).forEach(o=>items+=o.qty);
+  if(items===0){alert("Carrito vacío");return;}
 
-  let totalItems=0;
-  Object.values(cart.burger).forEach(o=>totalItems+=o.qty);
-  if(totalItems===0){ alert("Tu carrito está vacío"); return; }
-
-  if(btn.disabled) return;
-  btn.disabled = true;
-  btn.textContent = "Procesando...";
-
-  const gramosTotales=gramosDelPedido();
+  btn.disabled=true; btn.textContent="Procesando...";
 
   try{
-    await reservarMultiBloque(slot.key,gramosTotales);
-  }catch(e){
-    alert("Ese horario ya no tiene capacidad suficiente. Por favor, elegí otro.");
-    cargarSlots();
-    btn.disabled = false; btn.textContent = "Confirmar Pedido";
-    return;
-  }
+    await reservarMultiBloque(slot.key, gramosDelPedido());
+    const orderNumber = await obtenerYIncrementarOrderNumber();
+    const trackToken = generateToken();
 
-  let total=0;
-  Object.values(cart.burger).forEach(o=>total+=o.qty*o.item.price);
+    let total=0;
+    let detalle="";
+    for(const o of Object.values(cart.burger)){
+       total+=o.qty*o.item.price;
+       detalle+=`• ${o.item.name} x${o.qty} (${normalizeFriesLabel(o.fries)})\n`;
+       if(o.notes) detalle+=`   Nota: ${o.notes}\n`;
+    }
 
-  let detalle="";
-  for(const o of Object.values(cart.burger)){
-    detalle+=`• ${o.item.name} x${o.qty}\n   Papas: ${normalizeFriesLabel(o.fries)}\n`;
-    if(o.notes) detalle+=`   Nota: ${o.notes}\n`;
-  }
+    // Guardar Pedido Privado (Local)
+    const pedidoRef = await db.collection("orders").add({
+      source:"web",
+      orderNumber,
+      nombre,
+      telefono: tel,
+      pago:pago.value,
+      payment_method:pago.value,
+      payment_status:"pending_payment",
+      paid:false,
+      entrega:"take_away",
+      pickup_time_pretty:slot.pretty,
+      pickup_slot:slot.key,
+      status:"accepted",
+      statusHistory:[{to:"accepted",at:new Date().toISOString()}],
+      items:Object.values(cart.burger).map(o=>({
+        name:o.item.name, price:o.item.price, qty:o.qty,
+        fries:o.fries, notes:o.notes?[o.notes]:[],
+        extras:{patty:o.extras.patty, cheddar:o.extras.cheddar, EXTRA_PRICE_PATTY:2500, EXTRA_PRICE_CHEDDAR:300}
+      })),
+      total,
+      createdAt:new Date().toISOString(),
+      trackToken: trackToken
+    });
 
-  const orderNumber = await obtenerYIncrementarOrderNumber();
-  const trackToken = generateToken();
-  
-  // Generar Link de Tracking
-  const currentUrl = window.location.href.replace('pedido_cliente.html', 'gracias.html').replace('index.html', 'gracias.html');
-  // Ajuste para asegurar que si no hay archivo en la URL, agregue gracias.html
-  const baseUrl = currentUrl.split('?')[0].split('/').slice(0,-1).join('/'); 
-  // Mejor usar la URL base fija o relativa si están en la misma carpeta
-  const trackLink = `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, 'gracias.html')}?id=${orderNumber}&t=${trackToken}`;
+    // Guardar Copia Pública (Para seguimiento)
+    await db.collection("order_public").doc(trackToken).set({
+      orderNumber,
+      nombre,
+      status: "accepted",
+      updatedAt: new Date().toISOString(),
+      entrega: "take_away",
+      pago: pago.value,
+      payment_status: "pending_payment"
+    });
 
-  // Guardar en Firebase (Privado para el local)
-  const pedido = {
-    source:"web",
-    orderNumber,
-    nombre,
-    telefono,
-    pago:pago.value,
-    payment_method:pago.value,
-    payment_status:"pending_payment",
-    paid:false,
-    entrega:"take_away",
-    pickup_time_pretty:slot.pretty,
-    pickup_slot:slot.key,
-    status:"accepted",
-    statusHistory:[{to:"accepted",at:new Date().toISOString()}],
-    items:Object.values(cart.burger).map(o=>({
-      name:o.item.name,
-      price:o.item.price,
-      qty:o.qty,
-      fries:o.fries,
-      notes:o.notes ? [o.notes] : [],
-      extras:{
-        patty:o.extras.patty,
-        cheddar:o.extras.cheddar,
-        EXTRA_PRICE_PATTY:2500,
-        EXTRA_PRICE_CHEDDAR:300
-      }
-    })),
-    total,
-    createdAt:new Date().toISOString(),
-    trackToken: trackToken
-  };
+    // Generar Link Seguro
+    // Detectar URL base (si está en carpeta, subir un nivel)
+    const path = window.location.pathname;
+    const directory = path.substring(0, path.lastIndexOf('/'));
+    const trackLink = `${window.location.origin}${directory}/gracias.html?id=${pedidoRef.id}&t=${trackToken}`;
 
-  const docRef = await db.collection("orders").add(pedido);
-
-  // Guardar copia pública para tracking (Solo datos no sensibles)
-  const publicOrder = {
-    orderNumber,
-    nombre,
-    status: "accepted",
-    updatedAt: new Date().toISOString(),
-    entrega: "take_away",
-    pago: pago.value,
-    trackToken: trackToken
-  };
-  
-  await db.collection("order_public").doc(trackToken).set(publicOrder);
-
-
-  /* ============================
-        WHATSAPP CON LINK
-  ============================= */
-  const msg =
+    // WhatsApp
+    const msg = 
 `*Nuevo Pedido #${orderNumber}*
 Nombre: ${nombre}
-Teléfono: ${telefono||"-"}
 Pago: ${pago.value==="mercado_pago"?"Transferencia":"En Local"}
 Retiro: ${slot.pretty}
 
@@ -584,22 +438,25 @@ ${detalle}
 🔗 *Seguí tu pedido acá:*
 ${trackLink}`;
 
-  localStorage.removeItem(CART_KEY);
+    localStorage.removeItem(CART_KEY);
 
-  // Redirigir a WhatsApp y luego a Gracias (en pestaña nueva o misma, WhatsApp suele abrir app)
-  window.location.href = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" + encodeURIComponent(msg);
-  
-  // Opcional: Redirigir a gracias después de un momento o dejar que vuelvan del whatsapp
-  // window.location.href = trackLink; 
+    // 1. Abrir WhatsApp en nueva pestaña
+    window.open("https://wa.me/"+WHATSAPP_NUMBER+"?text="+encodeURIComponent(msg), '_blank');
+
+    // 2. Redirigir al usuario a la pantalla de gracias
+    setTimeout(() => {
+        window.location.href = trackLink;
+    }, 1000);
+
+  }catch(e){
+    console.error(e);
+    alert("Ocurrió un error. "+e.message);
+    cargarSlots();
+    btn.disabled=false; btn.textContent="Confirmar Pedido";
+  }
 };
 
-/* ============================
-   INIT
-============================ */
-window.addEventListener("DOMContentLoaded",()=>{
-  cargarSlots();
-  renderResumen();
-});
+window.addEventListener("DOMContentLoaded",()=>{cargarSlots();renderResumen();});
 </script>
 </body>
 </html>
