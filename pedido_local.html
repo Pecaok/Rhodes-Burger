@@ -154,7 +154,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    // 1. Configuración Firebase
+  window.addEventListener('DOMContentLoaded', () => {
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
@@ -163,29 +163,74 @@
       messagingSenderId: "951646688091",
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
     };
-    try{ firebase.initializeApp(firebaseConfig); }catch(e){}
-    const db = firebase.firestore(); // DB Global
+    try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
-    // 2. Helpers
+    window.db = firebase.firestore();
+    window.firebase = firebase;
+    window.idToDoc = new Map();
+  });
+
+  /* --- FUNCIONES GLOBALES DE ACCIÓN --- */
+  async function setOrderStatus(id, next, isPaid){
+      if (next === 'delivered' && !isPaid) {
+          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
+          return;
+      }
+      try{ 
+          await window.db.collection("orders").doc(id).update({ 
+              status: next, 
+              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
+          }); 
+      }catch(e){ alert("Error actualizando estado: "+e); }
+  }
+
+  async function setPaymentStatus(id, paid){
+      try{ 
+          await window.db.collection("orders").doc(id).update({ 
+              paid: !!paid, 
+              payment_status: paid ? "paid" : "pending_payment", 
+              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()}) 
+          }); 
+      }catch(e){ alert("Error actualizando pago: "+e); }
+  }
+
+  async function updatePago(id, value){
+      try{ 
+          await window.db.collection("orders").doc(id).update({ pago: value }); 
+      }catch(e){ alert("Error actualizando método: "+e); }
+  }
+
+  function printOrder(id){
+      const doc = window.idToDoc.get(id);
+      if(doc) window.trySilentPrint(doc);
+  }
+  
+  window.setOrderStatus = setOrderStatus;
+  window.setPaymentStatus = setPaymentStatus;
+  window.updatePago = updatePago;
+  window.printOrder = printOrder;
+
+
+  /* --- LÓGICA PRINCIPAL --- */
+  window.addEventListener('DOMContentLoaded', () => {
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    
-    // Mapas globales
-    let idToDoc = new Map();
-    let currentFilter = "recibidos";
-    let lastSnap = null;
 
-    // 3. Funciones de Datos
     function pickDocDate(obj){
-      const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
+      // Intenta varios formatos de fecha
+      if(obj.createdAt && typeof obj.createdAt === 'string') return new Date(obj.createdAt);
+      if(obj.createdAt && obj.createdAt.toDate) return obj.createdAt.toDate();
+      
+      const cand = ['timestamp','date','fecha','time'];
       for (const k of cand){
         const v = obj[k];
         if (v?.toDate) return v.toDate();
         if (typeof v === 'number') return new Date(v);
         if (typeof v === 'string'){ const d=new Date(v); if(!isNaN(d)) return d; }
       }
-      return null;
+      return new Date(); // Fallback
     }
+
     function displayOrderNumber(doc){
       const o=doc.data();
       const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
@@ -198,212 +243,119 @@
       return null;
     }
 
-    // 4. Funciones de Acción (Globales para onclick)
-    window.setOrderStatus = async (id, next, isPaid) => {
-        if (next === 'delivered' && !isPaid) {
-            alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
-            return;
-        }
-        try{ 
-            await db.collection("orders").doc(id).update({ 
-                status: next, 
-                statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
-            }); 
-        }catch(e){ alert("Error actualizando estado: "+e); }
-    };
-
-    window.setPaymentStatus = async (id, paid) => {
-        try{ 
-            await db.collection("orders").doc(id).update({ 
-                paid: !!paid, 
-                payment_status: paid ? "paid" : "pending_payment", 
-                statusHistory: firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()}) 
-            }); 
-        }catch(e){ alert("Error actualizando pago: "+e); }
-    };
-
-    window.updatePago = async (id, value) => {
-        try{ 
-            await db.collection("orders").doc(id).update({ pago: value }); 
-        }catch(e){ alert("Error actualizando método: "+e); }
-    };
-
-    window.printOrder = (id) => {
-        const doc = idToDoc.get(id);
-        if(doc) trySilentPrint(doc);
-    };
-
-
-    /* --- LÓGICA PRINCIPAL AL CARGAR --- */
-    document.addEventListener('DOMContentLoaded', () => {
-        const tabs=$("#tabs");
-        tabs.addEventListener("click",(e)=>{
-          const el=e.target.closest("[data-f]"); if(!el) return;
-          currentFilter = el.dataset.f;
-          tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
-          el.classList.add("active");
-          if (lastSnap) renderList(lastSnap);
-        });
-
-        // Botones Header
-        const btnBell=$("#btnBell");
-        const updateBell=()=>{ 
-            const on = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
-            btnBell.classList.toggle("active", on); 
+    /* ============= SONIDO ============= */
+    let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
+    let audioCtx = null;
+    function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
+    async function playBeepTriple(){ 
+        if(!soundEnabled) return; 
+        const ctx=getAudioCtx(); if(ctx.state==='suspended') await ctx.resume();
+        const beep = () => {
+            const o=ctx.createOscillator(); const g=ctx.createGain();
+            o.type="square"; o.frequency.value=700; o.connect(g); g.connect(ctx.destination);
+            o.start(); g.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime+0.15); o.stop(ctx.currentTime+0.15);
         };
-        updateBell();
-        btnBell.onclick=()=>{ 
-            const curr = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
-            localStorage.setItem("rb_bell_enabled", !curr); updateBell(); 
-        };
-
-        const btnAutoPrint=$("#btnAutoPrint");
-        const updateAP=()=>{
-            const on = JSON.parse(localStorage.getItem("rb_auto_print")||"false");
-            btnAutoPrint.classList.toggle("active", on);
-        };
-        updateAP();
-        btnAutoPrint.onclick=()=>{
-            const curr = JSON.parse(localStorage.getItem("rb_auto_print")||"false");
-            localStorage.setItem("rb_auto_print", !curr); updateAP();
-        };
-        $("#btnLogout").onclick=logout;
-
-        // SUSCRIPCIÓN FIREBASE (CORREGIDA: Trae los últimos por fecha)
-        (async function subscribeOrders(){
-          try{
-            // 🔥 ORDENAMIENTO SIMPLE: Solo por fecha. Esto evita el error de índices compuestos.
-            let q = db.collection("orders").orderBy("createdAt", "desc").limit(200);
-            
-            q.onSnapshot(async snap=>{
-              document.getElementById("ordersError").style.display="none";
-              lastSnap = snap;
-              renderList(snap);
-              
-              // Auto acciones para nuevos
-              snap.docChanges().forEach(ch => {
-                if (ch.type === 'added') {
-                   // Detectamos si es "nuevo-nuevo" por tiempo (hack simple) o confiamos en el listener
-                   // Simplemente ejecutamos el beep/print si no es la carga inicial masiva
-                }
-              });
-            }, err=>{ 
-                console.error("Error Snapshot:", err); 
-                document.getElementById("ordersError").style.display="block"; 
-                document.getElementById("ordersError").textContent="Error cargando pedidos: "+err.message;
-            });
-
-          }catch(err){ 
-              console.error("Error Init:", err); 
-              document.getElementById("ordersError").style.display="block"; 
-          }
-        })();
-    });
-
-    /* --- RENDERIZADO --- */
-    function renderList(snap){
-      const passFilter=o=>{
-        const s = o.status ?? "accepted";
-        if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
-        if(currentFilter==="entregados") return s==="delivered";
-        if(currentFilter==="cancelled") return s==="cancelled";
-        return true;
-      };
-
-      // Actualizamos mapa global
-      idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
-      
-      const docs = snap.docs.filter(d=>passFilter(d.data()));
-      const container = document.getElementById("orders");
-
-      if(docs.length === 0){
-          container.innerHTML = '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
-          return;
-      }
-
-      container.innerHTML = docs.map(doc => renderOrder(doc)).join("");
+        beep(); setTimeout(beep,200); setTimeout(beep,400); 
     }
 
-    /* --- RENDER INDIVIDUAL --- */
+    const btnBell=$("#btnBell");
+    const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
+    updateBellUI();
+    btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
+    $("#btnLogout").onclick=()=>{ logout(); };
+
+    const tabs=$("#tabs");
+    let currentFilter="recibidos", lastSnap=null;
+
+    tabs.addEventListener("click",(e)=>{
+      const el=e.target.closest("[data-f]"); if(!el) return;
+      currentFilter = el.dataset.f;
+      tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+      el.classList.add("active");
+      if (lastSnap) renderListFromSnap(lastSnap);
+    });
+
+    const btnStateClass=st=>`state-btn state-${st}`;
+    const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
+    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
+
+    const computeOrderTotal = o => {
+      if (typeof o.rawTotal === "number") return o.rawTotal;
+      const items = Array.isArray(o.items)?o.items:[];
+      return items.reduce((t,it)=>{
+        const qty = it.qty||1; const base = (it.price||0)*qty;
+        return t + base; 
+      },0);
+    };
+
+    /* ========== RENDER UI ========== */
     function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
       const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
       const items = Array.isArray(o.items) ? o.items : [];
 
-      // Agrupamos items
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
       items.forEach(it => {
           const name = (it.name||"").toLowerCase();
           const type = (it.type||"").toLowerCase();
-          const qty  = Number(it.qty || it.quantity || 1);
-          // Clonamos item
-          const item = {...it, qty: qty};
-
+          const qty  = it.qty || it.quantity || 1;
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
-              cats.burgers.push(item);
-              if(item.fries && item.fries !== 'sin_papas') cats.fries.push({ name: item.fries, qty: qty });
+              cats.burgers.push(it);
+              if(it.fries && it.fries !== 'sin_papas') cats.fries.push({ name: it.fries, qty: qty });
           } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
-              cats.fries.push(item);
+              cats.fries.push(it);
           } else if (type === 'drink' || name.includes('coca')) {
-              cats.drinks.push(item);
+              cats.drinks.push(it);
           } else {
-              cats.others.push(item);
+              cats.others.push(it);
           }
       });
 
-      // Función de Stacking (agrupar iguales)
-      const stack = (list) => {
-        const g={};
-        list.forEach(i=>{
-            const k=JSON.stringify({n:i.name, e:i.extras, nt:i.notes});
-            if(!g[k]) g[k]={...i}; else g[k].qty+=i.qty;
-        });
-        return Object.values(g);
-      };
-      cats.burgers=stack(cats.burgers); cats.fries=stack(cats.fries); 
-      cats.drinks=stack(cats.drinks); cats.others=stack(cats.others);
-
-      const renderSec = (title, list, icon) => {
+      const renderSection = (title, list, icon) => {
           if(!list.length) return "";
           const rows = list.map(it => {
+              const qty = it.qty || it.quantity || 1;
+              const name = it.name || "Ítem";
               let extras = [];
               if(it.extras?.patty) extras.push(`🥩 +${it.extras.patty} carne`);
               if(it.extras?.cheddar) extras.push(`🧀 +${it.extras.cheddar} cheddar`);
               const extrasHTML = extras.length ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` : "";
               const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
-              return `<div class="item-row"><div class="item-qty">${it.qty}</div><div class="item-det"><div class="item-name">${it.name}</div>${extrasHTML}${notesHTML}</div></div>`;
+              return `<div class="item-row"><div class="item-qty">${qty}</div><div class="item-det"><div class="item-name">${name}</div>${extrasHTML}${notesHTML}</div></div>`;
           }).join("");
           return `<div class="cat-section"><div class="cat-header">${icon} ${title}</div>${rows}</div>`;
       };
 
-      const fullItemsHTML = renderSec("HAMBURGUESAS", cats.burgers, "🍔") + renderSec("GUARNICIONES / PAPAS", cats.fries, "🍟") + renderSec("BEBIDAS", cats.drinks, "🥤") + renderSec("OTROS", cats.others, "🔸");
+      const fullItemsHTML = renderSection("HAMBURGUESAS", cats.burgers, "🍔") + renderSection("GUARNICIONES / PAPAS", cats.fries, "🍟") + renderSection("BEBIDAS", cats.drinks, "🥤") + renderSection("OTROS", cats.others, "🔸");
 
       const pickupPretty = getPickupPretty(o);
       const srcChip = o.source === "mostrador" ? `<span class="chip" style="background:#e3f2fd;color:#0d47a1">🖥️ Mostrador</span>` : "";
       const noteGeneral = (o.comment || o.notes || "").toString().trim() ? `<span class="chip">📝 ${o.comment || o.notes}</span>` : "";
-      
-      const btnStateClass=st=>`state-btn state-${st}`;
-      const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
-      const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
-      
       const st = o.status ?? "accepted";
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
-
-      // Botones HTML
+      
+      // Botones Estado
       const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
         `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
       ).join('')}</div>`;
 
       const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
-      
-      // Calculo Total
-      const computeOrderTotal = o => {
-          if (typeof o.rawTotal === "number") return o.rawTotal;
-          return (Array.isArray(o.items)?o.items:[]).reduce((t,it)=>(t+((it.price||0)*(it.qty||1))),0);
-      };
+
+      const payLine = `
+        <div class="pay-line">
+          <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
+            <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
+            <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
+            <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
+            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
+            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
+          </select>
+          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
+          <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
+        </div>`;
 
       return `
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
@@ -417,17 +369,7 @@
             </div>
             <div>
               <div class="right-total">${money(computeOrderTotal(o))}</div>
-              <div class="pay-line">
-                <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
-                  <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
-                  <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
-                  <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
-                  <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
-                  <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
-                </select>
-                <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
-                <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
-              </div>
+              ${payLine}
             </div>
           </div>
           <div class="divider"></div>
@@ -436,8 +378,8 @@
       `;
     }
 
-    /* ============= TICKET (CENTRADO, STACKEADO Y CORREGIDO) ============= */
-    function trySilentPrint(docSnap){
+    /* ============= TICKET 58MM CENTRADO ============= */
+    window.trySilentPrint = function(docSnap){
       const o = docSnap.data();
       const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
@@ -459,41 +401,29 @@
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
-      // Items para ticket con Stacking
+      // Items para ticket
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
       items.forEach(it => {
           const name = (it.name||"").toLowerCase();
           const type = (it.type||"").toLowerCase();
-          const qty  = Number(it.qty || it.quantity || 1);
-          const item = {...it, qty: qty}; // clon
+          const qty  = it.qty || it.quantity || 1;
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
-              cats.burgers.push(item);
-              if(item.fries && item.fries !== 'sin_papas') cats.fries.push({ name: item.fries, qty: qty });
+              cats.burgers.push(it);
+              if(it.fries && it.fries !== 'sin_papas') cats.fries.push({ name: it.fries, qty: qty });
           } else if (type === 'side' || name.includes('papas')) {
-              cats.fries.push(item);
+              cats.fries.push(it);
           } else if (type === 'drink' || name.includes('coca')) {
-              cats.drinks.push(item);
+              cats.drinks.push(it);
           } else {
-              cats.others.push(item);
+              cats.others.push(it);
           }
       });
-      
-      const stack = (list) => {
-        const g={};
-        list.forEach(i=>{
-            const k=JSON.stringify({n:i.name, e:i.extras, nt:i.notes});
-            if(!g[k]) g[k]={...i}; else g[k].qty+=i.qty;
-        });
-        return Object.values(g);
-      };
-      cats.burgers=stack(cats.burgers); cats.fries=stack(cats.fries); 
-      cats.drinks=stack(cats.drinks); cats.others=stack(cats.others);
 
       const renderTktSection = (title, list) => {
           if(!list.length) return "";
           const rows = list.map(it => {
-              const qty = it.qty;
+              const qty = it.qty||1;
               let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
               if(!title.includes("PAPAS")) {
                   if(it.extras?.patty) h += `<div class="sub">• +${it.extras.patty} carne</div>`;
@@ -509,11 +439,6 @@
       const htmlBody = renderTktSection("HAMBURGUESAS", cats.burgers) + renderTktSection("PAPAS", cats.fries) + renderTktSection("BEBIDAS", cats.drinks) + renderTktSection("OTROS", cats.others);
       const note = o.comment || o.notes || "";
       const commentBlock = note ? `<div class="hr"></div><div class="blk"><div class="lbl">NOTA</div><div>${escapeHtml(note)}</div></div>` : "";
-      
-      const computeOrderTotal = o => {
-        if (typeof o.rawTotal === "number") return o.rawTotal;
-        return (Array.isArray(o.items)?o.items:[]).reduce((t,it)=>(t+((it.price||0)*(it.qty||1))),0);
-      };
 
       const html = `
         <!doctype html><html><head><meta charset="utf-8"><title>Ticket</title>
@@ -556,6 +481,61 @@
       setTimeout(()=>{ try{document.body.removeChild(iframe)}catch(e){} }, 15000);
     };
 
+    /* --- AUTO PRINT & SUBSCRIBE --- */
+    let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
+    const btnAutoPrint = document.getElementById("btnAutoPrint");
+    const updateAP = ()=> btnAutoPrint.classList.toggle("active", autoPrint);
+    updateAP();
+    btnAutoPrint.onclick = ()=>{ autoPrint = !autoPrint; localStorage.setItem("rb_auto_print", JSON.stringify(autoPrint)); updateAP(); };
+
+    (async function subscribeOrders(){
+      try{
+        // 🔥 CONSULTA CORREGIDA: ORDENAR POR 'orderNumber'
+        // Esto evita el problema de fechas mezcladas (strings vs timestamps)
+        let q = window.db.collection("orders").orderBy("orderNumber", "desc").limit(200);
+        
+        q.onSnapshot(async snap=>{
+          document.getElementById("ordersError").style.display="none";
+          renderListFromSnap(snap);
+          
+          snap.docChanges().forEach(ch => {
+             if(ch.type==='added' && !isInitialLoad(ch)) {
+                 try{ playBeepTriple(); }catch(_){}
+                 if(autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id)||ch.doc);
+             }
+          });
+        }, err=>{ document.getElementById("ordersError").style.display="block"; console.error(err); });
+      }catch(err){ document.getElementById("ordersError").style.display="block"; console.error(err); }
+    })();
+
+    let _firstLoad = true;
+    function isInitialLoad(ch){
+        if(_firstLoad) { setTimeout(()=>_firstLoad=false, 2000); return true; }
+        return false;
+    }
+
+    function renderListFromSnap(snap){
+      let docs = snap.docs.map(d=>({data:d.data(), id:d.id, ref:d}));
+      
+      const passFilter=o=>{
+        const s = o.status ?? "accepted";
+        if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
+        if(currentFilter==="entregados") return s==="delivered";
+        if(currentFilter==="cancelled") return s==="cancelled";
+        return true;
+      };
+
+      const filtered = docs.filter(x => passFilter(x.data));
+      
+      // Actualizar mapa global
+      window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
+
+      document.getElementById("orders").innerHTML = filtered.length 
+        ? filtered.map(x => renderOrder(x.ref)).join("") 
+        : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
+    }
+
+  });
   </script>
   
   <script src="pwa.js"></script>
