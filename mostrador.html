@@ -350,7 +350,7 @@ const EXTRA_PRICE_PATTY   = 2500;
 const EXTRA_PRICE_CHEDDAR = 300;
 
 /* ============= LOGICA PAGO (DEFAULT PENDIENTE) ============= */
-let isOrderPaid = false; // 🔥 Default FALSE (Pendiente)
+let isOrderPaid = false; // 🔥 Default PENDIENTE
 
 window.setPaymentStatus = function(isPaid){
     isOrderPaid = isPaid;
@@ -662,7 +662,7 @@ $("#notes").oninput=()=> $("#notesCount").textContent = $("#notes").value.length
 $("#btnCancel").onclick=()=>{ $("#overlayCustomize").style.display="none"; };
 
 
-/* ============= SLOTS (TIEMPO REAL) ============= */
+/* ============= SLOTS (TIEMPO REAL + BUFFER 30M) ============= */
 const SLOT_START = "19:15";
 const SLOT_END   = "23:45";
 const SLOT_INTERVAL_MIN = 15;
@@ -700,10 +700,21 @@ function loadSlotsMostrador(){
   slotObjects = arr.map(d => ({ date:d, key:slotKey(d), gramsUsed:0, full:false }));
   $("#slotLabel").textContent="Cargando...";
   
-  // 🔥 LOGICA TIEMPO REAL: Seleccionar primer slot futuro
+  // 🔥 LOGICA BUFFER 30 MINUTOS
   const now = new Date();
-  const futureIdx = slotObjects.findIndex(s => s.date > now);
-  currentSlotIndex = futureIdx !== -1 ? futureIdx : 0;
+  const BUFFER_MINUTES = 30;
+  const cutoff = new Date(now.getTime() + BUFFER_MINUTES * 60000);
+
+  // Buscar primer slot DISPONIBLE que sea DESPUÉS del buffer
+  let futureIdx = slotObjects.findIndex(s => s.date >= cutoff);
+
+  // Si no encontramos (porque es muy tarde), ponemos el último por seguridad (o el primero si es temprano)
+  if (futureIdx === -1) {
+      if (now < slotObjects[0].date) futureIdx = 0; // Estamos antes de abrir
+      else futureIdx = slotObjects.length - 1; // Estamos cerrando
+  }
+
+  currentSlotIndex = futureIdx;
   
   slotObjects.forEach(s=>{
     const ref = db.collection("slots_grams").doc(s.key);
@@ -713,7 +724,7 @@ function loadSlotsMostrador(){
       s.gramsUsed = Number(d.gramsUsed || 0);
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
       
-      // Si el seleccionado se llenó o ya pasó, avanzar
+      // Si el seleccionado se llenó, avanzar al siguiente libre
       if(s.full && currentSlotIndex === slotObjects.indexOf(s)){
           const nextFree = slotObjects.findIndex((x, i) => i > currentSlotIndex && !x.full);
           if(nextFree !== -1) currentSlotIndex = nextFree;
@@ -760,7 +771,6 @@ async function sendToFirestore(){
   const nombre=$("#inpNombre").value.trim();
   if(!nombre){ alert("⚠️ Faltó el nombre del cliente."); $("#inpNombre").focus(); return; }
   
-  // PAGO OPCIONAL
   let pago=$("#selPago").value.trim();
   if(!pago) pago = "mostrador_sin_especificar";
 
@@ -772,7 +782,6 @@ async function sendToFirestore(){
   }
   if(!slot){ alert("Elegí un horario"); return; }
 
-  // CHECK PAPAS
   for (const id in cart.burger) {
     const burger = cart.burger[id];
     const name = burger.item.name.toLowerCase();
@@ -846,7 +855,7 @@ async function sendToFirestore(){
         return nxt;
       });
 
-      // ESTADO
+      // ESTADO PREDETERMINADO PENDIENTE (isOrderPaid arranca en false)
       const statusFinal = 'accepted'; 
       const payStatusFinal = isOrderPaid ? 'paid' : 'pending_payment';
 
@@ -879,7 +888,7 @@ async function sendToFirestore(){
       $("#inpNombre").value="";
       $("#selPago").value="";
       $("#manualTime").value="";
-      // RESET A PENDIENTE
+      // 🔥 RESETEAR A PENDIENTE PARA EL PRÓXIMO
       setPaymentStatus(false);
 
   } catch(e) {
