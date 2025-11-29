@@ -700,8 +700,6 @@ function loadSlotsMostrador(){
   slotObjects = arr.map(d => ({ date:d, key:slotKey(d), gramsUsed:0, full:false }));
   $("#slotLabel").textContent="Cargando...";
   
-  updateRealTimeSlot(); // Primera carga
-  
   // Cargar datos Firebase
   slotObjects.forEach(s=>{
     const ref = db.collection("slots_grams").doc(s.key);
@@ -711,7 +709,7 @@ function loadSlotsMostrador(){
       s.gramsUsed = Number(d.gramsUsed || 0);
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
       
-      // Re-verificar si el actual se llenó
+      // Actualizar visual
       updateRealTimeSlot();
     });
     slotSubs.push(unsub);
@@ -727,16 +725,17 @@ function updateRealTimeSlot(){
     let futureIdx = slotObjects.findIndex(s => s.date >= cutoff && !s.full);
 
     if (futureIdx === -1) {
-        // Si todo lleno o tarde, mostrar el último o primero
-        if (now < slotObjects[0].date) futureIdx = 0; 
-        else futureIdx = slotObjects.length - 1; 
+        // Si es muy temprano (antes de abrir), mostrar el primero
+        if (now < slotObjects[0].date) futureIdx = 0;
+        // Si es muy tarde (cerrado), mostrar el último
+        else futureIdx = slotObjects.length - 1;
     }
     currentSlotIndex = futureIdx;
     renderSlotMostrador();
 }
 
-// Actualizar cada minuto el "Ahora"
-setInterval(updateRealTimeSlot, 60000);
+// Actualizar cada 10 segundos para que sea "en vivo"
+setInterval(updateRealTimeSlot, 10000);
 
 function renderSlotMostrador(){
   if(slotObjects.length===0){ $("#slotLabel").textContent="Cerrado"; return; }
@@ -858,7 +857,7 @@ async function sendToFirestore(){
         return nxt;
       });
 
-      // ESTADO DEFAULT PENDIENTE
+      // ESTADO
       const statusFinal = 'accepted'; 
       const payStatusFinal = isOrderPaid ? 'paid' : 'pending_payment';
 
@@ -891,9 +890,9 @@ async function sendToFirestore(){
       $("#inpNombre").value="";
       $("#selPago").value="";
       $("#manualTime").value="";
-      // RESETEAR A PENDIENTE
+      // RESET A PENDIENTE
       setPaymentStatus(false);
-      // RESETEAR HORARIO AL ACTUAL
+      // RE-CALCULAR HORARIO
       updateRealTimeSlot();
 
   } catch(e) {
