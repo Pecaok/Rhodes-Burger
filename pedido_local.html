@@ -89,7 +89,7 @@
     .item-row { display: flex; gap: 12px; margin-bottom: 12px; font-size: 15px; align-items: flex-start; }
     .item-qty { font-weight: 800; font-size: 16px; color: var(--primary); min-width: 24px; }
     .item-det { flex: 1; }
-    .item-name { font-weight: 700; color: #111; line-height: 1.2; text-transform: capitalize; }
+    .item-name { font-weight: 700; color: #111; line-height: 1.2; }
     .item-extras { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
     .extra-line { font-size: 13px; color: #555; display: flex; align-items: center; gap: 6px; }
     .note-line { color: #d32f2f; font-style: italic; font-weight: 600; font-size: 13px; margin-top: 4px; }
@@ -170,7 +170,7 @@
     window.idToDoc = new Map();
   });
 
-  /* --- FUNCIONES GLOBALES --- */
+  /* --- FUNCIONES GLOBALES DE ACCIÓN --- */
   async function setOrderStatus(id, next, isPaid){
       if (next === 'delivered' && !isPaid) {
           alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
@@ -267,15 +267,8 @@
       currentFilter = el.dataset.f;
       tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
       el.classList.add("active");
-      if (lastSnap) renderList(lastSnap);
+      if (lastSnap) renderListFromSnap(lastSnap);
     });
-    const passFilter=o=>{
-      const s = o.status ?? "accepted";
-      if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
-      if(currentFilter==="entregados") return s==="delivered";
-      if(currentFilter==="cancelled") return s==="cancelled";
-      return true;
-    };
 
     const btnStateClass=st=>`state-btn state-${st}`;
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
@@ -290,14 +283,13 @@
       },0);
     };
 
-    // 🔥 FUNCIÓN PARA NORMALIZAR NOMBRES DE PAPAS (Saca guiones)
+    // 🔥 FUNCIÓN PARA NORMALIZAR NOMBRES DE PAPAS
     function normalizeFries(raw){
       if(!raw) return "";
       const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim();
       if(s.includes("sazon")) return "Sazonadas";
       if(s.includes("sin sal")) return "Sin sal";
       if(s.includes("con sal")||s.includes("sal")) return "Con sal";
-      // Si no coincide con ninguna, devolvemos limpio con mayúscula inicial
       return s.charAt(0).toUpperCase() + s.slice(1);
     }
 
@@ -336,7 +328,6 @@
               const extrasHTML = extras.length ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` : "";
               const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
               
-              // 🔥 APLICAMOS NORMALIZACIÓN DE NOMBRE
               let displayName = name;
               if(title.includes("PAPAS")) displayName = normalizeFries(name);
 
@@ -386,7 +377,6 @@
               </div>
             </div>
           </div>
-          <div class="divider"></div>
           <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
         </div>
       `;
@@ -402,15 +392,20 @@
       const dt = pickDocDate(o) || new Date();
       const dateStr = dt.toLocaleDateString("es-AR");
       const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
+      
       const pickup = getPickupPretty(o) || "A la brevedad";
       const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
-      const PAGO_MAP = { "mostrador_sin_especificar": "A COBRAR EN CAJA", "efectivo": "EFECTIVO", "mercado_pago": "MERCADO PAGO", "debito": "DÉBITO", "transferencia": "TRANSFERENCIA" };
+      const PAGO_MAP = {
+        "mostrador_sin_especificar": "A COBRAR EN CAJA",
+        "efectivo": "EFECTIVO", "mercado_pago": "MERCADO PAGO", "debito": "DÉBITO", "transferencia": "TRANSFERENCIA"
+      };
       let pagoTxt = PAGO_MAP[o.pago] || escapeHtml(o.pago) || "";
 
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
+      // Items para ticket
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
       items.forEach(it => {
@@ -434,7 +429,7 @@
           const rows = list.map(it => {
               const qty = it.qty||1;
               
-              // 🔥 NORMALIZAR NOMBRE TAMBIÉN EN EL TICKET
+              // 🔥 NORMALIZAR NOMBRE EN EL TICKET TAMBIÉN
               let displayName = escapeHtml(it.name);
               if(title.includes("PAPAS")) displayName = normalizeFries(it.name);
 
@@ -504,8 +499,8 @@
 
     (async function subscribeOrders(){
       try{
-        // Sin orderBy complejo para no romper índices
-        let q = window.db.collection("orders").limit(500);
+        // 🔥 ORDENAR POR orderNumber PARA EVITAR ERROR DE ÍNDICE Y TRAER LO NUEVO
+        let q = window.db.collection("orders").orderBy("orderNumber", "desc").limit(200);
         q.onSnapshot(async snap=>{
           document.getElementById("ordersError").style.display="none";
           renderListFromSnap(snap);
@@ -524,13 +519,15 @@
 
     function renderListFromSnap(snap){
       let docs = snap.docs.map(d=>({data:d.data(), id:d.id, ref:d}));
-      // Ordenar por fecha en JS
+      
+      // Ordenar por fecha en JS como respaldo
       docs.sort((a,b) => {
           const da = pickDocDate(a.data);
           const db = pickDocDate(b.data);
           if(!da) return 1; if(!db) return -1;
           return db - da; 
       });
+
       const passFilter=o=>{
         const s = o.status ?? "accepted";
         if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
