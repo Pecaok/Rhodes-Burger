@@ -1,44 +1,5 @@
 <!doctype html>
 <html lang="es">
-  <script>
-  /* ======== SESIÓN COMPARTIDA ======== */
-  const TTL_HOURS = 20;
-  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
-
-  function sessionValid(){
-    const ok = localStorage.getItem('rb_admin_ok') === 'true';
-    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
-    return ok && (Date.now() - ts) < TTL_MS;
-  }
-  function bumpSession(){
-    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
-  }
-  function logout(){
-    try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
-    try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
-    try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
-    try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
-    const next = encodeURIComponent('pedido_local.html');
-    location.replace('login.html?reason=logout&next=' + next);
-  }
-
-  (function requireSession(){
-    if (!sessionValid()){
-      const next = encodeURIComponent(
-        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
-        (location.search || '') + (location.hash || '')
-      );
-      location.replace('login.html?next=' + next);
-    } else {
-      bumpSession();
-    }
-  })();
-
-  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
-    window.addEventListener(evt, bumpSession, {passive:true});
-  });
-  </script>
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -154,146 +115,113 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-  window.addEventListener('DOMContentLoaded', () => {
-    const firebaseConfig = {
+  // --- CONFIGURACIÓN E INICIO ---
+  const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
       authDomain: "rhodes-burguers.firebaseapp.com",
       projectId: "rhodes-burguers",
       storageBucket: "rhodes-burguers.firebasestorage.app",
       messagingSenderId: "951646688091",
       appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-    };
-    try{ firebase.initializeApp(firebaseConfig);}catch(e){}
+  };
+  try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
-    // Variables globales
-    window.db = firebase.firestore();
-    window.firebase = firebase;
-    window.idToDoc = new Map();
-  });
+  const db = firebase.firestore();
+  const $ = s => document.querySelector(s);
+  const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-  /* --- FUNCIONES GLOBALES DE ACCIÓN --- */
-  async function setOrderStatus(id, next, isPaid){
-      if (next === 'delivered' && !isPaid) {
-          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
-          return;
-      }
-      try{ 
-          await window.db.collection("orders").doc(id).update({ 
-              status: next, 
-              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
-          }); 
-      }catch(e){ alert("Error actualizando estado: "+e); }
-  }
+  // Variables Globales
+  let currentFilter = "recibidos";
+  let lastSnap = null;
+  let idToDoc = new Map();
+  let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
+  let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
 
-  async function setPaymentStatus(id, paid){
-      try{ 
-          await window.db.collection("orders").doc(id).update({ 
-              paid: !!paid, 
-              payment_status: paid ? "paid" : "pending_payment", 
-              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()}) 
-          }); 
-      }catch(e){ alert("Error actualizando pago: "+e); }
-  }
-
-  async function updatePago(id, value){
-      try{ 
-          await window.db.collection("orders").doc(id).update({ pago: value }); 
-      }catch(e){ alert("Error actualizando método: "+e); }
-  }
-
-  function printOrder(id){
-      const doc = window.idToDoc.get(id);
-      if(doc) window.trySilentPrint(doc);
-  }
+  // --- FUNCIONES DE AYUDA (HELPERS) ---
   
-  // Exponer a window
-  window.setOrderStatus = setOrderStatus;
-  window.setPaymentStatus = setPaymentStatus;
-  window.updatePago = updatePago;
-  window.printOrder = printOrder;
-
-
-  /* --- LÓGICA PRINCIPAL --- */
-  window.addEventListener('DOMContentLoaded', () => {
-    const $ = s => document.querySelector(s);
-    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-
-    function pickDocDate(obj){
+  // Lee la fecha de cualquier formato (Timestamp o String)
+  function pickDocDate(obj){
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
         const v = obj[k];
         if (v?.toDate) return v.toDate();
-        if (typeof v === 'number') return new Date(v);
         if (typeof v === 'string'){ const d=new Date(v); if(!isNaN(d)) return d; }
+        if (typeof v === 'number') return new Date(v);
       }
       return null;
-    }
-    function displayOrderNumber(doc){
+  }
+
+  function displayOrderNumber(doc){
       const o=doc.data();
       const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
       for(const v of c){ if(v==null) continue; const n=typeof v==="string"?parseInt(v,10):v; if(Number.isFinite(n)) return `#${n}`; }
       return `#${doc.id.slice(-5).toUpperCase()}`;
-    }
-    function getPickupPretty(o){
+  }
+
+  function getPickupPretty(o){
       if (o.pickup_time_pretty && String(o.pickup_time_pretty).trim() !== "") return o.pickup_time_pretty;
       if (o.pickup_slot && /^\d{2}:\d{2}$/.test(o.pickup_slot)) return o.pickup_slot;
       return null;
-    }
+  }
 
-    /* ============= SONIDO ============= */
-    let soundEnabled = JSON.parse(localStorage.getItem("rb_bell_enabled")||"true");
-    let audioCtx = null;
-    function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
-    async function playBeepTriple(){ 
-        if(!soundEnabled) return; 
-        const ctx=getAudioCtx(); if(ctx.state==='suspended') await ctx.resume();
-        const beep = () => {
-            const o=ctx.createOscillator(); const g=ctx.createGain();
-            o.type="square"; o.frequency.value=700; o.connect(g); g.connect(ctx.destination);
-            o.start(); g.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime+0.15); o.stop(ctx.currentTime+0.15);
-        };
-        beep(); setTimeout(beep,200); setTimeout(beep,400); 
-    }
+  // Traduce códigos de papas a texto lindo
+  function normalizeFries(raw){
+    if(!raw) return "";
+    const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim();
+    if(s.includes("sazon")) return "Sazonadas";
+    if(s.includes("sin sal")) return "Sin sal";
+    if(s.includes("con sal")||s.includes("sal")) return "Con sal";
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
 
-    const btnBell=$("#btnBell");
-    const updateBellUI=()=>btnBell.classList.toggle("active",soundEnabled);
-    updateBellUI();
-    btnBell.onclick=()=>{ soundEnabled=!soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBellUI(); if(soundEnabled) playBeepTriple(); };
-    $("#btnLogout").onclick=()=>{ logout(); };
-
-    const tabs=$("#tabs");
-    let currentFilter="recibidos", lastSnap=null;
-
-    tabs.addEventListener("click",(e)=>{
-      const el=e.target.closest("[data-f]"); if(!el) return;
-      currentFilter = el.dataset.f;
-      tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
-      el.classList.add("active");
-      if (lastSnap) renderList(lastSnap);
-    });
-    const passFilter=o=>{
-      const s = o.status ?? "accepted";
-      if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
-      if(currentFilter==="entregados") return s==="delivered";
-      if(currentFilter==="cancelled") return s==="cancelled";
-      return true;
-    };
-
-    const btnStateClass=st=>`state-btn state-${st}`;
-    const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
-    const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
-
-    const computeOrderTotal = o => {
+  function computeOrderTotal(o){
       if (typeof o.rawTotal === "number") return o.rawTotal;
       const items = Array.isArray(o.items)?o.items:[];
       return items.reduce((t,it)=>{
         const qty = it.qty||1; const base = (it.price||0)*qty;
         return t + base; 
       },0);
-    };
+  }
 
-    /* ========== RENDER UI ========== */
-    function renderOrder(doc){
+  // --- FUNCIONES DE ACCIÓN (GLOBALES) ---
+
+  window.setOrderStatus = async (id, next, isPaid) => {
+      if (next === 'delivered' && !isPaid) {
+          alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
+          return;
+      }
+      try{ 
+          await db.collection("orders").doc(id).update({ 
+              status: next, 
+              statusHistory: firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
+          }); 
+      }catch(e){ alert("Error actualizando estado: "+e); }
+  };
+
+  window.setPaymentStatus = async (id, paid) => {
+      try{ 
+          await db.collection("orders").doc(id).update({ 
+              paid: !!paid, 
+              payment_status: paid ? "paid" : "pending_payment", 
+              statusHistory: firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()}) 
+          }); 
+      }catch(e){ alert("Error actualizando pago: "+e); }
+  };
+
+  window.updatePago = async (id, value) => {
+      try{ 
+          await db.collection("orders").doc(id).update({ pago: value }); 
+      }catch(e){ alert("Error actualizando método: "+e); }
+  };
+
+  window.printOrder = (id) => {
+      const doc = idToDoc.get(id);
+      if(doc) trySilentPrint(doc);
+  };
+
+  // --- RENDERIZADO DE PEDIDOS (HTML) ---
+
+  function renderOrder(doc){
       const o = doc.data();
       const dt = pickDocDate(o);
       const dtText = dt ? dt.toLocaleDateString('es-AR')+', '+dt.toLocaleTimeString('es-AR') : '—';
@@ -306,7 +234,14 @@
           const qty  = it.qty || it.quantity || 1;
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
-              if(it.fries && it.fries !== 'sin_papas') cats.fries.push({ name: it.fries, qty: qty });
+              // Extraer papas si las tiene adentro
+              let friesName = it.fries;
+              if(!friesName && it.extras && it.extras.fries) friesName = it.extras.fries;
+              if(!friesName && it.guarnicion) friesName = it.guarnicion;
+              
+              if(friesName && friesName !== 'sin_papas') {
+                   cats.fries.push({ name: friesName, qty: qty });
+              }
           } else if (type === 'side' || name.includes('papas') || name.includes('fritas')) {
               cats.fries.push(it);
           } else if (type === 'drink' || name.includes('coca')) {
@@ -319,14 +254,19 @@
       const renderSection = (title, list, icon) => {
           if(!list.length) return "";
           const rows = list.map(it => {
-              const qty = it.qty || it.quantity || 1;
-              const name = it.name || "Ítem";
+              const qty = it.qty || 1;
+              const name = it.name || "Item";
               let extras = [];
               if(it.extras?.patty) extras.push(`🥩 +${it.extras.patty} carne`);
               if(it.extras?.cheddar) extras.push(`🧀 +${it.extras.cheddar} cheddar`);
               const extrasHTML = extras.length ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` : "";
               const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
-              return `<div class="item-row"><div class="item-qty">${qty}</div><div class="item-det"><div class="item-name">${name}</div>${extrasHTML}${notesHTML}</div></div>`;
+              
+              // Normalizar nombre si son papas
+              let displayName = name;
+              if(title.includes("PAPAS")) displayName = normalizeFries(name);
+
+              return `<div class="item-row"><div class="item-qty">${qty}</div><div class="item-det"><div class="item-name">${displayName}</div>${extrasHTML}${notesHTML}</div></div>`;
           }).join("");
           return `<div class="cat-section"><div class="cat-header">${icon} ${title}</div>${rows}</div>`;
       };
@@ -336,11 +276,15 @@
       const pickupPretty = getPickupPretty(o);
       const srcChip = o.source === "mostrador" ? `<span class="chip" style="background:#e3f2fd;color:#0d47a1">🖥️ Mostrador</span>` : "";
       const noteGeneral = (o.comment || o.notes || "").toString().trim() ? `<span class="chip">📝 ${o.comment || o.notes}</span>` : "";
+      
+      // Estado
+      const btnStateClass=st=>`state-btn state-${st}`;
+      const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
+      const STATE_LABEL = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo para retirar', delivered:'Entregado', cancelled:'Cancelar'};
       const st = o.status ?? "accepted";
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       
-      // Botones Estado
       const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
         `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
       ).join('')}</div>`;
@@ -355,7 +299,7 @@
             <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
             <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
             <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
-            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transferencia</option>
+            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
           </select>
           <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
           <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
@@ -365,7 +309,7 @@
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
           <div class="order-head">
             <div>
-              <div class="order-title">${displayOrderNumber(doc)} — ${o.nombre || "Cliente"}</div>
+              <div class="order-title">${displayOrderNumber(doc)} — ${o.source==="mostrador" ? (o.nombre + " (Mostrador)") : (o.nombre || "Cliente")}</div>
               <div class="muted">N° interno: ${o.orderNumber || '—'}</div>
               <div class="muted">${dtText}</div>
               <div class="chips">${srcChip}<span class="chip">Retiro: ${o.entrega||"take_away"}</span><span class="chip">⏰ ${pickupPretty || "—"}</span>${noteGeneral}</div>
@@ -376,14 +320,13 @@
               ${payLine}
             </div>
           </div>
-          <div class="divider"></div>
           <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
         </div>
       `;
-    }
+  }
 
-    /* ============= TICKET 58MM CENTRADO ============= */
-    window.trySilentPrint = function(docSnap){
+  // --- TICKET IMPRESIÓN ---
+  function trySilentPrint(docSnap){
       const o = docSnap.data();
       const escapeHtml = s => (s || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const moneyT = n => (Number(n) || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
@@ -392,29 +335,29 @@
       const dt = pickDocDate(o) || new Date();
       const dateStr = dt.toLocaleDateString("es-AR");
       const timeStr = dt.toLocaleTimeString("es-AR", { hour12: false });
-      
       const pickup = getPickupPretty(o) || "A la brevedad";
-      const pickupBlockLarge = `<div style="text-align:center;margin:6px 0;font-size:20px;font-weight:900">Retira: ${escapeHtml(pickup)}</div>`;
 
       const PAGO_MAP = {
         "mostrador_sin_especificar": "A COBRAR EN CAJA",
         "efectivo": "EFECTIVO", "mercado_pago": "MERCADO PAGO", "debito": "DÉBITO", "transferencia": "TRANSFERENCIA"
       };
       let pagoTxt = PAGO_MAP[o.pago] || escapeHtml(o.pago) || "";
-
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
-      // Items para ticket
+      // Procesar items para ticket
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
       items.forEach(it => {
           const name = (it.name||"").toLowerCase();
           const type = (it.type||"").toLowerCase();
-          const qty  = it.qty || it.quantity || 1;
+          const qty  = it.qty || 1;
           if(type === 'burger' || name.includes('hamburguesa') || name.includes('doble') || name.includes('simple') || name.includes('crispy')) {
               cats.burgers.push(it);
-              if(it.fries && it.fries !== 'sin_papas') cats.fries.push({ name: it.fries, qty: qty });
+              let friesName = it.fries;
+              if(!friesName && it.extras && it.extras.fries) friesName = it.extras.fries;
+              if(!friesName && it.guarnicion) friesName = it.guarnicion;
+              if(friesName && friesName !== 'sin_papas') cats.fries.push({ name: friesName, qty: qty });
           } else if (type === 'side' || name.includes('papas')) {
               cats.fries.push(it);
           } else if (type === 'drink' || name.includes('coca')) {
@@ -428,7 +371,10 @@
           if(!list.length) return "";
           const rows = list.map(it => {
               const qty = it.qty||1;
-              let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
+              let displayName = escapeHtml(it.name);
+              if(title.includes("PAPAS")) displayName = normalizeFries(it.name);
+              
+              let h = `<div class="row name"><div class="l">${qty} × ${displayName}</div></div>`;
               if(!title.includes("PAPAS")) {
                   if(it.extras?.patty) h += `<div class="sub">• +${it.extras.patty} carne</div>`;
                   if(it.extras?.cheddar) h += `<div class="sub">• +${it.extras.cheddar} cheddar</div>`;
@@ -443,28 +389,21 @@
       const htmlBody = renderTktSection("HAMBURGUESAS", cats.burgers) + renderTktSection("PAPAS", cats.fries) + renderTktSection("BEBIDAS", cats.drinks) + renderTktSection("OTROS", cats.others);
       const note = o.comment || o.notes || "";
       const commentBlock = note ? `<div class="hr"></div><div class="blk"><div class="lbl">NOTA</div><div>${escapeHtml(note)}</div></div>` : "";
+      const clientName = o.source==="mostrador" ? (o.nombre+" (Mostrador)") : (o.nombre||"");
 
       const html = `
         <!doctype html><html><head><meta charset="utf-8"><title>Ticket</title>
         <style>
           @page { size: 58mm auto; margin: 0; }
           body { width: 58mm; margin: 0 auto; padding: 4px; font-family: Arial, sans-serif; font-size: 13px; font-weight: 700; color: #000; line-height: 1.3; box-sizing: border-box; }
-          .c { text-align: center; }
-          .brand { font-size: 16px; margin-bottom: 4px; }
-          .hr { border-top: 1px dashed #000; margin: 6px 0; }
-          .blk { margin: 4px 0; }
-          .lbl { font-size: 10px; text-transform: uppercase; margin-bottom: 2px; }
-          .row { display: flex; justify-content: space-between; }
-          .sub { font-size: 11px; margin-left: 4px; font-weight: normal; }
-          .sep { border-top: 1px dotted #999; margin: 4px 0; }
-          .foot { margin-top: 10px; text-align: center; font-size: 10px; font-weight: 400; }
+          .c { text-align: center; } .brand { font-size: 16px; margin-bottom: 4px; } .hr { border-top: 1px dashed #000; margin: 6px 0; } .blk { margin: 4px 0; } .lbl { font-size: 10px; text-transform: uppercase; margin-bottom: 2px; } .row { display: flex; justify-content: space-between; } .sub { font-size: 11px; margin-left: 4px; font-weight: normal; } .sep { border-top: 1px dotted #999; margin: 4px 0; } .foot { margin-top: 10px; text-align: center; font-size: 10px; font-weight: 400; }
         </style>
         </head><body>
           <div class="c brand">Rhodes Burgers</div>
           <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
           <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
           <div class="hr"></div>
-          ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
+          ${clientName ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(clientName)}</div></div>` : ""}
           ${pickupBlockLarge}
           ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
           ${commentBlock}
@@ -483,45 +422,79 @@
       const idoc = iframe.contentWindow.document;
       idoc.open(); idoc.write(html); idoc.close();
       setTimeout(()=>{ try{document.body.removeChild(iframe)}catch(e){} }, 15000);
-    };
+  }
 
-    /* --- AUTO PRINT & SUBSCRIBE --- */
-    let autoPrint = JSON.parse(localStorage.getItem("rb_auto_print") || "false");
-    const btnAutoPrint = document.getElementById("btnAutoPrint");
-    const updateAP = ()=> btnAutoPrint.classList.toggle("active", autoPrint);
-    updateAP();
-    btnAutoPrint.onclick = ()=>{ autoPrint = !autoPrint; localStorage.setItem("rb_auto_print", JSON.stringify(autoPrint)); updateAP(); };
 
-    (async function subscribeOrders(){
-      try{
-        // 🔥 ORDENAR POR orderNumber PARA EVITAR ERROR DE ÍNDICE Y TRAER LO NUEVO
-        let q = window.db.collection("orders").orderBy("orderNumber", "desc").limit(200);
-        
-        q.onSnapshot(async snap=>{
-          document.getElementById("ordersError").style.display="none";
-          renderListFromSnap(snap);
+  /* --- LOGICA INICIO --- */
+  window.addEventListener('DOMContentLoaded', () => {
+      const tabs=$("#tabs");
+      tabs.addEventListener("click",(e)=>{
+        const el=e.target.closest("[data-f]"); if(!el) return;
+        currentFilter = el.dataset.f;
+        tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
+        el.classList.add("active");
+        if (lastSnap) renderListFromSnap(lastSnap);
+      });
+
+      $("#btnLogout").onclick=logout;
+
+      // Botones Header
+      const btnBell=$("#btnBell");
+      const updateBell=()=>{ btnBell.classList.toggle("active", soundEnabled); };
+      updateBell();
+      btnBell.onclick=()=>{ soundEnabled = !soundEnabled; localStorage.setItem("rb_bell_enabled", JSON.stringify(soundEnabled)); updateBell(); };
+
+      const btnAutoPrint=$("#btnAutoPrint");
+      const updateAP=()=>{ btnAutoPrint.classList.toggle("active", autoPrint); };
+      updateAP();
+      btnAutoPrint.onclick=()=>{ autoPrint = !autoPrint; localStorage.setItem("rb_auto_print", JSON.stringify(autoPrint)); updateAP(); };
+
+      // SUSCRIPCIÓN FIREBASE (La que arregla la vista vacía)
+      (async function subscribeOrders(){
+        try{
+          // 🔥 CONSULTA ROBUSTA: Trae todo ordenado por fecha, usando 'desc' para que los Strings nuevos queden arriba.
+          // Si falla el orden, lo hace el cliente en JS.
+          let q = db.collection("orders").orderBy("createdAt", "desc").limit(200);
           
-          // Auto print (simple)
-          snap.docChanges().forEach(ch => {
-             if(ch.type==='added' && !isInitialLoad(ch)) {
-                 try{ playBeepTriple(); }catch(_){}
-                 if(autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id)||ch.doc);
+          q.onSnapshot(async snap=>{
+            document.getElementById("ordersError").style.display="none";
+            lastSnap = snap;
+            renderListFromSnap(snap);
+            
+            // Auto-acciones para nuevos
+            snap.docChanges().forEach(ch => {
+              if (ch.type === 'added' && !isInitialLoad()) {
+                try{ 
+                   if(soundEnabled){
+                     let actx = new (window.AudioContext||window.webkitAudioContext)();
+                     let o=actx.createOscillator(); let g=actx.createGain();
+                     o.type="square"; o.frequency.value=700; o.connect(g); g.connect(actx.destination);
+                     o.start(); g.gain.exponentialRampToValueAtTime(0.00001, actx.currentTime+0.15); o.stop(actx.currentTime+0.15);
+                   }
+                }catch(_){}
+                if (autoPrint) printOrder(ch.doc.id);
+              }
+            });
+          }, err=>{ 
+             console.error(err); 
+             // Si falla el index, hacemos fallback sin orden
+             if(err.code === 'failed-precondition'){
+                 console.log("Fallback a sin orden...");
+                 db.collection("orders").limit(200).onSnapshot(s=>{ lastSnap=s; renderListFromSnap(s); });
              }
           });
-        }, err=>{ document.getElementById("ordersError").style.display="block"; console.error(err); });
-      }catch(err){ document.getElementById("ordersError").style.display="block"; console.error(err); }
-    })();
 
-    let _firstLoad = true;
-    function isInitialLoad(ch){
-        if(_firstLoad) { setTimeout(()=>_firstLoad=false, 2000); return true; }
-        return false;
-    }
+        }catch(err){ console.error(err); }
+      })();
+  });
 
-    function renderListFromSnap(snap){
+  let _loaded = false;
+  function isInitialLoad(){ if(!_loaded){ setTimeout(()=>_loaded=true, 2500); return true; } return false; }
+
+  function renderListFromSnap(snap){
       let docs = snap.docs.map(d=>({data:d.data(), id:d.id, ref:d}));
       
-      // ORDENAR EN JS
+      // ORDENAR MANUAL (Para arreglar lío de fechas viejas/nuevas)
       docs.sort((a,b) => {
           const da = pickDocDate(a.data);
           const db = pickDocDate(b.data);
@@ -539,15 +512,16 @@
 
       const filtered = docs.filter(x => passFilter(x.data));
       
-      // Actualizar mapa global
-      window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
+      // Actualizar mapa global para impresión
+      idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
 
-      document.getElementById("orders").innerHTML = filtered.length 
-        ? filtered.map(x => renderOrder(x.ref)).join("") 
-        : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
-    }
-
-  });
+      const container = document.getElementById("orders");
+      if(filtered.length === 0){
+          container.innerHTML = '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
+      } else {
+          container.innerHTML = filtered.map(x => renderOrder(x.ref)).join("");
+      }
+  }
   </script>
   
   <script src="pwa.js"></script>
