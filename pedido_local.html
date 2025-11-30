@@ -165,6 +165,7 @@
     };
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
+    // Variables globales
     window.db = firebase.firestore();
     window.firebase = firebase;
     window.idToDoc = new Map();
@@ -205,6 +206,7 @@
       if(doc) window.trySilentPrint(doc);
   }
   
+  // Exponer a window
   window.setOrderStatus = setOrderStatus;
   window.setPaymentStatus = setPaymentStatus;
   window.updatePago = updatePago;
@@ -267,8 +269,15 @@
       currentFilter = el.dataset.f;
       tabs.querySelectorAll(".chipf").forEach(x=>x.classList.remove("active"));
       el.classList.add("active");
-      if (lastSnap) renderListFromSnap(lastSnap);
+      if (lastSnap) renderList(lastSnap);
     });
+    const passFilter=o=>{
+      const s = o.status ?? "accepted";
+      if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
+      if(currentFilter==="entregados") return s==="delivered";
+      if(currentFilter==="cancelled") return s==="cancelled";
+      return true;
+    };
 
     const btnStateClass=st=>`state-btn state-${st}`;
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
@@ -282,16 +291,6 @@
         return t + base; 
       },0);
     };
-
-    // 🔥 FUNCIÓN PARA NORMALIZAR NOMBRES DE PAPAS
-    function normalizeFries(raw){
-      if(!raw) return "";
-      const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim();
-      if(s.includes("sazon")) return "Sazonadas";
-      if(s.includes("sin sal")) return "Sin sal";
-      if(s.includes("con sal")||s.includes("sal")) return "Con sal";
-      return s.charAt(0).toUpperCase() + s.slice(1);
-    }
 
     /* ========== RENDER UI ========== */
     function renderOrder(doc){
@@ -327,11 +326,7 @@
               if(it.extras?.cheddar) extras.push(`🧀 +${it.extras.cheddar} cheddar`);
               const extrasHTML = extras.length ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` : "";
               const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
-              
-              let displayName = name;
-              if(title.includes("PAPAS")) displayName = normalizeFries(name);
-
-              return `<div class="item-row"><div class="item-qty">${qty}</div><div class="item-det"><div class="item-name">${displayName}</div>${extrasHTML}${notesHTML}</div></div>`;
+              return `<div class="item-row"><div class="item-qty">${qty}</div><div class="item-det"><div class="item-name">${name}</div>${extrasHTML}${notesHTML}</div></div>`;
           }).join("");
           return `<div class="cat-section"><div class="cat-header">${icon} ${title}</div>${rows}</div>`;
       };
@@ -345,12 +340,26 @@
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       
+      // Botones Estado
       const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
         `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
       ).join('')}</div>`;
 
       const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
+
+      const payLine = `
+        <div class="pay-line">
+          <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
+            <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
+            <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
+            <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
+            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
+            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transferencia</option>
+          </select>
+          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
+          <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
+        </div>`;
 
       return `
         <div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
@@ -364,19 +373,10 @@
             </div>
             <div>
               <div class="right-total">${money(computeOrderTotal(o))}</div>
-              <div class="pay-line">
-                <select class="btn" onchange="updatePago('${doc.id}', this.value)" style="min-width:140px">
-                  <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
-                  <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
-                  <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
-                  <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
-                  <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
-                </select>
-                <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
-                <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
-              </div>
+              ${payLine}
             </div>
           </div>
+          <div class="divider"></div>
           <div class="items-body">${fullItemsHTML || '<div class="cat-section"><div class="muted">Sin ítems</div></div>'}</div>
         </div>
       `;
@@ -428,12 +428,7 @@
           if(!list.length) return "";
           const rows = list.map(it => {
               const qty = it.qty||1;
-              
-              // 🔥 NORMALIZAR NOMBRE EN EL TICKET TAMBIÉN
-              let displayName = escapeHtml(it.name);
-              if(title.includes("PAPAS")) displayName = normalizeFries(it.name);
-
-              let h = `<div class="row name"><div class="l">${qty} × ${displayName}</div></div>`;
+              let h = `<div class="row name"><div class="l">${qty} × ${escapeHtml(it.name)}</div></div>`;
               if(!title.includes("PAPAS")) {
                   if(it.extras?.patty) h += `<div class="sub">• +${it.extras.patty} carne</div>`;
                   if(it.extras?.cheddar) h += `<div class="sub">• +${it.extras.cheddar} cheddar</div>`;
@@ -501,26 +496,32 @@
       try{
         // 🔥 ORDENAR POR orderNumber PARA EVITAR ERROR DE ÍNDICE Y TRAER LO NUEVO
         let q = window.db.collection("orders").orderBy("orderNumber", "desc").limit(200);
+        
         q.onSnapshot(async snap=>{
           document.getElementById("ordersError").style.display="none";
           renderListFromSnap(snap);
-          for (const ch of snap.docChanges()){
-            if (ch.type === 'added' && !isInitialLoad(ch)) {
-              try{ playBeepTriple(); }catch(_){}
-              if (autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id) || ch.doc);
-            }
-          }
+          
+          // Auto print (simple)
+          snap.docChanges().forEach(ch => {
+             if(ch.type==='added' && !isInitialLoad(ch)) {
+                 try{ playBeepTriple(); }catch(_){}
+                 if(autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id)||ch.doc);
+             }
+          });
         }, err=>{ document.getElementById("ordersError").style.display="block"; console.error(err); });
       }catch(err){ document.getElementById("ordersError").style.display="block"; console.error(err); }
     })();
 
     let _firstLoad = true;
-    function isInitialLoad(ch){ if(_firstLoad){ setTimeout(()=>_firstLoad=false,2000); return true; } return false; }
+    function isInitialLoad(ch){
+        if(_firstLoad) { setTimeout(()=>_firstLoad=false, 2000); return true; }
+        return false;
+    }
 
     function renderListFromSnap(snap){
       let docs = snap.docs.map(d=>({data:d.data(), id:d.id, ref:d}));
       
-      // Ordenar por fecha en JS como respaldo
+      // ORDENAR EN JS
       docs.sort((a,b) => {
           const da = pickDocDate(a.data);
           const db = pickDocDate(b.data);
@@ -535,10 +536,17 @@
         if(currentFilter==="cancelled") return s==="cancelled";
         return true;
       };
+
       const filtered = docs.filter(x => passFilter(x.data));
+      
+      // Actualizar mapa global
       window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
-      document.getElementById("orders").innerHTML = filtered.length ? filtered.map(x => renderOrder(x.ref)).join("") : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
+
+      document.getElementById("orders").innerHTML = filtered.length 
+        ? filtered.map(x => renderOrder(x.ref)).join("") 
+        : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
     }
+
   });
   </script>
   
