@@ -350,7 +350,7 @@ const EXTRA_PRICE_PATTY   = 2500;
 const EXTRA_PRICE_CHEDDAR = 300;
 
 /* ============= LOGICA PAGO (DEFAULT PENDIENTE) ============= */
-let isOrderPaid = false; // 🔥 Default PENDIENTE
+let isOrderPaid = false; 
 
 window.setPaymentStatus = function(isPaid){
     isOrderPaid = isPaid;
@@ -662,7 +662,7 @@ $("#notes").oninput=()=> $("#notesCount").textContent = $("#notes").value.length
 $("#btnCancel").onclick=()=>{ $("#overlayCustomize").style.display="none"; };
 
 
-/* ============= SLOTS (TIEMPO REAL + REGLA 30M/15M) ============= */
+/* ============= SLOTS (TIEMPO REAL + 30 MIN REGLA) ============= */
 const SLOT_START = "19:15";
 const SLOT_END   = "23:45";
 const SLOT_INTERVAL_MIN = 15;
@@ -709,30 +709,32 @@ function loadSlotsMostrador(){
       const d = doc.data()||{};
       s.gramsUsed = Number(d.gramsUsed || 0);
       s.full = s.gramsUsed >= GRAMOS_POR_BLOQUE;
+      
       updateRealTimeSlot();
     });
     slotSubs.push(unsub);
   });
 }
 
-// 🔥 LOGICA EXACTA DE INTERVALOS DE 15 MINUTOS
+// 🔥 LOGICA HORA LOCAL (UTC-3) + 30 MIN
 function updateRealTimeSlot(){
     const now = new Date();
-    const minutes = now.getMinutes();
+    // Forzar zona horaria UTC-3 si el dispositivo está mal configurado (opcional, pero recomendado)
+    // En este caso confiamos en la hora del sistema del usuario
     
-    // "Aterrizamos" en el cuarto de hora actual (0, 15, 30, 45)
+    const minutes = now.getMinutes();
     const quarter = Math.floor(minutes / 15) * 15;
     
-    // Construimos la hora base "limpia"
     const baseTime = new Date(now);
     baseTime.setMinutes(quarter);
     baseTime.setSeconds(0);
     baseTime.setMilliseconds(0);
     
-    // Sumamos exactamente 30 minutos
-    const targetTime = new Date(baseTime.getTime() + 30 * 60000);
+    // Sumar 30 min
+    const cutoff = new Date(baseTime.getTime() + 30 * 60000);
 
-    let futureIdx = slotObjects.findIndex(s => s.date.getTime() >= targetTime.getTime() && !s.full);
+    // Comparar
+    let futureIdx = slotObjects.findIndex(s => s.date.getTime() >= cutoff.getTime() && !s.full);
 
     if (futureIdx === -1) {
         if (now < slotObjects[0].date) futureIdx = 0; 
@@ -866,6 +868,13 @@ async function sendToFirestore(){
 
       const statusFinal = 'accepted'; 
       const payStatusFinal = isOrderPaid ? 'paid' : 'pending_payment';
+      
+      // 🔥 FECHA CORREGIDA A HORA LOCAL (ISO sin Z)
+      // Esto soluciona que en la DB se vea mal la hora
+      const now = new Date();
+      const offset = now.getTimezoneOffset() * 60000;
+      const localDate = new Date(now.getTime() - offset);
+      const createdAtLocal = localDate.toISOString().slice(0, -1); // Quitamos la 'Z'
 
       const order = {
         orderNumber,
@@ -883,7 +892,7 @@ async function sendToFirestore(){
         total: rawTotal,
         rawTotal,
         source: "mostrador",
-        createdAt: new Date().toISOString(), 
+        createdAt: createdAtLocal, // 🔥 USAMOS LA HORA LOCAL
         createdAt_server: firebase.firestore.FieldValue.serverTimestamp()
       };
 
