@@ -165,7 +165,6 @@
     };
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
-    // Variables globales
     window.db = firebase.firestore();
     window.firebase = firebase;
     window.idToDoc = new Map();
@@ -173,7 +172,6 @@
 
   /* --- FUNCIONES GLOBALES DE ACCIÓN --- */
   async function setOrderStatus(id, next, isPaid){
-      // Validar entrega solo si no está pagado
       if (next === 'delivered' && !isPaid) {
           alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
           return;
@@ -186,21 +184,12 @@
       }catch(e){ alert("Error actualizando estado: "+e); }
   }
 
-  async function setPaymentStatus(id, currentlyPaid, currentMethod){
-      // 🔥 VALIDACIÓN DE PAGO OBLIGATORIO
-      // Si se intenta marcar como PAGADO (currentlyPaid es false -> pasará a true)
-      // y NO hay método seleccionado (es null, vacío o 'mostrador_sin_especificar')
-      if(!currentlyPaid && (!currentMethod || currentMethod === "mostrador_sin_especificar" || currentMethod === "")){
-          alert("⚠️ FALTAN DATOS\n\nSeleccioná un METODO DE PAGO antes de marcar como pagado.");
-          return;
-      }
-
+  async function setPaymentStatus(id, paid){
       try{ 
-          const newStatus = !currentlyPaid;
           await window.db.collection("orders").doc(id).update({ 
-              paid: newStatus, 
-              payment_status: newStatus ? "paid" : "pending_payment", 
-              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to: newStatus?"paid":"pending_payment", at:new Date().toISOString()}) 
+              paid: !!paid, 
+              payment_status: paid ? "paid" : "pending_payment", 
+              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()}) 
           }); 
       }catch(e){ alert("Error actualizando pago: "+e); }
   }
@@ -228,15 +217,17 @@
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
     function pickDocDate(obj){
+      // Intentar leer la fecha de CUALQUIER formato posible
       const cand = ['createdAt','created_at','timestamp','date','fecha','time'];
       for (const k of cand){
         const v = obj[k];
-        if (v?.toDate) return v.toDate();
-        if (typeof v === 'number') return new Date(v);
-        if (typeof v === 'string'){ const d=new Date(v); if(!isNaN(d)) return d; }
+        if (v?.toDate) return v.toDate(); // Timestamp
+        if (typeof v === 'string'){ const d=new Date(v); if(!isNaN(d.getTime())) return d; } // String ISO
+        if (typeof v === 'number') return new Date(v); // Milisegundos
       }
-      return null;
+      return new Date(); // Fallback (ahora)
     }
+
     function displayOrderNumber(doc){
       const o=doc.data();
       const c=[o.orderNumber,o.number,o.numero,o.num,o.numPedido,o.nro,o.orderNo,o.seq,o.n,o.idPedido,o.pedidoNumber,o.pedido];
@@ -280,13 +271,6 @@
       el.classList.add("active");
       if (lastSnap) renderListFromSnap(lastSnap);
     });
-    const passFilter=o=>{
-      const s = o.status ?? "accepted";
-      if(currentFilter==="recibidos") return ["accepted","pending_payment","in_prep","ready"].includes(s);
-      if(currentFilter==="entregados") return s==="delivered";
-      if(currentFilter==="cancelled") return s==="cancelled";
-      return true;
-    };
 
     const btnStateClass=st=>`state-btn state-${st}`;
     const STATE_SEQ = ['accepted','in_prep','ready','delivered','cancelled'];
@@ -366,14 +350,7 @@
         `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
       ).join('')}</div>`;
 
-      // 🔥 LÓGICA VISUAL DE PAGO
-      let currentPago = o.pago;
-      // Si viene del mostrador sin especificar, lo tratamos como vacío para el select
-      if(currentPago === "mostrador_sin_especificar" || currentPago === "efectivo" && !isPaid && o.source==="mostrador") {
-          // Esto permite que el select muestre "Método..." (disabled selected) si queremos forzar elección
-          if(currentPago === "mostrador_sin_especificar") currentPago = "";
-      }
-
+      const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
 
       const payLine = `
@@ -385,7 +362,7 @@
             <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>QR (MP)</option>
             <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transferencia</option>
           </select>
-          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${currentPago || ''}')">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
+          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
           <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
         </div>`;
 
@@ -425,10 +402,7 @@
 
       const PAGO_MAP = {
         "mostrador_sin_especificar": "A COBRAR EN CAJA",
-        "efectivo": "EFECTIVO", 
-        "mercado_pago": "QR (MERCADO PAGO)", 
-        "debito": "DÉBITO", 
-        "transferencia": "TRANSFERENCIA"
+        "efectivo": "EFECTIVO", "mercado_pago": "QR (MERCADO PAGO)", "debito": "DÉBITO", "transferencia": "TRANSFERENCIA"
       };
       let pagoTxt = PAGO_MAP[o.pago] || escapeHtml(o.pago) || "";
       if(!o.pago || o.pago === "") pagoTxt = "A COBRAR EN CAJA";
@@ -436,7 +410,6 @@
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
 
-      // Items para ticket
       const items = Array.isArray(o.items) ? o.items : [];
       const cats = { burgers:[], fries:[], drinks:[], others:[] };
       items.forEach(it => {
@@ -462,7 +435,6 @@
           if(!list.length) return "";
           const rows = list.map(it => {
               const qty = it.qty||1;
-              
               let displayName = escapeHtml(it.name);
               if(title.includes("PAPAS")) displayName = normalizeFries(it.name);
 
@@ -488,22 +460,14 @@
         <style>
           @page { size: 58mm auto; margin: 0; }
           body { width: 58mm; margin: 0 auto; padding: 4px; font-family: Arial, sans-serif; font-size: 13px; font-weight: 700; color: #000; line-height: 1.3; box-sizing: border-box; }
-          .c { text-align: center; }
-          .brand { font-size: 16px; margin-bottom: 4px; }
-          .hr { border-top: 1px dashed #000; margin: 6px 0; }
-          .blk { margin: 4px 0; }
-          .lbl { font-size: 10px; text-transform: uppercase; margin-bottom: 2px; }
-          .row { display: flex; justify-content: space-between; }
-          .sub { font-size: 11px; margin-left: 4px; font-weight: normal; }
-          .sep { border-top: 1px dotted #999; margin: 4px 0; }
-          .foot { margin-top: 10px; text-align: center; font-size: 10px; font-weight: 400; }
+          .c { text-align: center; } .brand { font-size: 16px; margin-bottom: 4px; } .hr { border-top: 1px dashed #000; margin: 6px 0; } .blk { margin: 4px 0; } .lbl { font-size: 10px; text-transform: uppercase; margin-bottom: 2px; } .row { display: flex; justify-content: space-between; } .sub { font-size: 11px; margin-left: 4px; font-weight: normal; } .sep { border-top: 1px dotted #999; margin: 4px 0; } .foot { margin-top: 10px; text-align: center; font-size: 10px; font-weight: 400; }
         </style>
         </head><body>
           <div class="c brand">Rhodes Burgers</div>
           <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
           <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
           <div class="hr"></div>
-          ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
+          ${clientName ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(clientName)}</div></div>` : ""}
           ${pickupBlockLarge}
           ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${pagoTxt}</div></div>` : ""}
           ${commentBlock}
@@ -533,8 +497,9 @@
 
     (async function subscribeOrders(){
       try{
-        // ORDENAMIENTO POR orderNumber para evitar error de índices y traer LO NUEVO
-        let q = window.db.collection("orders").orderBy("orderNumber", "desc").limit(200);
+        // 🔥 TRAER TODO SIN ORDENAR PARA EVITAR BLOQUEOS DE INDICE
+        // (Ordenamos en el cliente con Javascript)
+        let q = window.db.collection("orders").limit(200);
         
         q.onSnapshot(async snap=>{
           document.getElementById("ordersError").style.display="none";
@@ -556,7 +521,7 @@
     function renderListFromSnap(snap){
       let docs = snap.docs.map(d=>({data:d.data(), id:d.id, ref:d}));
       
-      // Ordenar visualmente
+      // 🔥 ORDENAR EN CLIENTE (LO QUE HACE QUE SE VEAN SIEMPRE)
       docs.sort((a,b) => {
           const da = pickDocDate(a.data);
           const db = pickDocDate(b.data);
