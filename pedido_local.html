@@ -1,5 +1,44 @@
 <!doctype html>
 <html lang="es">
+  <script>
+  /* ======== SESIÓN COMPARTIDA ======== */
+  const TTL_HOURS = 20;
+  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
+
+  function sessionValid(){
+    const ok = localStorage.getItem('rb_admin_ok') === 'true';
+    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+    return ok && (Date.now() - ts) < TTL_MS;
+  }
+  function bumpSession(){
+    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
+  }
+  function logout(){
+    try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
+    try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
+    try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
+    try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
+    const next = encodeURIComponent('pedido_local.html');
+    location.replace('login.html?reason=logout&next=' + next);
+  }
+
+  (function requireSession(){
+    if (!sessionValid()){
+      const next = encodeURIComponent(
+        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
+        (location.search || '') + (location.hash || '')
+      );
+      location.replace('login.html?next=' + next);
+    } else {
+      bumpSession();
+    }
+  })();
+
+  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
+    window.addEventListener(evt, bumpSession, {passive:true});
+  });
+  </script>
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -19,14 +58,12 @@
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
     
-    /* HEADER */
     header{position:sticky;top:0;z-index:100;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.05);padding:0 12px}
     .topbar{max-width:1200px;margin:0 auto;height:60px;display:flex;align-items:center;gap:16px}
     .brand{display:flex;align-items:center;text-decoration:none;color:var(--primary);font-weight:800;font-size:18px}
     .brand img{width:32px;height:32px;border-radius:8px;margin-right:10px}
     .spacer{flex:1}
     
-    /* BOTONES HEADER */
     .nav-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;text-decoration:none;color:var(--text);font-weight:600;font-size:14px;transition:all .2s;border:none;cursor:pointer;background:transparent}
     .nav-btn:hover{background:#f0f0f0}
     .nav-btn.active{background:var(--primary);color:#fff}
@@ -39,7 +76,6 @@
     .container{max-width:1000px;margin:30px auto;padding:0 16px}
     h1{font-size:26px;font-weight:800;color:var(--primary);margin-bottom:20px}
     
-    /* TABS */
     .tabs{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap}
     .tab{padding:8px 16px;border-radius:20px;background:#e0e0e0;color:#555;font-weight:600;font-size:14px;cursor:pointer;border:none;transition:all .2s}
     .tab.active{background:var(--primary);color:#fff;box-shadow:0 4px 8px rgba(98,90,69,.2)}
@@ -82,14 +118,50 @@
     .state-btn.on.delivered{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-btn.cancelled:hover{background:#ffebee;color:#c62828;border-color:#ef9a9a}
 
-    /* PAGO */
-    .pay-line{display:flex;gap:8px;align-items:center;background:#f4f4f9;padding:4px;border-radius:10px}
-    .pay-select{padding:8px;border-radius:8px;border:1px solid var(--ring);background:#fff;font-weight:600;color:var(--text);cursor:pointer; outline:none}
-    .pay-toggle{padding:8px 16px;border-radius:8px;border:none;font-weight:700;font-size:13px;cursor:pointer;color:#fff;min-width:110px}
+    /* --- NUEVO ESTILO PAGO --- */
+    .pay-line {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        background: #fff;
+        padding: 0;
+        border-radius: 10px;
+    }
+    .pay-select {
+        appearance: none;
+        padding: 10px 30px 10px 14px;
+        border-radius: 8px;
+        border: 1px solid #ccc;
+        background: #fff url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23333%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E") no-repeat right 10px center;
+        background-size: 10px;
+        font-weight: 600;
+        color: #333;
+        cursor: pointer;
+        outline: none;
+        min-width: 140px;
+        font-size: 14px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .pay-select:focus { border-color: var(--primary); }
+    
+    .pay-toggle{
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: none;
+        font-weight: 800;
+        font-size: 13px;
+        cursor: pointer;
+        color: #fff;
+        min-width: 110px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        transition: transform 0.1s;
+    }
+    .pay-toggle:active { transform: scale(0.97); }
     .pay-toggle.is-paid{background:var(--pay-paid)}
     .pay-toggle.is-pending{background:var(--pay-pending)}
-    .print-btn{width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid var(--ring);background:#fff;cursor:pointer;font-size:18px}
-    .print-btn:hover{background:#f0f0f0}
+    
+    .print-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer;font-size:18px;color:#555;transition:all .2s}
+    .print-btn:hover{background:#f0f0f0;border-color:#ccc;color:#000}
 
     .empty-state{text-align:center;padding:40px;color:var(--muted);font-size:16px}
 
@@ -104,13 +176,11 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    // 1. Init
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
     try{ firebase.initializeApp(firebaseConfig); }catch(e){}
     const db = firebase.firestore();
     window.idToDoc = new Map();
 
-    // 2. Auth
     const TTL_MS = 20 * 60 * 60 * 1000;
     function checkSession(){
       const ok = localStorage.getItem('rb_admin_ok')==='true';
@@ -120,28 +190,40 @@
     }
     checkSession(); setInterval(checkSession, 5*60*1000);
 
-    // 3. Globals
+    // --- FUNCIONES GLOBALES ---
     window.logout = () => { localStorage.removeItem('rb_admin_ok'); location.replace('login.html'); };
+
     window.setOrderStatus = async (id, next, isPaid) => {
         if(next==='delivered' && !isPaid){ alert("⚠️ COBRAR PRIMERO: El pedido figura pendiente."); return; }
         try{ await db.collection("orders").doc(id).update({status:next}); }catch(e){console.error(e);}
     };
+
     window.setPaymentStatus = async (id, currentPaid, currentMethod) => {
-        if(!currentPaid && (!currentMethod || currentMethod==="")){ alert("⚠️ Seleccioná un MÉTODO DE PAGO."); return; }
-        try{ await db.collection("orders").doc(id).update({paid:!currentPaid, payment_status:!currentPaid?'paid':'pending_payment'}); }catch(e){}
+        // Bloqueo si está vacío
+        if(!currentPaid && (!currentMethod || currentMethod==="")){ alert("⚠️ Seleccioná un MÉTODO DE PAGO primero."); return; }
+        try{ 
+            await db.collection("orders").doc(id).update({
+                paid: !currentPaid, 
+                payment_status: !currentPaid ? 'paid' : 'pending_payment'
+            }); 
+        }catch(e){console.error(e);}
     };
+    
     window.updatePago = async (id, val) => {
         try{ await db.collection("orders").doc(id).update({pago:val}); }catch(e){}
     };
+
     window.printOrder = (id) => {
         const doc = window.idToDoc.get(id);
         if(doc) window.trySilentPrint(doc);
     };
+    
     window.pickDate = (o) => {
        if(o.createdAt?.toDate) return o.createdAt.toDate();
        if(typeof o.createdAt==='string') return new Date(o.createdAt);
        return new Date();
     };
+
     window.cleanFries = (raw) => {
        if(!raw) return "";
        const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim();
@@ -150,7 +232,7 @@
        if(s.includes('con sal')||s.includes('sal')) return "Con sal";
        return s.charAt(0).toUpperCase() + s.slice(1);
     };
-    // Categorizador Mejorado
+
     window.getCat = (item) => {
        const n = (item.name||"").toLowerCase();
        const t = (item.type||"").toLowerCase();
@@ -181,10 +263,10 @@
   <main class="container">
     <h1>Últimos pedidos</h1>
     <div class="tabs" id="tabs">
-      <button class="tab active" data-f="recibidos">Recibidos (Cocina)</button>
-      <button class="tab" data-f="entregados">Entregados</button>
-      <button class="tab" data-f="cancelled">Cancelados</button>
-      <button class="tab" data-f="all">Todos</button>
+      <button class="chipf active" data-f="recibidos">Recibidos</button>
+      <button class="chipf" data-f="entregados">Entregados</button>
+      <button class="chipf" data-f="cancelled">Cancelados</button>
+      <button class="chipf" data-f="all">Todos</button>
     </div>
     <div id="orders"><div class="empty-state">Cargando...</div></div>
     <div id="ordersError" class="err" style="display:none">Error de conexión.</div>
@@ -195,20 +277,19 @@
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     let currentFilter = "recibidos"; let lastSnap = null;
     
-    // Tabs
     document.getElementById("tabs").addEventListener("click", (e)=>{
-        const btn = e.target.closest(".tab"); if(!btn) return;
-        document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+        const btn = e.target.closest(".chipf"); if(!btn) return;
+        document.querySelectorAll(".chipf").forEach(b=>b.classList.remove("active"));
         btn.classList.add("active");
         currentFilter = btn.dataset.f;
         if(window.lastSnap) renderList(window.lastSnap);
     });
 
-    // Botones Header Logic
+    // Header
     const btnBell = document.getElementById("btnBell");
     let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
-    const updSound = ()=>{ btnBell.classList.toggle("active", soundOn); }; updSound();
-    btnBell.onclick = ()=>{ soundOn=!soundOn; localStorage.setItem("rb_sound", soundOn); updSound(); };
+    const updBell = ()=>{ btnBell.classList.toggle("active", soundOn); }; updBell();
+    btnBell.onclick = ()=>{ soundOn=!soundOn; localStorage.setItem("rb_sound", soundOn); updBell(); };
 
     const btnAP = document.getElementById("btnAutoPrint");
     let autoP = JSON.parse(localStorage.getItem("rb_autop")||"false");
@@ -223,8 +304,9 @@
     };
 
     // SUSCRIPCIÓN
-    let isInit=true; setTimeout(()=>isInit=false, 3000);
-    db.collection("orders").limit(250).onSnapshot(snap => {
+    let isInit=true; setTimeout(()=>isInit=false,3000);
+    
+    db.collection("orders").limit(300).onSnapshot(snap => {
         window.lastSnap = snap;
         renderList(snap);
         snap.docChanges().forEach(ch => {
@@ -234,15 +316,12 @@
             }
         });
     }, err => {
-        console.error(err);
-        document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error de conexión: ${err.message}</div>`;
+        document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
     });
 
     function renderList(snap){
         let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
         window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
-        
-        // Ordenar manual
         docs.sort((a,b) => window.pickDate(b.data) - window.pickDate(a.data));
 
         const filtered = docs.filter(o => {
@@ -253,9 +332,9 @@
             return true;
         });
 
-        const container = document.getElementById("orders");
-        if(filtered.length === 0){ container.innerHTML = '<div class="empty-state">No hay pedidos en esta sección.</div>'; return; }
-        container.innerHTML = filtered.map(x => buildOrderHTML(x.ref)).join("");
+        const cont = document.getElementById("orders");
+        if(filtered.length===0){ cont.innerHTML = '<div class="empty-state">No hay pedidos en esta sección.</div>'; return; }
+        cont.innerHTML = filtered.map(x => buildOrderHTML(x.ref)).join("");
     }
 
     function buildOrderHTML(doc){
@@ -263,20 +342,22 @@
         const dt = window.pickDate(o);
         const timeStr = dt.toLocaleTimeString("es-AR", {hour:'2-digit', minute:'2-digit'});
         const st = o.status || 'accepted';
-        const isPaid = (o.payment_status === 'paid') || o.paid === true;
+        const isPaid = (o.payment_status==='paid') || !!o.paid;
         
         const STATES = ['accepted','in_prep','ready','delivered'];
         const LABELS = {accepted:'Recibido', in_prep:'En preparación', ready:'Listo', delivered:'Entregado'};
         
         let btnsHTML = STATES.map(k => {
             const isOn = (k === st) ? 'on' : '';
-            return `<button class="state-btn st-btn ${isOn} state-${k}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})">${LABELS[k]}</button>`;
+            const disabled = (k==='delivered' && !isPaid) ? 'opacity:0.5' : '';
+            return `<button class="state-btn st-btn ${isOn} ${k}" style="${disabled}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})">${LABELS[k]}</button>`;
         }).join('') + `<button class="state-btn st-btn cancelled" onclick="setOrderStatus('${doc.id}', 'cancelled', ${isPaid})">Cancelar</button>`;
 
+        // Pago visual
         let payVal = o.pago;
         if(payVal === 'mostrador_sin_especificar') payVal = "";
 
-        // Clasificar items
+        // Items
         const items = Array.isArray(o.items) ? o.items : [];
         const cats = { b:[], f:[], d:[], o:[] };
         
@@ -340,14 +421,14 @@
                  <div class="right-total">${money(total)}</div>
                  <div class="pay-line">
                     <select class="pay-select" onchange="updatePago('${doc.id}', this.value)">
-                       <option value="" disabled ${!payVal?'selected':''}>Método...</option>
+                       <option value="" disabled ${!payVal?'selected':''}> (Seleccionar) </option>
                        <option value="efectivo" ${payVal==='efectivo'?'selected':''}>Efectivo</option>
-                       <option value="mercado_pago" ${payVal==='mercado_pago'?'selected':''}>QR (MP)</option>
+                       <option value="mercado_pago" ${payVal==='mercado_pago'?'selected':''}>QR</option>
                        <option value="debito" ${payVal==='debito'?'selected':''}>Débito</option>
                        <option value="transferencia" ${payVal==='transferencia'?'selected':''}>Transferencia</option>
                     </select>
                     <button class="pay-toggle ${isPaid?'is-paid':'is-pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal||''}')">
-                       ${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}
+                       ${isPaid ? 'PAGADO ✓' : 'PENDIENTE'}
                     </button>
                     <button class="print-btn" onclick="printOrder('${doc.id}')">🖨️</button>
                  </div>
@@ -357,10 +438,10 @@
         </div>`;
     }
 
-    // --- TICKET ---
+    // --- TICKET 58mm ---
     window.trySilentPrint = function(docSnap){
        const o = docSnap.data();
-       const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
+       const esc = s => (s||'').toString().replace(/&/g,'&amp;');
        const m = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
        const dt = window.pickDate(o);
        const dateStr = dt.toLocaleDateString("es-AR");
@@ -368,11 +449,13 @@
 
        let payTxt = o.pago;
        if(!payTxt || payTxt==='mostrador_sin_especificar') payTxt="A COBRAR EN CAJA";
-       if(payTxt==='mercado_pago') payTxt="QR (MP)";
-       
+       else if(payTxt==='mercado_pago') payTxt="QR";
+       else payTxt = payTxt.toUpperCase();
+
        const isPaid = (o.payment_status === 'paid') || o.paid;
        const stPay = isPaid ? "PAGADO" : "PENDIENTE";
        
+       // Procesar items
        const items = Array.isArray(o.items) ? o.items : [];
        const cats = { b:[], f:[], d:[], o:[] };
        items.forEach(it => {
@@ -425,7 +508,7 @@
          <div class="hr"></div>
          ${body}
          <div class="hr"></div>
-         <div style="display:flex;justify-content:space-between;font-size:14px"><div>TOTAL</div><div>${m(total)}</div></div>
+         <div class="row"><div class="l">TOTAL</div><div>${m(total)}</div></div>
          <div class="c" style="margin-top:10px;font-size:10px">${dateStr} ${timeStr}</div>
          <script>window.onload=()=>{setTimeout(()=>{window.print()},200)}<\/script>
        </body></html>`;
