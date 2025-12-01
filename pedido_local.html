@@ -26,7 +26,6 @@
     .brand img{width:32px;height:32px;border-radius:8px;margin-right:10px}
     .spacer{flex:1}
     
-    /* Botones Nav */
     .nav-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;text-decoration:none;color:var(--text);font-weight:600;font-size:14px;transition:all .2s;border:none;cursor:pointer;background:transparent}
     .nav-btn:hover{background:#f0f0f0}
     .nav-btn.active{background:var(--primary);color:#fff}
@@ -39,12 +38,11 @@
     .container{max-width:1000px;margin:30px auto;padding:0 16px}
     h1{font-size:26px;font-weight:800;color:var(--primary);margin-bottom:20px}
     
-    /* Tabs */
     .tabs{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap}
     .tab{padding:8px 16px;border-radius:20px;background:#e0e0e0;color:#555;font-weight:600;font-size:14px;cursor:pointer;border:none;transition:all .2s}
     .tab.active{background:var(--primary);color:#fff;box-shadow:0 4px 8px rgba(98,90,69,.2)}
 
-    /* Tarjeta Pedido */
+    /* Tarjeta */
     .order{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:24px;margin-bottom:24px;border:1px solid transparent;transition:all .3s}
     .order:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.12)}
     .order.cancelled{opacity:.6;filter:grayscale(1)}
@@ -61,7 +59,6 @@
     .or-right{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
     .right-total{font-size:22px;font-weight:900;color:var(--primary)}
 
-    /* Items Lista */
     .items{border-top:1px solid var(--ring);padding-top:16px}
     .cat-group{margin-bottom:16px}
     .cat-title{font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
@@ -72,7 +69,6 @@
     .it-sub{font-size:13px;color:#666;margin-top:2px}
     .it-note{font-size:13px;color:#d32f2f;font-style:italic;margin-top:2px;font-weight:600}
 
-    /* Botones Estado */
     .stateBtns{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
     .state-btn{flex:1;min-width:100px;padding:8px;border:1px solid var(--ring);background:#fff;color:var(--text);border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s}
     .state-btn:hover{background:#f5f5f5}
@@ -82,7 +78,7 @@
     .state-btn.on.delivered{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-btn.cancelled:hover{background:#ffebee;color:#c62828;border-color:#ef9a9a}
 
-    /* Pago */
+    /* PAGO */
     .pay-line{display:flex;gap:8px;align-items:center;background:#f4f4f9;padding:4px;border-radius:10px}
     .pay-select{padding:8px;border-radius:8px;border:1px solid var(--ring);background:#fff;font-weight:600;color:var(--text);cursor:pointer; outline:none; min-width: 140px;}
     .pay-toggle{padding:8px 16px;border-radius:8px;border:none;font-weight:700;font-size:13px;cursor:pointer;color:#fff;min-width:110px}
@@ -129,7 +125,11 @@
     };
 
     window.setPaymentStatus = async (id, currentPaid, currentMethod) => {
-        if(!currentPaid && (!currentMethod || currentMethod==="")){ alert("⚠️ Seleccioná un MÉTODO DE PAGO primero."); return; }
+        // Bloqueo: Si no hay método o es la opción vacía, no deja pagar.
+        if(!currentPaid && (!currentMethod || currentMethod === "")){ 
+            alert("⚠️ Seleccioná un MÉTODO DE PAGO primero."); 
+            return; 
+        }
         try{ 
             await db.collection("orders").doc(id).update({
                 paid: !currentPaid, 
@@ -160,7 +160,7 @@
        if(s.includes('con sal')||s.includes('sal')) return "Con sal";
        return s.charAt(0).toUpperCase() + s.slice(1);
     };
-    // Categorizador
+
     window.getCat = (item) => {
        const n = (item.name||"").toLowerCase();
        const t = (item.type||"").toLowerCase();
@@ -213,7 +213,7 @@
         if(window.lastSnap) renderList(window.lastSnap);
     });
 
-    // Header
+    // Header Buttons
     const btnBell = document.getElementById("btnBell");
     let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
     const updBell = ()=>{ btnBell.classList.toggle("active", soundOn); }; updBell();
@@ -231,10 +231,9 @@
         o.start(); g.gain.exponentialRampToValueAtTime(0.00001, c.currentTime+0.2); o.stop(c.currentTime+0.2); }catch(e){}
     };
 
-    // SUSCRIPCIÓN (Orden por número para evitar errores)
-    let isInit=true; setTimeout(()=>isInit=false,3000);
-    
-    // 🔥 ORDENAMOS POR orderNumber que es seguro
+    // SUSCRIPCIÓN
+    let isInit=true; setTimeout(()=>isInit=false, 3000);
+    // Orden por número para asegurar visibilidad
     db.collection("orders").orderBy("orderNumber", "desc").limit(300).onSnapshot(snap => {
         window.lastSnap = snap;
         renderList(snap);
@@ -245,17 +244,15 @@
             }
         });
     }, err => {
-        console.error(err);
-        // Fallback si no hay indice
-        db.collection("orders").limit(100).onSnapshot(s=>{window.lastSnap=s;renderList(s)});
+        document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
     });
 
     function renderList(snap){
         let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
         window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
         
-        // Orden visual
-        docs.sort((a,b) => (b.data.orderNumber||0) - (a.data.orderNumber||0));
+        // Ordenar visual (nuevo arriba)
+        docs.sort((a,b) => window.pickDate(b.data) - window.pickDate(a.data));
 
         const filtered = docs.filter(o => {
             const s = o.data.status || 'accepted';
@@ -274,6 +271,7 @@
         const o = doc.data();
         const dt = window.pickDate(o);
         const timeStr = dt.toLocaleTimeString("es-AR", {hour:'2-digit', minute:'2-digit'});
+        
         const st = o.status || 'accepted';
         const isPaid = (o.payment_status==='paid') || !!o.paid;
         
@@ -286,13 +284,12 @@
             return `<button class="state-btn ${isOn} state-${k}" style="${disabled}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})">${LABELS[k]}</button>`;
         }).join('') + `<button class="state-btn cancelled" onclick="setOrderStatus('${doc.id}', 'cancelled', ${isPaid})">Cancelar</button>`;
 
+        // 🔥 PAGO
         let payVal = o.pago;
-        if(payVal === 'mostrador_sin_especificar') payVal = "";
+        if(payVal === 'mostrador_sin_especificar') payVal = ""; // Para mostrar la opción vacía
 
-        // Items
         const items = Array.isArray(o.items) ? o.items : [];
         const cats = { b:[], f:[], d:[], o:[] };
-        
         items.forEach(it => {
             const cat = window.getCat(it);
             if(cat === 'b'){
@@ -337,7 +334,7 @@
         const total = o.total || items.reduce((a,i)=>a+((i.price||0)*(i.qty||1)),0);
 
         return `
-        <div class="order order-card ${st==='cancelled'?'cancelled':''}">
+        <div class="order ${st==='cancelled'?'cancelled':''}">
            <div class="order-head">
               <div class="or-left">
                  <div class="order-title">#${o.orderNumber||'--'} — ${o.source==='mostrador'?o.nombre+' (Mostrador)':o.nombre}</div>
@@ -352,24 +349,23 @@
                  <div class="right-total">${money(total)}</div>
                  <div class="pay-line">
                     <select class="pay-select" onchange="updatePago('${doc.id}', this.value)">
-                       <option value="" disabled ${!payVal?'selected':''}> (Seleccionar) </option>
-                       <option value="efectivo" ${payVal==='efectivo'?'selected':''}>Efectivo</option>
+                       <option value="" ${!payVal?'selected':''}> (Seleccionar...) </option> <option value="efectivo" ${payVal==='efectivo'?'selected':''}>Efectivo</option>
                        <option value="mercado_pago" ${payVal==='mercado_pago'?'selected':''}>QR (MP)</option>
                        <option value="debito" ${payVal==='debito'?'selected':''}>Débito</option>
                        <option value="transferencia" ${payVal==='transferencia'?'selected':''}>Transferencia</option>
                     </select>
-                    <button class="pay-toggle ${isPaid?'is-paid':'is-pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal||''}')">
-                       ${isPaid ? 'PAGADO ✓' : 'PENDIENTE'}
+                    <button class="pay-toggle ${isPaid?'is-paid':'is-pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal}')">
+                       ${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}
                     </button>
                     <button class="print-btn" onclick="printOrder('${doc.id}')">🖨️</button>
                  </div>
               </div>
            </div>
-           <div class="items items-list">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
+           <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
         </div>`;
     }
 
-    // --- TICKET ---
+    // --- TICKET (58mm) ---
     window.trySilentPrint = function(docSnap){
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -379,8 +375,8 @@
        const timeStr = dt.toLocaleTimeString("es-AR",{hour12:false});
 
        let payTxt = o.pago;
-       if(!payTxt || payTxt==='mostrador_sin_especificar') payTxt="A COBRAR EN CAJA";
-       else if(payTxt==='mercado_pago') payTxt="QR";
+       if(!payTxt || payTxt==='mostrador_sin_especificar' || payTxt==="") payTxt="A COBRAR EN CAJA";
+       else if(payTxt==='mercado_pago') payTxt="QR (MP)";
        else payTxt = payTxt.toUpperCase();
 
        const isPaid = (o.payment_status === 'paid') || o.paid;
@@ -447,7 +443,6 @@
        document.body.append(f); const d=f.contentWindow.document; d.open();d.write(html);d.close();
        setTimeout(()=>f.remove(), 10000);
     };
-
   });
   </script>
 </body>
