@@ -1,5 +1,44 @@
 <!doctype html>
 <html lang="es">
+  <script>
+  /* ======== SESIÓN COMPARTIDA ======== */
+  const TTL_HOURS = 20;
+  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
+
+  function sessionValid(){
+    const ok = localStorage.getItem('rb_admin_ok') === 'true';
+    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+    return ok && (Date.now() - ts) < TTL_MS;
+  }
+  function bumpSession(){
+    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
+  }
+  function logout(){
+    try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
+    try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
+    try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
+    try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
+    const next = encodeURIComponent('pedido_local.html');
+    location.replace('login.html?reason=logout&next=' + next);
+  }
+
+  (function requireSession(){
+    if (!sessionValid()){
+      const next = encodeURIComponent(
+        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
+        (location.search || '') + (location.hash || '')
+      );
+      location.replace('login.html?next=' + next);
+    } else {
+      bumpSession();
+    }
+  })();
+
+  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
+    window.addEventListener(evt, bumpSession, {passive:true});
+  });
+  </script>
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -19,12 +58,14 @@
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
     
+    /* Header */
     header{position:sticky;top:0;z-index:100;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.05);padding:0 12px}
     .topbar{max-width:1200px;margin:0 auto;height:60px;display:flex;align-items:center;gap:16px}
     .brand{display:flex;align-items:center;text-decoration:none;color:var(--primary);font-weight:800;font-size:18px}
     .brand img{width:32px;height:32px;border-radius:8px;margin-right:10px}
     .spacer{flex:1}
     
+    /* Botones Nav */
     .nav-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;text-decoration:none;color:var(--text);font-weight:600;font-size:14px;transition:all .2s;border:none;cursor:pointer;background:transparent}
     .nav-btn:hover{background:#f0f0f0}
     .nav-btn.active{background:var(--primary);color:#fff}
@@ -37,10 +78,12 @@
     .container{max-width:1000px;margin:30px auto;padding:0 16px}
     h1{font-size:26px;font-weight:800;color:var(--primary);margin-bottom:20px}
     
+    /* Tabs */
     .tabs{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap}
     .tab{padding:8px 16px;border-radius:20px;background:#e0e0e0;color:#555;font-weight:600;font-size:14px;cursor:pointer;border:none;transition:all .2s}
     .tab.active{background:var(--primary);color:#fff;box-shadow:0 4px 8px rgba(98,90,69,.2)}
 
+    /* Tarjeta Pedido */
     .order{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:24px;margin-bottom:24px;border:1px solid transparent;transition:all .3s}
     .order:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.12)}
     .order.cancelled{opacity:.6;filter:grayscale(1)}
@@ -57,6 +100,7 @@
     .or-right{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
     .right-total{font-size:22px;font-weight:900;color:var(--primary)}
 
+    /* Items Lista */
     .items{border-top:1px solid var(--ring);padding-top:16px}
     .cat-group{margin-bottom:16px}
     .cat-title{font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
@@ -67,6 +111,7 @@
     .it-sub{font-size:13px;color:#666;margin-top:2px}
     .it-note{font-size:13px;color:#d32f2f;font-style:italic;margin-top:2px;font-weight:600}
 
+    /* Botones Estado */
     .stateBtns{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
     .state-btn{flex:1;min-width:100px;padding:8px;border:1px solid var(--ring);background:#fff;color:var(--text);border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;transition:all .2s}
     .state-btn:hover{background:#f5f5f5}
@@ -76,8 +121,9 @@
     .state-btn.on.delivered{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-btn.cancelled:hover{background:#ffebee;color:#c62828;border-color:#ef9a9a}
 
+    /* Pago */
     .pay-line{display:flex;gap:8px;align-items:center;background:#f4f4f9;padding:4px;border-radius:10px}
-    .pay-select{padding:8px;border-radius:8px;border:1px solid var(--ring);background:#fff;font-weight:600;color:var(--text);cursor:pointer; outline:none; min-width: 130px;}
+    .pay-select{padding:8px;border-radius:8px;border:1px solid var(--ring);background:#fff;font-weight:600;color:var(--text);cursor:pointer; outline:none; min-width: 140px;}
     .pay-toggle{padding:8px 16px;border-radius:8px;border:none;font-weight:700;font-size:13px;cursor:pointer;color:#fff;min-width:110px}
     .pay-toggle.is-paid{background:var(--pay-paid)}
     .pay-toggle.is-pending{background:var(--pay-pending)}
@@ -122,7 +168,11 @@
     };
 
     window.setPaymentStatus = async (id, currentPaid, currentMethod) => {
-        if(!currentPaid && (!currentMethod || currentMethod==="")){ alert("⚠️ Seleccioná un MÉTODO DE PAGO primero."); return; }
+        // 🔥 Bloqueo: Si no hay método definido (o es la opción 'A Cobrar'), no deja marcar pagado
+        if(!currentPaid && (!currentMethod || currentMethod==="" || currentMethod==="mostrador_sin_especificar")){ 
+            alert("⚠️ Seleccioná un MÉTODO DE PAGO antes de marcar como PAGADO."); 
+            return; 
+        }
         try{ 
             await db.collection("orders").doc(id).update({
                 paid: !currentPaid, 
@@ -134,7 +184,6 @@
     window.updatePago = async (id, val) => {
         try{ await db.collection("orders").doc(id).update({pago:val}); }catch(e){}
     };
-
     window.printOrder = (id) => {
         const doc = window.idToDoc.get(id);
         if(doc) window.trySilentPrint(doc);
@@ -153,6 +202,7 @@
        if(s.includes('con sal')||s.includes('sal')) return "Con sal";
        return s.charAt(0).toUpperCase() + s.slice(1);
     };
+    // Categorizador
     window.getCat = (item) => {
        const n = (item.name||"").toLowerCase();
        const t = (item.type||"").toLowerCase();
@@ -205,6 +255,7 @@
         if(window.lastSnap) renderList(window.lastSnap);
     });
 
+    // Header
     const btnBell = document.getElementById("btnBell");
     let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
     const updBell = ()=>{ btnBell.classList.toggle("active", soundOn); }; updBell();
@@ -222,9 +273,9 @@
         o.start(); g.gain.exponentialRampToValueAtTime(0.00001, c.currentTime+0.2); o.stop(c.currentTime+0.2); }catch(e){}
     };
 
-    // SUSCRIPCIÓN (OrderNumber para visibilidad total)
-    let isInit=true; setTimeout(()=>isInit=false, 3000);
-    db.collection("orders").orderBy("orderNumber", "desc").limit(250).onSnapshot(snap => {
+    // SUSCRIPCIÓN (Orden por número)
+    let isInit=true; setTimeout(()=>isInit=false,3000);
+    db.collection("orders").orderBy("orderNumber", "desc").limit(300).onSnapshot(snap => {
         window.lastSnap = snap;
         renderList(snap);
         snap.docChanges().forEach(ch => {
@@ -234,15 +285,12 @@
             }
         });
     }, err => {
-        console.error(err);
-        document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error de conexión.</div>`;
+        document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
     });
 
     function renderList(snap){
         let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
         window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
-        
-        // Orden visual
         docs.sort((a,b) => (b.data.orderNumber||0) - (a.data.orderNumber||0));
 
         const filtered = docs.filter(o => {
@@ -254,7 +302,7 @@
         });
 
         const cont = document.getElementById("orders");
-        if(filtered.length === 0){ cont.innerHTML = '<div class="empty-state">No hay pedidos en esta sección.</div>'; return; }
+        if(filtered.length===0){ cont.innerHTML = '<div class="empty-state">No hay pedidos en esta sección.</div>'; return; }
         cont.innerHTML = filtered.map(x => buildOrderHTML(x.ref)).join("");
     }
 
@@ -272,14 +320,17 @@
             const isOn = (k === st) ? 'on' : '';
             const disabled = (k==='delivered' && !isPaid) ? 'opacity:0.5' : '';
             return `<button class="state-btn ${isOn} state-${k}" style="${disabled}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})">${LABELS[k]}</button>`;
-        }).join('') + `<button class="state-btn state-cancelled" onclick="setOrderStatus('${doc.id}', 'cancelled', ${isPaid})">Cancelar</button>`;
+        }).join('') + `<button class="state-btn cancelled" onclick="setOrderStatus('${doc.id}', 'cancelled', ${isPaid})">Cancelar</button>`;
 
-        // 🔥 PAGO: Si es "mostrador_sin_especificar" lo mostramos vacío
+        // Pago visual
         let payVal = o.pago;
+        // Si es "mostrador_sin_especificar", lo ponemos como vacío para que el select diga "⚠️ A COBRAR"
         if(payVal === 'mostrador_sin_especificar') payVal = "";
 
+        // Items
         const items = Array.isArray(o.items) ? o.items : [];
         const cats = { b:[], f:[], d:[], o:[] };
+        
         items.forEach(it => {
             const cat = window.getCat(it);
             if(cat === 'b'){
@@ -339,7 +390,7 @@
                  <div class="right-total">${money(total)}</div>
                  <div class="pay-line">
                     <select class="pay-select" onchange="updatePago('${doc.id}', this.value)">
-                       <option value="" disabled ${!payVal?'selected':''}>Método...</option>
+                       <option value="" disabled ${!payVal?'selected':''}>⚠️ A COBRAR</option>
                        <option value="efectivo" ${payVal==='efectivo'?'selected':''}>Efectivo</option>
                        <option value="mercado_pago" ${payVal==='mercado_pago'?'selected':''}>QR (MP)</option>
                        <option value="debito" ${payVal==='debito'?'selected':''}>Débito</option>
@@ -352,7 +403,7 @@
                  </div>
               </div>
            </div>
-           <div class="items">${itemsHTML || '<div class="muted">Sin ítems</div>'}</div>
+           <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
         </div>`;
     }
 
@@ -434,7 +485,6 @@
        document.body.appendChild(f); const d=f.contentWindow.document; d.open();d.write(html);d.close();
        setTimeout(()=>f.remove(), 10000);
     };
-
   });
   </script>
 </body>
