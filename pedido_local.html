@@ -165,14 +165,15 @@
     };
     try{ firebase.initializeApp(firebaseConfig);}catch(e){}
 
-    // Inicializar globales
+    // Variables globales
     window.db = firebase.firestore();
     window.firebase = firebase;
     window.idToDoc = new Map();
   });
 
-  /* --- FUNCIONES GLOBALES (ACCESIBLES DESDE ONCLICK) --- */
-  window.setOrderStatus = async function(id, next, isPaid){
+  /* --- FUNCIONES GLOBALES DE ACCIÓN --- */
+  async function setOrderStatus(id, next, isPaid){
+      // Validar entrega solo si no está pagado
       if (next === 'delivered' && !isPaid) {
           alert("⚠️ NO SE PUEDE ENTREGAR\n\nEl pedido figura como PENDIENTE.\nCobralo primero antes de marcarlo como entregado.");
           return;
@@ -183,28 +184,42 @@
               statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to:next,at:new Date().toISOString()}) 
           }); 
       }catch(e){ alert("Error actualizando estado: "+e); }
-  };
+  }
 
-  window.setPaymentStatus = async function(id, paid){
+  async function setPaymentStatus(id, currentlyPaid, currentMethod){
+      // 🔥 VALIDACIÓN DE PAGO OBLIGATORIO
+      // Si se intenta marcar como PAGADO (currentlyPaid es false -> pasará a true)
+      // y NO hay método seleccionado (es null, vacío o 'mostrador_sin_especificar')
+      if(!currentlyPaid && (!currentMethod || currentMethod === "mostrador_sin_especificar" || currentMethod === "")){
+          alert("⚠️ FALTAN DATOS\n\nSeleccioná un METODO DE PAGO antes de marcar como pagado.");
+          return;
+      }
+
       try{ 
+          const newStatus = !currentlyPaid;
           await window.db.collection("orders").doc(id).update({ 
-              paid: !!paid, 
-              payment_status: paid ? "paid" : "pending_payment", 
-              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to: paid?"paid":"pending_payment", at:new Date().toISOString()}) 
+              paid: newStatus, 
+              payment_status: newStatus ? "paid" : "pending_payment", 
+              statusHistory: window.firebase.firestore.FieldValue.arrayUnion({to: newStatus?"paid":"pending_payment", at:new Date().toISOString()}) 
           }); 
       }catch(e){ alert("Error actualizando pago: "+e); }
-  };
+  }
 
-  window.updatePago = async function(id, value){
+  async function updatePago(id, value){
       try{ 
           await window.db.collection("orders").doc(id).update({ pago: value }); 
       }catch(e){ alert("Error actualizando método: "+e); }
-  };
+  }
 
-  window.printOrder = function(id){
+  function printOrder(id){
       const doc = window.idToDoc.get(id);
       if(doc) window.trySilentPrint(doc);
-  };
+  }
+  
+  window.setOrderStatus = setOrderStatus;
+  window.setPaymentStatus = setPaymentStatus;
+  window.updatePago = updatePago;
+  window.printOrder = printOrder;
 
 
   /* --- LÓGICA PRINCIPAL --- */
@@ -285,8 +300,7 @@
         return t + base; 
       },0);
     };
-    
-    // Normalizar papas
+
     function normalizeFries(raw){
       if(!raw) return "";
       const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim();
@@ -331,7 +345,6 @@
               const extrasHTML = extras.length ? `<div class="item-extras">${extras.map(e => `<div class="extra-line">${e}</div>`).join("")}</div>` : "";
               const notesHTML = it.notes ? `<div class="note-line">📝 ${it.notes}</div>` : "";
               
-              // Normalizar nombre si son papas
               let displayName = name;
               if(title.includes("PAPAS")) displayName = normalizeFries(name);
 
@@ -349,12 +362,18 @@
       const curIdx = Math.max(STATE_SEQ.indexOf(st),0);
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       
-      // Botones Estado
       const stateBtns = `<div class="stateBtns">${STATE_SEQ.map((key,idx)=>
         `<button class="${btnStateClass(key)} ${idx<=curIdx?'on':''}" onclick="setOrderStatus('${doc.id}', '${key}', ${isPaid})">${STATE_LABEL[key]}</button>`
       ).join('')}</div>`;
 
-      const currentPago = (o.pago === "mostrador_sin_especificar") ? "" : o.pago;
+      // 🔥 LÓGICA VISUAL DE PAGO
+      let currentPago = o.pago;
+      // Si viene del mostrador sin especificar, lo tratamos como vacío para el select
+      if(currentPago === "mostrador_sin_especificar" || currentPago === "efectivo" && !isPaid && o.source==="mostrador") {
+          // Esto permite que el select muestre "Método..." (disabled selected) si queremos forzar elección
+          if(currentPago === "mostrador_sin_especificar") currentPago = "";
+      }
+
       const payBtnClasses = `btn pay-toggle ${isPaid?'is-paid':'is-pending'}`;
 
       const payLine = `
@@ -363,10 +382,10 @@
             <option value="" disabled ${(!currentPago)?'selected':''}>Método...</option>
             <option value="efectivo" ${currentPago==="efectivo"?"selected":""}>Efectivo</option>
             <option value="debito" ${currentPago==="debito"?"selected":""}>Debito</option>
-            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>MP</option>
-            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transf</option>
+            <option value="mercado_pago" ${currentPago==="mercado_pago"?"selected":""}>QR (MP)</option>
+            <option value="transferencia" ${currentPago==="transferencia"?"selected":""}>Transferencia</option>
           </select>
-          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${!isPaid})">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
+          <button class="${payBtnClasses}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${currentPago || ''}')">${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}</button>
           <button class="btn" onclick="printOrder('${doc.id}')">🖨 Imprimir</button>
         </div>`;
 
@@ -406,9 +425,13 @@
 
       const PAGO_MAP = {
         "mostrador_sin_especificar": "A COBRAR EN CAJA",
-        "efectivo": "EFECTIVO", "mercado_pago": "MERCADO PAGO", "debito": "DÉBITO", "transferencia": "TRANSFERENCIA"
+        "efectivo": "EFECTIVO", 
+        "mercado_pago": "QR (MERCADO PAGO)", 
+        "debito": "DÉBITO", 
+        "transferencia": "TRANSFERENCIA"
       };
       let pagoTxt = PAGO_MAP[o.pago] || escapeHtml(o.pago) || "";
+      if(!o.pago || o.pago === "") pagoTxt = "A COBRAR EN CAJA";
 
       const isPaid = ((o.payment_status === "paid") || o.paid === true);
       const payState = isPaid ? "PAGADO" : "PENDIENTE";
@@ -440,7 +463,6 @@
           const rows = list.map(it => {
               const qty = it.qty||1;
               
-              // Normalizar nombre en ticket también
               let displayName = escapeHtml(it.name);
               if(title.includes("PAPAS")) displayName = normalizeFries(it.name);
 
@@ -481,9 +503,9 @@
           <div class="c" style="font-size:14px">${escapeHtml(orderDisplay)}</div>
           <div class="c" style="font-size:18px; margin: 6px 0">[ ${payState} ]</div>
           <div class="hr"></div>
-          ${clientName ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(clientName)}</div></div>` : ""}
+          ${o.nombre ? `<div class="blk"><div class="lbl">CLIENTE</div><div>${escapeHtml(o.nombre)}</div></div>` : ""}
           ${pickupBlockLarge}
-          ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${escapeHtml(pagoTxt)}</div></div>` : ""}
+          ${(pagoTxt) ? `<div class="blk"><div class="lbl">MEDIO DE PAGO</div><div>${pagoTxt}</div></div>` : ""}
           ${commentBlock}
           <div class="hr"></div>
           ${htmlBody}
@@ -511,20 +533,18 @@
 
     (async function subscribeOrders(){
       try{
-        // 🔥 ORDENAMIENTO POR OrderNumber DESCENDENTE (SOLUCIÓN FINAL)
-        // Esto evita que Firebase se confunda con los formatos de fecha y siempre trae los últimos.
+        // ORDENAMIENTO POR orderNumber para evitar error de índices y traer LO NUEVO
         let q = window.db.collection("orders").orderBy("orderNumber", "desc").limit(200);
         
         q.onSnapshot(async snap=>{
           document.getElementById("ordersError").style.display="none";
-          lastSnap = snap;
           renderListFromSnap(snap);
           
           snap.docChanges().forEach(ch => {
-            if (ch.type === 'added' && !isInitialLoad()) {
-              try{ playBeepTriple(); }catch(_){}
-              if (autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id)||ch.doc);
-            }
+             if(ch.type==='added' && !isInitialLoad()) {
+                 try{ playBeepTriple(); }catch(_){}
+                 if(autoPrint) window.trySilentPrint(window.idToDoc.get(ch.doc.id)||ch.doc);
+             }
           });
         }, err=>{ document.getElementById("ordersError").style.display="block"; console.error(err); });
       }catch(err){ document.getElementById("ordersError").style.display="block"; console.error(err); }
@@ -536,8 +556,13 @@
     function renderListFromSnap(snap){
       let docs = snap.docs.map(d=>({data:d.data(), id:d.id, ref:d}));
       
-      // Orden secundario en JS (por seguridad)
-      docs.sort((a,b) => b.data.orderNumber - a.data.orderNumber);
+      // Ordenar visualmente
+      docs.sort((a,b) => {
+          const da = pickDocDate(a.data);
+          const db = pickDocDate(b.data);
+          if(!da) return 1; if(!db) return -1;
+          return db - da; 
+      });
 
       const passFilter=o=>{
         const s = o.status ?? "accepted";
@@ -548,7 +573,10 @@
       };
       const filtered = docs.filter(x => passFilter(x.data));
       window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
-      document.getElementById("orders").innerHTML = filtered.length ? filtered.map(x => renderOrder(x.ref)).join("") : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
+
+      document.getElementById("orders").innerHTML = filtered.length 
+        ? filtered.map(x => renderOrder(x.ref)).join("") 
+        : '<p class="muted" style="text-align:center; padding:20px">No hay pedidos.</p>';
     }
   });
   </script>
