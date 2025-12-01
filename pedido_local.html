@@ -1,44 +1,5 @@
 <!doctype html>
 <html lang="es">
-  <script>
-  /* ======== SESIÓN COMPARTIDA ======== */
-  const TTL_HOURS = 20;
-  const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
-
-  function sessionValid(){
-    const ok = localStorage.getItem('rb_admin_ok') === 'true';
-    const ts = Number(localStorage.getItem('rb_admin_t') || 0);
-    return ok && (Date.now() - ts) < TTL_MS;
-  }
-  function bumpSession(){
-    if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
-  }
-  function logout(){
-    try{ localStorage.removeItem('rb_admin_ok'); }catch(_){}
-    try{ localStorage.removeItem('rb_admin_t'); }catch(_){}
-    try{ localStorage.removeItem('rb_auth_v2'); }catch(_){}
-    try{ sessionStorage.removeItem('rb_auth_v2'); }catch(_){}
-    const next = encodeURIComponent('pedido_local.html');
-    location.replace('login.html?reason=logout&next=' + next);
-  }
-
-  (function requireSession(){
-    if (!sessionValid()){
-      const next = encodeURIComponent(
-        (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
-        (location.search || '') + (location.hash || '')
-      );
-      location.replace('login.html?next=' + next);
-    } else {
-      bumpSession();
-    }
-  })();
-
-  ['click','keydown','focus','mousemove','touchstart','scroll'].forEach(evt=>{
-    window.addEventListener(evt, bumpSession, {passive:true});
-  });
-  </script>
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -168,11 +129,7 @@
     };
 
     window.setPaymentStatus = async (id, currentPaid, currentMethod) => {
-        // 🔥 Bloqueo: Si no hay método definido (o es la opción 'A Cobrar'), no deja marcar pagado
-        if(!currentPaid && (!currentMethod || currentMethod==="" || currentMethod==="mostrador_sin_especificar")){ 
-            alert("⚠️ Seleccioná un MÉTODO DE PAGO antes de marcar como PAGADO."); 
-            return; 
-        }
+        if(!currentPaid && (!currentMethod || currentMethod==="")){ alert("⚠️ Seleccioná un MÉTODO DE PAGO primero."); return; }
         try{ 
             await db.collection("orders").doc(id).update({
                 paid: !currentPaid, 
@@ -184,6 +141,7 @@
     window.updatePago = async (id, val) => {
         try{ await db.collection("orders").doc(id).update({pago:val}); }catch(e){}
     };
+
     window.printOrder = (id) => {
         const doc = window.idToDoc.get(id);
         if(doc) window.trySilentPrint(doc);
@@ -273,8 +231,10 @@
         o.start(); g.gain.exponentialRampToValueAtTime(0.00001, c.currentTime+0.2); o.stop(c.currentTime+0.2); }catch(e){}
     };
 
-    // SUSCRIPCIÓN (Orden por número)
+    // SUSCRIPCIÓN (Orden por número para evitar errores)
     let isInit=true; setTimeout(()=>isInit=false,3000);
+    
+    // 🔥 ORDENAMOS POR orderNumber que es seguro
     db.collection("orders").orderBy("orderNumber", "desc").limit(300).onSnapshot(snap => {
         window.lastSnap = snap;
         renderList(snap);
@@ -285,12 +245,16 @@
             }
         });
     }, err => {
-        document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
+        console.error(err);
+        // Fallback si no hay indice
+        db.collection("orders").limit(100).onSnapshot(s=>{window.lastSnap=s;renderList(s)});
     });
 
     function renderList(snap){
         let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
         window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
+        
+        // Orden visual
         docs.sort((a,b) => (b.data.orderNumber||0) - (a.data.orderNumber||0));
 
         const filtered = docs.filter(o => {
@@ -322,9 +286,7 @@
             return `<button class="state-btn ${isOn} state-${k}" style="${disabled}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})">${LABELS[k]}</button>`;
         }).join('') + `<button class="state-btn cancelled" onclick="setOrderStatus('${doc.id}', 'cancelled', ${isPaid})">Cancelar</button>`;
 
-        // Pago visual
         let payVal = o.pago;
-        // Si es "mostrador_sin_especificar", lo ponemos como vacío para que el select diga "⚠️ A COBRAR"
         if(payVal === 'mostrador_sin_especificar') payVal = "";
 
         // Items
@@ -375,7 +337,7 @@
         const total = o.total || items.reduce((a,i)=>a+((i.price||0)*(i.qty||1)),0);
 
         return `
-        <div class="order ${st==='cancelled'?'cancelled':''}">
+        <div class="order order-card ${st==='cancelled'?'cancelled':''}">
            <div class="order-head">
               <div class="or-left">
                  <div class="order-title">#${o.orderNumber||'--'} — ${o.source==='mostrador'?o.nombre+' (Mostrador)':o.nombre}</div>
@@ -390,20 +352,20 @@
                  <div class="right-total">${money(total)}</div>
                  <div class="pay-line">
                     <select class="pay-select" onchange="updatePago('${doc.id}', this.value)">
-                       <option value="" disabled ${!payVal?'selected':''}>⚠️ A COBRAR</option>
+                       <option value="" disabled ${!payVal?'selected':''}> (Seleccionar) </option>
                        <option value="efectivo" ${payVal==='efectivo'?'selected':''}>Efectivo</option>
                        <option value="mercado_pago" ${payVal==='mercado_pago'?'selected':''}>QR (MP)</option>
                        <option value="debito" ${payVal==='debito'?'selected':''}>Débito</option>
                        <option value="transferencia" ${payVal==='transferencia'?'selected':''}>Transferencia</option>
                     </select>
                     <button class="pay-toggle ${isPaid?'is-paid':'is-pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal||''}')">
-                       ${isPaid ? 'PAGADO ✓' : 'PENDIENTE $'}
+                       ${isPaid ? 'PAGADO ✓' : 'PENDIENTE'}
                     </button>
                     <button class="print-btn" onclick="printOrder('${doc.id}')">🖨️</button>
                  </div>
               </div>
            </div>
-           <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
+           <div class="items items-list">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
         </div>`;
     }
 
@@ -418,7 +380,7 @@
 
        let payTxt = o.pago;
        if(!payTxt || payTxt==='mostrador_sin_especificar') payTxt="A COBRAR EN CAJA";
-       else if(payTxt==='mercado_pago') payTxt="QR (MP)";
+       else if(payTxt==='mercado_pago') payTxt="QR";
        else payTxt = payTxt.toUpperCase();
 
        const isPaid = (o.payment_status === 'paid') || o.paid;
@@ -482,9 +444,10 @@
        </body></html>`;
        
        const f = document.createElement('iframe'); f.style.cssText='position:fixed;left:0;top:0;width:0;height:0;border:0';
-       document.body.appendChild(f); const d=f.contentWindow.document; d.open();d.write(html);d.close();
+       document.body.append(f); const d=f.contentWindow.document; d.open();d.write(html);d.close();
        setTimeout(()=>f.remove(), 10000);
     };
+
   });
   </script>
 </body>
