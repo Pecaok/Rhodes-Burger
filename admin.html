@@ -176,6 +176,54 @@ th{
   border-bottom:1px solid #eee;
 }
 tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
+
+/* --- ESTILOS ARRASTRAR Y SOLTAR (ORDENAR) --- */
+.sortable-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 15px;
+  margin-top: 20px;
+}
+.sort-card {
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: grab;
+  transition: box-shadow 0.2s, transform 0.2s;
+  position: relative;
+}
+.sort-card:hover {
+  box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+}
+.sort-card:active {
+  cursor: grabbing;
+}
+.sort-card.dragging {
+  opacity: 0.5;
+  border: 2px dashed var(--primary);
+  transform: scale(0.95);
+}
+.sort-card img {
+  width: 100%;
+  height: 100px;
+  object-fit: cover;
+  pointer-events: none; /* Clave para que no interfiera el drag de la imagen */
+}
+.sort-card-body {
+  padding: 10px;
+}
+.sort-card-title {
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sort-card-price {
+  font-size: 12px;
+  color: #666;
+}
 </style>
 </head>
 
@@ -217,16 +265,12 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
 <main>
 
 <section class="card featured">
-  <h2 style="margin-bottom:6px">Gestión del Menú (CRUD + Orden Visual)</h2>
+  <h2 style="margin-bottom:6px">Gestión del Menú</h2>
   <p class="muted" style="margin-bottom:14px">
-    Agregá, editá, eliminá y ordená visualmente el menú.
+    Agregá, editá o eliminá productos. Para cambiar el orden, usá la sección de abajo.
   </p>
 
-  <div class="form-grid" style="
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
-    gap:14px;
-  ">
+  <div class="form-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px;">
     <div>
       <label><strong>ID (único)</strong></label>
       <input id="prdId" type="text" placeholder="Ej: bigjohn_simple">
@@ -293,7 +337,7 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
 <section class="card">
   <h2>Orden Visual del Menú</h2>
   <p class="muted" style="margin-bottom:14px">
-    Arrastrá para ordenar la posición de los productos.
+    <strong>Arrastrá las tarjetas</strong> para cambiar el orden en que aparecen en el menú digital.
   </p>
 
   <div class="row" id="orderCatButtons" style="margin-bottom:15px">
@@ -302,16 +346,13 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
     <button class="btn" data-cat="guarniciones">Guarniciones</button>
   </div>
 
-  <div id="orderGrid" style="
-    display:grid;
-    grid-template-columns:repeat(auto-fill, minmax(150px,1fr));
-    gap:16px;
-  "></div>
+  <div id="orderGrid" class="sortable-grid"></div>
 
   <div style="margin-top:16px">
-    <button class="btn primary" id="btnSaveOrder">Guardar orden</button>
+    <button class="btn primary" id="btnSaveOrder" style="width:100%; justify-content:center">💾 Guardar Nuevo Orden</button>
   </div>
 </section>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
@@ -347,9 +388,6 @@ function autoDetectKind(id, name = "", desc = "") {
   return "simple"; 
 }
 
-/* ============================================================
-   (2) Conversión archivo → Base64
-=============================================================== */
 async function fileToBase64(file){
   return new Promise((resolve, reject)=>{
     const r = new FileReader();
@@ -360,7 +398,7 @@ async function fileToBase64(file){
 }
 
 /* ============================================================
-   (3) GUARDAR / ACTUALIZAR PRODUCTO
+   (2) CRUD PRODUCTOS
 =============================================================== */
 async function saveProduct(){
   const id = $('#prdId').value.trim();
@@ -376,48 +414,33 @@ async function saveProduct(){
   if(!(price>0)){ alert("Precio inválido"); return; }
 
   let finalImg = urlImg || null;
-  if(file){
-    finalImg = await fileToBase64(file);
-  }
+  if(file){ finalImg = await fileToBase64(file); }
 
   const payload = {
-    name,
-    category,
-    price,
+    name, category, price,
     img: finalImg,
     description: desc || null,
     available: true,
     kind: autoDetectKind(id, name, desc),
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
+  
+  // Solo setear createdAt si no existe
+  const docSnap = await productsCol.doc(id).get();
+  if(!docSnap.exists) payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
 
   try{
     await productsCol.doc(id).set(payload, {merge:true});
-    alert("Producto guardado correctamente.");
+    alert("Producto guardado.");
     clearProductForm();
-  }catch(e){
-    console.error(e);
-    alert("Error al guardar.");
-  }
+  }catch(e){ console.error(e); alert("Error al guardar."); }
 }
 
-/* ============================================================
-   (4) LIMPIAR FORMULARIO
-=============================================================== */
 function clearProductForm(){
-  $('#prdId').value = '';
-  $('#prdName').value = '';
-  $('#prdCategory').value = 'hamburguesas';
-  $('#prdPrice').value = '';
-  $('#prdImg').value = '';
-  $('#prdImgFile').value = '';
-  $('#prdDesc').value = '';
+  $('#prdId').value = ''; $('#prdName').value = ''; $('#prdCategory').value = 'hamburguesas';
+  $('#prdPrice').value = ''; $('#prdImg').value = ''; $('#prdImgFile').value = ''; $('#prdDesc').value = '';
 }
 
-/* ============================================================
-   (5) Cargar producto al formulario para editar
-=============================================================== */
 function loadProductIntoForm(data, id){
   $('#prdId').value = id;
   $('#prdName').value = data.name || '';
@@ -428,34 +451,17 @@ function loadProductIntoForm(data, id){
   $('#prdDesc').value = data.description || '';
 }
 
-/* ============================================================
-   (6) Eliminar producto
-=============================================================== */
 async function deleteProduct(id){
   if(!confirm("¿Eliminar "+id+"?")) return;
-  try{
-    await productsCol.doc(id).delete();
-  }catch(e){
-    alert("No se pudo eliminar.");
-  }
+  try{ await productsCol.doc(id).delete(); }catch(e){ alert("Error al eliminar."); }
 }
 
-/* ============================================================
-   (7) Toggle disponibilidad
-=============================================================== */
 async function toggleProductAvailability(id, current){
-  try{
-    await productsCol.doc(id).set({
-      available: !current,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    },{merge:true});
-  }catch(e){
-    alert("Error cambiando disponibilidad.");
-  }
+  try{ await productsCol.doc(id).set({ available: !current },{merge:true}); }catch(e){}
 }
 
 /* ============================================================
-   (8) Render tabla CRUD
+   (3) RENDER TABLA CRUD
 =============================================================== */
 function renderProductsTable(snapshot){
   const tbody = $('#prdTable');
@@ -510,6 +516,7 @@ const menuOrderRef = db.collection("config").doc("menuOrder");
 const orderGrid = document.querySelector("#orderGrid");
 const orderCatButtons = document.querySelector("#orderCatButtons");
 
+/* Cambio de categoría */
 window.addEventListener("DOMContentLoaded", ()=>{
   if(orderCatButtons){
     orderCatButtons.querySelectorAll("button").forEach(btn=>{
@@ -523,15 +530,18 @@ window.addEventListener("DOMContentLoaded", ()=>{
   }
 });
 
+/* Cargar orden guardado */
 let MENU_ORDER = {};
 menuOrderRef.onSnapshot(snap=>{
   MENU_ORDER = snap.exists ? snap.data() : {};
   renderOrderGrid();
 });
 
+/* Render grid con Drag & Drop */
 function renderOrderGrid(){
   if(!orderGrid) return;
   orderGrid.innerHTML = "";
+
   const list = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT);
   const orderedIds = MENU_ORDER[CURRENT_CAT] || [];
 
@@ -546,44 +556,61 @@ function renderOrderGrid(){
 
   list.forEach(p=>{
     const card = document.createElement("div");
-    card.className = "orderCard";
+    card.className = "sort-card"; // Usar la clase nueva
     card.draggable = true;
     card.dataset.id = p.id;
+
     card.innerHTML = `
-      <div style="border:1px solid #ddd;border-radius:12px;overflow:hidden;background:#fff; cursor:grab">
-        <img src="${p.img || ""}" style="width:100%;height:110px;object-fit:cover">
-        <div style="padding:10px;font-weight:700;font-size:14px">${p.name}</div>
+      <img src="${p.img || "images/logo.png"}" onerror="this.src='images/logo.png'">
+      <div class="sort-card-body">
+        <div class="sort-card-title" title="${p.name}">${p.name}</div>
+        <div class="sort-card-price">$${p.price}</div>
       </div>
     `;
+
+    // Eventos Drag
     card.addEventListener("dragstart", e=>{
       e.dataTransfer.setData("id", p.id);
       card.classList.add("dragging");
     });
+
     card.addEventListener("dragend", ()=>{
       card.classList.remove("dragging");
     });
+
     card.addEventListener("dragover", e=>{
       e.preventDefault();
       const dragging = orderGrid.querySelector(".dragging");
       if(!dragging || dragging === card) return;
-      orderGrid.insertBefore(dragging, card);
+      
+      // Lógica simple de reordenamiento visual
+      const siblings = [...orderGrid.querySelectorAll(".sort-card:not(.dragging)")];
+      const nextSibling = siblings.find(sibling => {
+          const rect = sibling.getBoundingClientRect();
+          return e.clientX < rect.right && e.clientY < rect.bottom;
+      });
+      
+      orderGrid.insertBefore(dragging, nextSibling);
     });
+
     orderGrid.appendChild(card);
   });
 }
 
+/* Suscripción */
 productsCol.onSnapshot(snap=>{
   ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
   renderOrderGrid();
 });
 
+/* Guardar Orden */
 window.addEventListener("DOMContentLoaded", ()=>{
   const btnSaveOrder = document.querySelector("#btnSaveOrder");
   if(btnSaveOrder){
     btnSaveOrder.onclick = async ()=>{
-      const ids = [...orderGrid.querySelectorAll(".orderCard")].map(c => c.dataset.id);
+      const ids = [...orderGrid.querySelectorAll(".sort-card")].map(c => c.dataset.id);
       await menuOrderRef.set({ ...MENU_ORDER, [CURRENT_CAT]: ids }, {merge:true});
-      alert("Orden guardada.");
+      alert("✅ Orden guardado correctamente. El menú se actualizará en breve.");
     };
   }
 });
