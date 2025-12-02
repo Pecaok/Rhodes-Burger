@@ -26,7 +26,7 @@
     .btn.success{background:var(--success);color:#fff;border-color:var(--success)}
     .btn.danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
 
-    /* LAYOUT */
+    /* LAYOUT ANCHO COMPLETO */
     .container { max-width: 98%; margin: 24px auto; padding: 0 12px; }
     h1{font-size:28px;margin:10px 0 18px}
 
@@ -61,7 +61,7 @@
     tr:last-child td { border-bottom: none; }
     .num-cell { text-align: right; font-variant-numeric: tabular-nums; }
 
-    /* DATOS EXTRAS (CAJA, TOP CLIENTES) */
+    /* DATOS EXTRAS */
     .data-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 15px; margin-top: 20px; }
     .cash-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #eee; }
     .cash-total { font-weight: 800; font-size: 16px; border-top: 2px solid #eee; padding-top: 10px; margin-top: 5px; }
@@ -85,7 +85,6 @@
     
     .warn-pill{display:inline-block;border-radius:999px;padding:4px 10px;font-weight:700;font-size:12px}
     .warn{background:#fff3cd;color:#8a6d3b} .danger{background:#ffebee;color:#c62828}
-
     .text-muted { color: var(--muted); }
   </style>
 </head>
@@ -210,362 +209,298 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    // 1. FIREBASE
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-      authDomain: "rhodes-burguers.firebaseapp.com",
-      projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-    };
-    try { firebase.initializeApp(firebaseConfig); } catch(e) {}
-    const db = firebase.firestore();
-
-    // 2. HELPERS
-    const $ = s => document.getElementById(s);
-    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-    
-    function parseDateAny(val){
-        if(!val) return null;
-        if(val.toDate) return val.toDate();
-        if(typeof val === 'string') return new Date(val);
-        return new Date(val);
-    }
-
-    // Logout
-    $('btnLogout').onclick = ()=>{
-        localStorage.removeItem('rb_auth_v2');
-        localStorage.removeItem('rb_admin_ok');
-        location.replace('login.html');
-    };
-
-    // VARIABLES GLOBALES PARA EXPORTAR
-    let CURRENT_ORDERS = [];
-
-    // 3. LOGICA PRINCIPAL
-    async function loadKPI(){
-        const fromInp = $('fromDate').value;
-        const toInp = $('toDate').value;
-        const monthInp = $('monthPicker').value;
-        
-        let start, end;
-        if(fromInp && toInp){
-           start = new Date(fromInp + 'T00:00:00');
-           end = new Date(toInp + 'T23:59:59');
-        } else {
-           const d = monthInp ? new Date(monthInp + '-01T00:00:00') : new Date();
-           start = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
-           end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
-        }
-
-        // Buscar pedidos unificados (Viejos + Nuevos)
-        const orders = await fetchUnifiedOrders(start, end);
-        CURRENT_ORDERS = orders; // Guardar para exportar
-
-        // PROCESAR DATOS
-        let totalRevenue = 0;
-        let totalOrders = 0;
-        let totalMinutes = 0;
-        let countTime = 0;
-
-        const payStats = {};
-        const sourceStats = {};
-        const statusStats = {};
-        const productStats = {};
-        const clientStats = {};
-
-        const daysInMonth = end.getDate();
-        const dayData = Array(daysInMonth).fill(0);
-        const dayMoney = Array(daysInMonth).fill(0);
-        const hourMatrix = Array.from({length:6}, ()=>Array(daysInMonth).fill(0)); // 19 to 00
-
-        orders.forEach(o => {
-            const dt = parseDateAny(o.createdAt);
-            if(!dt || dt < start || dt > end) return;
-
-            const total = Number(o.total || o.rawTotal || 0);
-            totalOrders++;
-            totalRevenue += total;
-
-            // Pagos (Agrupamos claves sucias)
-            let pay = (o.pago || o.payment_method || 'otro').toLowerCase();
-            if(pay.includes('efectivo')) pay = 'Efectivo';
-            else if(pay.includes('mercado') || pay.includes('mp')) pay = 'Mercado Pago';
-            else if(pay.includes('transfer')) pay = 'Transferencia';
-            else if(pay.includes('debito')) pay = 'Débito';
-            else pay = 'Otro';
-            
-            payStats[pay] = (payStats[pay] || 0) + total; // Sumamos plata, no cantidad
-
-            // Origen
-            let src = (o.source || 'web').toLowerCase();
-            sourceStats[src] = (sourceStats[src] || 0) + 1;
-
-            // Estado
-            let st = o.status || 'accepted';
-            statusStats[st] = (statusStats[st] || 0) + 1;
-
-            // Tiempo (si tiene updated y created)
-            if(o.updatedAt && (o.status==='ready' || o.status==='delivered')){
-                const endT = parseDateAny(o.updatedAt);
-                const diff = (endT - dt) / 60000; // minutos
-                if(diff > 0 && diff < 180) { // filtrar errores
-                    totalMinutes += diff;
-                    countTime++;
-                }
-            }
-
-            // Clientes
-            const cli = (o.nombre || 'Anónimo').trim();
-            if(!clientStats[cli]) clientStats[cli] = {count:0, total:0};
-            clientStats[cli].count++;
-            clientStats[cli].total += total;
-
-            // Productos
-            const items = Array.isArray(o.items) ? o.items : [];
-            items.forEach(it => {
-                 const name = (it.name || 'Item').trim();
-                 const qty = Number(it.qty || 1);
-                 if(!productStats[name]) productStats[name] = {qty:0, total:0};
-                 productStats[name].qty += qty;
-                 productStats[name].total += (Number(it.price||0) * qty);
-            });
-
-            // Gráficos diarios
-            const dayIdx = dt.getDate() - 1;
-            dayData[dayIdx]++;
-            dayMoney[dayIdx] += total;
-
-            // Heatmap horas (19 a 24)
-            let h = dt.getHours();
-            if(h >= 19 && h <= 23) hourMatrix[h-19][dayIdx]++;
-            if(h === 0) hourMatrix[5][dayIdx]++; // 00:00 va al final
-        });
-
-        // --- RENDER ---
-
-        // KPIs
-        $('kpiCount').textContent = totalOrders;
-        $('kpiRevenue').textContent = money(totalRevenue);
-        $('kpiATV').textContent = totalOrders ? money(totalRevenue/totalOrders) : '$0';
-        $('kpiTime').textContent = countTime ? Math.round(totalMinutes/countTime) + ' min' : '—';
-
-        // CIERRE DE CAJA
-        let cashHTML = '';
-        for(const [method, amount] of Object.entries(payStats)){
-            cashHTML += `<div class="cash-row"><span>${method}</span><span>${money(amount)}</span></div>`;
-        }
-        cashHTML += `<div class="cash-row cash-total"><span>TOTAL</span><span>${money(totalRevenue)}</span></div>`;
-        $('cashBreakdown').innerHTML = cashHTML || '<div class="text-muted">Sin datos</div>';
-
-        // TOP CLIENTES
-        const sortedClients = Object.entries(clientStats).sort((a,b)=>b[1].total - a[1].total).slice(0,5);
-        const clientBody = $('topClientsTable').querySelector('tbody');
-        clientBody.innerHTML = sortedClients.map(([name, d]) => 
-            `<tr><td>${name}</td><td class="num-cell">${d.count}</td><td class="num-cell">${money(d.total)}</td></tr>`
-        ).join('') || '<tr><td colspan="3" class="text-muted">Sin datos</td></tr>';
-
-        // GRÁFICO PEDIDOS
-        renderBarChart(dayData, dayMoney, daysInMonth);
-
-        // DONAS
-        renderDoughnut("payChart", Object.keys(payStats), Object.values(payStats));
-        renderDoughnut("sourceChart", Object.keys(sourceStats), Object.values(sourceStats));
-        renderDoughnut("statusChart", Object.keys(statusStats), Object.values(statusStats));
-
-        // HEATMAP
-        renderHourMap(hourMatrix, daysInMonth);
-
-        // PRODUCTOS
-        const sortedProds = Object.entries(productStats).sort((a,b)=>b[1].qty - a[1].qty);
-        const prodBody = $('burgersTable').querySelector('tbody');
-        prodBody.innerHTML = sortedProds.map(([name, d]) => 
-             `<tr><td>${name}</td><td class="num-cell">${d.qty}</td><td class="num-cell">${money(d.total)}</td></tr>`
-        ).join('') || '<tr><td colspan="3">Sin datos</td></tr>';
-    }
-
-
-    // --- HELPERS VISUALES ---
-
-    let mainChart, d1, d2, d3;
-
-    function renderBarChart(counts, amounts, days){
-        const labels = Array.from({length:days},(_,i)=>i+1);
-        const ctx = $('ordersChart').getContext('2d');
-        if(mainChart) mainChart.destroy();
-        mainChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [
-                    { label: 'Pedidos', data: counts, backgroundColor: '#625A45', yAxisID: 'y' },
-                    { type: 'line', label: 'Ingresos', data: amounts, borderColor: '#2e7d32', yAxisID: 'y1' }
-                ]
-            },
-            options: { responsive:true, maintainAspectRatio:false, scales:{ y:{beginAtZero:true}, y1:{position:'right', beginAtZero:true} } }
-        });
-    }
-
-    function renderDoughnut(id, labels, data){
-        const ctx = $(id).getContext('2d');
-        const chartMap = {payChart:d1, sourceChart:d2, statusChart:d3};
-        if(chartMap[id]) chartMap[id].destroy();
-        
-        const colors = ['#625A45', '#F5A524', '#2e7d32', '#d32f2f', '#1976d2', '#7b1fa2'];
-        const newChart = new Chart(ctx, {
-            type: 'doughnut',
-            data: { labels, datasets: [{ data, backgroundColor: colors }] },
-            options: { responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{legend:{position:'bottom'}} }
-        });
-        
-        if(id==='payChart') d1=newChart;
-        if(id==='sourceChart') d2=newChart;
-        if(id==='statusChart') d3=newChart;
-    }
-
-    function renderHourMap(matrix, days){
-        const el = $('hourmap');
-        el.innerHTML = '';
-        el.style.gridTemplateColumns = `50px repeat(${days}, 1fr)`;
-        
-        // Header días
-        el.insertAdjacentHTML('beforeend', '<div></div>');
-        for(let i=1; i<=days; i++) el.insertAdjacentHTML('beforeend', `<div class="hm-head">${i}</div>`);
-
-        // Filas
-        const hours = ['19:00','20:00','21:00','22:00','23:00','00:00'];
-        matrix.forEach((row, idx) => {
-            el.insertAdjacentHTML('beforeend', `<div class="hm-day">${hours[idx]}</div>`);
-            const max = Math.max(...row, 1);
-            row.forEach(val => {
-                const alpha = val ? (val/max)*0.8 + 0.2 : 0.05;
-                const bg = val ? `rgba(46, 125, 50, ${alpha})` : '#f0f0f0';
-                el.insertAdjacentHTML('beforeend', `<div class="hm-cell" style="background:${bg}" title="${val}">${val||''}</div>`);
-            });
-        });
-    }
-
-
-    // --- LÓGICA DE DATOS (FETCH) ---
-    async function fetchUnifiedOrders(start, end){
-        // Estrategia doble para capturar pedidos viejos y nuevos
-        const p1 = db.collection('orders')
-            .where('createdAt', '>=', start.toISOString().split('T')[0])
-            .where('createdAt', '<=', end.toISOString().split('T')[0])
-            .get();
-            
-        const p2 = db.collection('orders')
-            .where('createdAt', '>=', start.toISOString())
-            .where('createdAt', '<=', end.toISOString())
-            .get();
-
-        const [snap1, snap2] = await Promise.all([p1, p2]);
-        const map = new Map();
-        
-        [...snap1.docs, ...snap2.docs].forEach(d => {
-             const data = d.data();
-             if(data.status !== 'cancelled') map.set(d.id, data);
-        });
-        return Array.from(map.values());
-    }
-
-    // --- EXPORTAR CSV ---
-    $('btnExport').onclick = () => {
-        if(!CURRENT_ORDERS.length) return alert("No hay datos para exportar");
-        
-        let csv = "Fecha,Pedido,Cliente,MetodoPago,Total,Estado\n";
-        CURRENT_ORDERS.forEach(o => {
-            const date = parseDateAny(o.createdAt)?.toLocaleDateString() || '';
-            const row = [
-                date,
-                o.orderNumber,
-                `"${(o.nombre||'').replace(/"/g,'')}"`,
-                o.pago,
-                o.total,
-                o.status
-            ];
-            csv += row.join(",") + "\n";
-        });
-
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = "reporte_ventas.csv";
-        link.click();
-    };
-
-    // --- CALENDARIO ---
-    const mCal = $('calMonth');
-    const calGrid = $('calendarGrid');
-    
-    async function renderCalendar(){
-        const ym = mCal.value;
-        if(!ym) return;
-        const [y, m] = ym.split('-').map(Number);
-        const start = new Date(y, m-1, 1);
-        const end = new Date(y, m, 0, 23, 59, 59);
-        
-        const orders = await fetchUnifiedOrders(start, end);
-        const daysInMonth = end.getDate();
-        const dayTotal = Array(daysInMonth).fill(0);
-        const dayCount = Array(daysInMonth).fill(0);
-
-        orders.forEach(o => {
-            const dt = parseDateAny(o.createdAt);
-            if(dt) {
-                const d = dt.getDate()-1;
-                if(d>=0 && d<daysInMonth){
-                    dayTotal[d] += (o.total||0);
-                    dayCount[d]++;
-                }
-            }
-        });
-
-        calGrid.innerHTML = '';
-        const startDay = new Date(y, m-1, 1).getDay();
-        for(let i=0; i<startDay; i++) calGrid.insertAdjacentHTML('beforeend', '<div></div>');
-        
-        dayTotal.forEach((total, i) => {
-            const count = dayCount[i];
-            const cls = count > 0 ? 'cal-day' : 'cal-day cal-empty';
-            const html = `
-                <div class="${cls}">
-                    <div class="cal-num">${i+1}</div>
-                    ${count ? `<div class="cal-content">
-                        <div class="cal-burger-hero">🍔 ${count}</div>
-                        <div class="cal-pill">${money(total)}</div>
-                    </div>` : ''}
-                </div>`;
-            calGrid.insertAdjacentHTML('beforeend', html);
-        });
-        
-        $('calRange').textContent = `Total Mes: ${money(dayTotal.reduce((a,b)=>a+b,0))}`;
-    }
-
-    $('calGo').onclick = renderCalendar;
-    $('calPrev').onclick = () => { stepMonth(-1); renderCalendar(); };
-    $('calNext').onclick = () => { stepMonth(1); renderCalendar(); };
-
-    function stepMonth(n){
-        const [y, m] = mCal.value.split('-');
-        const d = new Date(y, m-1+n, 1);
-        mCal.value = d.toISOString().slice(0,7);
-    }
-
-
-    // INIT
     document.addEventListener('DOMContentLoaded', () => {
+        // 1. FIREBASE INIT
+        const firebaseConfig = {
+          apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+          authDomain: "rhodes-burguers.firebaseapp.com",
+          projectId: "rhodes-burguers",
+          storageBucket: "rhodes-burguers.firebasestorage.app",
+          messagingSenderId: "951646688091",
+          appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+        };
+        try { firebase.initializeApp(firebaseConfig); } catch(e) {}
+        const db = firebase.firestore();
+
+        // 2. HELPERS
+        const $ = s => document.getElementById(s);
+        const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+        
+        function parseDateAny(val){
+            if(!val) return null;
+            if(val.toDate) return val.toDate();
+            if(typeof val === 'string') return new Date(val);
+            return new Date(val);
+        }
+
+        // 3. LOGOUT
+        const btnLogout = $('btnLogout');
+        if(btnLogout){
+            btnLogout.onclick = ()=>{
+                localStorage.removeItem('rb_auth_v2');
+                localStorage.removeItem('rb_admin_ok');
+                location.replace('login.html');
+            };
+        }
+
+        // GLOBAL DATA
+        let CURRENT_ORDERS = [];
+        let mainChart, d1, d2, d3;
+
+        // 4. INITIAL LOAD
         const now = new Date();
         const ym = now.toISOString().slice(0,7);
-        $('monthPicker').value = ym;
-        $('calMonth').value = ym;
+        if($('monthPicker')) $('monthPicker').value = ym;
+        if($('calMonth')) $('calMonth').value = ym;
+
+        if($('btnReload')) $('btnReload').onclick = loadKPI;
+        if($('calGo')) $('calGo').onclick = renderCalendar;
+        if($('calPrev')) $('calPrev').onclick = () => { stepMonth(-1); renderCalendar(); };
+        if($('calNext')) $('calNext').onclick = () => { stepMonth(1); renderCalendar(); };
         
-        $('btnReload').onclick = loadKPI;
+        if($('btnExport')) $('btnExport').onclick = exportExcel;
+
         loadKPI();
         renderCalendar();
-    });
 
+        // --- CORE LOGIC ---
+
+        async function loadKPI(){
+            const fromInp = $('fromDate').value;
+            const toInp = $('toDate').value;
+            const monthInp = $('monthPicker').value;
+            
+            let start, end, isRange = false;
+            if(fromInp && toInp){
+               isRange = true;
+               start = new Date(fromInp + 'T00:00:00');
+               end = new Date(toInp + 'T23:59:59');
+            } else {
+               const d = monthInp ? new Date(monthInp + '-01T00:00:00') : new Date();
+               start = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
+               end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+            }
+
+            const orders = await fetchUnifiedOrders(start, end);
+            CURRENT_ORDERS = orders;
+
+            // Procesar
+            let totalRevenue = 0, totalOrders = 0, totalMinutes = 0, countTime = 0;
+            const payStats = {}, sourceStats = {}, statusStats = {}, productStats = {}, clientStats = {};
+            
+            const daysInMonth = end.getDate();
+            const dayData = Array(daysInMonth).fill(0);
+            const dayMoney = Array(daysInMonth).fill(0);
+            const hourMatrix = Array.from({length:6}, ()=>Array(daysInMonth).fill(0));
+
+            orders.forEach(o => {
+                const dt = parseDateAny(o.createdAt);
+                if(!dt || dt < start || dt > end) return;
+
+                const total = Number(o.total || o.rawTotal || 0);
+                totalOrders++;
+                totalRevenue += total;
+
+                // Stats
+                let pay = (o.pago || 'otro').toLowerCase();
+                if(pay.includes('efectivo')) pay = 'Efectivo';
+                else if(pay.includes('mercado')||pay.includes('mp')) pay = 'Mercado Pago';
+                else if(pay.includes('debito')) pay = 'Débito';
+                else if(pay.includes('transfer')) pay = 'Transferencia';
+                payStats[pay] = (payStats[pay]||0) + total;
+
+                let src = (o.source || 'web').toLowerCase();
+                sourceStats[src] = (sourceStats[src]||0) + 1;
+
+                let st = o.status || 'accepted';
+                statusStats[st] = (statusStats[st]||0) + 1;
+
+                // Tiempo
+                if(o.updatedAt && (o.status==='ready'||o.status==='delivered')){
+                    const endT = parseDateAny(o.updatedAt);
+                    const diff = (endT - dt)/60000;
+                    if(diff>0 && diff<180){ totalMinutes+=diff; countTime++; }
+                }
+
+                // Cliente
+                const cli = (o.nombre||'Anónimo').trim();
+                if(!clientStats[cli]) clientStats[cli]={count:0, total:0};
+                clientStats[cli].count++; clientStats[cli].total+=total;
+
+                // Productos
+                (o.items||[]).forEach(it=>{
+                    const name = (it.name||'Item').trim();
+                    const qty = Number(it.qty||1);
+                    if(!productStats[name]) productStats[name]={qty:0, total:0};
+                    productStats[name].qty+=qty;
+                    productStats[name].total+=(Number(it.price||0)*qty);
+                });
+
+                // Daily & Hourly
+                if(!isRange){
+                    const dayIdx = dt.getDate()-1;
+                    if(dayIdx>=0 && dayIdx<daysInMonth){
+                        dayData[dayIdx]++;
+                        dayMoney[dayIdx]+=total;
+                        let h=dt.getHours();
+                        if(h>=19 && h<=23) hourMatrix[h-19][dayIdx]++;
+                        if(h===0) hourMatrix[5][dayIdx]++;
+                    }
+                }
+            });
+
+            // Render KPI
+            $('kpiCount').textContent = totalOrders;
+            $('kpiRevenue').textContent = money(totalRevenue);
+            $('kpiATV').textContent = totalOrders ? money(totalRevenue/totalOrders) : '$0';
+            $('kpiTime').textContent = countTime ? Math.round(totalMinutes/countTime)+' min' : '—';
+
+            // Render Caja
+            let cashHTML = '';
+            for(const [k,v] of Object.entries(payStats)) cashHTML += `<div class="cash-row"><span>${k}</span><span>${money(v)}</span></div>`;
+            cashHTML += `<div class="cash-row cash-total"><span>TOTAL</span><span>${money(totalRevenue)}</span></div>`;
+            $('cashBreakdown').innerHTML = cashHTML;
+
+            // Render Clients
+            const topCli = Object.entries(clientStats).sort((a,b)=>b[1].total - a[1].total).slice(0,5);
+            $('topClientsTable').querySelector('tbody').innerHTML = topCli.map(([n,d])=>`<tr><td>${n}</td><td class="num-cell">${d.count}</td><td class="num-cell">${money(d.total)}</td></tr>`).join('');
+
+            // Render Products
+            const topProd = Object.entries(productStats).sort((a,b)=>b[1].qty - a[1].qty);
+            $('burgersTable').querySelector('tbody').innerHTML = topProd.map(([n,d])=>`<tr><td>${n}</td><td class="num-cell">${d.qty}</td><td class="num-cell">${money(d.total)}</td></tr>`).join('');
+
+            // Charts
+            if(!isRange){
+                renderBarChart(dayData, dayMoney, daysInMonth);
+                renderHourMap(hourMatrix, daysInMonth);
+            }
+            
+            renderDoughnut("payChart", Object.keys(payStats), Object.values(payStats));
+            renderDoughnut("sourceChart", Object.keys(sourceStats), Object.values(sourceStats));
+            renderDoughnut("statusChart", Object.keys(statusStats), Object.values(statusStats));
+        }
+
+        async function fetchUnifiedOrders(start, end){
+            const sStr = start.toISOString(); const eStr = end.toISOString();
+            // Doble fetch para asegurar
+            const p1 = db.collection('orders').where('createdAt','>=',sStr.split('T')[0]).where('createdAt','<=',eStr.split('T')[0]).get();
+            const p2 = db.collection('orders').where('createdAt','>=',sStr).where('createdAt','<=',eStr).get();
+            const [sn1, sn2] = await Promise.all([p1, p2]);
+            
+            const map = new Map();
+            [...sn1.docs, ...sn2.docs].forEach(d => {
+                const dat = d.data();
+                if(!dat.status?.includes('cancel')) map.set(d.id, dat);
+            });
+            return Array.from(map.values());
+        }
+
+        function exportExcel(){
+            if(!CURRENT_ORDERS.length) return alert("Sin datos.");
+            let csv = "Fecha,Pedido,Cliente,Pago,Total,Estado\n";
+            CURRENT_ORDERS.forEach(o=>{
+                const d = parseDateAny(o.createdAt)?.toLocaleDateString()||'';
+                csv += `${d},${o.orderNumber},"${(o.nombre||'').replace(/"/g,'')}",${o.pago},${o.total},${o.status}\n`;
+            });
+            const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "ventas.csv";
+            link.click();
+        }
+
+        // --- CALENDARIO ---
+        async function renderCalendar(){
+            const ym = $('calMonth').value;
+            if(!ym) return;
+            const [y, m] = ym.split('-').map(Number);
+            const start = new Date(y, m-1, 1);
+            const end = new Date(y, m, 0, 23, 59, 59);
+            
+            const orders = await fetchUnifiedOrders(start, end);
+            const days = end.getDate();
+            const totals = Array(days).fill(0);
+            const counts = Array(days).fill(0);
+
+            orders.forEach(o=>{
+                const dt = parseDateAny(o.createdAt);
+                if(dt && dt.getMonth() === m-1){
+                    const d = dt.getDate()-1;
+                    totals[d]+=Number(o.total||0);
+                    counts[d]++;
+                }
+            });
+
+            const grid = $('calendarGrid');
+            grid.innerHTML = '';
+            const startDay = new Date(y, m-1, 1).getDay();
+            for(let i=0; i<startDay; i++) grid.insertAdjacentHTML('beforeend', '<div></div>');
+            
+            totals.forEach((t, i)=>{
+                const c = counts[i];
+                const html = `<div class="cal-day ${c?'':'cal-empty'}"><div class="cal-num">${i+1}</div>${c?`<div class="cal-content"><div class="cal-burger-hero">🍔 ${c}</div><div class="cal-pill">${money(t)}</div></div>`:''}</div>`;
+                grid.insertAdjacentHTML('beforeend', html);
+            });
+            $('calRange').textContent = `Total: ${money(totals.reduce((a,b)=>a+b,0))}`;
+        }
+
+        function stepMonth(n){
+            const [y, m] = $('calMonth').value.split('-');
+            const d = new Date(y, m-1+n, 1);
+            $('calMonth').value = d.toISOString().slice(0,7);
+        }
+
+        // --- CHART HELPERS ---
+        const COLORS = ['#625A45', '#F5A524', '#2e7d32', '#d32f2f', '#1976d2'];
+        
+        function renderBarChart(c, a, d){
+            const ctx = $('ordersChart').getContext('2d');
+            if(mainChart) mainChart.destroy();
+            mainChart = new Chart(ctx, {
+                type:'bar',
+                data:{
+                    labels: Array.from({length:d},(_,i)=>i+1),
+                    datasets: [
+                        { label:'Pedidos', data:c, backgroundColor:'#625A45', yAxisID:'y' },
+                        { type:'line', label:'$', data:a, borderColor:'#2e7d32', yAxisID:'y1' }
+                    ]
+                },
+                options:{ responsive:true, maintainAspectRatio:false, scales:{ y:{beginAtZero:true}, y1:{position:'right', beginAtZero:true} } }
+            });
+        }
+
+        function renderDoughnut(id, l, d){
+            const ctx = $(id).getContext('2d');
+            const map = {payChart:d1, sourceChart:d2, statusChart:d3};
+            if(map[id]) map[id].destroy();
+            const chart = new Chart(ctx, {
+                type:'doughnut',
+                data:{ labels:l, datasets:[{ data:d, backgroundColor:COLORS }] },
+                options:{ responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{legend:{position:'bottom'}} }
+            });
+            if(id==='payChart') d1=chart;
+            if(id==='sourceChart') d2=chart;
+            if(id==='statusChart') d3=chart;
+        }
+
+        function renderHourMap(matrix, days){
+            const el = $('hourmap');
+            el.innerHTML = '';
+            el.style.gridTemplateColumns = `50px repeat(${days}, 1fr)`;
+            el.insertAdjacentHTML('beforeend', '<div></div>');
+            for(let i=1; i<=days; i++) el.insertAdjacentHTML('beforeend', `<div class="hm-head">${i}</div>`);
+            const hours=['19:00','20:00','21:00','22:00','23:00','00:00'];
+            matrix.forEach((row, i)=>{
+                el.insertAdjacentHTML('beforeend', `<div class="hm-day">${hours[i]}</div>`);
+                const max = Math.max(...row, 1);
+                row.forEach(v=>{
+                    const a = v ? (v/max)*0.8+0.2 : 0.05;
+                    const bg = v ? `rgba(46,125,50,${a})` : '#f0f0f0';
+                    el.insertAdjacentHTML('beforeend', `<div class="hm-cell" style="background:${bg}" title="${v}">${v||''}</div>`);
+                });
+            });
+        }
+    });
   </script>
 </body>
 </html>
