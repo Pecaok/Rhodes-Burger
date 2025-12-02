@@ -1,9 +1,6 @@
 <!doctype html>
 <html lang="es">
 
-<!-- ============================================================
-      SESIÓN COMPARTIDA (igual que login.html)
-=============================================================== -->
 <script>
 const TTL_HOURS = 20;
 const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
@@ -207,24 +204,24 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
     </div>
 
     <div style="margin-left:12px">
-      <a class="btn" href="index.html">Ir al Menú</a>
-      <button class="btn" onclick="logout()">Salir</button>
+        <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <a href="pedido_local.html" class="btn">📦 Pedidos</a>
+            <a href="finanzas.html" class="btn">📈 Finanzas</a>
+            <a href="mostrador.html" class="btn">🧾 Mostrador</a>
+            <a href="admin.html" class="btn primary">⚙️ Admin</a>
+        </nav>
     </div>
   </div>
 </header>
 
 <main>
 
-<!-- ============================================================
-       BLOQUE CRUD PRINCIPAL
-=============================================================== -->
 <section class="card featured">
   <h2 style="margin-bottom:6px">Gestión del Menú (CRUD + Orden Visual)</h2>
   <p class="muted" style="margin-bottom:14px">
     Agregá, editá, eliminá y ordená visualmente el menú.
   </p>
 
-  <!-- FORMULARIO CRUD -->
   <div class="form-grid" style="
     display:grid;
     grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
@@ -293,9 +290,6 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
   </div>
 </section>
 
-<!-- ============================================================
-     ORDEN VISUAL DEL MENÚ
-=============================================================== -->
 <section class="card">
   <h2>Orden Visual del Menú</h2>
   <p class="muted" style="margin-bottom:14px">
@@ -318,9 +312,6 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
     <button class="btn primary" id="btnSaveOrder">Guardar orden</button>
   </div>
 </section>
-<!-- ============================================================
-     FIREBASE
-=============================================================== -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
@@ -335,14 +326,8 @@ const firebaseConfig = {
   appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
 };
 try{ firebase.initializeApp(firebaseConfig); } catch(e){}
-try{
-  firebase.firestore().settings({ experimentalForceLongPolling:true, useFetchStreams:false });
-}catch(e){}
-
 const db = firebase.firestore();
 const productsCol = db.collection('products');
-
-/* Helpers */
 const $ = s => document.querySelector(s);
 
 /* ============================================================
@@ -352,21 +337,14 @@ function autoDetectKind(id, name = "", desc = "") {
   id   = id.toLowerCase();
   name = (name || "").toLowerCase();
   desc = (desc || "").toLowerCase();
-
-  // 1) ID (más preciso porque vos usás *_simple *_doble)
   if (id.includes("_doble"))  return "doble";
   if (id.includes("_simple")) return "simple";
   if (id.includes("_pollo"))  return "pollo";
-
-  // 2) Name
   if (name.includes("doble")) return "doble";
   if (name.includes("pollo")) return "pollo";
-
-  // 3) Description
   if (desc.includes("doble")) return "doble";
   if (desc.includes("pollo")) return "pollo";
-
-  return "simple"; // default
+  return "simple"; 
 }
 
 /* ============================================================
@@ -382,7 +360,7 @@ async function fileToBase64(file){
 }
 
 /* ============================================================
-   (3) GUARDAR / ACTUALIZAR PRODUCTO — CON kind AUTOMÁTICO 🔥
+   (3) GUARDAR / ACTUALIZAR PRODUCTO
 =============================================================== */
 async function saveProduct(){
   const id = $('#prdId').value.trim();
@@ -409,10 +387,7 @@ async function saveProduct(){
     img: finalImg,
     description: desc || null,
     available: true,
-
-    // 🔥 NUEVO: GENERA kind SIEMPRE (Opción A)
     kind: autoDetectKind(id, name, desc),
-
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   };
@@ -489,14 +464,8 @@ function renderProductsTable(snapshot){
   snapshot.forEach(doc=>{
     const p = doc.data();
     const tr = document.createElement('tr');
-
-    const imgTag = p.img
-      ? `<img src="${p.img}" class="img-preview">`
-      : `<div class="img-preview"></div>`;
-
-    const availableTag = p.available
-      ? `<span class="pill ok">Activo</span>`
-      : `<span class="pill off">Pausado</span>`;
+    const imgTag = p.img ? `<img src="${p.img}" class="img-preview">` : `<div class="img-preview"></div>`;
+    const availableTag = p.available ? `<span class="pill ok">Activo</span>` : `<span class="pill off">Pausado</span>`;
 
     tr.innerHTML = `
       <td>${doc.id}</td>
@@ -513,7 +482,6 @@ function renderProductsTable(snapshot){
         <button class="btn bad" data-act="delete" data-id="${doc.id}">Eliminar</button>
       </td>
     `;
-
     tbody.appendChild(tr);
   });
 
@@ -521,84 +489,55 @@ function renderProductsTable(snapshot){
     btn.onclick = async()=>{
       const id = btn.dataset.id;
       const act = btn.dataset.act;
-
       if(act === "edit"){
         const d = await productsCol.doc(id).get();
         loadProductIntoForm(d.data(), id);
-
       } else if(act === "toggle"){
         toggleProductAvailability(id, btn.dataset.av === "true");
-
       } else if(act === "delete"){
         deleteProduct(id);
       }
     };
   });
 }
-
-/* ============================================================
-   (9) Suscripción a Firestore
-=============================================================== */
 productsCol.onSnapshot(renderProductsTable);
 </script>
-<!-- ============================================================
-      🔥 ORDEN VISUAL (DRAG & DROP con menuOrder)
-=============================================================== -->
+
 <script>
 let ORDER_PRODUCTS = [];
 let CURRENT_CAT = "hamburguesas";
-
-const menuOrderRef   = db.collection("config").doc("menuOrder");
-const orderGrid      = document.querySelector("#orderGrid");
+const menuOrderRef = db.collection("config").doc("menuOrder");
+const orderGrid = document.querySelector("#orderGrid");
 const orderCatButtons = document.querySelector("#orderCatButtons");
 
-/* ============================================================
-      Cambio de categoría
-=============================================================== */
 window.addEventListener("DOMContentLoaded", ()=>{
-
   if(orderCatButtons){
     orderCatButtons.querySelectorAll("button").forEach(btn=>{
       btn.onclick = ()=>{
-        orderCatButtons
-          .querySelectorAll("button")
-          .forEach(b=> b.classList.remove("primary"));
-
+        orderCatButtons.querySelectorAll("button").forEach(b=> b.classList.remove("primary"));
         btn.classList.add("primary");
         CURRENT_CAT = btn.dataset.cat;
         renderOrderGrid();
       };
     });
   }
-
 });
 
-/* ============================================================
-      Cargar orden guardado
-=============================================================== */
 let MENU_ORDER = {};
-
 menuOrderRef.onSnapshot(snap=>{
   MENU_ORDER = snap.exists ? snap.data() : {};
   renderOrderGrid();
 });
 
-/* ============================================================
-      Render grid con el orden respetado
-=============================================================== */
 function renderOrderGrid(){
-
   if(!orderGrid) return;
-
   orderGrid.innerHTML = "";
-
   const list = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT);
   const orderedIds = MENU_ORDER[CURRENT_CAT] || [];
 
   list.sort((a,b)=>{
     const ia = orderedIds.indexOf(a.id);
     const ib = orderedIds.indexOf(b.id);
-
     if(ia === -1 && ib === -1) return a.name.localeCompare(b.name);
     if(ia === -1) return 1;
     if(ib === -1) return -1;
@@ -610,416 +549,110 @@ function renderOrderGrid(){
     card.className = "orderCard";
     card.draggable = true;
     card.dataset.id = p.id;
-
     card.innerHTML = `
-      <div style="border:1px solid #ddd;border-radius:12px;overflow:hidden;background:#fff">
+      <div style="border:1px solid #ddd;border-radius:12px;overflow:hidden;background:#fff; cursor:grab">
         <img src="${p.img || ""}" style="width:100%;height:110px;object-fit:cover">
         <div style="padding:10px;font-weight:700;font-size:14px">${p.name}</div>
       </div>
     `;
-
     card.addEventListener("dragstart", e=>{
       e.dataTransfer.setData("id", p.id);
       card.classList.add("dragging");
     });
-
     card.addEventListener("dragend", ()=>{
       card.classList.remove("dragging");
     });
-
     card.addEventListener("dragover", e=>{
       e.preventDefault();
       const dragging = orderGrid.querySelector(".dragging");
       if(!dragging || dragging === card) return;
       orderGrid.insertBefore(dragging, card);
     });
-
     orderGrid.appendChild(card);
   });
 }
 
-/* ============================================================
-      Suscripción a productos
-=============================================================== */
 productsCol.onSnapshot(snap=>{
   ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
   renderOrderGrid();
 });
-</script>
 
-<!-- Guardar orden -->
-<script>
 window.addEventListener("DOMContentLoaded", ()=>{
-
   const btnSaveOrder = document.querySelector("#btnSaveOrder");
-  if(!btnSaveOrder){
-    console.error("btnSaveOrder NO EXISTE EN EL DOM");
-    return;
+  if(btnSaveOrder){
+    btnSaveOrder.onclick = async ()=>{
+      const ids = [...orderGrid.querySelectorAll(".orderCard")].map(c => c.dataset.id);
+      await menuOrderRef.set({ ...MENU_ORDER, [CURRENT_CAT]: ids }, {merge:true});
+      alert("Orden guardada.");
+    };
   }
-
-  btnSaveOrder.onclick = async ()=>{
-    const ids = [...orderGrid.querySelectorAll(".orderCard")]
-      .map(c => c.dataset.id);
-
-    await menuOrderRef.set({
-      ...MENU_ORDER,
-      [CURRENT_CAT]: ids
-    }, {merge:true});
-
-    alert("Orden guardada.");
-  };
-
-});
-</script>
-<!-- ============================================================
-      🔥 INVENTARIO
-=============================================================== -->
-<script>
-const invList = document.querySelector('#invList');
-
-function renderInventory(snapshot){
-  if(!invList) return;
-  invList.innerHTML = '';
-
-  snapshot.forEach(doc=>{
-    const p = doc.data();
-    const available = !!p.available;
-
-    const el = document.createElement('div');
-    el.className = "tile";
-    el.innerHTML = `
-      <div>
-        <div style="font-weight:800">${p.name}</div>
-        <div class="muted" style="font-size:13px">${p.category}</div>
-      </div>
-
-      <div class="row">
-        <span class="pill ${available?'ok':'off'}">
-          ${available ? 'Disponible' : 'Sin stock'}
-        </span>
-
-        <button class="btn ${available?'warn':'good'}"
-                data-id="${doc.id}" data-next="${available?0:1}">
-          ${available ? 'Desactivar' : 'Activar'}
-        </button>
-      </div>
-    `;
-    invList.appendChild(el);
-  });
-
-  invList.querySelectorAll("button[data-id]").forEach(btn=>{
-    btn.onclick = async()=>{
-      const id = btn.dataset.id;
-      const next = btn.dataset.next === "1";
-
-      try{
-        await productsCol.doc(id).set({
-          available: next,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        },{merge:true});
-      }catch(e){
-        alert("Error cambiando disponibilidad.");
-      }
-    };
-  });
-}
-
-productsCol.onSnapshot(renderInventory);
-</script>
-
-<!-- ============================================================
-      🔥 SIDES (configuración de papas)
-=============================================================== -->
-<script>
-const sidesRef = () => db.collection("config").doc("sides");
-
-const SIDES_META = [
-  { key:"con_sazon", label:"Con sazón" },
-  { key:"con_sal",   label:"Con sal" },
-  { key:"sin_sal",   label:"Sin sal" }
-];
-
-const sidesContainer = document.querySelector("#sidesContainer");
-
-function renderSidesUI(state){
-  if(!sidesContainer) return;
-
-  sidesContainer.innerHTML = '';
-
-  SIDES_META.forEach(s=>{
-    const enabled = state ? !!state[s.key] : true;
-
-    const el = document.createElement("div");
-    el.className = "side-pill " + (enabled ? "on" : "off");
-
-    el.innerHTML = `
-      <div>
-        <div style="font-weight:800">${s.label}</div>
-        <div class="muted" style="font-size:13px">
-          ${enabled ? "Visible" : "Bloqueada"} en web y mostrador
-        </div>
-      </div>
-
-      <div>
-        <button class="btn ${enabled?'bad':'good'}"
-                data-side="${s.key}" data-next="${enabled?0:1}">
-          ${enabled ? "Deshabilitar" : "Habilitar"}
-        </button>
-      </div>
-    `;
-
-    sidesContainer.appendChild(el);
-  });
-
-  sidesContainer.querySelectorAll("button[data-side]").forEach(btn=>{
-    btn.onclick = async()=>{
-      const key = btn.dataset.side;
-      const next = btn.dataset.next === "1";
-
-      btn.disabled = true;
-      try{
-        await sidesRef().set({
-          [key]: next,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        },{merge:true});
-      }catch(e){}
-
-      btn.disabled = false;
-    };
-  });
-}
-
-sidesRef().onSnapshot(snap=>{
-  renderSidesUI(snap.exists ? snap.data() : {});
 });
 </script>
 
-<!-- ============================================================
-      🔥 STORE OVERRIDE (Horarios, Forzar abierto)
-=============================================================== -->
 <script>
 const storeRef = () => db.collection("config").doc("store");
-
-const storePill        = document.querySelector("#storePill");
-const storeSub         = document.querySelector("#storeSub");
-const btnOpen          = document.querySelector("#btnForceOpen");
-const btnClose         = document.querySelector("#btnForceClose");
-const forceUntilInput  = document.querySelector("#forceUntil");
-const btnSaveUntil     = document.querySelector("#btnSaveUntil");
+const storePill = document.querySelector("#storePill");
+const storeSub = document.querySelector("#storeSub");
+const btnOpen = document.querySelector("#btnForceOpen");
+const btnClose = document.querySelector("#btnForceClose");
+const forceUntilInput = document.querySelector("#forceUntil");
+const btnSaveUntil = document.querySelector("#btnSaveUntil");
 
 function applyStoreDocToUI(d){
   const on = !!d.forceOpen;
   let until = null;
-
   if(d.forceOpenUntil){
     try{
-      if(typeof d.forceOpenUntil.toDate === "function"){
-        until = d.forceOpenUntil.toDate();
-      } else if(d.forceOpenUntil.seconds){
-        until = new Date(d.forceOpenUntil.seconds * 1000);
-      } else {
-        until = new Date(d.forceOpenUntil);
-      }
+      if(typeof d.forceOpenUntil.toDate === "function"){ until = d.forceOpenUntil.toDate(); } 
+      else if(d.forceOpenUntil.seconds){ until = new Date(d.forceOpenUntil.seconds * 1000); } 
+      else { until = new Date(d.forceOpenUntil); }
     }catch(e){}
   }
-
   const active = on || (until && until.getTime() > Date.now());
-
   storePill.className = "pill " + (active ? "ok" : "off");
   storePill.textContent = "Estado: " + (active ? "Forzado ABIERTO" : "Normal");
 
   if(until && until.getTime() > Date.now()){
-    storeSub.textContent =
-      "Hasta: " +
-      String(until.getHours()).padStart(2,"0") + ":" +
-      String(until.getMinutes()).padStart(2,"0");
-
+    storeSub.textContent = "Hasta: " + String(until.getHours()).padStart(2,"0") + ":" + String(until.getMinutes()).padStart(2,"0");
     const local = new Date(until.getTime() - until.getTimezoneOffset()*60000);
     forceUntilInput.value = local.toISOString().slice(0,16);
   } else {
-    storeSub.textContent = d.forceOpenMessage || "Normal";
+    storeSub.textContent = "Normal";
     forceUntilInput.value = "";
   }
 }
 
-storeRef().onSnapshot(snap=>{
-  applyStoreDocToUI(snap.exists ? snap.data() : {});
-});
+storeRef().onSnapshot(snap=>{ applyStoreDocToUI(snap.exists ? snap.data() : {}); });
 
-btnOpen.onclick = async()=>{
-  await storeRef().set({
-    forceOpen:true,
-    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-  },{merge:true});
-};
-
-btnClose.onclick = async()=>{
-  await storeRef().set({
-    forceOpen:false,
-    forceOpenMessage: firebase.firestore.FieldValue.delete(),
-    forceOpenUntil: firebase.firestore.FieldValue.delete(),
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  },{merge:true});
+btnOpen.onclick = async()=>{ await storeRef().set({ forceOpen:true, updatedAt:firebase.firestore.FieldValue.serverTimestamp() },{merge:true}); };
+btnClose.onclick = async()=>{ 
+    await storeRef().set({ 
+        forceOpen:false, 
+        forceOpenUntil: firebase.firestore.FieldValue.delete(), 
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
+    },{merge:true}); 
 };
 
 btnSaveUntil.onclick = async()=>{
   const v = forceUntilInput.value;
   if(!v){ alert("Elegí fecha y hora"); return; }
-
   const local = new Date(v);
-  if(isNaN(local.getTime())){
-    alert("Fecha inválida");
-    return;
-  }
-
+  if(isNaN(local.getTime())){ alert("Fecha inválida"); return; }
   await storeRef().set({
     forceOpen:true,
     forceOpenUntil: firebase.firestore.Timestamp.fromDate(local),
     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
   },{merge:true});
-
   alert("Guardado correctamente.");
 };
 </script>
-<!-- ============================================================
-      🔥 CUPONES (CRUD COMPLETO)
-=============================================================== -->
-<script>
-const cpTbody = document.querySelector("#cpTable");
 
-function upsertCouponFromForm(){
-  const code = (document.querySelector("#cpCode").value||"").trim().toUpperCase();
-  if(!code){ alert("Ingresá código"); return; }
-
-  const type = document.querySelector("#cpType").value;
-  const value = Number(document.querySelector("#cpValue").value||0);
-  if(!(value>0)){ alert("Valor inválido"); return; }
-
-  const maxUses = Number(document.querySelector("#cpMaxUses").value||0);
-  const note    = (document.querySelector("#cpNote").value||"").trim();
-  const from    = document.querySelector("#cpFrom").value ? new Date(document.querySelector("#cpFrom").value) : null;
-  const to      = document.querySelector("#cpTo").value   ? new Date(document.querySelector("#cpTo").value)   : null;
-
-  const payload = {
-    code, type, value,
-    enabled:true,
-    note: note || null,
-    validFrom: from ? firebase.firestore.Timestamp.fromDate(from) : null,
-    validTo:   to   ? firebase.firestore.Timestamp.fromDate(to)   : null,
-    maxUses: maxUses > 0 ? maxUses : null,
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  };
-
-  db.collection("coupons").doc(code)
-    .set({
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      uses:0,
-      ...payload
-    },{merge:true})
-    .then(()=>{
-      alert("Cupón guardado");
-      loadCoupons();
-    })
-    .catch(()=>{
-      alert("Error guardando cupón");
-    });
-}
-
-document.querySelector("#btnCreateCp").onclick = upsertCouponFromForm;
-
-
-function renderCoupons(list){
-  cpTbody.innerHTML = "";
-
-  list.forEach(doc=>{
-    const c = doc.data();
-    const uses = `${c.uses||0}${c.maxUses?` / ${c.maxUses}`:''}`;
-
-    const vf = c.validFrom ? fmtDate(c.validFrom) : null;
-    const vt = c.validTo   ? fmtDate(c.validTo)   : null;
-
-    const vig =
-      (vf ? vf.toLocaleDateString("es-AR") + " " : "") +
-      (vt ? "→ " + vt.toLocaleDateString("es-AR") : "");
-
-    const tr = document.createElement("tr");
-
-    tr.innerHTML = `
-      <td>${c.code}</td>
-      <td>${c.type === "percent" ? "%" : "$"}</td>
-      <td>${c.value}</td>
-      <td>${uses}</td>
-      <td>${vig || "-"}</td>
-      <td>${c.enabled ? "<span class='pill ok'>HABILITADO</span>" : "<span class='pill off'>PAUSADO</span>"}</td>
-      <td class="row">
-        <button class="btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
-          ${c.enabled ? "Deshabilitar" : "Habilitar"}
-        </button>
-        <button class="btn bad" data-act="delete" data-id="${doc.id}">
-          Eliminar
-        </button>
-      </td>
-    `;
-
-    cpTbody.appendChild(tr);
-  });
-
-  cpTbody.querySelectorAll("button[data-act]").forEach(btn=>{
-    btn.onclick = async()=>{
-      const id  = btn.dataset.id;
-      const act = btn.dataset.act;
-
-      if(act === "toggle"){
-        const snap = await db.collection("coupons").doc(id).get();
-        const enabled = !!snap.data()?.enabled;
-
-        await db.collection("coupons")
-          .doc(id)
-          .set({ enabled:!enabled, updatedAt:new Date() },{merge:true});
-
-        loadCoupons();
-
-      } else if(act === "delete"){
-        if(confirm("¿Eliminar "+id+"?")){
-          await db.collection("coupons").doc(id).delete();
-          loadCoupons();
-        }
-      }
-    };
-  });
-}
-
-async function loadCoupons(){
-  const q = await db.collection("coupons").orderBy("code").get();
-  renderCoupons(q.docs);
-}
-</script>
-
-<!-- ============================================================
-      🔥 BOOT FINAL
-=============================================================== -->
-<script>
-(async function boot(){
-  loadCoupons();
-})();
-</script>
-
-<!-- ============================================================
-      🔥 BOTONES FINALES CRUD
-=============================================================== -->
 <script>
 window.addEventListener("DOMContentLoaded", ()=>{
-
   const btnSaveProduct = document.querySelector("#btnSaveProduct");
-  if(btnSaveProduct){
-    btnSaveProduct.onclick = saveProduct;
-  }
-
+  if(btnSaveProduct){ btnSaveProduct.onclick = saveProduct; }
   const btnClearProduct = document.querySelector("#btnClearProduct");
-  if(btnClearProduct){
-    btnClearProduct.onclick = clearProductForm;
-  }
-
+  if(btnClearProduct){ btnClearProduct.onclick = clearProductForm; }
 });
 </script>
 
