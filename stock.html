@@ -51,7 +51,17 @@
     <div class="card">
         <div class="row" style="margin-bottom:20px">
             <div style="flex:1; min-width:200px"><input type="text" id="searchBox" placeholder="🔍 Buscar ingrediente..." /></div>
-            <div><select id="filterCat" style="width:auto"><option value="all">Todas</option><option value="carniceria">Carne</option><option value="panaderia">Pan</option><option value="almacen">Almacén</option><option value="verdularia">Verdura</option><option value="bebidas">Bebidas</option><option value="packaging">Pack</option></select></div>
+            <div>
+                <select id="filterCat" style="width:auto">
+                    <option value="all">Todas</option>
+                    <option value="carniceria">Carne</option>
+                    <option value="panaderia">Pan</option>
+                    <option value="papas">Papas / Congelados</option> <option value="salsas">Salsas</option> <option value="almacen">Almacén</option>
+                    <option value="verdularia">Verdura</option>
+                    <option value="bebidas">Bebidas</option>
+                    <option value="packaging">Pack</option>
+                </select>
+            </div>
         </div>
         <div style="overflow-x:auto">
             <table>
@@ -65,28 +75,24 @@
   <div class="modal-overlay" id="modalProd">
     <div class="modal">
         <h2 id="mpTitle">Nuevo Producto</h2> <input type="hidden" id="mpId">
-        <div style="margin-bottom:15px"><label>Nombre</label><input type="text" id="mpName" placeholder="Ej: Cebolla Crispy"></div>
-        <div style="margin-bottom:15px"><label>Categoría</label><select id="mpCat"><option value="carniceria">Carne</option><option value="panaderia">Pan</option><option value="almacen">Almacén</option><option value="verdularia">Verdura</option><option value="bebidas">Bebidas</option><option value="packaging">Packaging</option></select></div>
-        
-        <div class="row">
-            <div style="flex:1">
-                <label>Stock</label>
-                <input type="number" id="mpQty" step="0.001">
-            </div>
-            <div style="flex:1">
-                <label>Unidad</label>
-                <select id="mpUnit">
-                    <option value="kg">Kilos (kg)</option>
-                    <option value="gr">Gramos (gr)</option>
-                    <option value="lt">Litros (l)</option>
-                    <option value="ml">Mililitros (ml)</option>
-                    <option value="u">Unidades (u)</option>
-                    <option value="pq">Paquetes</option>
-                </select>
-            </div>
+        <div style="margin-bottom:15px"><label>Nombre</label><input type="text" id="mpName" placeholder="Ej: Salsa Cheddar"></div>
+        <div style="margin-bottom:15px"><label>Categoría</label>
+            <select id="mpCat">
+                <option value="carniceria">Carne</option>
+                <option value="panaderia">Pan</option>
+                <option value="papas">Papas Fritas / Congelados</option>
+                <option value="salsas">Salsas / Aderezos</option>
+                <option value="almacen">Almacén</option>
+                <option value="verdularia">Verdura</option>
+                <option value="bebidas">Bebidas</option>
+                <option value="packaging">Packaging</option>
+            </select>
         </div>
-        
-        <div style="margin-bottom:15px"><label>Mínimo (Alerta)</label><input type="number" id="mpMin" value="5" step="0.001"></div>
+        <div class="row">
+            <div style="flex:1"><label>Stock</label><input type="number" id="mpQty" step="0.001"></div>
+            <div style="flex:1"><label>Unidad</label><select id="mpUnit"><option value="u">Unid.</option><option value="kg">Kg</option><option value="gr">Gramos</option><option value="lt">Lt</option><option value="ml">Ml</option><option value="pq">Paq.</option></select></div>
+        </div>
+        <div style="margin-bottom:15px"><label>Mínimo</label><input type="number" id="mpMin" value="5" step="0.001"></div>
         <div class="row"><button onclick="saveProduct()" class="btn primary" style="flex:1">Guardar</button><button onclick="$('#modalProd').style.display='none'" class="btn" style="flex:1">Cerrar</button></div>
         <button id="btnDelProd" class="btn danger" style="width:100%; margin-top:10px" onclick="delProduct()">Eliminar</button>
     </div>
@@ -95,7 +101,9 @@
   <div class="modal-overlay" id="modalRecipe">
     <div class="modal" style="max-width:600px">
         <h2>Gestor de Recetas</h2>
-        <p style="font-size:12px; color:#666; margin-bottom:15px">Conecta el nombre del pedido con los ingredientes del stock.</p>
+        <p style="font-size:12px; color:#666; margin-bottom:15px">
+            <b>Nota:</b> Las papas fritas se descuentan automáticamente (200g) en cada hamburguesa. No las agregues aquí salvo que quieras descontar EXTRA.
+        </p>
         
         <div style="background:#f0f7ff; padding:15px; border-radius:10px; border:1px solid #d0e4ff; margin-bottom:20px">
             <label style="font-weight:bold; font-size:12px">NOMBRE EN EL PEDIDO (Exacto)</label>
@@ -107,7 +115,7 @@
                     <select id="recIngSelect" style="background:#fff"></select>
                 </div>
                 <div style="flex:1">
-                    <label style="font-size:11px">Cantidad (Según stock)</label>
+                    <label style="font-size:11px">Cantidad</label>
                     <input type="number" id="recIngQty" placeholder="Ej: 0.05" step="0.001" style="background:#fff">
                 </div>
                 <button class="btn primary" onclick="addIngToRecipe()">+</button>
@@ -146,10 +154,7 @@
         INVENTORY.filter(p=>p.name.toLowerCase().includes(t) && (c==='all'||p.category===c)).forEach(p=>{
             let stHtml = `<span class="status-dot st-ok"></span>OK`;
             if(p.qty<=p.min) stHtml=`<span class="status-dot st-danger"></span>CRIT`; else if(p.qty<=p.min*1.5) stHtml=`<span class="status-dot st-warn"></span>BAJO`;
-            
-            // Mostrar hasta 3 decimales si no es entero
             const displayQty = Number(p.qty) % 1 !== 0 ? Number(p.qty).toFixed(3) : p.qty;
-
             b.insertAdjacentHTML('beforeend', `<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td>
             <td><div class="qty-control"><button class="qty-btn" onclick="upd('${p.id}',-1)">-</button><b>${displayQty}</b><button class="qty-btn" onclick="upd('${p.id}',1)">+</button> <small>${p.unit}</small></div></td>
             <td>${p.min}</td><td>${stHtml}</td><td><button class="btn btn-sm" onclick="openProd('${p.id}')">✏️</button></td></tr>`);
