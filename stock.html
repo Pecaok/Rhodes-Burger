@@ -56,7 +56,9 @@
                     <option value="all">Todas</option>
                     <option value="carniceria">Carne</option>
                     <option value="panaderia">Pan</option>
-                    <option value="papas">Papas / Congelados</option> <option value="salsas">Salsas</option> <option value="almacen">Almacén</option>
+                    <option value="papas">Papas / Congelados</option>
+                    <option value="salsas">Salsas</option>
+                    <option value="almacen">Almacén</option>
                     <option value="verdularia">Verdura</option>
                     <option value="bebidas">Bebidas</option>
                     <option value="packaging">Pack</option>
@@ -102,7 +104,7 @@
     <div class="modal" style="max-width:600px">
         <h2>Gestor de Recetas</h2>
         <p style="font-size:12px; color:#666; margin-bottom:15px">
-            <b>Nota:</b> Las papas fritas se descuentan automáticamente (200g) en cada hamburguesa. No las agregues aquí salvo que quieras descontar EXTRA.
+            <b>Nota:</b> Las papas fritas se descuentan automáticamente (200g) en cada hamburguesa.
         </p>
         
         <div style="background:#f0f7ff; padding:15px; border-radius:10px; border:1px solid #d0e4ff; margin-bottom:20px">
@@ -167,17 +169,20 @@
         const s=$('#recIngSelect'); s.innerHTML='<option value="">Seleccionar...</option>';
         INVENTORY.forEach(i=> s.insertAdjacentHTML('beforeend', `<option value="${i.name}">${i.name} (${i.unit})</option>`));
     }
+    
     window.addIngToRecipe = () => {
         const name=$('#recIngSelect').value, qty=$('#recIngQty').value;
         if(!name || !qty) return alert("Selecciona ingrediente y cantidad");
         currentIngs.push({ingrediente: name, cantidad: Number(qty)});
         renderCurrentIngs(); $('#recIngQty').value='';
     };
+    
     function renderCurrentIngs(){
         const l=$('#recipeList'); l.innerHTML='';
         if(!currentIngs.length) return l.innerHTML='<div style="text-align:center;color:#ccc">Lista vacía</div>';
         currentIngs.forEach((i,x)=> l.insertAdjacentHTML('beforeend', `<div class="ing-item"><span>${i.cantidad} x ${i.ingrediente}</span> <button style="color:red;border:none;background:none;cursor:pointer" onclick="currentIngs.splice(${x},1);renderCurrentIngs()">×</button></div>`));
     }
+    
     window.saveRecipe = async () => {
         const n=$('#recName').value.trim();
         if(!n || !currentIngs.length) return alert("Falta nombre o ingredientes");
@@ -186,13 +191,31 @@
         await db.collection('recipes').doc(n).set({ ingredients: currentIngs });
         alert("Receta guardada!"); $('#recName').value=''; currentIngs=[]; renderCurrentIngs();
     };
+
+    // 🔥 NUEVA FUNCIÓN PARA EDITAR RECETA 🔥
+    window.editRecipe = (id) => {
+        const r = RECIPES.find(x => x.id === id);
+        if (!r) return;
+        // Cargar nombre
+        $('#recName').value = r.id;
+        // Cargar ingredientes (clonamos el array para no romper la referencia original)
+        currentIngs = [...r.ingredients];
+        renderCurrentIngs();
+        // Scroll arriba para ver lo que editamos
+        $('.modal').scrollTop = 0;
+    };
+
     function renderSavedRecipes(){
         const c=$('#savedRecipes'); c.innerHTML='';
         RECIPES.forEach(r=>{
             const txt = r.ingredients.map(i=>`${i.cantidad} ${i.ingrediente}`).join(', ');
+            // 🔥 AÑADIDO BOTÓN DE EDITAR (✏️) AL LADO DE BORRAR 🔥
             c.insertAdjacentHTML('beforeend', `<div style="padding:8px; border-bottom:1px solid #eee; display:flex; justify-content:space-between">
                 <div><b>${r.id}</b><div style="color:#666;font-size:11px">${txt}</div></div>
-                <button style="color:red;border:none;background:none;cursor:pointer" onclick="delRecipe('${r.id}')">🗑</button>
+                <div style="display:flex; gap:10px">
+                    <button style="color:blue;border:none;background:none;cursor:pointer;font-size:16px" title="Editar" onclick="editRecipe('${r.id}')">✏️</button>
+                    <button style="color:red;border:none;background:none;cursor:pointer;font-size:16px" title="Borrar" onclick="delRecipe('${r.id}')">🗑</button>
+                </div>
             </div>`);
         });
     }
