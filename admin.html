@@ -226,12 +226,17 @@
         const $ = s => document.getElementById(s);
         const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
         
+        // Parseador híbrido para fechas viejas y nuevas
         function parseDateAny(val){
             if(!val) return null;
-            if(val.toDate) return val.toDate(); // Timestamp (Pedidos Viejos)
-            if(typeof val === 'string') return new Date(val); // Texto (Pedidos Nuevos)
-            if(typeof val === 'number') return new Date(val); 
-            return new Date(val);
+            if(val.toDate) return val.toDate(); // Timestamp
+            if(typeof val === 'string') {
+                 // Intentar ISO normal
+                 let d = new Date(val);
+                 if(!isNaN(d.getTime())) return d;
+            }
+            if(typeof val === 'number') return new Date(val);
+            return null;
         }
 
         // 3. LOGOUT
@@ -282,7 +287,7 @@
                end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
             }
 
-            // 🔥 FETCH UNIFICADO (VIEJOS Y NUEVOS)
+            // 🔥 LLAMADA UNIFICADA
             const orders = await fetchUnifiedOrders(start, end);
             CURRENT_ORDERS = orders;
 
@@ -296,22 +301,22 @@
             const hourMatrix = Array.from({length:6}, ()=>Array(daysInMonth + 1).fill(0));
 
             orders.forEach(o => {
-                const dt = parseDateAny(o.createdAt);
+                const dt = parseDateAny(o.createdAt || o.created_at); // 🔥 Doble chequeo de fecha
                 if(!dt) return;
-                
-                // Filtro manual de fechas para asegurar
-                if(dt < start || dt > end) return;
+                if(dt < start || dt > end) return; // Filtro JS
 
                 const total = Number(o.total || o.rawTotal || 0);
                 totalOrders++;
                 totalRevenue += total;
 
                 // Stats
-                let pay = (o.pago || 'otro').toLowerCase();
+                let pay = (o.pago || o.payment_method || 'otro').toLowerCase();
                 if(pay.includes('efectivo')) pay = 'Efectivo';
                 else if(pay.includes('mercado')||pay.includes('mp')) pay = 'Mercado Pago';
                 else if(pay.includes('debito')) pay = 'Débito';
                 else if(pay.includes('transfer')) pay = 'Transferencia';
+                else pay = 'Otro';
+                
                 payStats[pay] = (payStats[pay]||0) + total;
 
                 let src = (o.source || 'web').toLowerCase();
@@ -323,8 +328,10 @@
                 // Tiempo
                 if(o.updatedAt && (o.status==='ready'||o.status==='delivered')){
                     const endT = parseDateAny(o.updatedAt);
-                    const diff = (endT - dt)/60000;
-                    if(diff>0 && diff<180){ totalMinutes+=diff; countTime++; }
+                    if(endT){
+                        const diff = (endT - dt)/60000;
+                        if(diff>0 && diff<240){ totalMinutes+=diff; countTime++; }
+                    }
                 }
 
                 // Cliente
@@ -386,34 +393,40 @@
 
         }
 
-        // 🔥 FETCH DE DOBLE VÍA (TEXTO Y FECHA)
+        // 🔥 ESTRATEGIA HÍBRIDA DE FECHAS
         async function fetchUnifiedOrders(start, end){
             const sStr = start.toISOString().split('T')[0]; 
             const eStr = end.toISOString().split('T')[0];
             
-            // 1. Pedidos Nuevos (Fecha es String ISO)
+            // 1. Pedidos Nuevos (String ISO)
             const p1 = db.collection('orders')
                 .where('createdAt', '>=', sStr)
                 .where('createdAt', '<=', eStr + 'T23:59:59')
                 .get();
                 
-            // 2. Pedidos Viejos (Fecha es Timestamp)
+            // 2. Pedidos Viejos (Timestamp)
             const p2 = db.collection('orders')
                 .where('createdAt', '>=', start)
                 .where('createdAt', '<=', end)
                 .get();
+                
+            // 3. Pedidos Viejos (created_at snake_case)
+            const p3 = db.collection('orders')
+                .where('created_at', '>=', start)
+                .where('created_at', '<=', end)
+                .get();
 
-            const [sn1, sn2] = await Promise.all([p1, p2]);
+            const [sn1, sn2, sn3] = await Promise.all([p1, p2, p3]);
             
             const map = new Map();
             const addDoc = (doc) => {
                 const d = doc.data();
-                // Excluir cancelados del total
                 if(!d.status?.includes('cancel')) map.set(doc.id, d);
             };
             
             sn1.forEach(addDoc);
             sn2.forEach(addDoc);
+            sn3.forEach(addDoc);
             
             return Array.from(map.values());
         }
@@ -422,7 +435,7 @@
             if(!CURRENT_ORDERS.length) return alert("Sin datos.");
             let csv = "Fecha,Pedido,Cliente,Pago,Total,Estado\n";
             CURRENT_ORDERS.forEach(o=>{
-                const d = parseDateAny(o.createdAt)?.toLocaleDateString()||'';
+                const d = parseDateAny(o.createdAt || o.created_at)?.toLocaleDateString()||'';
                 csv += `${d},${o.orderNumber},"${(o.nombre||'').replace(/"/g,'')}",${o.pago},${o.total},${o.status}\n`;
             });
             const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
@@ -446,11 +459,13 @@
             const counts = Array(days).fill(0);
 
             orders.forEach(o=>{
-                const dt = parseDateAny(o.createdAt);
+                const dt = parseDateAny(o.createdAt || o.created_at);
                 if(dt && dt.getMonth() === m-1){
                     const d = dt.getDate()-1;
-                    totals[d]+=Number(o.total||0);
-                    counts[d]++;
+                    if(d >= 0 && d < days) {
+                        totals[d] += Number(o.total||0);
+                        counts[d]++;
+                    }
                 }
             });
 
@@ -484,9 +499,7 @@
                 data:{
                     labels: Array.from({length:d},(_,i)=>i+1),
                     datasets: [
-                        // Pedidos: Azul Oscuro Fuerte
                         { label:'Pedidos', data:c, backgroundColor:'#303F9F', yAxisID:'y', order: 2 },
-                        // Ingresos: Verde Esmeralda con Puntos
                         { 
                             type:'line', label:'$', data:a, 
                             borderColor:'#009688', backgroundColor:'rgba(0, 150, 136, 0.05)', 
@@ -506,7 +519,7 @@
             const chart = new Chart(ctx, {
                 type:'doughnut',
                 data:{ labels:l, datasets:[{ data:d, backgroundColor:COLORS, borderWidth:2, borderColor:'#fff' }] },
-                options:{ responsive:true, maintainAspectRatio:false, cutout:'65%', plugins:{legend:{position:'bottom', labels:{padding:15, usePointStyle:true}}} }
+                options:{ responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{legend:{position:'bottom', labels:{padding:15, usePointStyle:true}}} }
             });
             if(id==='payChart') d1=chart;
             if(id==='sourceChart') d2=chart;
@@ -525,7 +538,6 @@
                 const max = Math.max(...row, 1);
                 row.forEach(v=>{
                     const a = v ? (v/max)*0.85+0.15 : 0.05;
-                    // Azul para el mapa de calor
                     const bg = v ? `rgba(48, 63, 159, ${a})` : '#f0f0f0';
                     el.insertAdjacentHTML('beforeend', `<div class="hm-cell" style="background:${bg}" title="${v}">${v||''}</div>`);
                 });
