@@ -41,6 +41,7 @@
     .tab{padding:8px 16px;border-radius:20px;background:#e0e0e0;color:#555;font-weight:600;font-size:14px;cursor:pointer;border:none;transition:all .2s}
     .tab.active{background:var(--primary);color:#fff;box-shadow:0 4px 8px rgba(98,90,69,.2)}
 
+    /* Tarjeta */
     .order{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:24px;margin-bottom:24px;border:1px solid transparent;transition:all .3s}
     .order:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.12)}
     .order.cancelled{opacity:.6;filter:grayscale(1)}
@@ -76,6 +77,7 @@
     .state-btn.on.delivered{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-btn.cancelled:hover{background:#ffebee;color:#c62828;border-color:#ef9a9a}
 
+    /* PAGO */
     .pay-line{display:flex;gap:8px;align-items:center;background:#f4f4f9;padding:4px;border-radius:10px}
     .pay-select{padding:8px;border-radius:8px;border:1px solid var(--ring);background:#fff;font-weight:600;color:var(--text);cursor:pointer; outline:none; min-width: 140px;}
     .pay-toggle{padding:8px 16px;border-radius:8px;border:none;font-weight:700;font-size:13px;cursor:pointer;color:#fff;min-width:110px}
@@ -97,8 +99,9 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
+    // 1. Init
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
-    try{ firebase.initializeApp(firebaseConfig); }catch(e){ console.error("Error Firebase:", e); }
+    try{ firebase.initializeApp(firebaseConfig); }catch(e){ console.error("Firebase Init Error", e); }
     const db = firebase.firestore();
     window.idToDoc = new Map();
 
@@ -119,6 +122,7 @@
     let RECETAS_DB = {}; 
     let INVENTARIO_DB = {}; // Mapa: "nombre minuscula" -> "ID"
 
+    // Carga inicial y en tiempo real
     db.collection('recipes').onSnapshot(snap => {
         RECETAS_DB = {};
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
@@ -127,31 +131,38 @@
     db.collection('inventory').onSnapshot(snap => {
         INVENTARIO_DB = {};
         snap.forEach(doc => { 
+            // Guardamos ID indexado por nombre en minúscula para buscar fácil
             INVENTARIO_DB[doc.data().name.trim().toLowerCase()] = doc.id; 
         });
     });
 
-    // --- BUSCADOR INTELIGENTE DE INGREDIENTES ---
-    // Busca en el inventario algo que coincida con las palabras clave
+    // --- BUSCADOR SEGURO DE INGREDIENTES ---
     function findSmartId(keywords) {
-        // keywords es array ej: ['carne', 'medallon']
-        // Busca si alguna key del inventario contiene alguna de las palabras
         const stockNames = Object.keys(INVENTARIO_DB);
+        // 1. Intento exacto primero
+        for (const key of keywords) {
+            const kLower = key.toLowerCase();
+            if (INVENTARIO_DB[kLower]) return INVENTARIO_DB[kLower];
+        }
+        // 2. Intento parcial (que contenga la palabra)
         for (const stockName of stockNames) {
             for (const key of keywords) {
-                if (stockName.includes(key)) return INVENTARIO_DB[stockName];
+                if (stockName.includes(key.toLowerCase())) return INVENTARIO_DB[stockName];
             }
         }
         return null;
     }
 
-    // --- FUNCIÓN UNIFICADA DE GESTIÓN DE STOCK ---
+    // --- GESTIÓN DE STOCK (REST y SUMA) ---
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
-        if(factor === -1 && pedido.stockDescontado) return;
-        if(factor === 1 && !pedido.stockDescontado) return;
+        
+        // Protecciones
+        if(factor === -1 && pedido.stockDescontado) return; // Ya descontado
+        if(factor === 1 && !pedido.stockDescontado) return; // No se puede devolver lo que no se descontó
 
-        console.log(`🔄 Stock update (${factor === -1 ? 'Resta' : 'Suma'}) pedido #${pedido.orderNumber}`);
+        console.log(`📊 GESTIONANDO STOCK Pedido #${pedido.orderNumber} (Factor: ${factor})`);
+
         const batch = db.batch();
         let huboCambios = false;
 
@@ -169,56 +180,50 @@
 
             if (ingredientes) {
                 ingredientes.forEach(ing => {
-                    // Intento exacto
+                    // Buscar ID (Exacto o Inteligente)
                     let ingID = INVENTARIO_DB[ing.ingrediente.trim().toLowerCase()];
-                    // Si no encuentra exacto, intenta búsqueda inteligente parcial
-                    if(!ingID) ingID = findSmartId([ing.ingrediente.trim().toLowerCase()]);
+                    if(!ingID) ingID = findSmartId([ing.ingrediente]); // Busca ignorando mayúsculas
 
                     if (ingID) {
                         const ref = db.collection('inventory').doc(ingID);
-                        const delta = ing.cantidad * qtyPedida * factor; 
+                        const delta = Number(ing.cantidad) * qtyPedida * factor;
                         batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
                         huboCambios = true;
                     }
                 });
             }
 
-            // B. EXTRAS (Con búsqueda inteligente)
+            // B. EXTRAS (Lógica reforzada)
             if(item.extras){
-                for (const [key, val] of Object.entries(item.extras)) {
+                for (const [key, valRaw] of Object.entries(item.extras)) {
+                    const val = Number(valRaw); // Asegurar número
                     if (val > 0) {
-                        let ingID = null;
-                        let amount = 0;
+                        let searchTerms = [];
+                        let amountPerUnit = 1;
 
                         if (key === 'patty') {
-                            amount = 1;
-                            // Si es de pollo, busca pollo
+                            // Detectar si es pollo o carne
                             if (prodNameLower.includes('pollo') || prodNameLower.includes('crispy') || prodNameLower.includes('chicken')) {
-                                ingID = findSmartId(['pollo', 'chicken', 'crispy']);
+                                searchTerms = ['medallón de pollo', 'pollo', 'crispy'];
                             } else {
-                                // Si no, busca carne o medallon
-                                ingID = findSmartId(['carne','Medallon', 'patty']);
+                                searchTerms = ['carne (medallón)', 'carne', 'medallon', 'patty'];
                             }
                         } 
-                        else if (key === 'cheddar') { 
-                            amount = 1; 
-                            ingID = findSmartId(['Cheddar', 'queso']);
-                        }
-                        else if (key === 'bacon') { 
-                            amount = 0.03; // 30g
-                            ingID = findSmartId(['Bacon', 'panceta']);
-                        }
-                        else if (key === 'brioche') {
-                            amount = 1;
-                            ingID = findSmartId(['brioche', 'pan']);
-                        }
+                        else if (key === 'cheddar') { searchTerms = ['cheddar', 'queso']; }
+                        else if (key === 'bacon') { searchTerms = ['bacon', 'panceta']; amountPerUnit = 0.03; }
+                        else if (key === 'brioche') { searchTerms = ['brioche', 'pan brioche']; }
+                        else { searchTerms = [key]; } // Fallback para otros extras
 
+                        const ingID = findSmartId(searchTerms);
+                        
                         if (ingID) {
                             const ref = db.collection('inventory').doc(ingID);
-                            const delta = amount * val * factor;
+                            const delta = amountPerUnit * val * factor;
                             batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
                             huboCambios = true;
-                            console.log(`   -> Extra: ${key} (${delta})`);
+                            console.log(`   ${factor===-1?'Restando':'Devolviendo'} Extra: ${key} (${delta})`);
+                        } else {
+                            console.warn(`   ⚠️ No encontré stock para el extra: ${key}`);
                         }
                     }
                 }
@@ -227,26 +232,35 @@
 
         if (huboCambios) {
             const pedidoRef = db.collection('orders').doc(pedido.id);
+            // Actualizamos la marca: true si descontamos (-1), false si devolvimos (1)
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
-            console.log("✅ Stock actualizado correctamente.");
+            console.log("✅ Stock actualizado exitosamente.");
         }
     }
 
-    // 3. Globales
+    // 3. Funciones Globales
     window.logout = () => { localStorage.removeItem('rb_admin_ok'); location.replace('login.html'); };
 
+    // 🔥 LOGICA DE ESTADOS 🔥
     window.setOrderStatus = async (id, next, isPaid) => {
         if(next==='delivered' && !isPaid){ alert("⚠️ COBRAR PRIMERO: El pedido figura pendiente."); return; }
+        
         try{ 
+            // Obtenemos los datos ANTES de cambiar el estado
             const docSnap = await db.collection('orders').doc(id).get();
             if(!docSnap.exists) return;
             const pedidoData = { id: docSnap.id, ...docSnap.data() };
 
-            if(next === 'delivered'){ await gestionarStock(pedidoData, -1); } 
-            else if(next === 'cancelled'){ await gestionarStock(pedidoData, 1); }
+            if(next === 'delivered'){
+                await gestionarStock(pedidoData, -1); // Restar
+            } 
+            else if(next === 'cancelled'){
+                await gestionarStock(pedidoData, 1); // Devolver
+            }
 
             await db.collection("orders").doc(id).update({status:next}); 
+
         }catch(e){console.error(e);}
     };
 
@@ -262,7 +276,6 @@
     window.printOrder = (id) => { const doc = window.idToDoc.get(id); if(doc) window.trySilentPrint(doc); };
     
     window.pickDate = (o) => { if(o.createdAt?.toDate) return o.createdAt.toDate(); if(typeof o.createdAt==='string') return new Date(o.createdAt); return new Date(); };
-    
     window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
 
     window.getCat = (item) => { const n = (item.name||"").toLowerCase(); const t = (item.type||"").toLowerCase(); if(t==='burger' || n.includes('hamburguesa') || n.includes('doble') || n.includes('simple') || n.includes('crispy')) return 'b'; if(t==='side' || n.includes('papas') || n.includes('fritas') || n.includes('sazon') || n.includes('sin sal') || n.includes('con sal')) return 'f'; if(t==='drink' || n.includes('coca') || n.includes('agua') || n.includes('cerveza')) return 'd'; return 'o'; };
