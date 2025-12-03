@@ -116,16 +116,128 @@
     }
     checkSession(); setInterval(checkSession, 5*60*1000);
 
+    // =================================================================
+    // 🔥 CONFIGURACIÓN DE RECETAS (DICCIONARIO DE INGREDIENTES) 🔥
+    // =================================================================
+    // La clave (ej: "Hamburguesa Doble") debe ser IGUAL a como sale en el pedido.
+    // Los ingredientes deben tener el MISMO NOMBRE que en tu Stock.
+    const RECETAS = {
+        "Hamburguesa Simple": [
+            { ingrediente: "Carne (Medallón)", cantidad: 1 },
+            { ingrediente: "Pan de Papa", cantidad: 1 }
+        ],
+        "Hamburguesa Doble": [
+            { ingrediente: "Carne (Medallón)", cantidad: 2 },
+            { ingrediente: "Pan de Papa", cantidad: 1 },
+            { ingrediente: "Cheddar (Fetas)", cantidad: 2 } // Doble queso
+        ],
+        "Hamburguesa Triple": [
+            { ingrediente: "Carne (Medallón)", cantidad: 3 },
+            { ingrediente: "Pan de Papa", cantidad: 1 },
+            { ingrediente: "Cheddar (Fetas)", cantidad: 3 },
+            { ingrediente: "Bacon / Panceta", cantidad: 0.05 } // 50g aprox
+        ],
+        // Ejemplo para papas
+        "Papas Fritas": [
+             { ingrediente: "Bolsa de Papas", cantidad: 0.2 } // 200g de papa
+        ],
+        // Agrega aquí el resto... "Royal", "Crispy", etc.
+    };
+    
+    // Nombres exactos de extras para descontar
+    const EXTRAS_MAPPING = {
+        'patty': { ingrediente: "Carne (Medallón)", cantidad: 1 },
+        'cheddar': { ingrediente: "Cheddar (Fetas)", cantidad: 1 },
+        'bacon': { ingrediente: "Bacon / Panceta", cantidad: 0.03 }
+    };
+
+    // --- LÓGICA DE DESCUENTO DE STOCK ---
+    async function descontarStockDePedido(pedido) {
+        if (!pedido.items || pedido.stockDescontado) return; // Ya se descontó o no tiene items
+
+        console.log("⚡ Descontando stock para pedido #" + pedido.orderNumber);
+        
+        // 1. Traer todo el inventario para mapear Nombres -> IDs
+        const snapshot = await db.collection('inventory').get();
+        const inventarioMap = {}; 
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            inventarioMap[data.name.trim().toLowerCase()] = doc.id;
+        });
+
+        const batch = db.batch();
+        let huboCambios = false;
+
+        // 2. Recorrer items del pedido
+        pedido.items.forEach(item => {
+            const nombreProd = item.name.trim();
+            const qty = Number(item.qty || 1);
+            
+            // A. Descontar receta base
+            const receta = RECETAS[nombreProd] || RECETAS[Object.keys(RECETAS).find(k => nombreProd.includes(k))]; // Intento de match parcial
+            
+            if (receta) {
+                receta.forEach(ing => {
+                    const idStock = inventarioMap[ing.ingrediente.trim().toLowerCase()];
+                    if (idStock) {
+                        const ref = db.collection('inventory').doc(idStock);
+                        batch.update(ref, { qty: firebase.firestore.FieldValue.increment(- (ing.cantidad * qty)) });
+                        huboCambios = true;
+                    }
+                });
+            }
+
+            // B. Descontar Extras (si tiene)
+            if(item.extras){
+                for (const [key, val] of Object.entries(item.extras)) {
+                    // key puede ser 'patty', 'cheddar'. val es la cantidad extra
+                    const mapExtra = EXTRAS_MAPPING[key];
+                    if(mapExtra && val > 0){
+                        const idStock = inventarioMap[mapExtra.ingrediente.trim().toLowerCase()];
+                        if(idStock){
+                            const ref = db.collection('inventory').doc(idStock);
+                            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(- (mapExtra.cantidad * val)) });
+                            huboCambios = true;
+                        }
+                    }
+                }
+            }
+        });
+
+        // 3. Confirmar cambios
+        if (huboCambios) {
+            // Marcar pedido como descontado para no repetir
+            const pedidoRef = db.collection('orders').doc(pedido.id);
+            batch.update(pedidoRef, { stockDescontado: true });
+            
+            await batch.commit();
+            console.log("✅ Stock actualizado.");
+            // Opcional: alert("Stock descontado");
+        }
+    }
+
     // 3. Funciones Globales
     window.logout = () => { localStorage.removeItem('rb_admin_ok'); location.replace('login.html'); };
 
+    // 🔥 MODIFICADO PARA INTEGRAR EL STOCK 🔥
     window.setOrderStatus = async (id, next, isPaid) => {
         if(next==='delivered' && !isPaid){ alert("⚠️ COBRAR PRIMERO: El pedido figura pendiente."); return; }
-        try{ await db.collection("orders").doc(id).update({status:next}); }catch(e){console.error(e);}
+        
+        try{ 
+            // 1. Actualizar estado
+            await db.collection("orders").doc(id).update({status:next}); 
+            
+            // 2. Si es ENTREGADO, descontar stock
+            if(next === 'delivered'){
+                const doc = await db.collection('orders').doc(id).get();
+                if(doc.exists){
+                    descontarStockDePedido({ id: doc.id, ...doc.data() });
+                }
+            }
+        }catch(e){console.error(e);}
     };
 
     window.setPaymentStatus = async (id, currentPaid, currentMethod) => {
-        // Bloqueo: Si no hay método o es la opción vacía, no deja pagar.
         if(!currentPaid && (!currentMethod || currentMethod === "")){ 
             alert("⚠️ Seleccioná un MÉTODO DE PAGO primero."); 
             return; 
@@ -179,6 +291,14 @@
       <div class="spacer"></div>
       <a href="pedido_local.html" class="nav-btn active">📦 Pedidos</a>
       <a href="finanzas.html" class="nav-btn">📈 Finanzas</a>
+      <div class="dropdown" style="position:relative;display:inline-block">
+            <button onclick="document.getElementById('ddStock').classList.toggle('show')" class="nav-btn">📋 Stock ▾</button>
+            <div id="ddStock" style="display:none;position:absolute;background:#fff;border:1px solid #ccc;border-radius:8px;top:100%;left:0;min-width:150px;box-shadow:0 5px 15px rgba(0,0,0,0.1)">
+                <a href="stock.html" style="display:block;padding:10px;text-decoration:none;color:#333;border-bottom:1px solid #eee">📦 Stock</a>
+                <a href="ingresos.html" style="display:block;padding:10px;text-decoration:none;color:#333">📥 Ingresos</a>
+            </div>
+      </div>
+      <style>.show{display:block!important}</style>
       <a href="mostrador.html" class="nav-btn">🧾 Mostrador</a>
       <a href="admin.html" class="nav-btn">⚙️ Admin</a>
       
@@ -286,7 +406,7 @@
 
         // 🔥 PAGO
         let payVal = o.pago;
-        if(payVal === 'mostrador_sin_especificar') payVal = ""; // Para mostrar la opción vacía
+        if(payVal === 'mostrador_sin_especificar') payVal = "";
 
         const items = Array.isArray(o.items) ? o.items : [];
         const cats = { b:[], f:[], d:[], o:[] };
