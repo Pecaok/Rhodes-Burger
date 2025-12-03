@@ -100,23 +100,9 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
- // 1. Init
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-      authDomain: "rhodes-burguers.firebaseapp.com",
-      projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-    };
-
-    try {
-      firebase.initializeApp(firebaseConfig);
-    } catch (e) {
-      console.error("Error Firebase Init:", e);
-    }
-
-    // Definimos db aquí para que exista globalmente
+    // 1. Init
+    const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
+    try{ firebase.initializeApp(firebaseConfig); }catch(e){ console.error("Firebase Init Error", e); }
     const db = firebase.firestore();
     window.idToDoc = new Map();
 
@@ -130,80 +116,89 @@
     }
     checkSession(); setInterval(checkSession, 5*60*1000);
 
-  // =================================================================
-    // 🔥 CONFIGURACIÓN DE RECETAS (DICCIONARIO DE INGREDIENTES) 🔥
     // =================================================================
-    const RECETAS = {
-        "Cheeseburger Simple": [
-            { ingrediente: "Carne (Medallón)", cantidad: 1 },
-            { ingrediente: "Cheddar (Fetas)", cantidad: 2 },
-            { ingrediente: "Pan de Papa", cantidad: 1 } 
-        ],
-        "Hamburguesa Doble": [
-            { ingrediente: "Carne (Medallón)", cantidad: 2 },
-            { ingrediente: "Pan de Papa", cantidad: 1 },
-            { ingrediente: "Cheddar (Fetas)", cantidad: 2 }
-        ],
-        "Hamburguesa Triple": [
-            { ingrediente: "Carne (Medallón)", cantidad: 3 },
-            { ingrediente: "Pan de Papa", cantidad: 1 },
-            { ingrediente: "Cheddar (Fetas)", cantidad: 3 },
-            { ingrediente: "Bacon / Panceta", cantidad: 0.05 }
-        ],
-        "Papas Fritas": [
-             { ingrediente: "Bolsa de Papas", cantidad: 0.2 }
-        ],
-        // Mapeos de guarnición
-        "Con Sal": [ { ingrediente: "Bolsa de Papas", cantidad: 0.2 } ],
-        "Sin Sal": [ { ingrediente: "Bolsa de Papas", cantidad: 0.2 } ],
-        "Sazonadas": [ { ingrediente: "Bolsa de Papas", cantidad: 0.2 } ]
-    };
+    // 🔥 SISTEMA DE STOCK INTELIGENTE (CONECTADO A BASE DE DATOS) 🔥
+    // =================================================================
     
+    let RECETAS_DB = {}; // Aquí se guardarán las recetas descargadas
+    let INVENTARIO_DB = {}; // Aquí se guardarán los IDs de los ingredientes
+
+    // 1. Escuchar cambios en Recetas e Inventario en tiempo real
+    db.collection('recipes').onSnapshot(snap => {
+        RECETAS_DB = {};
+        snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
+        console.log("📚 Recetas actualizadas:", Object.keys(RECETAS_DB).length);
+    });
+
+    db.collection('inventory').onSnapshot(snap => {
+        INVENTARIO_DB = {};
+        snap.forEach(doc => { 
+            // Guardamos: "nombre del ingrediente" -> "ID del documento"
+            INVENTARIO_DB[doc.data().name.trim().toLowerCase()] = doc.id; 
+        });
+    });
+
+    // Mapeo fijo solo para extras (estos suelen ser estándar, si cambian, edita aquí)
     const EXTRAS_MAPPING = {
-        'patty': { ingrediente: "Carne (Medallón)", cantidad: 1 },
-        'cheddar': { ingrediente: "Cheddar (Fetas)", cantidad: 1 },
-        'brioche': { ingrediente: "Pan Brioche", cantidad: 1 },
-        'bacon': { ingrediente: "Bacon / Panceta", cantidad: 0.03 } // Asumiendo 30g extra
+        'patty': { name: "Carne (Medallón)", qty: 1 },
+        'cheddar': { name: "Cheddar (Fetas)", qty: 1 },
+        'bacon': { name: "Bacon / Panceta", qty: 0.03 }
     };
 
-    // --- 1. FUNCIÓN PARA DESCONTAR (Resta) ---
-    async function descontarStockDePedido(pedido) {
-        if (!pedido.items || pedido.stockDescontado) return; 
-
-        console.log("📉 Descontando stock pedido #" + pedido.orderNumber);
+    // --- FUNCIÓN UNIFICADA DE GESTIÓN DE STOCK ---
+    // factor: -1 para descontar (Entregado), 1 para devolver (Cancelado)
+    async function gestionarStock(pedido, factor) {
+        if (!pedido.items) return;
         
-        const snapshot = await db.collection('inventory').get();
-        const inventarioMap = {}; 
-        snapshot.forEach(doc => inventarioMap[doc.data().name.trim().toLowerCase()] = doc.id);
+        // Si vamos a descontar (-1) y ya estaba descontado: ERROR (Evitar doble descuento)
+        if(factor === -1 && pedido.stockDescontado) return;
+        // Si vamos a devolver (1) y NO estaba descontado: ERROR (No devolver lo que no se restó)
+        if(factor === 1 && !pedido.stockDescontado) return;
+
+        console.log(`🔄 Gestionando stock (${factor === -1 ? 'Descontar' : 'Reponer'}) pedido #${pedido.orderNumber}`);
 
         const batch = db.batch();
         let huboCambios = false;
 
         pedido.items.forEach(item => {
-            const nombreProd = item.name.trim();
-            const qty = Number(item.qty || 1);
+            const prodName = item.name.trim(); // Nombre en el pedido (ej: "Hamburguesa Doble")
+            const qtyPedida = Number(item.qty || 1);
+
+            // A. Buscar Receta en la DB (Búsqueda exacta o parcial)
+            let ingredientes = RECETAS_DB[prodName];
             
-            // Receta base
-            const receta = RECETAS[nombreProd] || RECETAS[Object.keys(RECETAS).find(k => nombreProd.includes(k))];
-            if (receta) {
-                receta.forEach(ing => {
-                    const idStock = inventarioMap[ing.ingrediente.trim().toLowerCase()];
-                    if (idStock) {
-                        const ref = db.collection('inventory').doc(idStock);
-                        batch.update(ref, { qty: firebase.firestore.FieldValue.increment(- (ing.cantidad * qty)) });
+            // Si no encuentra exacto, busca si el nombre contiene la clave (ej: "Hamburguesa Doble con fritas")
+            if (!ingredientes) {
+                const key = Object.keys(RECETAS_DB).find(k => prodName.includes(k));
+                if(key) ingredientes = RECETAS_DB[key];
+            }
+
+            if (ingredientes) {
+                ingredientes.forEach(ing => {
+                    // Buscar ID del ingrediente en el mapa de inventario
+                    const ingID = INVENTARIO_DB[ing.ingrediente.trim().toLowerCase()];
+                    if (ingID) {
+                        const ref = db.collection('inventory').doc(ingID);
+                        // Multiplicamos: Cantidad de la receta * Cantidad del pedido * Factor (-1 o 1)
+                        const delta = ing.cantidad * qtyPedida * factor; 
+                        batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
                         huboCambios = true;
+                    } else {
+                        console.warn(`Ingrediente no encontrado en stock: ${ing.ingrediente}`);
                     }
                 });
             }
-            // Extras
+
+            // B. Extras (Siempre fijos)
             if(item.extras){
                 for (const [key, val] of Object.entries(item.extras)) {
-                    const mapExtra = EXTRAS_MAPPING[key];
-                    if(mapExtra && val > 0){
-                        const idStock = inventarioMap[mapExtra.ingrediente.trim().toLowerCase()];
-                        if(idStock){
-                            const ref = db.collection('inventory').doc(idStock);
-                            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(- (mapExtra.cantidad * val)) });
+                    const extraDef = EXTRAS_MAPPING[key];
+                    if(extraDef && val > 0){
+                        const ingID = INVENTARIO_DB[extraDef.name.toLowerCase()];
+                        if(ingID){
+                            const ref = db.collection('inventory').doc(ingID);
+                            const delta = extraDef.qty * val * factor;
+                            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
                             huboCambios = true;
                         }
                     }
@@ -213,69 +208,10 @@
 
         if (huboCambios) {
             const pedidoRef = db.collection('orders').doc(pedido.id);
-            batch.update(pedidoRef, { stockDescontado: true });
+            // Si factor es -1 (descontamos), marcamos true. Si es 1 (devolvemos), marcamos false.
+            batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
-            console.log("✅ Stock descontado.");
-        }
-    }
-
-    // --- 2. FUNCIÓN PARA REPONER (Suma si se cancela) ---
-    async function reponerStockDePedido(pedido) {
-        // OJO: Solo reponemos si ya se había descontado antes
-        if (!pedido.items || !pedido.stockDescontado) {
-            console.log("ℹ️ No se repone stock porque no se había descontado.");
-            return; 
-        }
-
-        console.log("↺ Reponiendo stock pedido #" + pedido.orderNumber);
-        
-        const snapshot = await db.collection('inventory').get();
-        const inventarioMap = {}; 
-        snapshot.forEach(doc => inventarioMap[doc.data().name.trim().toLowerCase()] = doc.id);
-
-        const batch = db.batch();
-        let huboCambios = false;
-
-        pedido.items.forEach(item => {
-            const nombreProd = item.name.trim();
-            const qty = Number(item.qty || 1);
-            
-            // Receta base
-            const receta = RECETAS[nombreProd] || RECETAS[Object.keys(RECETAS).find(k => nombreProd.includes(k))];
-            if (receta) {
-                receta.forEach(ing => {
-                    const idStock = inventarioMap[ing.ingrediente.trim().toLowerCase()];
-                    if (idStock) {
-                        const ref = db.collection('inventory').doc(idStock);
-                        // AQUI ESTA LA MAGIA: Usamos numeros POSITIVOS para sumar
-                        batch.update(ref, { qty: firebase.firestore.FieldValue.increment(ing.cantidad * qty) });
-                        huboCambios = true;
-                    }
-                });
-            }
-            // Extras
-            if(item.extras){
-                for (const [key, val] of Object.entries(item.extras)) {
-                    const mapExtra = EXTRAS_MAPPING[key];
-                    if(mapExtra && val > 0){
-                        const idStock = inventarioMap[mapExtra.ingrediente.trim().toLowerCase()];
-                        if(idStock){
-                            const ref = db.collection('inventory').doc(idStock);
-                            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(mapExtra.cantidad * val) });
-                            huboCambios = true;
-                        }
-                    }
-                }
-            }
-        });
-
-        if (huboCambios) {
-            const pedidoRef = db.collection('orders').doc(pedido.id);
-            // Quitamos la marca de descontado
-            batch.update(pedidoRef, { stockDescontado: false });
-            await batch.commit();
-            console.log("✅ Stock devuelto al inventario.");
-            alert("El pedido fue cancelado y el stock ha sido repuesto.");
+            console.log("✅ Stock actualizado correctamente.");
         }
     }
 
@@ -297,12 +233,12 @@
             
             // 3. Manejo de Stock según el cambio
             if(next === 'delivered'){
-                // Si pasa a entregado -> RESTAR
-                descontarStockDePedido(pedidoData);
+                // Si pasa a entregado -> RESTAR (-1)
+                await gestionarStock(pedidoData, -1); 
             } 
             else if(next === 'cancelled'){
-                // Si pasa a cancelado -> REPONER (solo si se había restado antes)
-                reponerStockDePedido(pedidoData);
+                // Si pasa a cancelado -> REPONER (1) (solo si se había restado antes)
+                await gestionarStock(pedidoData, 1);
             }
 
         }catch(e){console.error(e);}
