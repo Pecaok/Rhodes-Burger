@@ -1,855 +1,554 @@
 <!doctype html>
 <html lang="es">
-
-<script>
-const TTL_HOURS = 20;
-const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
-
-function sessionValid(){
-  const ok = localStorage.getItem('rb_admin_ok') === 'true';
-  const ts = Number(localStorage.getItem('rb_admin_t') || 0);
-  return ok && (Date.now() - ts) < TTL_MS;
-}
-function bumpSession(){
-  if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
-}
-function logout(){
-  localStorage.removeItem('rb_admin_ok');
-  localStorage.removeItem('rb_admin_t');
-  localStorage.removeItem('rb_auth_v2');
-  sessionStorage.removeItem('rb_auth_v2');
-  location.replace('login.html');
-}
-(function requireSession(){
-  if (!sessionValid()){
-    const next = encodeURIComponent(
-      (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
-      (location.search || '') + (location.hash || '')
-    );
-    location.replace('login.html?next=' + next);
-  } else bumpSession();
-})();
-['click','keydown','focus','mousemove','touchstart','scroll']
-  .forEach(e => window.addEventListener(e, bumpSession, {passive:true}));
-</script>
-
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Admin • Rhodes Burgers</title>
-<link rel="icon" href="images/logo.png" />
-
-<style>
-:root{
-  --primary:#625A45; --text:#111; --muted:#666; --bg:#f6f6f6; 
-  --card:#fff; --ring:#eaeaea; --shadow:0 10px 28px rgba(0,0,0,.08);
-  --good:#2e7d32; --warn:#fb8c00; --bad:#d32f2f; --radius:18px;
-}
-*{box-sizing:border-box}
-html,body{
-  margin:0;
-  background:var(--bg);
-  color:var(--text);
-  font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif;
-}
-
-/* HEADER */
-header{
-  position:sticky;
-  top:0;
-  z-index:20;
-  background:#fff;
-  box-shadow:0 2px 12px rgba(0,0,0,.06);
-}
-.topbar{
-  max-width:1200px;
-  margin:0 auto;
-  padding:10px 12px;
-  display:flex;
-  align-items:center;
-  gap:12px;
-}
-.brand{
-  display:flex;
-  align-items:center;
-  font-weight:800;
-  color:inherit;
-  text-decoration:none;
-}
-.brand img{
-  width:36px;height:36px;
-  border-radius:10px;
-  margin-right:8px;
-  object-fit:contain;
-  background:#fff;
-}
-.spacer{flex:1}
-
-/* Store Controls */
-.store-controls{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  background:#fff;
-  padding:8px 10px;
-  border-radius:12px;
-  border:1px solid var(--ring);
-}
-.pill{
-  padding:6px 10px;
-  border-radius:12px;
-  font-weight:800;
-  font-size: 12px;
-  text-transform: uppercase;
-}
-.pill.ok{background:#eaf6ea;color:var(--good);border:1px solid #d7ecd7}
-.pill.off{background:#fafafa;color:#777;border:1px solid #eee}
-
-.small{font-size:13px;color:var(--muted)}
-
-/* MAIN */
-main{
-  max-width:1200px;
-  margin:22px auto;
-  padding:0 12px;
-  display:grid;
-  grid-template-columns:1fr;
-  gap:18px;
-}
-
-.card{
-  background:var(--card);
-  border-radius:var(--radius);
-  padding:16px;
-  box-shadow:var(--shadow);
-}
-.card.featured{
-  border:2px solid var(--primary);
-  background:#fff8f0;
-  padding:22px;
-}
-
-h1{font-size:26px;margin:8px 0 10px}
-h2{font-size:20px;margin:8px 0 14px}
-h3{font-size:17px;margin:8px 0}
-.muted{color:var(--muted)}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-
-.btn{
-  display:inline-flex;
-  gap:8px;
-  padding:8px 12px;
-  border-radius:12px;
-  border:1.5px solid var(--ring);
-  background:#fff;
-  cursor:pointer;
-  font-weight:700;
-}
-.btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
-.btn.good{background:#e9f6eb;border-color:#cfead3}
-.btn.warn{background:#fff6e8;border-color:#ffe1b8}
-.btn.bad{background:#fff1f1;border-color:#ffd7d7}
-
-input,textarea,select{
-  width:100%;
-  padding:10px;
-  font-size:15px;
-  border-radius:12px;
-  border:1.5px solid var(--ring);
-  background:#fff;
-}
-
-/* Imagen previa */
-.img-preview{
-  width:80px;height:80px;
-  object-fit:cover;
-  border-radius:12px;
-  border:1px solid #ddd;
-  background:#fafafa;
-}
-
-/* Tabla */
-table{width:100%;border-collapse:separate;border-spacing:0 8px}
-td,th{padding:10px 12px;background:#fff;text-align:left}
-th{
-  color:#555;
-  font-size:13px;
-  background:#fafafa;
-  border-bottom:1px solid #eee;
-}
-tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
-
-/* --- ESTILOS ARRASTRAR Y SOLTAR (ORDENAR) --- */
-.sortable-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 15px;
-  margin-top: 20px;
-}
-.sort-card {
-  background: #fff;
-  border: 1px solid #eee;
-  border-radius: 12px;
-  overflow: hidden;
-  cursor: grab;
-  transition: box-shadow 0.2s, transform 0.2s;
-  position: relative;
-}
-.sort-card:hover {
-  box-shadow: 0 5px 15px rgba(0,0,0,0.05);
-}
-.sort-card:active {
-  cursor: grabbing;
-}
-.sort-card.dragging {
-  opacity: 0.5;
-  border: 2px dashed var(--primary);
-  transform: scale(0.95);
-}
-.sort-card img {
-  width: 100%;
-  height: 100px;
-  object-fit: cover;
-  pointer-events: none; 
-}
-.sort-card-body {
-  padding: 10px;
-}
-.sort-card-title {
-  font-weight: 700;
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sort-card-price {
-  font-size: 12px;
-  color: #666;
-}
-</style>
-</head>
-
-<body>
-
-<header>
-  <div class="topbar">
-    <a class="brand" href="#"><img src="images/logo.png">Rhodes Burgers • Admin</a>
-    <div class="spacer"></div>
-
-    <div class="store-controls" id="storeControls">
-      <div style="display:flex;flex-direction:column">
-        <div id="storePill" class="pill off">Estado: —</div>
-        <div class="small" id="storeSub" style="margin-top:4px">—</div>
-      </div>
-
-      <div style="min-width:220px;display:flex;gap:8px;align-items:center">
-        <button class="btn good" id="btnForceOpen">Forzar abierto</button>
-        <button class="btn bad" id="btnForceClose">Desactivar</button>
-      </div>
-
-      <div style="display:flex;gap:8px;align-items:center">
-        <input id="forceUntil" type="datetime-local" style="width:220px"/>
-        <button class="btn primary" id="btnSaveUntil">Guardar</button>
-      </div>
-    </div>
-
-    <div style="margin-left:12px">
-        <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <a href="pedido_local.html" class="btn">📦 Pedidos</a>
-            <a href="finanzas.html" class="btn">📈 Finanzas</a>
-            <a href="mostrador.html" class="btn">🧾 Mostrador</a>
-            <a href="admin.html" class="btn primary">⚙️ Admin</a>
-        </nav>
-    </div>
-  </div>
-</header>
-
-<main>
-
-<section class="card featured">
-  <h2 style="margin-bottom:6px">Gestión del Menú</h2>
-  <p class="muted" style="margin-bottom:14px">
-    Agregá, editá o eliminá productos.
-  </p>
-
-  <div class="form-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px;">
-    <div>
-      <label><strong>ID (único)</strong></label>
-      <input id="prdId" type="text" placeholder="Ej: bigjohn_simple">
-    </div>
-
-    <div>
-      <label><strong>Nombre</strong></label>
-      <input id="prdName" type="text" placeholder="Nombre del producto">
-    </div>
-
-    <div>
-      <label><strong>Categoría</strong></label>
-      <select id="prdCategory">
-        <option value="hamburguesas">Hamburguesas</option>
-        <option value="bebidas">Bebidas</option>
-        <option value="guarniciones">Guarniciones</option>
-      </select>
-    </div>
-
-    <div>
-      <label><strong>Precio</strong></label>
-      <input id="prdPrice" type="number" min="0" step="1" placeholder="Ej: 4800">
-    </div>
-
-    <div>
-      <label><strong>Imagen (URL o archivo)</strong></label>
-      <input id="prdImg" type="text" placeholder="https://...">
-      <input id="prdImgFile" type="file" accept="image/*" style="margin-top:8px">
-    </div>
-
-    <div style="grid-column:1/-1">
-      <label><strong>Descripción</strong></label>
-      <textarea id="prdDesc" rows="3" placeholder="Descripción corta…"></textarea>
-    </div>
-  </div>
-
-  <div class="row" style="margin-top:14px">
-    <button class="btn primary" id="btnSaveProduct">Guardar / Actualizar</button>
-    <button class="btn bad" id="btnClearProduct">Limpiar Formulario</button>
-  </div>
-
-  <div style="height:1px;background:#ddd;margin:18px 0"></div>
-
-  <h3>Lista de productos</h3>
-
-  <div style="overflow:auto">
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>IMG</th>
-          <th>Nombre</th>
-          <th>Categoría</th>
-          <th>Precio</th>
-          <th>Estado</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody id="prdTable"></tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <h2>Orden Visual del Menú</h2>
-  <p class="muted" style="margin-bottom:14px">
-    <strong>Arrastrá las tarjetas</strong> para cambiar el orden en que aparecen en el menú digital.
-  </p>
-
-  <div class="row" id="orderCatButtons" style="margin-bottom:15px">
-    <button class="btn primary" data-cat="hamburguesas">Hamburguesas</button>
-    <button class="btn" data-cat="bebidas">Bebidas</button>
-    <button class="btn" data-cat="guarniciones">Guarniciones</button>
-  </div>
-
-  <div id="orderGrid" class="sortable-grid"></div>
-
-  <div style="margin-top:16px">
-    <button class="btn primary" id="btnSaveOrder" style="width:100%; justify-content:center">💾 Guardar Nuevo Orden</button>
-  </div>
-</section>
-
-<section class="card">
-  <h2>Gestión de Cupones</h2>
-  <p class="muted" style="margin-bottom:14px">Creá códigos de descuento para tus clientes.</p>
-
-  <div class="form-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px;">
-      <div>
-          <label><strong>Código</strong></label>
-          <input id="cpCode" type="text" placeholder="Ej: VERANO20" style="text-transform:uppercase">
-      </div>
-      <div>
-          <label><strong>Tipo</strong></label>
-          <select id="cpType">
-              <option value="percent">% Porcentaje</option>
-              <option value="fixed">$ Monto Fijo</option>
-          </select>
-      </div>
-      <div>
-          <label><strong>Valor</strong></label>
-          <input id="cpValue" type="number" placeholder="Ej: 10 o 500">
-      </div>
-      <div>
-          <label><strong>Max Usos</strong></label>
-          <input id="cpMaxUses" type="number" placeholder="Opcional (Ej: 100)">
-      </div>
-      <div>
-        <label><strong>Desde</strong></label>
-        <input id="cpFrom" type="date">
-      </div>
-      <div>
-        <label><strong>Hasta</strong></label>
-        <input id="cpTo" type="date">
-      </div>
-      <div style="grid-column:1/-1">
-        <label><strong>Nota interna</strong></label>
-        <input id="cpNote" type="text" placeholder="Ej: Promo lanzamiento instagram">
-      </div>
-  </div>
-  
-  <div class="row" style="margin-top:14px">
-    <button class="btn primary" id="btnCreateCp">Crear Cupón</button>
-  </div>
-
-  <div style="height:1px;background:#ddd;margin:18px 0"></div>
-
-  <div style="overflow:auto">
-      <table>
-          <thead>
-              <tr>
-                  <th>Código</th>
-                  <th>Tipo</th>
-                  <th>Valor</th>
-                  <th>Usos</th>
-                  <th>Vigencia</th>
-                  <th>Estado</th>
-                  <th>Acciones</th>
-              </tr>
-          </thead>
-          <tbody id="cpTable"></tbody>
-      </table>
-  </div>
-</section>
-
-
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-
-<script>
-// Firebase Config
-const firebaseConfig = {
-  apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-  authDomain: "rhodes-burguers.firebaseapp.com",
-  projectId: "rhodes-burguers",
-  storageBucket: "rhodes-burguers.firebasestorage.app",
-  messagingSenderId: "951646688091",
-  appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-};
-try{ firebase.initializeApp(firebaseConfig); } catch(e){}
-const db = firebase.firestore();
-const productsCol = db.collection('products');
-const $ = s => document.querySelector(s);
-
-/* Helpers Fecha */
-const fmtDate = d => {
-    if(!d) return null;
-    // Si es timestamp de firebase
-    if(d.toDate) return d.toDate(); 
-    // Si es string
-    if(typeof d === 'string') return new Date(d);
-    return d; 
-}
-
-/* ============================================================
-   (1) FUNCIÓN PARA DETECTAR kind AUTOMÁTICAMENTE
-=============================================================== */
-function autoDetectKind(id, name = "", desc = "") {
-  id   = id.toLowerCase();
-  name = (name || "").toLowerCase();
-  desc = (desc || "").toLowerCase();
-  if (id.includes("_doble"))  return "doble";
-  if (id.includes("_simple")) return "simple";
-  if (id.includes("_pollo"))  return "pollo";
-  if (name.includes("doble")) return "doble";
-  if (name.includes("pollo")) return "pollo";
-  if (desc.includes("doble")) return "doble";
-  if (desc.includes("pollo")) return "pollo";
-  return "simple"; 
-}
-
-async function fileToBase64(file){
-  return new Promise((resolve, reject)=>{
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
-
-/* ============================================================
-   (2) CRUD PRODUCTOS
-=============================================================== */
-async function saveProduct(){
-  const id = $('#prdId').value.trim();
-  const name = $('#prdName').value.trim();
-  const category = $('#prdCategory').value.trim();
-  const price = Number($('#prdPrice').value || 0);
-  const urlImg = $('#prdImg').value.trim();
-  const desc = $('#prdDesc').value.trim();
-  const file = $('#prdImgFile').files[0];
-
-  if(!id){ alert("Ingresá un ID"); return; }
-  if(!name){ alert("Ingresá un nombre"); return; }
-  if(!(price>0)){ alert("Precio inválido"); return; }
-
-  let finalImg = urlImg || null;
-  if(file){ finalImg = await fileToBase64(file); }
-
-  const payload = {
-    name, category, price,
-    img: finalImg,
-    description: desc || null,
-    available: true,
-    kind: autoDetectKind(id, name, desc),
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  };
-  
-  const docSnap = await productsCol.doc(id).get();
-  if(!docSnap.exists) payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-
-  try{
-    await productsCol.doc(id).set(payload, {merge:true});
-    alert("Producto guardado.");
-    clearProductForm();
-  }catch(e){ console.error(e); alert("Error al guardar."); }
-}
-
-function clearProductForm(){
-  $('#prdId').value = ''; $('#prdName').value = ''; $('#prdCategory').value = 'hamburguesas';
-  $('#prdPrice').value = ''; $('#prdImg').value = ''; $('#prdImgFile').value = ''; $('#prdDesc').value = '';
-}
-
-function loadProductIntoForm(data, id){
-  $('#prdId').value = id;
-  $('#prdName').value = data.name || '';
-  $('#prdCategory').value = data.category || 'hamburguesas';
-  $('#prdPrice').value = data.price || '';
-  $('#prdImg').value = (data.img && !data.img.startsWith("data:")) ? data.img : '';
-  $('#prdImgFile').value = '';
-  $('#prdDesc').value = data.description || '';
-}
-
-async function deleteProduct(id){
-  if(!confirm("¿Eliminar "+id+"?")) return;
-  try{ await productsCol.doc(id).delete(); }catch(e){ alert("Error al eliminar."); }
-}
-
-async function toggleProductAvailability(id, current){
-  try{ await productsCol.doc(id).set({ available: !current },{merge:true}); }catch(e){ alert("Error cambiando disponibilidad."); }
-}
-
-/* ============================================================
-   (3) RENDER TABLA CRUD
-=============================================================== */
-function renderProductsTable(snapshot){
-  const tbody = $('#prdTable');
-  tbody.innerHTML = '';
-
-  snapshot.forEach(doc=>{
-    const p = doc.data();
-    const tr = document.createElement('tr');
-    const imgTag = p.img ? `<img src="${p.img}" class="img-preview">` : `<div class="img-preview"></div>`;
-    const availableTag = p.available ? `<span class="pill ok">Activo</span>` : `<span class="pill off">Pausado</span>`;
-
-    tr.innerHTML = `
-      <td>${doc.id}</td>
-      <td>${imgTag}</td>
-      <td>${p.name}</td>
-      <td>${p.category}</td>
-      <td>$${p.price}</td>
-      <td>${availableTag}</td>
-      <td class="row">
-        <button class="btn good" data-act="edit" data-id="${doc.id}">Editar</button>
-        <button class="btn warn" data-act="toggle" data-id="${doc.id}" data-av="${p.available}">
-          ${p.available ? "Desactivar" : "Activar"}
-        </button>
-        <button class="btn bad" data-act="delete" data-id="${doc.id}">Eliminar</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  tbody.querySelectorAll("button").forEach(btn=>{
-    btn.onclick = async()=>{
-      const id = btn.dataset.id;
-      const act = btn.dataset.act;
-      if(act === "edit"){
-        const d = await productsCol.doc(id).get();
-        loadProductIntoForm(d.data(), id);
-      } else if(act === "toggle"){
-        toggleProductAvailability(id, btn.dataset.av === "true");
-      } else if(act === "delete"){
-        deleteProduct(id);
-      }
-    };
-  });
-}
-productsCol.onSnapshot(renderProductsTable);
-</script>
-
-<script>
-let ORDER_PRODUCTS = [];
-let CURRENT_CAT = "hamburguesas";
-const menuOrderRef = db.collection("config").doc("menuOrder");
-const orderGrid = document.querySelector("#orderGrid");
-const orderCatButtons = document.querySelector("#orderCatButtons");
-
-window.addEventListener("DOMContentLoaded", ()=>{
-  if(orderCatButtons){
-    orderCatButtons.querySelectorAll("button").forEach(btn=>{
-      btn.onclick = ()=>{
-        orderCatButtons.querySelectorAll("button").forEach(b=> b.classList.remove("primary"));
-        btn.classList.add("primary");
-        CURRENT_CAT = btn.dataset.cat;
-        renderOrderGrid();
-      };
-    });
-  }
-});
-
-let MENU_ORDER = {};
-menuOrderRef.onSnapshot(snap=>{
-  MENU_ORDER = snap.exists ? snap.data() : {};
-  renderOrderGrid();
-});
-
-function renderOrderGrid(){
-  if(!orderGrid) return;
-  orderGrid.innerHTML = "";
-
-  const list = ORDER_PRODUCTS.filter(p => p.category === CURRENT_CAT);
-  const orderedIds = MENU_ORDER[CURRENT_CAT] || [];
-
-  list.sort((a,b)=>{
-    const ia = orderedIds.indexOf(a.id);
-    const ib = orderedIds.indexOf(b.id);
-    if(ia === -1 && ib === -1) return a.name.localeCompare(b.name);
-    if(ia === -1) return 1;
-    if(ib === -1) return -1;
-    return ia - ib;
-  });
-
-  list.forEach(p=>{
-    const card = document.createElement("div");
-    card.className = "sort-card"; 
-    card.draggable = true;
-    card.dataset.id = p.id;
-
-    card.innerHTML = `
-      <img src="${p.img || "images/logo.png"}" onerror="this.src='images/logo.png'">
-      <div class="sort-card-body">
-        <div class="sort-card-title" title="${p.name}">${p.name}</div>
-        <div class="sort-card-price">$${p.price}</div>
-      </div>
-    `;
-
-    card.addEventListener("dragstart", e=>{
-      e.dataTransfer.setData("id", p.id);
-      card.classList.add("dragging");
-    });
-
-    card.addEventListener("dragend", ()=>{
-      card.classList.remove("dragging");
-    });
-
-    card.addEventListener("dragover", e=>{
-      e.preventDefault();
-      const dragging = orderGrid.querySelector(".dragging");
-      if(!dragging || dragging === card) return;
-      
-      const siblings = [...orderGrid.querySelectorAll(".sort-card:not(.dragging)")];
-      const nextSibling = siblings.find(sibling => {
-          const rect = sibling.getBoundingClientRect();
-          return e.clientX < rect.right && e.clientY < rect.bottom;
-      });
-      
-      orderGrid.insertBefore(dragging, nextSibling);
-    });
-    orderGrid.appendChild(card);
-  });
-}
-
-productsCol.onSnapshot(snap=>{
-  ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
-  renderOrderGrid();
-});
-
-window.addEventListener("DOMContentLoaded", ()=>{
-  const btnSaveOrder = document.querySelector("#btnSaveOrder");
-  if(btnSaveOrder){
-    btnSaveOrder.onclick = async ()=>{
-      const ids = [...orderGrid.querySelectorAll(".sort-card")].map(c => c.dataset.id);
-      await menuOrderRef.set({ ...MENU_ORDER, [CURRENT_CAT]: ids }, {merge:true});
-      alert("✅ Orden guardado correctamente.");
-    };
-  }
-});
-</script>
-
-<script>
-const storeRef = () => db.collection("config").doc("store");
-const storePill = document.querySelector("#storePill");
-const storeSub = document.querySelector("#storeSub");
-const btnOpen = document.querySelector("#btnForceOpen");
-const btnClose = document.querySelector("#btnForceClose");
-const forceUntilInput = document.querySelector("#forceUntil");
-const btnSaveUntil = document.querySelector("#btnSaveUntil");
-
-function applyStoreDocToUI(d){
-  const on = !!d.forceOpen;
-  let until = null;
-  if(d.forceOpenUntil){
-    try{
-      if(typeof d.forceOpenUntil.toDate === "function"){ until = d.forceOpenUntil.toDate(); } 
-      else if(d.forceOpenUntil.seconds){ until = new Date(d.forceOpenUntil.seconds * 1000); } 
-      else { until = new Date(d.forceOpenUntil); }
-    }catch(e){}
-  }
-  const active = on || (until && until.getTime() > Date.now());
-  storePill.className = "pill " + (active ? "ok" : "off");
-  storePill.textContent = "Estado: " + (active ? "Forzado ABIERTO" : "Normal");
-
-  if(until && until.getTime() > Date.now()){
-    storeSub.textContent = "Hasta: " + String(until.getHours()).padStart(2,"0") + ":" + String(until.getMinutes()).padStart(2,"0");
-    const local = new Date(until.getTime() - until.getTimezoneOffset()*60000);
-    forceUntilInput.value = local.toISOString().slice(0,16);
-  } else {
-    storeSub.textContent = "Normal";
-    forceUntilInput.value = "";
-  }
-}
-
-storeRef().onSnapshot(snap=>{ applyStoreDocToUI(snap.exists ? snap.data() : {}); });
-
-btnOpen.onclick = async()=>{ await storeRef().set({ forceOpen:true, updatedAt:firebase.firestore.FieldValue.serverTimestamp() },{merge:true}); };
-btnClose.onclick = async()=>{ 
-    await storeRef().set({ 
-        forceOpen:false, 
-        forceOpenUntil: firebase.firestore.FieldValue.delete(), 
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
-    },{merge:true}); 
-};
-
-btnSaveUntil.onclick = async()=>{
-  const v = forceUntilInput.value;
-  if(!v){ alert("Elegí fecha y hora"); return; }
-  const local = new Date(v);
-  if(isNaN(local.getTime())){ alert("Fecha inválida"); return; }
-  await storeRef().set({
-    forceOpen:true,
-    forceOpenUntil: firebase.firestore.Timestamp.fromDate(local),
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  },{merge:true});
-  alert("Guardado correctamente.");
-};
-</script>
-
-<script>
-const cpTbody = document.querySelector("#cpTable");
-
-function upsertCouponFromForm(){
-  const code = (document.querySelector("#cpCode").value||"").trim().toUpperCase();
-  if(!code){ alert("Ingresá código"); return; }
-
-  const type = document.querySelector("#cpType").value;
-  const value = Number(document.querySelector("#cpValue").value||0);
-  if(!(value>0)){ alert("Valor inválido"); return; }
-
-  const maxUses = Number(document.querySelector("#cpMaxUses").value||0);
-  const note    = (document.querySelector("#cpNote").value||"").trim();
-  
-  // Fechas (input date) -> Timestamp
-  const fStr = document.querySelector("#cpFrom").value;
-  const tStr = document.querySelector("#cpTo").value;
-  let from = null, to = null;
-  if(fStr) from = new Date(fStr + "T00:00:00"); // Local start
-  if(tStr) to   = new Date(tStr + "T23:59:59"); // Local end
-
-  const payload = {
-    code, type, value,
-    enabled:true,
-    note: note || null,
-    validFrom: from ? firebase.firestore.Timestamp.fromDate(from) : null,
-    validTo:   to   ? firebase.firestore.Timestamp.fromDate(to)   : null,
-    maxUses: maxUses > 0 ? maxUses : null,
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  };
-
-  db.collection("coupons").doc(code)
-    .set({
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      uses:0,
-      ...payload
-    },{merge:true})
-    .then(()=>{
-      alert("Cupón guardado: " + code);
-      loadCoupons();
-    })
-    .catch(e=>{ console.error(e); alert("Error guardando cupón"); });
-}
-
-document.querySelector("#btnCreateCp").onclick = upsertCouponFromForm;
-
-function renderCoupons(list){
-  cpTbody.innerHTML = "";
-  list.forEach(doc=>{
-    const c = doc.data();
-    const uses = `${c.uses||0}${c.maxUses?` / ${c.maxUses}`:''}`;
-    const vf = fmtDate(c.validFrom);
-    const vt = fmtDate(c.validTo);
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Finanzas • Rhodes Burgers</title>
+  <link rel="icon" href="images/logo.png" />
+  <style>
+    :root{
+      --primary:#625A45; --text:#111; --muted:#666; --bg:#f6f6f6; --card:#fff;
+      --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.08); --ring:#eaeaea;
+      --danger:#d32f2f; --warn:#ff9800; --success:#2e7d32;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
     
-    const vig = (vf ? vf.toLocaleDateString("es-AR")+" " : "") + (vt ? "→ "+vt.toLocaleDateString("es-AR") : "");
+    /* HEADER */
+    header{position:sticky; top:0; z-index:10; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06)}
+    .topbar{width:100%; padding:10px 20px; display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+    .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700}
+    .brand img{width:36px;height:36px;border-radius:10px;background:#fff;object-fit:contain;margin-right:8px}
+    .spacer{flex:1}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;padding:8px 12px;border-radius:999px;cursor:pointer;font-weight:600;text-decoration:none;color:inherit;transition:all .2s}
+    .btn:hover{background:#f0f0f0}
+    .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .btn.success{background:var(--success);color:#fff;border-color:var(--success)}
+    .btn.danger{border-color:#ffdddd;background:#fff5f5;color:#b30000}
 
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><strong>${c.code}</strong></td>
-      <td>${c.type === "percent" ? "%" : "$"}</td>
-      <td>${c.value}</td>
-      <td>${uses}</td>
-      <td class="small muted">${vig || "Permanente"}</td>
-      <td>${c.enabled ? "<span class='pill ok'>SI</span>" : "<span class='pill off'>NO</span>"}</td>
-      <td class="row">
-        <button class="btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
-          ${c.enabled ? "Pausar" : "Activar"}
-        </button>
-        <button class="btn bad" data-act="delete" data-id="${doc.id}">X</button>
-      </td>
-    `;
-    cpTbody.appendChild(tr);
-  });
+    /* LAYOUT ANCHO COMPLETO */
+    .container { max-width: 98%; margin: 24px auto; padding: 0 12px; }
+    h1{font-size:28px;margin:10px 0 18px}
 
-  cpTbody.querySelectorAll("button[data-act]").forEach(btn=>{
-    btn.onclick = async()=>{
-      const id = btn.dataset.id;
-      const act = btn.dataset.act;
-      if(act === "toggle"){
-        const snap = await db.collection("coupons").doc(id).get();
-        const enabled = !!snap.data()?.enabled;
-        await db.collection("coupons").doc(id).set({ enabled:!enabled, updatedAt:new Date() },{merge:true});
-        loadCoupons();
-      } else if(act === "delete"){
-        if(confirm("¿Eliminar "+id+"?")){
-          await db.collection("coupons").doc(id).delete();
-          loadCoupons();
-        }
+    .grid{display:grid;grid-template-columns:1fr;gap:18px}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px}
+    
+    .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    
+    /* KPIs */
+    .kpi{display:flex;gap:12px;flex-wrap:wrap}
+    .kbadge{min-width:140px;background:#f7f7f7;border:1px solid var(--ring);border-radius:14px;padding:10px 14px; flex:1}
+    .klabel{font-size:12px;color:var(--muted); text-transform:uppercase; letter-spacing:0.5px}
+    .kvalue{font-weight:800;font-size:22px; margin-top:4px}
+
+    /* CHARTS */
+    .chartWrap{height:280px}
+    .chartWrapTall{height:320px}
+    .charts-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-top: 12px; }
+    canvas{width:100% !important; height:100% !important; display:block}
+
+    /* INPUTS */
+    label{font-weight:600;display:block;margin:8px 0 4px; font-size:12px}
+    select, input{ width:100%;padding:8px 12px;border:1px solid var(--ring);border-radius:10px; font-family:inherit }
+    .inline{display:flex;gap:10px;flex-wrap:wrap; align-items:flex-end}
+    
+    /* TABLES */
+    .table-responsive { overflow-x: auto; }
+    table{width:100%;border-collapse:collapse; font-size:14px}
+    th,td{padding:10px;border-bottom:1px solid #eee;text-align:left}
+    th{font-size:12px;text-transform:uppercase;color:#666;letter-spacing:.05em; font-weight:700}
+    td{ font-weight: 500; }
+    tr:last-child td { border-bottom: none; }
+    .num-cell { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* DATOS EXTRAS */
+    .data-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 15px; margin-top: 20px; }
+    .cash-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #eee; }
+    .cash-total { font-weight: 800; font-size: 16px; border-top: 2px solid #eee; padding-top: 10px; margin-top: 5px; }
+    
+    /* HEATMAPS */
+    .heatmap{display:grid;border:1px solid var(--ring);border-radius:12px;overflow:hidden}
+    .hm-cell{padding:8px;text-align:center;border-top:1px solid var(--ring);border-left:1px solid var(--ring);font-size:12px}
+    .hm-head{background:#fafafa;font-weight:700}
+    .hm-day{background:#fafafa;text-align:left;font-weight:700}
+    .hm-legend{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .swatch{width:18px;height:18px;border-radius:4px;border:1px solid var(--ring)}
+
+    /* CALENDARIO */
+    .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 16px; }
+    .cal-day { background: #fff; border-radius: 12px; height: 90px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid #eee; transition: all 0.2s; }
+    .cal-day:hover:not(.cal-empty) { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.08); border-color: var(--primary); }
+    .cal-empty { background: #fafafa; border-style: dashed; }
+    .cal-num { font-size: 12px; font-weight: 700; color: #999; text-align: right; }
+    .cal-content { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; }
+    .cal-pill { background: rgba(46, 125, 50, 0.1); color: #2e7d32; border-radius: 99px; padding: 2px 6px; font-size: 10px; font-weight: 700; }
+    
+    .warn-pill{display:inline-block;border-radius:999px;padding:4px 10px;font-weight:700;font-size:12px}
+    .warn{background:#fff3cd;color:#8a6d3b} .danger{background:#ffebee;color:#c62828}
+    .text-muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <script>
+    /* Auth Guard */
+    (function(){
+      const qs = new URLSearchParams(location.search);
+      if (qs.get('auth')==='1') {
+        localStorage.setItem('rb_admin_ok','true');
+        localStorage.setItem('rb_admin_t', String(Date.now()));
       }
-    };
-  });
-}
+      const ok = localStorage.getItem('rb_admin_ok')==='true';
+      const ts = Number(localStorage.getItem('rb_admin_t')||0);
+      if (!(ok && (Date.now()-ts < 72000000))){ // 20h
+        location.replace('login.html');
+      }
+      localStorage.setItem('rb_admin_t', String(Date.now()));
+    })();
+  </script>
 
-async function loadCoupons(){
-  const q = await db.collection("coupons").orderBy("code").get();
-  renderCoupons(q.docs);
-}
-</script>
+  <header>
+    <div class="topbar">
+      <a class="brand" href="#"><img src="images/logo.png" alt="Rhodes Burgers">Finanzas</a>
+      <div class="spacer"></div>
+      <nav style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <a href="pedido_local.html" class="btn">📦 Pedidos</a>
+        <a href="finanzas.html" class="btn primary">📈 Finanzas</a>
+        <a href="mostrador.html" class="btn">🧾 Mostrador</a>
+        <a href="admin.html" class="btn">⚙️ Admin</a>
+      </nav>
+      <button id="btnLogout" class="btn danger">⏻ Salir</button>
+    </div>
+  </header>
 
-<script>
-window.addEventListener("DOMContentLoaded", ()=>{
-  const btnSaveProduct = document.querySelector("#btnSaveProduct");
-  if(btnSaveProduct){ btnSaveProduct.onclick = saveProduct; }
-  const btnClearProduct = document.querySelector("#btnClearProduct");
-  if(btnClearProduct){ btnClearProduct.onclick = clearProductForm; }
-  
-  // Cargar cupones
-  loadCoupons();
-});
-</script>
+  <main class="container">
+    <h1>Resumen & Control</h1>
 
+    <div class="grid">
+      <section class="card">
+        <div class="row" style="justify-content:space-between; align-items:flex-end; margin-bottom:20px">
+          <div class="inline">
+             <div><label>Mes</label><input type="month" id="monthPicker" /></div>
+             <div><label>Desde</label><input type="date" id="fromDate" /></div>
+             <div><label>Hasta</label><input type="date" id="toDate" /></div>
+             <button id="btnReload" class="btn primary">Actualizar</button>
+          </div>
+          <div>
+             <button id="btnExport" class="btn success">📥 Exportar Excel</button>
+          </div>
+        </div>
+
+        <div class="kpi">
+           <div class="kbadge"><div class="klabel">Pedidos Totales</div><div class="kvalue" id="kpiCount">—</div></div>
+           <div class="kbadge"><div class="klabel">Ingresos Totales</div><div class="kvalue" id="kpiRevenue">—</div></div>
+           <div class="kbadge"><div class="klabel">Ticket Promedio</div><div class="kvalue" id="kpiATV">—</div></div>
+           <div class="kbadge"><div class="klabel">Tiempo Promedio</div><div class="kvalue" id="kpiTime">—</div></div>
+        </div>
+
+        <div class="data-row">
+            <div class="card" style="border:1px solid #eee; box-shadow:none; background:#fafafa">
+                <h3>💰 Cierre de Caja (Estimado)</h3>
+                <div id="cashBreakdown">
+                    <div class="text-muted">Cargando...</div>
+                </div>
+            </div>
+
+            <div class="card" style="border:1px solid #eee; box-shadow:none; background:#fafafa">
+                <h3>🏆 Top 5 Clientes</h3>
+                <div class="table-responsive">
+                    <table id="topClientsTable">
+                        <thead><tr><th>Cliente</th><th class="num-cell">Pedidos</th><th class="num-cell">Total</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top:25px">
+          <div class="chartWrapTall"><canvas id="ordersChart"></canvas></div>
+        </div>
+
+        <div class="charts-row">
+          <div class="card"><strong>Medios de pago</strong><div class="chartWrap"><canvas id="payChart"></canvas></div></div>
+          <div class="card"><strong>Origen (Canal)</strong><div class="chartWrap"><canvas id="sourceChart"></canvas></div></div>
+          <div class="card"><strong>Estados</strong><div class="chartWrap"><canvas id="statusChart"></canvas></div></div>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <strong>Calendario de Ventas</strong>
+          <div class="inline" style="margin:10px 0">
+            <label class="badge">Mes <input type="month" id="calMonth" style="border:none;padding:0;width:auto"></label>
+            <button id="calPrev" class="btn">◀</button>
+            <button id="calNext" class="btn">▶</button>
+            <span id="calRange" class="text-muted" style="font-size:14px; margin-left:10px">—</span>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <strong>Mapa de Calor (Días x Horas)</strong>
+          <div id="hourmap" class="heatmap" style="margin-top:8px"></div>
+          <div id="hourSummary" class="text-muted" style="margin-top:8px; font-size:13px">—</div>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <strong>Hamburguesas vendidas</strong>
+          <div class="table-responsive" style="margin-top:10px">
+            <table id="burgersTable">
+                <thead><tr><th>Producto</th><th class="num-cell">Cant.</th><th class="num-cell">Total $</th></tr></thead>
+                <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+      </section>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // 1. FIREBASE INIT
+        const firebaseConfig = {
+          apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+          authDomain: "rhodes-burguers.firebaseapp.com",
+          projectId: "rhodes-burguers",
+          storageBucket: "rhodes-burguers.firebasestorage.app",
+          messagingSenderId: "951646688091",
+          appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+        };
+        try { firebase.initializeApp(firebaseConfig); } catch(e) {}
+        const db = firebase.firestore();
+
+        // 2. HELPERS
+        const $ = s => document.getElementById(s);
+        const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+        
+        // 🔥 PARSEADOR DE FECHAS DEFINITIVO
+        function parseDateAny(val){
+            if(!val) return null;
+            if(val.toDate) return val.toDate(); // Timestamp
+            if(typeof val === 'string') return new Date(val); // ISO String
+            if(typeof val === 'number') return new Date(val); // Milliseconds
+            return new Date(val);
+        }
+
+        // 3. LOGOUT
+        const btnLogout = $('btnLogout');
+        if(btnLogout){
+            btnLogout.onclick = ()=>{
+                localStorage.removeItem('rb_auth_v2');
+                localStorage.removeItem('rb_admin_ok');
+                location.replace('login.html');
+            };
+        }
+
+        // GLOBAL DATA
+        let CURRENT_ORDERS = [];
+        let mainChart, d1, d2, d3;
+
+        // 4. INITIAL LOAD
+        const now = new Date();
+        const ym = now.toISOString().slice(0,7);
+        if($('monthPicker')) $('monthPicker').value = ym;
+        if($('calMonth')) $('calMonth').value = ym;
+
+        if($('btnReload')) $('btnReload').onclick = loadKPI;
+        if($('calGo')) $('calGo').onclick = renderCalendar;
+        if($('calPrev')) $('calPrev').onclick = () => { stepMonth(-1); renderCalendar(); };
+        if($('calNext')) $('calNext').onclick = () => { stepMonth(1); renderCalendar(); };
+        
+        if($('btnExport')) $('btnExport').onclick = exportExcel;
+
+        loadKPI();
+        renderCalendar();
+
+        // --- CORE LOGIC ---
+
+        async function loadKPI(){
+            const fromInp = $('fromDate').value;
+            const toInp = $('toDate').value;
+            const monthInp = $('monthPicker').value;
+            
+            let start, end, isRange = false;
+            if(fromInp && toInp){
+               isRange = true;
+               // Ajustar a fin del día
+               start = new Date(fromInp + 'T00:00:00');
+               end = new Date(toInp + 'T23:59:59');
+            } else {
+               const d = monthInp ? new Date(monthInp + '-01T00:00:00') : new Date();
+               start = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
+               end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+            }
+
+            // Buscamos pedidos
+            const orders = await fetchUnifiedOrders(start, end);
+            CURRENT_ORDERS = orders;
+
+            // Procesar
+            let totalRevenue = 0, totalOrders = 0, totalMinutes = 0, countTime = 0;
+            const payStats = {}, sourceStats = {}, statusStats = {}, productStats = {}, clientStats = {};
+            
+            // Arrays para gráficos
+            const daysInMonth = end.getDate(); // Aprox días del rango
+            const dayData = Array(daysInMonth + 1).fill(0); // +1 por seguridad de índice
+            const dayMoney = Array(daysInMonth + 1).fill(0);
+            const hourMatrix = Array.from({length:6}, ()=>Array(daysInMonth + 1).fill(0));
+
+            orders.forEach(o => {
+                // Doble chequeo fecha: createdAt o created_at
+                const dt = parseDateAny(o.createdAt || o.created_at);
+                if(!dt) return;
+                
+                // Filtro estricto de rango en JS
+                if(dt < start || dt > end) return;
+
+                const total = Number(o.total || o.rawTotal || 0);
+                totalOrders++;
+                totalRevenue += total;
+
+                // Stats
+                let pay = (o.pago || o.payment_method || 'otro').toLowerCase();
+                if(pay.includes('efectivo')) pay = 'Efectivo';
+                else if(pay.includes('mercado')||pay.includes('mp')) pay = 'Mercado Pago';
+                else if(pay.includes('debito')) pay = 'Débito';
+                else if(pay.includes('transfer')) pay = 'Transferencia';
+                payStats[pay] = (payStats[pay]||0) + total;
+
+                let src = (o.source || 'web').toLowerCase();
+                sourceStats[src] = (sourceStats[src]||0) + 1;
+
+                let st = o.status || 'accepted';
+                statusStats[st] = (statusStats[st]||0) + 1;
+
+                // Tiempo
+                if(o.updatedAt && (o.status==='ready'||o.status==='delivered')){
+                    const endT = parseDateAny(o.updatedAt);
+                    const diff = (endT - dt)/60000;
+                    if(diff>0 && diff<180){ totalMinutes+=diff; countTime++; }
+                }
+
+                // Cliente
+                const cli = (o.nombre||'Anónimo').trim();
+                if(!clientStats[cli]) clientStats[cli]={count:0, total:0};
+                clientStats[cli].count++; clientStats[cli].total+=total;
+
+                // Productos
+                (o.items||[]).forEach(it=>{
+                    const name = (it.name||'Item').trim();
+                    const qty = Number(it.qty||1);
+                    if(!productStats[name]) productStats[name]={qty:0, total:0};
+                    productStats[name].qty+=qty;
+                    productStats[name].total+=(Number(it.price||0)*qty);
+                });
+
+                // Daily & Hourly
+                if(!isRange){
+                    const dayIdx = dt.getDate() - 1;
+                    if(dayIdx >= 0 && dayIdx < dayData.length){
+                        dayData[dayIdx]++;
+                        dayMoney[dayIdx]+=total;
+                        let h=dt.getHours();
+                        if(h>=19 && h<=23) hourMatrix[h-19][dayIdx]++;
+                        if(h===0) hourMatrix[5][dayIdx]++;
+                    }
+                }
+            });
+
+            // Render KPI
+            $('kpiCount').textContent = totalOrders;
+            $('kpiRevenue').textContent = money(totalRevenue);
+            $('kpiATV').textContent = totalOrders ? money(totalRevenue/totalOrders) : '$0';
+            $('kpiTime').textContent = countTime ? Math.round(totalMinutes/countTime)+' min' : '—';
+
+            // Render Caja
+            let cashHTML = '';
+            for(const [k,v] of Object.entries(payStats)) cashHTML += `<div class="cash-row"><span>${k}</span><span>${money(v)}</span></div>`;
+            cashHTML += `<div class="cash-row cash-total"><span>TOTAL</span><span>${money(totalRevenue)}</span></div>`;
+            $('cashBreakdown').innerHTML = cashHTML;
+
+            // Render Clients
+            const topCli = Object.entries(clientStats).sort((a,b)=>b[1].total - a[1].total).slice(0,5);
+            $('topClientsTable').querySelector('tbody').innerHTML = topCli.map(([n,d])=>`<tr><td>${n}</td><td class="num-cell">${d.count}</td><td class="num-cell">${money(d.total)}</td></tr>`).join('');
+
+            // Render Products
+            const topProd = Object.entries(productStats).sort((a,b)=>b[1].qty - a[1].qty);
+            $('burgersTable').querySelector('tbody').innerHTML = topProd.map(([n,d])=>`<tr><td>${n}</td><td class="num-cell">${d.qty}</td><td class="num-cell">${money(d.total)}</td></tr>`).join('');
+
+            // Charts
+            if(!isRange){
+                renderBarChart(dayData, dayMoney, daysInMonth);
+                renderHourMap(hourMatrix, daysInMonth);
+            }
+            
+            renderDoughnut("payChart", Object.keys(payStats), Object.values(payStats));
+            renderDoughnut("sourceChart", Object.keys(sourceStats), Object.values(sourceStats));
+            renderDoughnut("statusChart", Object.keys(statusStats), Object.values(statusStats));
+
+        }
+
+        // 🔥 FETCH UNIFICADO QUE BUSCA TODO
+        async function fetchUnifiedOrders(start, end){
+            // Buscamos con un margen de seguridad de 2 días para evitar líos de UTC/GMT-3
+            const sSafe = new Date(start); sSafe.setDate(sSafe.getDate()-2);
+            const eSafe = new Date(end);   eSafe.setDate(eSafe.getDate()+2);
+
+            // Query 1: Por string (formato nuevo)
+            const p1 = db.collection('orders')
+                .where('createdAt', '>=', sSafe.toISOString().split('T')[0])
+                .where('createdAt', '<=', eSafe.toISOString().split('T')[0])
+                .get();
+                
+            // Query 2: Por Timestamp (formato viejo)
+            const p2 = db.collection('orders')
+                .where('createdAt', '>=', sSafe)
+                .where('createdAt', '<=', eSafe)
+                .get();
+
+            // Query 3: Por 'created_at' (snake_case por si acaso)
+            const p3 = db.collection('orders')
+                .where('created_at', '>=', sSafe)
+                .where('created_at', '<=', eSafe)
+                .get();
+
+            const [sn1, sn2, sn3] = await Promise.all([p1, p2, p3]);
+            
+            const map = new Map();
+            const addToMap = (doc) => {
+                const dat = doc.data();
+                if(!dat.status?.includes('cancel')) map.set(doc.id, dat);
+            };
+
+            sn1.forEach(addToMap);
+            sn2.forEach(addToMap);
+            sn3.forEach(addToMap);
+
+            return Array.from(map.values());
+        }
+
+        function exportExcel(){
+            if(!CURRENT_ORDERS.length) return alert("Sin datos.");
+            let csv = "Fecha,Pedido,Cliente,Pago,Total,Estado\n";
+            CURRENT_ORDERS.forEach(o=>{
+                const d = parseDateAny(o.createdAt || o.created_at)?.toLocaleDateString()||'';
+                csv += `${d},${o.orderNumber},"${(o.nombre||'').replace(/"/g,'')}",${o.pago},${o.total},${o.status}\n`;
+            });
+            const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "ventas.csv";
+            link.click();
+        }
+
+        // --- CALENDARIO ---
+        async function renderCalendar(){
+            const ym = $('calMonth').value;
+            if(!ym) return;
+            const [y, m] = ym.split('-').map(Number);
+            const start = new Date(y, m-1, 1);
+            const end = new Date(y, m, 0, 23, 59, 59);
+            
+            const orders = await fetchUnifiedOrders(start, end);
+            const days = end.getDate();
+            const totals = Array(days).fill(0);
+            const counts = Array(days).fill(0);
+
+            orders.forEach(o=>{
+                const dt = parseDateAny(o.createdAt || o.created_at);
+                // Filtro estricto
+                if(dt && dt.getMonth() === m-1 && dt.getFullYear() === y){
+                    const d = dt.getDate()-1;
+                    totals[d]+=Number(o.total||0);
+                    counts[d]++;
+                }
+            });
+
+            const grid = $('calendarGrid');
+            grid.innerHTML = '';
+            const startDay = new Date(y, m-1, 1).getDay();
+            for(let i=0; i<startDay; i++) grid.insertAdjacentHTML('beforeend', '<div></div>');
+            
+            totals.forEach((t, i)=>{
+                const c = counts[i];
+                const html = `<div class="cal-day ${c?'':'cal-empty'}"><div class="cal-num">${i+1}</div>${c?`<div class="cal-content"><div class="cal-burger-hero">🍔 ${c}</div><div class="cal-pill">${money(t)}</div></div>`:''}</div>`;
+                grid.insertAdjacentHTML('beforeend', html);
+            });
+            $('calRange').textContent = `Total: ${money(totals.reduce((a,b)=>a+b,0))}`;
+        }
+
+        function stepMonth(n){
+            const [y, m] = $('calMonth').value.split('-');
+            const d = new Date(y, m-1+n, 1);
+            $('calMonth').value = d.toISOString().slice(0,7);
+        }
+
+        // --- CHART HELPERS (COLORES MEJORADOS) ---
+        
+        // Colores Dona (6)
+        const DONUT_COLORS = ['#009688', '#FF7043', '#3F51B5', '#FFC107', '#4CAF50', '#F44336'];
+        
+        function renderBarChart(c, a, d){
+            const ctx = $('ordersChart').getContext('2d');
+            if(mainChart) mainChart.destroy();
+            mainChart = new Chart(ctx, {
+                type:'bar',
+                data:{
+                    labels: Array.from({length:d},(_,i)=>i+1),
+                    datasets: [
+                        // Pedidos (Barras AZUL OSCURO)
+                        { label:'Pedidos', data:c, backgroundColor:'#303F9F', yAxisID:'y', order: 2 },
+                        // Ingresos (Línea VERDE ESMERALDA)
+                        { 
+                            type:'line', label:'$', data:a, 
+                            borderColor:'#009688', backgroundColor:'rgba(0, 150, 136, 0.05)', // Fondo casi transparente
+                            borderWidth:3, pointRadius:4, pointBackgroundColor:'#fff', pointBorderWidth:2,
+                            yAxisID:'y1', order: 1, tension: 0.3
+                        }
+                    ]
+                },
+                options:{ 
+                    responsive:true, maintainAspectRatio:false, 
+                    scales:{ y:{beginAtZero:true}, y1:{position:'right', beginAtZero:true} } 
+                }
+            });
+        }
+
+        function renderDoughnut(id, l, d){
+            const ctx = $(id).getContext('2d');
+            const map = {payChart:d1, sourceChart:d2, statusChart:d3};
+            if(map[id]) map[id].destroy();
+            const chart = new Chart(ctx, {
+                type:'doughnut',
+                data:{ labels:l, datasets:[{ data:d, backgroundColor:DONUT_COLORS, borderWidth:2, borderColor:'#fff' }] },
+                options:{ responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{legend:{position:'bottom', labels:{padding:15, usePointStyle:true}}} }
+            });
+            if(id==='payChart') d1=chart;
+            if(id==='sourceChart') d2=chart;
+            if(id==='statusChart') d3=chart;
+        }
+
+        function renderHourMap(matrix, days){
+            const el = $('hourmap');
+            el.innerHTML = '';
+            el.style.gridTemplateColumns = `50px repeat(${days}, 1fr)`;
+            el.insertAdjacentHTML('beforeend', '<div></div>');
+            for(let i=1; i<=days; i++) el.insertAdjacentHTML('beforeend', `<div class="hm-head">${i}</div>`);
+            const hours=['19:00','20:00','21:00','22:00','23:00','00:00'];
+            matrix.forEach((row, i)=>{
+                el.insertAdjacentHTML('beforeend', `<div class="hm-day">${hours[i]}</div>`);
+                const max = Math.max(...row, 1);
+                row.forEach(v=>{
+                    // Mapa de calor AZUL
+                    const a = v ? (v/max)*0.85+0.15 : 0.05;
+                    const bg = v ? `rgba(48, 63, 159, ${a})` : '#f0f0f0';
+                    el.insertAdjacentHTML('beforeend', `<div class="hm-cell" style="background:${bg}" title="${v}">${v||''}</div>`);
+                });
+            });
+        }
+    });
+  </script>
 </body>
 </html>
