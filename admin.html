@@ -99,6 +99,8 @@ header{
   padding:6px 10px;
   border-radius:12px;
   font-weight:800;
+  font-size: 12px;
+  text-transform: uppercase;
 }
 .pill.ok{background:#eaf6ea;color:var(--good);border:1px solid #d7ecd7}
 .pill.off{background:#fafafa;color:#777;border:1px solid #eee}
@@ -208,7 +210,7 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
   width: 100%;
   height: 100px;
   object-fit: cover;
-  pointer-events: none; /* Clave para que no interfiera el drag de la imagen */
+  pointer-events: none; 
 }
 .sort-card-body {
   padding: 10px;
@@ -267,7 +269,7 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
 <section class="card featured">
   <h2 style="margin-bottom:6px">Gestión del Menú</h2>
   <p class="muted" style="margin-bottom:14px">
-    Agregá, editá o eliminá productos. Para cambiar el orden, usá la sección de abajo.
+    Agregá, editá o eliminá productos.
   </p>
 
   <div class="form-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px;">
@@ -353,6 +355,69 @@ tr{box-shadow:0 1px 0 rgba(0,0,0,.04)}
   </div>
 </section>
 
+<section class="card">
+  <h2>Gestión de Cupones</h2>
+  <p class="muted" style="margin-bottom:14px">Creá códigos de descuento para tus clientes.</p>
+
+  <div class="form-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px;">
+      <div>
+          <label><strong>Código</strong></label>
+          <input id="cpCode" type="text" placeholder="Ej: VERANO20" style="text-transform:uppercase">
+      </div>
+      <div>
+          <label><strong>Tipo</strong></label>
+          <select id="cpType">
+              <option value="percent">% Porcentaje</option>
+              <option value="fixed">$ Monto Fijo</option>
+          </select>
+      </div>
+      <div>
+          <label><strong>Valor</strong></label>
+          <input id="cpValue" type="number" placeholder="Ej: 10 o 500">
+      </div>
+      <div>
+          <label><strong>Max Usos</strong></label>
+          <input id="cpMaxUses" type="number" placeholder="Opcional (Ej: 100)">
+      </div>
+      <div>
+        <label><strong>Desde</strong></label>
+        <input id="cpFrom" type="date">
+      </div>
+      <div>
+        <label><strong>Hasta</strong></label>
+        <input id="cpTo" type="date">
+      </div>
+      <div style="grid-column:1/-1">
+        <label><strong>Nota interna</strong></label>
+        <input id="cpNote" type="text" placeholder="Ej: Promo lanzamiento instagram">
+      </div>
+  </div>
+  
+  <div class="row" style="margin-top:14px">
+    <button class="btn primary" id="btnCreateCp">Crear Cupón</button>
+  </div>
+
+  <div style="height:1px;background:#ddd;margin:18px 0"></div>
+
+  <div style="overflow:auto">
+      <table>
+          <thead>
+              <tr>
+                  <th>Código</th>
+                  <th>Tipo</th>
+                  <th>Valor</th>
+                  <th>Usos</th>
+                  <th>Vigencia</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+              </tr>
+          </thead>
+          <tbody id="cpTable"></tbody>
+      </table>
+  </div>
+</section>
+
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
@@ -370,6 +435,16 @@ try{ firebase.initializeApp(firebaseConfig); } catch(e){}
 const db = firebase.firestore();
 const productsCol = db.collection('products');
 const $ = s => document.querySelector(s);
+
+/* Helpers Fecha */
+const fmtDate = d => {
+    if(!d) return null;
+    // Si es timestamp de firebase
+    if(d.toDate) return d.toDate(); 
+    // Si es string
+    if(typeof d === 'string') return new Date(d);
+    return d; 
+}
 
 /* ============================================================
    (1) FUNCIÓN PARA DETECTAR kind AUTOMÁTICAMENTE
@@ -425,7 +500,6 @@ async function saveProduct(){
     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
   
-  // Solo setear createdAt si no existe
   const docSnap = await productsCol.doc(id).get();
   if(!docSnap.exists) payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
 
@@ -457,7 +531,7 @@ async function deleteProduct(id){
 }
 
 async function toggleProductAvailability(id, current){
-  try{ await productsCol.doc(id).set({ available: !current },{merge:true}); }catch(e){}
+  try{ await productsCol.doc(id).set({ available: !current },{merge:true}); }catch(e){ alert("Error cambiando disponibilidad."); }
 }
 
 /* ============================================================
@@ -516,7 +590,6 @@ const menuOrderRef = db.collection("config").doc("menuOrder");
 const orderGrid = document.querySelector("#orderGrid");
 const orderCatButtons = document.querySelector("#orderCatButtons");
 
-/* Cambio de categoría */
 window.addEventListener("DOMContentLoaded", ()=>{
   if(orderCatButtons){
     orderCatButtons.querySelectorAll("button").forEach(btn=>{
@@ -530,14 +603,12 @@ window.addEventListener("DOMContentLoaded", ()=>{
   }
 });
 
-/* Cargar orden guardado */
 let MENU_ORDER = {};
 menuOrderRef.onSnapshot(snap=>{
   MENU_ORDER = snap.exists ? snap.data() : {};
   renderOrderGrid();
 });
 
-/* Render grid con Drag & Drop */
 function renderOrderGrid(){
   if(!orderGrid) return;
   orderGrid.innerHTML = "";
@@ -556,7 +627,7 @@ function renderOrderGrid(){
 
   list.forEach(p=>{
     const card = document.createElement("div");
-    card.className = "sort-card"; // Usar la clase nueva
+    card.className = "sort-card"; 
     card.draggable = true;
     card.dataset.id = p.id;
 
@@ -568,7 +639,6 @@ function renderOrderGrid(){
       </div>
     `;
 
-    // Eventos Drag
     card.addEventListener("dragstart", e=>{
       e.dataTransfer.setData("id", p.id);
       card.classList.add("dragging");
@@ -583,7 +653,6 @@ function renderOrderGrid(){
       const dragging = orderGrid.querySelector(".dragging");
       if(!dragging || dragging === card) return;
       
-      // Lógica simple de reordenamiento visual
       const siblings = [...orderGrid.querySelectorAll(".sort-card:not(.dragging)")];
       const nextSibling = siblings.find(sibling => {
           const rect = sibling.getBoundingClientRect();
@@ -592,25 +661,22 @@ function renderOrderGrid(){
       
       orderGrid.insertBefore(dragging, nextSibling);
     });
-
     orderGrid.appendChild(card);
   });
 }
 
-/* Suscripción */
 productsCol.onSnapshot(snap=>{
   ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
   renderOrderGrid();
 });
 
-/* Guardar Orden */
 window.addEventListener("DOMContentLoaded", ()=>{
   const btnSaveOrder = document.querySelector("#btnSaveOrder");
   if(btnSaveOrder){
     btnSaveOrder.onclick = async ()=>{
       const ids = [...orderGrid.querySelectorAll(".sort-card")].map(c => c.dataset.id);
       await menuOrderRef.set({ ...MENU_ORDER, [CURRENT_CAT]: ids }, {merge:true});
-      alert("✅ Orden guardado correctamente. El menú se actualizará en breve.");
+      alert("✅ Orden guardado correctamente.");
     };
   }
 });
@@ -675,11 +741,113 @@ btnSaveUntil.onclick = async()=>{
 </script>
 
 <script>
+const cpTbody = document.querySelector("#cpTable");
+
+function upsertCouponFromForm(){
+  const code = (document.querySelector("#cpCode").value||"").trim().toUpperCase();
+  if(!code){ alert("Ingresá código"); return; }
+
+  const type = document.querySelector("#cpType").value;
+  const value = Number(document.querySelector("#cpValue").value||0);
+  if(!(value>0)){ alert("Valor inválido"); return; }
+
+  const maxUses = Number(document.querySelector("#cpMaxUses").value||0);
+  const note    = (document.querySelector("#cpNote").value||"").trim();
+  
+  // Fechas (input date) -> Timestamp
+  const fStr = document.querySelector("#cpFrom").value;
+  const tStr = document.querySelector("#cpTo").value;
+  let from = null, to = null;
+  if(fStr) from = new Date(fStr + "T00:00:00"); // Local start
+  if(tStr) to   = new Date(tStr + "T23:59:59"); // Local end
+
+  const payload = {
+    code, type, value,
+    enabled:true,
+    note: note || null,
+    validFrom: from ? firebase.firestore.Timestamp.fromDate(from) : null,
+    validTo:   to   ? firebase.firestore.Timestamp.fromDate(to)   : null,
+    maxUses: maxUses > 0 ? maxUses : null,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  db.collection("coupons").doc(code)
+    .set({
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      uses:0,
+      ...payload
+    },{merge:true})
+    .then(()=>{
+      alert("Cupón guardado: " + code);
+      loadCoupons();
+    })
+    .catch(e=>{ console.error(e); alert("Error guardando cupón"); });
+}
+
+document.querySelector("#btnCreateCp").onclick = upsertCouponFromForm;
+
+function renderCoupons(list){
+  cpTbody.innerHTML = "";
+  list.forEach(doc=>{
+    const c = doc.data();
+    const uses = `${c.uses||0}${c.maxUses?` / ${c.maxUses}`:''}`;
+    const vf = fmtDate(c.validFrom);
+    const vt = fmtDate(c.validTo);
+    
+    const vig = (vf ? vf.toLocaleDateString("es-AR")+" " : "") + (vt ? "→ "+vt.toLocaleDateString("es-AR") : "");
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><strong>${c.code}</strong></td>
+      <td>${c.type === "percent" ? "%" : "$"}</td>
+      <td>${c.value}</td>
+      <td>${uses}</td>
+      <td class="small muted">${vig || "Permanente"}</td>
+      <td>${c.enabled ? "<span class='pill ok'>SI</span>" : "<span class='pill off'>NO</span>"}</td>
+      <td class="row">
+        <button class="btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
+          ${c.enabled ? "Pausar" : "Activar"}
+        </button>
+        <button class="btn bad" data-act="delete" data-id="${doc.id}">X</button>
+      </td>
+    `;
+    cpTbody.appendChild(tr);
+  });
+
+  cpTbody.querySelectorAll("button[data-act]").forEach(btn=>{
+    btn.onclick = async()=>{
+      const id = btn.dataset.id;
+      const act = btn.dataset.act;
+      if(act === "toggle"){
+        const snap = await db.collection("coupons").doc(id).get();
+        const enabled = !!snap.data()?.enabled;
+        await db.collection("coupons").doc(id).set({ enabled:!enabled, updatedAt:new Date() },{merge:true});
+        loadCoupons();
+      } else if(act === "delete"){
+        if(confirm("¿Eliminar "+id+"?")){
+          await db.collection("coupons").doc(id).delete();
+          loadCoupons();
+        }
+      }
+    };
+  });
+}
+
+async function loadCoupons(){
+  const q = await db.collection("coupons").orderBy("code").get();
+  renderCoupons(q.docs);
+}
+</script>
+
+<script>
 window.addEventListener("DOMContentLoaded", ()=>{
   const btnSaveProduct = document.querySelector("#btnSaveProduct");
   if(btnSaveProduct){ btnSaveProduct.onclick = saveProduct; }
   const btnClearProduct = document.querySelector("#btnClearProduct");
   if(btnClearProduct){ btnClearProduct.onclick = clearProductForm; }
+  
+  // Cargar cupones
+  loadCoupons();
 });
 </script>
 
