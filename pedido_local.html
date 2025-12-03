@@ -130,68 +130,61 @@
     }
     checkSession(); setInterval(checkSession, 5*60*1000);
 
-    // =================================================================
+  // =================================================================
     // 🔥 CONFIGURACIÓN DE RECETAS (DICCIONARIO DE INGREDIENTES) 🔥
     // =================================================================
-    // La clave (ej: "Hamburguesa Doble") debe ser IGUAL a como sale en el pedido.
-    // Los ingredientes deben tener el MISMO NOMBRE que en tu Stock.
     const RECETAS = {
         "Cheeseburger Simple": [
-            { ingrediente: "Medallon", cantidad: 1 },
-            { ingrediente: "Cheddar", cantidad: 2 },
-            { ingrediente: "Pan Brioche", cantidad: 1 }
+            { ingrediente: "Carne (Medallón)", cantidad: 1 },
+            { ingrediente: "Cheddar (Fetas)", cantidad: 2 },
+            { ingrediente: "Pan de Papa", cantidad: 1 } 
         ],
         "Hamburguesa Doble": [
             { ingrediente: "Carne (Medallón)", cantidad: 2 },
             { ingrediente: "Pan de Papa", cantidad: 1 },
-            { ingrediente: "Cheddar (Fetas)", cantidad: 2 } // Doble queso
+            { ingrediente: "Cheddar (Fetas)", cantidad: 2 }
         ],
         "Hamburguesa Triple": [
             { ingrediente: "Carne (Medallón)", cantidad: 3 },
             { ingrediente: "Pan de Papa", cantidad: 1 },
             { ingrediente: "Cheddar (Fetas)", cantidad: 3 },
-            { ingrediente: "Bacon / Panceta", cantidad: 0.05 } // 50g aprox
+            { ingrediente: "Bacon / Panceta", cantidad: 0.05 }
         ],
-        // Ejemplo para papas
         "Papas Fritas": [
-             { ingrediente: "Bolsa de Papas", cantidad: 0.2 } // 200g de papa
+             { ingrediente: "Bolsa de Papas", cantidad: 0.2 }
         ],
-        // Agrega aquí el resto... "Royal", "Crispy", etc.
+        // Mapeos de guarnición
+        "Con Sal": [ { ingrediente: "Bolsa de Papas", cantidad: 0.2 } ],
+        "Sin Sal": [ { ingrediente: "Bolsa de Papas", cantidad: 0.2 } ],
+        "Sazonadas": [ { ingrediente: "Bolsa de Papas", cantidad: 0.2 } ]
     };
     
-    // Nombres exactos de extras para descontar
     const EXTRAS_MAPPING = {
-        'patty': { ingrediente: "Medallon", cantidad: 1 },
+        'patty': { ingrediente: "Carne (Medallón)", cantidad: 1 },
         'cheddar': { ingrediente: "Cheddar (Fetas)", cantidad: 1 },
         'brioche': { ingrediente: "Pan Brioche", cantidad: 1 },
-        'bacon': { ingrediente: "Bacon / Panceta", cantidad: 1 }
+        'bacon': { ingrediente: "Bacon / Panceta", cantidad: 0.03 } // Asumiendo 30g extra
     };
 
-    // --- LÓGICA DE DESCUENTO DE STOCK ---
+    // --- 1. FUNCIÓN PARA DESCONTAR (Resta) ---
     async function descontarStockDePedido(pedido) {
-        if (!pedido.items || pedido.stockDescontado) return; // Ya se descontó o no tiene items
+        if (!pedido.items || pedido.stockDescontado) return; 
 
-        console.log("⚡ Descontando stock para pedido #" + pedido.orderNumber);
+        console.log("📉 Descontando stock pedido #" + pedido.orderNumber);
         
-        // 1. Traer todo el inventario para mapear Nombres -> IDs
         const snapshot = await db.collection('inventory').get();
         const inventarioMap = {}; 
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            inventarioMap[data.name.trim().toLowerCase()] = doc.id;
-        });
+        snapshot.forEach(doc => inventarioMap[doc.data().name.trim().toLowerCase()] = doc.id);
 
         const batch = db.batch();
         let huboCambios = false;
 
-        // 2. Recorrer items del pedido
         pedido.items.forEach(item => {
             const nombreProd = item.name.trim();
             const qty = Number(item.qty || 1);
             
-            // A. Descontar receta base
-            const receta = RECETAS[nombreProd] || RECETAS[Object.keys(RECETAS).find(k => nombreProd.includes(k))]; // Intento de match parcial
-            
+            // Receta base
+            const receta = RECETAS[nombreProd] || RECETAS[Object.keys(RECETAS).find(k => nombreProd.includes(k))];
             if (receta) {
                 receta.forEach(ing => {
                     const idStock = inventarioMap[ing.ingrediente.trim().toLowerCase()];
@@ -202,11 +195,9 @@
                     }
                 });
             }
-
-            // B. Descontar Extras (si tiene)
+            // Extras
             if(item.extras){
                 for (const [key, val] of Object.entries(item.extras)) {
-                    // key puede ser 'patty', 'cheddar'. val es la cantidad extra
                     const mapExtra = EXTRAS_MAPPING[key];
                     if(mapExtra && val > 0){
                         const idStock = inventarioMap[mapExtra.ingrediente.trim().toLowerCase()];
@@ -220,36 +211,100 @@
             }
         });
 
-        // 3. Confirmar cambios
         if (huboCambios) {
-            // Marcar pedido como descontado para no repetir
             const pedidoRef = db.collection('orders').doc(pedido.id);
             batch.update(pedidoRef, { stockDescontado: true });
-            
             await batch.commit();
-            console.log("✅ Stock actualizado.");
-            // Opcional: alert("Stock descontado");
+            console.log("✅ Stock descontado.");
+        }
+    }
+
+    // --- 2. FUNCIÓN PARA REPONER (Suma si se cancela) ---
+    async function reponerStockDePedido(pedido) {
+        // OJO: Solo reponemos si ya se había descontado antes
+        if (!pedido.items || !pedido.stockDescontado) {
+            console.log("ℹ️ No se repone stock porque no se había descontado.");
+            return; 
+        }
+
+        console.log("↺ Reponiendo stock pedido #" + pedido.orderNumber);
+        
+        const snapshot = await db.collection('inventory').get();
+        const inventarioMap = {}; 
+        snapshot.forEach(doc => inventarioMap[doc.data().name.trim().toLowerCase()] = doc.id);
+
+        const batch = db.batch();
+        let huboCambios = false;
+
+        pedido.items.forEach(item => {
+            const nombreProd = item.name.trim();
+            const qty = Number(item.qty || 1);
+            
+            // Receta base
+            const receta = RECETAS[nombreProd] || RECETAS[Object.keys(RECETAS).find(k => nombreProd.includes(k))];
+            if (receta) {
+                receta.forEach(ing => {
+                    const idStock = inventarioMap[ing.ingrediente.trim().toLowerCase()];
+                    if (idStock) {
+                        const ref = db.collection('inventory').doc(idStock);
+                        // AQUI ESTA LA MAGIA: Usamos numeros POSITIVOS para sumar
+                        batch.update(ref, { qty: firebase.firestore.FieldValue.increment(ing.cantidad * qty) });
+                        huboCambios = true;
+                    }
+                });
+            }
+            // Extras
+            if(item.extras){
+                for (const [key, val] of Object.entries(item.extras)) {
+                    const mapExtra = EXTRAS_MAPPING[key];
+                    if(mapExtra && val > 0){
+                        const idStock = inventarioMap[mapExtra.ingrediente.trim().toLowerCase()];
+                        if(idStock){
+                            const ref = db.collection('inventory').doc(idStock);
+                            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(mapExtra.cantidad * val) });
+                            huboCambios = true;
+                        }
+                    }
+                }
+            }
+        });
+
+        if (huboCambios) {
+            const pedidoRef = db.collection('orders').doc(pedido.id);
+            // Quitamos la marca de descontado
+            batch.update(pedidoRef, { stockDescontado: false });
+            await batch.commit();
+            console.log("✅ Stock devuelto al inventario.");
+            alert("El pedido fue cancelado y el stock ha sido repuesto.");
         }
     }
 
     // 3. Funciones Globales
     window.logout = () => { localStorage.removeItem('rb_admin_ok'); location.replace('login.html'); };
 
-    // 🔥 MODIFICADO PARA INTEGRAR EL STOCK 🔥
+    // 🔥 LOGICA DE ESTADOS ACTUALIZADA 🔥
     window.setOrderStatus = async (id, next, isPaid) => {
         if(next==='delivered' && !isPaid){ alert("⚠️ COBRAR PRIMERO: El pedido figura pendiente."); return; }
         
         try{ 
-            // 1. Actualizar estado
+            // 1. Obtener datos actuales del pedido (necesario para saber si ya se descontó stock)
+            const docSnap = await db.collection('orders').doc(id).get();
+            if(!docSnap.exists) return;
+            const pedidoData = { id: docSnap.id, ...docSnap.data() };
+
+            // 2. Actualizar estado visual
             await db.collection("orders").doc(id).update({status:next}); 
             
-            // 2. Si es ENTREGADO, descontar stock
+            // 3. Manejo de Stock según el cambio
             if(next === 'delivered'){
-                const doc = await db.collection('orders').doc(id).get();
-                if(doc.exists){
-                    descontarStockDePedido({ id: doc.id, ...doc.data() });
-                }
+                // Si pasa a entregado -> RESTAR
+                descontarStockDePedido(pedidoData);
+            } 
+            else if(next === 'cancelled'){
+                // Si pasa a cancelado -> REPONER (solo si se había restado antes)
+                reponerStockDePedido(pedidoData);
             }
+
         }catch(e){console.error(e);}
     };
 
