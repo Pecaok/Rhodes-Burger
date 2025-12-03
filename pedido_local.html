@@ -117,17 +117,28 @@
     checkSession(); setInterval(checkSession, 5*60*1000);
 
     // =================================================================
-    // 🔥 SISTEMA DE STOCK INTELIGENTE (CONECTADO A BASE DE DATOS) 🔥
+    // 🔥 CONFIGURACIÓN DE EXTRAS (ESTO SI VA FIJO POR AHORA) 🔥
+    // =================================================================
+    // Define qué ingrediente del stock se descuenta por cada tipo de extra.
+    const EXTRAS_MAPPING = {
+        'patty': { name: "Carne (Medallón)", qty: 1 },
+        'cheddar': { name: "Cheddar (Fetas)", qty: 1 },
+        'bacon': { name: "Bacon / Panceta", qty: 0.03 }, // Asumo 30g
+        'brioche': { name: "Pan Brioche", qty: 1 }
+    };
+
+    // =================================================================
+    // 🔥 SISTEMA DE STOCK CONECTADO A BASE DE DATOS 🔥
     // =================================================================
     
-    let RECETAS_DB = {}; // Aquí se guardarán las recetas descargadas
-    let INVENTARIO_DB = {}; // Aquí se guardarán los IDs de los ingredientes
+    let RECETAS_DB = {}; // Aquí se descargarán tus recetas del panel de Stock
+    let INVENTARIO_DB = {}; // Mapa de Nombre -> ID
 
     // 1. Escuchar cambios en Recetas e Inventario en tiempo real
     db.collection('recipes').onSnapshot(snap => {
         RECETAS_DB = {};
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
-        console.log("📚 Recetas actualizadas:", Object.keys(RECETAS_DB).length);
+        console.log("📚 Recetas cargadas desde DB:", Object.keys(RECETAS_DB));
     });
 
     db.collection('inventory').onSnapshot(snap => {
@@ -138,58 +149,49 @@
         });
     });
 
-    // Mapeo fijo solo para extras (estos suelen ser estándar, si cambian, edita aquí)
-    const EXTRAS_MAPPING = {
-        'patty': { name: "Carne (Medallón)", qty: 1 },
-        'cheddar': { name: "Cheddar (Fetas)", qty: 1 },
-        'bacon': { name: "Bacon / Panceta", qty: 0.03 }
-    };
-
-    // --- FUNCIÓN UNIFICADA DE GESTIÓN DE STOCK ---
-    // factor: -1 para descontar (Entregado), 1 para devolver (Cancelado)
+    // --- FUNCIÓN GESTIÓN STOCK ---
+    // factor: -1 (restar/entregado), 1 (sumar/cancelado)
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
         
-        // Si vamos a descontar (-1) y ya estaba descontado: ERROR (Evitar doble descuento)
+        // Validaciones de seguridad
         if(factor === -1 && pedido.stockDescontado) return;
-        // Si vamos a devolver (1) y NO estaba descontado: ERROR (No devolver lo que no se restó)
         if(factor === 1 && !pedido.stockDescontado) return;
 
-        console.log(`🔄 Gestionando stock (${factor === -1 ? 'Descontar' : 'Reponer'}) pedido #${pedido.orderNumber}`);
+        console.log(`🔄 Stock update (${factor === -1 ? 'Resta' : 'Suma'}) pedido #${pedido.orderNumber}`);
 
         const batch = db.batch();
         let huboCambios = false;
 
         pedido.items.forEach(item => {
-            const prodName = item.name.trim(); // Nombre en el pedido (ej: "Hamburguesa Doble")
+            const prodName = item.name.trim(); 
             const qtyPedida = Number(item.qty || 1);
 
-            // A. Buscar Receta en la DB (Búsqueda exacta o parcial)
+            // A. BUSCAR RECETA EN LA DB
             let ingredientes = RECETAS_DB[prodName];
             
-            // Si no encuentra exacto, busca si el nombre contiene la clave (ej: "Hamburguesa Doble con fritas")
+            // Búsqueda inteligente (parcial): Si no existe exacta, busca si el nombre contiene la clave
             if (!ingredientes) {
                 const key = Object.keys(RECETAS_DB).find(k => prodName.includes(k));
                 if(key) ingredientes = RECETAS_DB[key];
             }
 
+            // Si encontramos receta, descontamos sus ingredientes
             if (ingredientes) {
                 ingredientes.forEach(ing => {
-                    // Buscar ID del ingrediente en el mapa de inventario
                     const ingID = INVENTARIO_DB[ing.ingrediente.trim().toLowerCase()];
                     if (ingID) {
                         const ref = db.collection('inventory').doc(ingID);
-                        // Multiplicamos: Cantidad de la receta * Cantidad del pedido * Factor (-1 o 1)
                         const delta = ing.cantidad * qtyPedida * factor; 
                         batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
                         huboCambios = true;
-                    } else {
-                        console.warn(`Ingrediente no encontrado en stock: ${ing.ingrediente}`);
                     }
                 });
+            } else {
+                console.log(`⚠️ No hay receta para "${prodName}" en Stock > Recetas`);
             }
 
-            // B. Extras (Siempre fijos)
+            // B. EXTRAS (Mapeo fijo arriba)
             if(item.extras){
                 for (const [key, val] of Object.entries(item.extras)) {
                     const extraDef = EXTRAS_MAPPING[key];
@@ -208,38 +210,34 @@
 
         if (huboCambios) {
             const pedidoRef = db.collection('orders').doc(pedido.id);
-            // Si factor es -1 (descontamos), marcamos true. Si es 1 (devolvemos), marcamos false.
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
-            console.log("✅ Stock actualizado correctamente.");
+            console.log("✅ Stock actualizado.");
         }
     }
 
     // 3. Funciones Globales
     window.logout = () => { localStorage.removeItem('rb_admin_ok'); location.replace('login.html'); };
 
-    // 🔥 LOGICA DE ESTADOS ACTUALIZADA 🔥
+    // 🔥 LOGICA DE ESTADOS 🔥
     window.setOrderStatus = async (id, next, isPaid) => {
         if(next==='delivered' && !isPaid){ alert("⚠️ COBRAR PRIMERO: El pedido figura pendiente."); return; }
         
         try{ 
-            // 1. Obtener datos actuales del pedido (necesario para saber si ya se descontó stock)
             const docSnap = await db.collection('orders').doc(id).get();
             if(!docSnap.exists) return;
             const pedidoData = { id: docSnap.id, ...docSnap.data() };
 
-            // 2. Actualizar estado visual
-            await db.collection("orders").doc(id).update({status:next}); 
-            
-            // 3. Manejo de Stock según el cambio
+            // Gestión de Stock
             if(next === 'delivered'){
-                // Si pasa a entregado -> RESTAR (-1)
-                await gestionarStock(pedidoData, -1); 
+                await gestionarStock(pedidoData, -1); // Restar
             } 
             else if(next === 'cancelled'){
-                // Si pasa a cancelado -> REPONER (1) (solo si se había restado antes)
-                await gestionarStock(pedidoData, 1);
+                await gestionarStock(pedidoData, 1); // Sumar/Devolver
             }
+
+            // Actualizar estado visual
+            await db.collection("orders").doc(id).update({status:next}); 
 
         }catch(e){console.error(e);}
     };
