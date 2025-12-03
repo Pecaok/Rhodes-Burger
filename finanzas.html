@@ -381,20 +381,42 @@
         }
 
         async function fetchUnifiedOrders(start, end){
-            const sStr = start.toISOString(); const eStr = end.toISOString();
-            // Doble fetch para asegurar
-            const p1 = db.collection('orders').where('createdAt','>=',sStr.split('T')[0]).where('createdAt','<=',eStr.split('T')[0]).get();
-            const p2 = db.collection('orders').where('createdAt','>=',sStr).where('createdAt','<=',eStr).get();
-            const [sn1, sn2] = await Promise.all([p1, p2]);
-            
-            const map = new Map();
-            [...sn1.docs, ...sn2.docs].forEach(d => {
-                const dat = d.data();
-                if(!dat.status?.includes('cancel')) map.set(d.id, dat);
-            });
-            return Array.from(map.values());
-        }
+    // Convertimos a Date objects de JS nativo para Firestore
+    // Nota: Si en tu BD 'createdAt' es string, mantenlo como string.
+    // Si es Timestamp de firebase, usa objetos Date.
+    
+    // Solución Híbrida más eficiente: Traer por rango amplio de String
+    // y filtrar el resto en el cliente para no duplicar llamadas.
+    
+    const sStr = start.toISOString();
+    const eStr = end.toISOString();
+    
+    // Hacemos SOLO UNA llamada basada en el formato más común (asumo ISO completo)
+    // Si tienes mezcla, es mejor traer todo el mes y filtrar en JS.
+    
+    // Opción optimizada: Traer todo el mes sin filtro de where complejo si no hay muchos datos,
+    // o mantener 1 solo where.
+    
+    try {
+        const snapshot = await db.collection('orders')
+            .where('createdAt', '>=', sStr.split('T')[0]) // Busca desde el día 'YYYY-MM-DD'
+            .where('createdAt', '<=', eStr)
+            .get();
 
+        const data = [];
+        snapshot.forEach(d => {
+            const val = d.data();
+            // Filtro de seguridad (status)
+            if(!val.status?.includes('cancel')) {
+                data.push(val);
+            }
+        });
+        return data;
+    } catch (e) {
+        console.error("Error cargando pedidos:", e);
+        return [];
+    }
+}
         function exportExcel(){
             if(!CURRENT_ORDERS.length) return alert("Sin datos.");
             let csv = "Fecha,Pedido,Cliente,Pago,Total,Estado\n";
