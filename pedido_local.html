@@ -41,7 +41,6 @@
     .tab{padding:8px 16px;border-radius:20px;background:#e0e0e0;color:#555;font-weight:600;font-size:14px;cursor:pointer;border:none;transition:all .2s}
     .tab.active{background:var(--primary);color:#fff;box-shadow:0 4px 8px rgba(98,90,69,.2)}
 
-    /* Tarjeta */
     .order{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:24px;margin-bottom:24px;border:1px solid transparent;transition:all .3s}
     .order:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.12)}
     .order.cancelled{opacity:.6;filter:grayscale(1)}
@@ -77,7 +76,6 @@
     .state-btn.on.delivered{background:var(--st-delivered);border-color:var(--st-delivered);color:#fff}
     .state-btn.cancelled:hover{background:#ffebee;color:#c62828;border-color:#ef9a9a}
 
-    /* PAGO */
     .pay-line{display:flex;gap:8px;align-items:center;background:#f4f4f9;padding:4px;border-radius:10px}
     .pay-select{padding:8px;border-radius:8px;border:1px solid var(--ring);background:#fff;font-weight:600;color:var(--text);cursor:pointer; outline:none; min-width: 140px;}
     .pay-toggle{padding:8px 16px;border-radius:8px;border:none;font-weight:700;font-size:13px;cursor:pointer;color:#fff;min-width:110px}
@@ -99,9 +97,8 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    // 1. Init
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
-    try{ firebase.initializeApp(firebaseConfig); }catch(e){ console.error("Firebase Init Error", e); }
+    try{ firebase.initializeApp(firebaseConfig); }catch(e){ console.error("Error Firebase:", e); }
     const db = firebase.firestore();
     window.idToDoc = new Map();
 
@@ -120,9 +117,8 @@
     // =================================================================
     
     let RECETAS_DB = {}; 
-    let INVENTARIO_DB = {}; // Mapa: "nombre minuscula" -> "ID"
+    let INVENTARIO_DB = {}; 
 
-    // Carga inicial y en tiempo real
     db.collection('recipes').onSnapshot(snap => {
         RECETAS_DB = {};
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
@@ -131,20 +127,16 @@
     db.collection('inventory').onSnapshot(snap => {
         INVENTARIO_DB = {};
         snap.forEach(doc => { 
-            // Guardamos ID indexado por nombre en minúscula para buscar fácil
             INVENTARIO_DB[doc.data().name.trim().toLowerCase()] = doc.id; 
         });
     });
 
-    // --- BUSCADOR SEGURO DE INGREDIENTES ---
+    // --- BUSCADOR SEGURO ---
     function findSmartId(keywords) {
         const stockNames = Object.keys(INVENTARIO_DB);
-        // 1. Intento exacto primero
         for (const key of keywords) {
-            const kLower = key.toLowerCase();
-            if (INVENTARIO_DB[kLower]) return INVENTARIO_DB[kLower];
+            if (INVENTARIO_DB[key.toLowerCase()]) return INVENTARIO_DB[key.toLowerCase()];
         }
-        // 2. Intento parcial (que contenga la palabra)
         for (const stockName of stockNames) {
             for (const key of keywords) {
                 if (stockName.includes(key.toLowerCase())) return INVENTARIO_DB[stockName];
@@ -153,16 +145,13 @@
         return null;
     }
 
-    // --- GESTIÓN DE STOCK (REST y SUMA) ---
+    // --- GESTIÓN DE STOCK ---
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
-        
-        // Protecciones
-        if(factor === -1 && pedido.stockDescontado) return; // Ya descontado
-        if(factor === 1 && !pedido.stockDescontado) return; // No se puede devolver lo que no se descontó
+        if(factor === -1 && pedido.stockDescontado) return;
+        if(factor === 1 && !pedido.stockDescontado) return;
 
-        console.log(`📊 GESTIONANDO STOCK Pedido #${pedido.orderNumber} (Factor: ${factor})`);
-
+        console.log(`📊 STOCK update (${factor}) pedido #${pedido.orderNumber}`);
         const batch = db.batch();
         let huboCambios = false;
 
@@ -171,7 +160,7 @@
             const prodNameLower = prodName.toLowerCase();
             const qtyPedida = Number(item.qty || 1);
 
-            // A. RECETA BASE
+            // 1. RECETA DE BASE
             let ingredientes = RECETAS_DB[prodName];
             if (!ingredientes) {
                 const key = Object.keys(RECETAS_DB).find(k => prodName.includes(k));
@@ -180,9 +169,8 @@
 
             if (ingredientes) {
                 ingredientes.forEach(ing => {
-                    // Buscar ID (Exacto o Inteligente)
                     let ingID = INVENTARIO_DB[ing.ingrediente.trim().toLowerCase()];
-                    if(!ingID) ingID = findSmartId([ing.ingrediente]); // Busca ignorando mayúsculas
+                    if(!ingID) ingID = findSmartId([ing.ingrediente]);
 
                     if (ingID) {
                         const ref = db.collection('inventory').doc(ingID);
@@ -193,74 +181,78 @@
                 });
             }
 
-            // B. EXTRAS (Lógica reforzada)
+            // 2. EXTRAS (Cheddar, Bacon, etc.)
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
-                    const val = Number(valRaw); // Asegurar número
+                    const val = Number(valRaw);
                     if (val > 0) {
                         let searchTerms = [];
                         let amountPerUnit = 1;
 
                         if (key === 'patty') {
-                            // Detectar si es pollo o carne
-                            if (prodNameLower.includes('pollo') || prodNameLower.includes('crispy') || prodNameLower.includes('chicken')) {
+                            if (prodNameLower.includes('pollo') || prodNameLower.includes('crispy')) {
                                 searchTerms = ['medallón de pollo', 'pollo', 'crispy'];
                             } else {
-                                searchTerms = ['carne (medallón)', 'carne', 'medallon', 'patty'];
+                                searchTerms = ['carne', 'medallon', 'patty'];
                             }
                         } 
                         else if (key === 'cheddar') { searchTerms = ['cheddar', 'queso']; }
-                        else if (key === 'bacon') { searchTerms = ['bacon', 'panceta']; amountPerUnit = 0.03; }
+                        else if (key === 'bacon') { searchTerms = ['bacon', 'panceta']; amountPerUnit = 0.03; } // 30g
                         else if (key === 'brioche') { searchTerms = ['brioche', 'pan brioche']; }
-                        else { searchTerms = [key]; } // Fallback para otros extras
+                        else { searchTerms = [key]; }
 
                         const ingID = findSmartId(searchTerms);
-                        
                         if (ingID) {
                             const ref = db.collection('inventory').doc(ingID);
                             const delta = amountPerUnit * val * factor;
                             batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
                             huboCambios = true;
-                            console.log(`   ${factor===-1?'Restando':'Devolviendo'} Extra: ${key} (${delta})`);
-                        } else {
-                            console.warn(`   ⚠️ No encontré stock para el extra: ${key}`);
                         }
                     }
                 }
             }
+
+            // 3. 🔥 DESCUENTO AUTOMÁTICO DE PAPAS (200g) 🔥
+            // Si es hamburguesa, descontar papas
+            const esBurger = prodNameLower.includes('hamburguesa') || prodNameLower.includes('burger') || prodNameLower.includes('doble') || prodNameLower.includes('simple') || prodNameLower.includes('royal') || prodNameLower.includes('crispy') || prodNameLower.includes('cuarto') || prodNameLower.includes('big');
+            
+            if (esBurger) {
+                // Busca papas en el stock
+                const papasID = findSmartId(['papas', 'bastones', 'papas fritas', 'congeladas', 'bolsa de papas']);
+                if (papasID) {
+                    const ref = db.collection('inventory').doc(papasID);
+                    // 0.200 kg por cada hamburguesa pedida
+                    const deltaPapas = 0.2 * qtyPedida * factor;
+                    batch.update(ref, { qty: firebase.firestore.FieldValue.increment(deltaPapas) });
+                    huboCambios = true;
+                    console.log(`   🍟 Auto Papas: ${deltaPapas.toFixed(3)}`);
+                }
+            }
+
         });
 
         if (huboCambios) {
             const pedidoRef = db.collection('orders').doc(pedido.id);
-            // Actualizamos la marca: true si descontamos (-1), false si devolvimos (1)
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
-            console.log("✅ Stock actualizado exitosamente.");
+            console.log("✅ Stock actualizado.");
         }
     }
 
-    // 3. Funciones Globales
+    // 3. Globales
     window.logout = () => { localStorage.removeItem('rb_admin_ok'); location.replace('login.html'); };
 
-    // 🔥 LOGICA DE ESTADOS 🔥
     window.setOrderStatus = async (id, next, isPaid) => {
         if(next==='delivered' && !isPaid){ alert("⚠️ COBRAR PRIMERO: El pedido figura pendiente."); return; }
-        
         try{ 
-            // Obtenemos los datos ANTES de cambiar el estado
             const docSnap = await db.collection('orders').doc(id).get();
             if(!docSnap.exists) return;
             const pedidoData = { id: docSnap.id, ...docSnap.data() };
 
-            if(next === 'delivered'){
-                await gestionarStock(pedidoData, -1); // Restar
-            } 
-            else if(next === 'cancelled'){
-                await gestionarStock(pedidoData, 1); // Devolver
-            }
+            if(next === 'delivered'){ await gestionarStock(pedidoData, -1); } 
+            else if(next === 'cancelled'){ await gestionarStock(pedidoData, 1); }
 
             await db.collection("orders").doc(id).update({status:next}); 
-
         }catch(e){console.error(e);}
     };
 
