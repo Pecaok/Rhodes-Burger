@@ -14,7 +14,7 @@
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
     
-    /* HEADER (Igual a las otras) */
+    /* HEADER */
     header{position:sticky; top:0; z-index:100; background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .topbar{width: 100%; padding:10px 20px; display:flex;align-items:center;gap:12px;flex-wrap:wrap}
     .brand{display:flex;align-items:center;text-decoration:none;color:inherit;font-weight:700}
@@ -42,7 +42,7 @@
     input:focus, select:focus { border-color:var(--primary) }
     label { font-size:12px; font-weight:700; color:var(--muted); margin-bottom:4px; display:block }
 
-    /* TABLA DE INGRESO */
+    /* TABLA DE CARGA */
     .entry-table { width:100%; border-collapse:collapse; margin-top:15px }
     .entry-table th { text-align:left; font-size:12px; color:#999; text-transform:uppercase; padding:10px; border-bottom:1px solid #eee }
     .entry-table td { padding:8px; border-bottom:1px solid #f9f9f9 }
@@ -51,6 +51,12 @@
     .trash-btn:hover { opacity:1; color:var(--danger) }
 
     .total-row { text-align:right; padding:20px; font-size:18px; font-weight:800; border-top:2px solid #eee }
+
+    /* TABLA HISTORIAL (NUEVA) */
+    .history-table { width:100%; border-collapse:collapse; font-size:14px; }
+    .history-table th { text-align:left; background:#fafafa; padding:12px; font-weight:700; color:#555; border-bottom:2px solid #eee; }
+    .history-table td { padding:12px; border-bottom:1px solid #eee; vertical-align:top; }
+    .hist-items { font-size:12px; color:#666; display:block; margin-top:4px; }
   </style>
 </head>
 <body>
@@ -129,6 +135,27 @@
             <button id="btnSave" class="btn primary" style="padding:12px 24px; font-size:16px">✅ Confirmar Ingreso</button>
         </div>
     </div>
+
+    <div class="card" style="margin-top:20px">
+        <h3>Historial de Ingresos</h3>
+        <div style="overflow-x:auto">
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Proveedor / Factura</th>
+                        <th>Detalle Compra</th>
+                        <th style="text-align:right">Total</th>
+                        <th style="text-align:center">Acción</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody">
+                    <tr><td colspan="5" style="padding:20px; text-align:center; color:#999">Cargando historial...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
   </main>
 
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -150,68 +177,54 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     
-    let PRODUCTS = []; // Cache de productos para el select
+    let PRODUCTS = []; // Cache de productos
 
     // 2. INIT
     document.addEventListener('DOMContentLoaded', async () => {
-        // Poner fecha de hoy
         $('#entryDate').valueAsDate = new Date();
 
-        // Cargar productos
+        // Cargar productos para el select
         const snap = await db.collection('inventory').orderBy('name').get();
         PRODUCTS = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        // Agregar primera linea vacía
-        addLine();
+        addLine(); // Primera linea
+        
+        // Escuchar Historial en tiempo real
+        loadHistory();
 
         // Eventos
         $('#btnAddLine').onclick = addLine;
         $('#btnSave').onclick = saveEntry;
     });
 
-    // 3. LOGICA DE FILAS
+    // 3. LOGICA FILAS
     function addLine(){
         const tbody = $('#linesBody');
         const tr = document.createElement('tr');
         
-        // Crear opciones del select
         let options = `<option value="">Seleccionar...</option>`;
         PRODUCTS.forEach(p => {
             options += `<option value="${p.id}" data-unit="${p.unit}">${p.name} (${p.unit})</option>`;
         });
 
         tr.innerHTML = `
-            <td>
-                <select class="p-select">${options}</select>
-            </td>
-            <td>
-                <input type="number" class="p-qty" step="0.1" min="0" placeholder="0">
-            </td>
-            <td>
-                <input type="number" class="p-cost" step="0.1" min="0" placeholder="$">
-            </td>
+            <td><select class="p-select">${options}</select></td>
+            <td><input type="number" class="p-qty" step="0.1" min="0" placeholder="0"></td>
+            <td><input type="number" class="p-cost" step="0.1" min="0" placeholder="$"></td>
             <td style="font-weight:bold; color:#666" class="p-subtotal">$0</td>
-            <td>
-                <button class="trash-btn" onclick="removeLine(this)">🗑</button>
-            </td>
+            <td><button class="trash-btn" onclick="removeLine(this)">🗑</button></td>
         `;
         
-        // Event listeners para calcular
         tr.querySelector('.p-qty').addEventListener('input', calcTotal);
         tr.querySelector('.p-cost').addEventListener('input', calcTotal);
-        
         tbody.appendChild(tr);
     }
 
-    function removeLine(btn){
-        btn.closest('tr').remove();
-        calcTotal();
-    }
+    function removeLine(btn){ btn.closest('tr').remove(); calcTotal(); }
 
     function calcTotal(){
         let total = 0;
-        const rows = document.querySelectorAll('#linesBody tr');
-        rows.forEach(tr => {
+        document.querySelectorAll('#linesBody tr').forEach(tr => {
             const qty = Number(tr.querySelector('.p-qty').value) || 0;
             const cost = Number(tr.querySelector('.p-cost').value) || 0;
             const sub = qty * cost;
@@ -222,72 +235,110 @@
         return total;
     }
 
-    // 4. GUARDAR
+    // 4. GUARDAR ENTRADA
     async function saveEntry(){
         const rows = document.querySelectorAll('#linesBody tr');
         const items = [];
-        let valid = true;
         let totalCost = 0;
 
-        // Validar datos
         rows.forEach(tr => {
             const pid = tr.querySelector('.p-select').value;
             const qty = Number(tr.querySelector('.p-qty').value);
             const cost = Number(tr.querySelector('.p-cost').value);
-            const pname = tr.querySelector('.p-select').selectedOptions[0]?.text || '';
+            const pname = tr.querySelector('.p-select').selectedOptions[0]?.text.split('(')[0].trim() || ''; // Nombre limpio
 
             if(pid && qty > 0){
-                items.push({ pid, pname, qty, cost, subtotal: qty*cost });
+                items.push({ pid, pname, qty, cost });
                 totalCost += (qty*cost);
-            } else if(pid) {
-                valid = false; // Seleccionó producto pero no puso cantidad
             }
         });
 
-        if(!valid) return alert("Por favor ingresa cantidades válidas para los productos seleccionados.");
-        if(items.length === 0) return alert("La lista está vacía.");
+        if(items.length === 0) return alert("Lista vacía o cantidades en 0.");
+        if(!confirm(`¿Confirmar ingreso por ${money(totalCost)}?`)) return;
 
-        if(!confirm(`¿Confirmar ingreso de ${items.length} productos por un total de ${money(totalCost)}?`)) return;
-
-        $('#btnSave').disabled = true;
+        $('#btnSave').disabled = true; 
         $('#btnSave').textContent = "Guardando...";
 
         try {
             const batch = db.batch();
-            const timestamp = new Date();
-
-            // 1. Crear documento de Historial de Ingreso
+            
+            // A. Guardar registro en historial
             const entryRef = db.collection('stock_entries').doc();
             batch.set(entryRef, {
                 date: $('#entryDate').value,
-                createdAt: timestamp,
-                provider: $('#provider').value,
-                invoice: $('#invoice').value,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                provider: $('#provider').value || 'Mostrador',
+                invoice: $('#invoice').value || '-',
                 totalCost: totalCost,
                 items: items
             });
 
-            // 2. Actualizar Stock de cada producto
+            // B. Actualizar stock
             items.forEach(it => {
                 const prodRef = db.collection('inventory').doc(it.pid);
-                // Usamos increment para evitar problemas de concurrencia
-                batch.update(prodRef, { 
-                    qty: firebase.firestore.FieldValue.increment(it.qty) 
-                });
+                batch.update(prodRef, { qty: firebase.firestore.FieldValue.increment(it.qty) });
             });
 
             await batch.commit();
 
-            alert("¡Ingreso registrado y stock actualizado!");
-            window.location.href = 'stock.html'; // Volver al stock
+            alert("¡Ingreso guardado correctamente!");
+            window.location.reload(); // Recargar para limpiar y ver tabla actualizada
 
         } catch(e) {
             console.error(e);
-            alert("Hubo un error al guardar.");
+            alert("Error al guardar.");
             $('#btnSave').disabled = false;
-            $('#btnSave').textContent = "✅ Confirmar Ingreso";
         }
     }
+
+    // 5. CARGAR HISTORIAL (Tiempo real)
+    function loadHistory(){
+        db.collection('stock_entries')
+          .orderBy('createdAt', 'desc')
+          .limit(20)
+          .onSnapshot(snap => {
+              const tbody = $('#historyBody');
+              tbody.innerHTML = '';
+
+              if(snap.empty){
+                  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px; color:#999">No hay ingresos registrados aún.</td></tr>`;
+                  return;
+              }
+
+              snap.forEach(doc => {
+                  const d = doc.data();
+                  
+                  // Formato de fecha (fix UTC con split)
+                  const [yyyy, mm, dd] = (d.date || '').split('-');
+                  const niceDate = d.date ? `${dd}/${mm}/${yyyy}` : '-';
+
+                  // Resumen de items
+                  const summary = (d.items || []).map(i => `${i.pname} (x${i.qty})`).join(', ');
+
+                  const tr = document.createElement('tr');
+                  tr.innerHTML = `
+                    <td><strong>${niceDate}</strong></td>
+                    <td>
+                        <div>${d.provider}</div>
+                        <div style="font-size:11px; color:#999">Fact: ${d.invoice}</div>
+                    </td>
+                    <td><span class="hist-items">${summary}</span></td>
+                    <td style="text-align:right; font-weight:bold">${money(d.totalCost)}</td>
+                    <td style="text-align:center">
+                        <button class="trash-btn" style="color:#d32f2f" onclick="deleteEntry('${doc.id}')" title="Borrar del historial">×</button>
+                    </td>
+                  `;
+                  tbody.appendChild(tr);
+              });
+          });
+    }
+
+    // Borrar historial (Solo visual, no revierte stock para evitar bugs complejos)
+    window.deleteEntry = async (id) => {
+        if(confirm("¿Eliminar este registro del historial?\n\nNOTA: Esto NO descuenta el stock cargado, solo borra el registro contable.")){
+            await db.collection('stock_entries').doc(id).delete();
+        }
+    };
 
     window.removeLine = removeLine;
   </script>
