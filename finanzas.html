@@ -125,7 +125,12 @@
     .cal-revenue-pill { background: #ecfdf5; color: #047857; border-radius: 99px; padding: 2px 8px; font-size: 10px; font-weight: 700; border: 1px solid #a7f3d0; }
     .no-sales-icon { font-size: 20px; opacity: 0.1; margin-top: -10px; }
 
-    /* RESPONSIVE */
+    /* Estilos específicos del Calendario de Ingredientes */
+    .cal-ing-row { font-size: 11px; font-weight: 600; display:flex; gap:4px; align-items:center; }
+    .cal-ing-row.meat { color: #8d6e63; } /* Marrón para carne */
+    .cal-ing-row.fries { color: #f59e0b; } /* Amarillo para papas */
+
+    /* RESPONSIVE HEADER FIX */
     @media (max-width: 768px) {
         .brand span { display: none; }
         .nav-btn { padding: 8px; font-size: 12px; }
@@ -207,10 +212,20 @@
           <div class="chartWrapTall"><canvas id="ordersChart"></canvas></div>
         </div>
 
-        <div class="card" style="margin-top:20px; border:1px solid #e5e7eb; box-shadow:none; background:#fdfdfd">
-            <strong>Consumo de Insumos (Estimado)</strong>
-            <div style="font-size:12px; color:#666; margin-bottom:10px">Medallones totales y gramos de papa (200g/burger) consumidos.</div>
-            <div class="chartWrap"><canvas id="ingredientsChart"></canvas></div>
+        <div class="card" style="margin-top:20px; border:1px solid #e5e7eb; box-shadow:none; background:#fff">
+            <strong>Calendario de Insumos (Consumo)</strong>
+            <div style="font-size:12px; color:#666; margin-bottom:10px">Medallones totales y kilos de papa consumidos por día.</div>
+            
+            <div class="calendar-grid" style="margin-top:5px">
+               <div class="cal-day-header" style="text-align:center">D</div>
+               <div class="cal-day-header" style="text-align:center">L</div>
+               <div class="cal-day-header" style="text-align:center">M</div>
+               <div class="cal-day-header" style="text-align:center">M</div>
+               <div class="cal-day-header" style="text-align:center">J</div>
+               <div class="cal-day-header" style="text-align:center">V</div>
+               <div class="cal-day-header" style="text-align:center">S</div>
+            </div>
+            <div id="ingCalendar" class="calendar-grid" style="margin-top:0"></div>
         </div>
 
         <div class="charts-row">
@@ -230,7 +245,7 @@
 
         <div class="card" style="margin-top:20px; border:1px solid #e5e7eb; box-shadow:none">
           <div class="row" style="justify-content:space-between">
-              <strong>Calendario de Ventas</strong>
+              <strong>Calendario de Ventas ($)</strong>
               <div class="inline">
                 <button id="calPrev" class="btn">◀</button>
                 <input type="month" id="calMonth" style="width:auto">
@@ -240,13 +255,6 @@
           </div>
           <div style="margin-top:10px; font-weight:bold; color:var(--primary)" id="calRange">—</div>
           <div id="calendarGrid" class="calendar-grid"></div>
-          
-          <div class="hm-legend" style="margin-top:10px; justify-content:flex-end">
-             <span class="muted">Intensidad:</span> 
-             <span class="swatch" style="background:#e8f5e9"></span>
-             <span class="swatch" style="background:#4caf50"></span>
-             <span class="swatch" style="background:#2e7d32"></span>
-          </div>
         </div>
 
         <div class="charts-row">
@@ -372,7 +380,7 @@
         const daysInPeriod = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
         const labels = Array.from({length: daysInPeriod}, (_, i) => {
             const d = new Date(start); d.setDate(d.getDate() + i);
-            return d.getDate(); // Label es el número de día
+            return d.getDate(); 
         });
         
         const dayOrders = Array(daysInPeriod).fill(0);
@@ -411,10 +419,8 @@
                 (d.items || []).forEach(it => {
                     const qty = Number(it.qty || 1);
                     if(isBurgerItem(it)){
-                        // Papas: 200g por hamburguesa
-                        dayFries[dayIdx] += (200 * qty);
+                        dayFries[dayIdx] += (200 * qty); // Gramos
                         
-                        // Medallones
                         let pat = 1;
                         const n = (it.name||'').toLowerCase();
                         if(n.includes('doble')) pat = 2;
@@ -444,35 +450,30 @@
             scales: { y:{beginAtZero:true}, y1:{beginAtZero:true, position:'right'} }
         });
 
-        // 2. 🔥 CHART INSUMOS (Nuevo) 🔥
-        renderChart("ingredientsChart", "bar", {
-            labels: labels,
-            datasets: [
-                { 
-                    label: 'Medallones (unid.)', 
-                    data: dayPatties, 
-                    backgroundColor: '#8d6e63', 
-                    yAxisID: 'y' 
-                },
-                { 
-                    label: 'Papas (gramos)', 
-                    data: dayFries, 
-                    type: 'line',
-                    borderColor: '#f59e0b', 
-                    backgroundColor: 'rgba(245, 158, 11, 0.1)', 
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.4,
-                    yAxisID: 'y1' 
-                }
-            ]
-        }, {
-            responsive:true, maintainAspectRatio:false,
-            interaction: { mode: 'index', intersect: false },
-            scales: { 
-                y: { beginAtZero:true, title:{display:true, text:'Unidades'} }, 
-                y1: { beginAtZero:true, position:'right', title:{display:true, text:'Gramos'}, grid:{drawOnChartArea:false} } 
-            }
+        // 2. 🔥 CALENDARIO DE INSUMOS (Render Manual) 🔥
+        const ingGrid = document.getElementById('ingCalendar');
+        ingGrid.innerHTML = '';
+        
+        // Rellenar días vacíos al principio si es un mes completo
+        const startDay = start.getDay(); 
+        for(let i=0; i<startDay; i++){ ingGrid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-empty-day"></div>`); }
+
+        dayPatties.forEach((p, i) => {
+            const f = dayFries[i];
+            const hasData = p > 0 || f > 0;
+            const friesKg = (f / 1000).toFixed(1); // Convertir a Kilos
+            
+            const content = hasData 
+                ? `<div class="cal-ing-row meat">🥩 ${p}</div>
+                   <div class="cal-ing-row fries">🍟 ${friesKg}kg</div>`
+                : `<span style="opacity:0.2">-</span>`;
+
+            ingGrid.insertAdjacentHTML("beforeend", `
+                <div class="cal-day ${hasData?'':'cal-empty-day'}" style="height:auto; min-height:70px; justify-content:flex-start">
+                    <div class="cal-day-header">${i+1}</div>
+                    <div style="margin-top:4px">${content}</div>
+                </div>
+            `);
         });
 
         // 3. Donuts
@@ -491,9 +492,8 @@
       }catch(e){ console.error("KPI Error:", e); }
     }
 
-    // --- TABLA Y CALENDARIO (Reutilizando lógica) ---
+    // --- TABLA Y CALENDARIO VENTAS (Reutilizando lógica) ---
     async function loadBurgersByMonth(){
-      // Lógica simplificada para tabla de burgers mes actual
       const tbody = $("#bmBody"); tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando...</td></tr>`;
       try {
         const ym = $("#burgMonth").value || new Date().toISOString().slice(0,7);
@@ -527,6 +527,68 @@
       } catch(e){ console.error(e); }
     }
 
+    async function renderCalendar(monthStr){
+        const grid = document.getElementById("calendarGrid");
+        const totalBadge = document.getElementById("calRange"); 
+        if(!grid) return;
+        grid.innerHTML = "";
+        
+        if(!monthStr) return;
+        const [y, m] = monthStr.split("-").map(Number);
+        const daysInMonth = new Date(y, m, 0).getDate();
+        const start = new Date(y, m - 1, 1);
+        const end   = new Date(y, m, 1);
+
+        try {
+            const orders = await fetchUnifiedOrders(start, end);
+            const counts = Array(daysInMonth).fill(0);
+            const totals = Array(daysInMonth).fill(0);
+
+            orders.forEach(data => {
+                const dt = parseDateAny(data.createdAt);
+                if(!dt || dt.getMonth() + 1 !== m) return;
+                const idx = dt.getDate() - 1;
+                if(idx >= 0 && idx < daysInMonth){
+                    totals[idx] += Number(data.total || 0);
+                    let bCount = 0;
+                    const items = Array.isArray(data.items) ? data.items : [];
+                    items.forEach(it => { if(isBurgerItem(it)) bCount += (Number(it.qty||1)); });
+                    counts[idx] += bCount;
+                }
+            });
+
+            const totalBurgersMonth = counts.reduce((a, b) => a + b, 0);
+            const totalMoneyMonth   = totals.reduce((a, b) => a + b, 0);
+            if(totalBadge) {
+                totalBadge.innerHTML = `Total Mes: 💵 ${money(totalMoneyMonth)} (${totalBurgersMonth} burgers)`;
+            }
+
+            const startDay = start.getDay(); 
+            for(let i=0; i<startDay; i++){ grid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-empty-day"></div>`); }
+            const maxVal = Math.max(...counts, 1);
+            for(let d=1; d<=daysInMonth; d++){
+                const c = counts[d-1]; const t = totals[d-1];
+                const bg = c > 0 ? '' : 'cal-empty-day';
+                const contentHTML = c > 0 
+                  ? `<div class="cal-burger-hero">🍔 ${c}</div><div class="cal-revenue-pill">${money(t)}</div>`
+                  : `<div class="no-sales-icon">🍔</div>`;
+                
+                let style = '';
+                if(c > 0) {
+                    const intense = Math.min(1, c / (maxVal*0.8)); 
+                    style = `border-color: rgba(16, 185, 129, ${intense}); background-color: rgba(16, 185, 129, ${intense * 0.1})`;
+                }
+
+                grid.insertAdjacentHTML("beforeend", `
+                    <div class="cal-day ${bg}" style="${style}" title="Día ${d}: ${money(t)}">
+                        <div class="cal-day-header">${d}</div>
+                        <div class="cal-data-wrap">${contentHTML}</div>
+                    </div>
+                `);
+            }
+        } catch(e) { console.error("Cal Error:", e); }
+    }
+
     // --- INIT ---
     document.addEventListener('DOMContentLoaded', ()=>{
       const now = new Date();
@@ -550,6 +612,20 @@
          };
          $("#bmGo").onclick=loadT;
          loadT();
+      }
+      const mCal = $("#calMonth");
+      if(mCal){
+         const loadC = ()=>renderCalendar(mCal.value);
+         $("#calPrev").onclick=()=>{ 
+             const [y,m] = mCal.value.split('-').map(Number); 
+             mCal.value = new Date(y, m-2).toISOString().slice(0,7); loadC(); 
+         };
+         $("#calNext").onclick=()=>{ 
+             const [y,m] = mCal.value.split('-').map(Number); 
+             mCal.value = new Date(y, m).toISOString().slice(0,7); loadC(); 
+         };
+         $("#calGo").onclick=loadC;
+         setTimeout(loadC, 500);
       }
     });
   </script>
