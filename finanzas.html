@@ -82,6 +82,7 @@
     .cal-num { font-size: 12px; font-weight: 700; color: #999; text-align: right; }
     .cal-content { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; }
     .cal-pill { background: rgba(46, 125, 50, 0.1); color: #2e7d32; border-radius: 99px; padding: 2px 6px; font-size: 10px; font-weight: 700; }
+    .cal-burger-hero { font-size: 11px; color: #555; }
     
     .warn-pill{display:inline-block;border-radius:999px;padding:4px 10px;font-weight:700;font-size:12px}
     .warn{background:#fff3cd;color:#8a6d3b} .danger{background:#ffebee;color:#c62828}
@@ -182,6 +183,18 @@
             <span id="calRange" class="text-muted" style="font-size:14px; margin-left:10px">—</span>
           </div>
           <div id="calendarGrid" class="calendar-grid"></div>
+        </div>
+
+        <div class="card" style="margin-top:20px; border-top: 4px solid #ff9800;">
+          <strong>🥩 Control de Insumos (Carne y Papas)</strong>
+          <div class="inline" style="margin:10px 0">
+            <span id="supplyRange" class="text-muted" style="font-size:14px;">—</span>
+          </div>
+          <div style="display:flex; gap:15px; margin-bottom:10px; font-size:12px;">
+            <span style="color:#795548; font-weight:bold;">🥩 = Medallones</span>
+            <span style="color:#F57F17; font-weight:bold;">🍟 = Papas (kg)</span>
+          </div>
+          <div id="supplyGrid" class="calendar-grid"></div>
         </div>
 
         <div class="card" style="margin-top:20px">
@@ -408,7 +421,7 @@
             link.click();
         }
 
-        // --- CALENDARIO ---
+        // --- CALENDARIO UNIFICADO (VENTAS + INSUMOS) ---
         async function renderCalendar(){
             const ym = $('calMonth').value;
             if(!ym) return;
@@ -418,29 +431,94 @@
             
             const orders = await fetchUnifiedOrders(start, end);
             const days = end.getDate();
+            
+            // Arrays Ventas
             const totals = Array(days).fill(0);
             const counts = Array(days).fill(0);
+            
+            // Arrays Insumos
+            const meatCounts = Array(days).fill(0); 
+            const friesKilos = Array(days).fill(0); 
 
             orders.forEach(o=>{
                 const dt = parseDateAny(o.createdAt);
                 if(dt && dt.getMonth() === m-1){
                     const d = dt.getDate()-1;
+                    
+                    // Ventas
                     totals[d]+=Number(o.total||0);
                     counts[d]++;
+
+                    // Insumos
+                    if(o.items && Array.isArray(o.items)){
+                        o.items.forEach(item => {
+                            const name = (item.name || '').toLowerCase();
+                            const qty = Number(item.qty || 1);
+
+                            let pattiesPerUnit = 1; 
+                            if(name.includes('doble')) pattiesPerUnit = 2;
+                            if(name.includes('triple')) pattiesPerUnit = 3;
+                            if(name.includes('cuadruple') || name.includes('cuádruple')) pattiesPerUnit = 4;
+                            
+                            // Exclusiones (bebidas, etc)
+                            if(name.includes('bebida') || name.includes('salsa') || name.includes('helado') || name.includes('agua') || name.includes('cerveza') || name.includes('postre')){
+                                pattiesPerUnit = 0;
+                            }
+                            
+                            meatCounts[d] += (pattiesPerUnit * qty);
+
+                            // Papas (200g por burger)
+                            if(pattiesPerUnit > 0 && !name.includes('extra') && !name.includes('adicional')){
+                                friesKilos[d] += (0.200 * qty);
+                            }
+                        });
+                    }
                 }
             });
 
+            // 1. Render Ventas
             const grid = $('calendarGrid');
             grid.innerHTML = '';
-            const startDay = new Date(y, m-1, 1).getDay();
+            const startDay = new Date(y, m-1, 1).getDay(); 
             for(let i=0; i<startDay; i++) grid.insertAdjacentHTML('beforeend', '<div></div>');
             
             totals.forEach((t, i)=>{
                 const c = counts[i];
-                const html = `<div class="cal-day ${c?'':'cal-empty'}"><div class="cal-num">${i+1}</div>${c?`<div class="cal-content"><div class="cal-burger-hero">🍔 ${c}</div><div class="cal-pill">${money(t)}</div></div>`:''}</div>`;
+                const html = `<div class="cal-day ${c?'':'cal-empty'}">
+                                <div class="cal-num">${i+1}</div>
+                                ${c?`<div class="cal-content">
+                                       <div class="cal-burger-hero">🍔 ${c}</div>
+                                       <div class="cal-pill">${money(t)}</div>
+                                     </div>`:''}
+                              </div>`;
                 grid.insertAdjacentHTML('beforeend', html);
             });
             $('calRange').textContent = `Total: ${money(totals.reduce((a,b)=>a+b,0))}`;
+
+            // 2. Render Insumos
+            const supplyGrid = $('supplyGrid');
+            if(supplyGrid){
+                supplyGrid.innerHTML = '';
+                for(let i=0; i<startDay; i++) supplyGrid.insertAdjacentHTML('beforeend', '<div></div>');
+
+                meatCounts.forEach((mCount, i)=>{
+                    const fCount = friesKilos[i]; 
+                    const active = mCount > 0 || fCount > 0;
+                    
+                    const html = `<div class="cal-day ${active?'':'cal-empty'}" style="${active?'border-color:#ff9800':''}">
+                                    <div class="cal-num">${i+1}</div>
+                                    ${active ? `<div class="cal-content" style="gap:4px;">
+                                             <div style="color:#795548; font-weight:800; font-size:13px;">🥩 ${mCount}</div>
+                                             <div style="color:#F57F17; font-weight:800; font-size:13px;">🍟 ${fCount.toFixed(1)}kg</div>
+                                           </div>` : ''}
+                                  </div>`;
+                    supplyGrid.insertAdjacentHTML('beforeend', html);
+                });
+
+                const totalMeat = meatCounts.reduce((a,b)=>a+b, 0);
+                const totalFries = friesKilos.reduce((a,b)=>a+b, 0);
+                $('supplyRange').textContent = `Total Mes: 🥩 ${totalMeat} Medallones | 🍟 ${totalFries.toFixed(1)} kg Papas`;
+            }
         }
 
         function stepMonth(n){
