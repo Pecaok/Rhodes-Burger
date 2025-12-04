@@ -125,10 +125,18 @@
     .cal-revenue-pill { background: #ecfdf5; color: #047857; border-radius: 99px; padding: 2px 8px; font-size: 10px; font-weight: 700; border: 1px solid #a7f3d0; }
     .no-sales-icon { font-size: 20px; opacity: 0.1; margin-top: -10px; }
 
-    /* Estilos específicos del Calendario de Ingredientes */
+    /* Estilos específicos del Calendario de Insumos */
     .cal-ing-row { font-size: 11px; font-weight: 600; display:flex; gap:4px; align-items:center; }
     .cal-ing-row.meat { color: #8d6e63; } /* Marrón para carne */
     .cal-ing-row.fries { color: #f59e0b; } /* Amarillo para papas */
+
+    /* Metricas Totales en Calendario */
+    .cal-metrics {
+        display: flex; gap: 15px; flex-wrap: wrap; margin-top: 10px;
+        background: #fdfdfd; border: 1px solid #eee; padding: 10px; border-radius: 10px;
+    }
+    .metric-item { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #444; }
+    .metric-item b { font-size: 15px; color: #111; }
 
     /* RESPONSIVE HEADER FIX */
     @media (max-width: 768px) {
@@ -139,6 +147,7 @@
         .cal-burger-hero { font-size: 12px; }
         .cal-revenue-pill { font-size: 9px; padding: 1px 4px; }
         .kpi { grid-template-columns: 1fr 1fr; }
+        .cal-metrics { gap: 10px; font-size: 12px; }
     }
   </style>
 </head>
@@ -212,8 +221,32 @@
           <div class="chartWrapTall"><canvas id="ordersChart"></canvas></div>
         </div>
 
+        <div class="card" style="margin-top:20px; border:1px solid #e5e7eb; box-shadow:none">
+          <div class="row" style="justify-content:space-between">
+              <strong>Calendario de Ventas & Consumo</strong>
+              <div class="inline">
+                <button id="calPrev" class="btn">◀</button>
+                <input type="month" id="calMonth" style="width:auto">
+                <button id="calNext" class="btn">▶</button>
+                <button id="calGo" class="btn">Ver</button>
+              </div>
+          </div>
+          
+          <div id="calRange" class="cal-metrics">Cargando...</div>
+
+          <div id="calendarGrid" class="calendar-grid"></div>
+          
+          <div class="hm-legend" style="margin-top:10px; justify-content:flex-end">
+             <span class="muted">Intensidad Ventas:</span> 
+             <span class="swatch" style="background:#e8f5e9"></span>
+             <span class="swatch" style="background:#a5d6a7"></span>
+             <span class="swatch" style="background:#4caf50"></span>
+             <span class="swatch" style="background:#2e7d32"></span>
+          </div>
+        </div>
+
         <div class="card" style="margin-top:20px; border:1px solid #e5e7eb; box-shadow:none; background:#fff">
-            <strong>Calendario de Insumos (Consumo)</strong>
+            <strong>Detalle Diario de Insumos</strong>
             <div style="font-size:12px; color:#666; margin-bottom:10px">Medallones totales y kilos de papa consumidos por día.</div>
             
             <div class="calendar-grid" style="margin-top:5px">
@@ -241,20 +274,6 @@
             <strong>Estados</strong>
             <div class="chartWrap"><canvas id="statusChart"></canvas></div>
           </div>
-        </div>
-
-        <div class="card" style="margin-top:20px; border:1px solid #e5e7eb; box-shadow:none">
-          <div class="row" style="justify-content:space-between">
-              <strong>Calendario de Ventas ($)</strong>
-              <div class="inline">
-                <button id="calPrev" class="btn">◀</button>
-                <input type="month" id="calMonth" style="width:auto">
-                <button id="calNext" class="btn">▶</button>
-                <button id="calGo" class="btn">Ver</button>
-              </div>
-          </div>
-          <div style="margin-top:10px; font-weight:bold; color:var(--primary)" id="calRange">—</div>
-          <div id="calendarGrid" class="calendar-grid"></div>
         </div>
 
         <div class="charts-row">
@@ -306,7 +325,6 @@
 
     window.logout = () => { localStorage.removeItem('rb_admin_ok'); location.replace('login.html'); };
 
-    // --- LOGICA DE FECHAS ---
     function parseDateAny(val){
         if(!val) return null;
         if(val instanceof Date) return val;
@@ -345,8 +363,7 @@
     }
 
     /* --- CHART HELPERS --- */
-    let charts = {}; // Store charts to destroy later
-
+    let charts = {}; 
     function renderChart(id, type, data, options){
         const ctx = document.getElementById(id).getContext("2d");
         if(charts[id]) charts[id].destroy();
@@ -402,7 +419,6 @@
             statusCount.set(d.status||'accepted', (statusCount.get(d.status||'accepted')||0)+1);
             sourceCount.set((d.source||'web').toLowerCase(), (sourceCount.get((d.source||'web').toLowerCase())||0)+1);
 
-            // Index based on start date
             const diffTime = Math.abs(dt - start);
             const dayIdx = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) - 1; 
 
@@ -410,35 +426,30 @@
                 dayOrders[dayIdx]++;
                 dayRevenue[dayIdx] += tot;
                 
-                // Heatmaps
                 hmMatrix[dt.getDay()][dayIdx]++;
                 const hr = dt.getHours();
                 if(hr >= 19 && hr < 24) hourMatrix[hr - 19][dayIdx]++;
 
-                // 🔥 CALCULADORA DE INSUMOS 🔥
+                // 🔥 CALCULADORA DE INSUMOS DIARIA (PARA CALENDARIO INSUMOS) 🔥
                 (d.items || []).forEach(it => {
                     const qty = Number(it.qty || 1);
                     if(isBurgerItem(it)){
                         dayFries[dayIdx] += (200 * qty); // Gramos
-                        
                         let pat = 1;
                         const n = (it.name||'').toLowerCase();
                         if(n.includes('doble')) pat = 2;
                         if(n.includes('triple')) pat = 3;
                         if(it.extras?.patty) pat += Number(it.extras.patty);
-                        
                         dayPatties[dayIdx] += (pat * qty);
                     }
                 });
             }
         });
 
-        // Update KPIs
         $('#kpiCount').textContent = count;
         $('#kpiRevenue').textContent = money(revenue);
         $('#kpiATV').textContent = count ? money(revenue/count) : '—';
 
-        // 1. Chart Ventas
         renderChart("ordersChart", "bar", {
             labels: labels,
             datasets: [
@@ -450,22 +461,18 @@
             scales: { y:{beginAtZero:true}, y1:{beginAtZero:true, position:'right'} }
         });
 
-        // 2. 🔥 CALENDARIO DE INSUMOS (Render Manual) 🔥
+        // 🔥 RENDERIZAR CALENDARIO DE INSUMOS 🔥
         const ingGrid = document.getElementById('ingCalendar');
         ingGrid.innerHTML = '';
-        
-        // Rellenar días vacíos al principio si es un mes completo
         const startDay = start.getDay(); 
         for(let i=0; i<startDay; i++){ ingGrid.insertAdjacentHTML("beforeend", `<div class="cal-day cal-empty-day"></div>`); }
 
         dayPatties.forEach((p, i) => {
             const f = dayFries[i];
             const hasData = p > 0 || f > 0;
-            const friesKg = (f / 1000).toFixed(1); // Convertir a Kilos
-            
+            const friesKg = (f / 1000).toFixed(1); 
             const content = hasData 
-                ? `<div class="cal-ing-row meat">🥩 ${p}</div>
-                   <div class="cal-ing-row fries">🍟 ${friesKg}kg</div>`
+                ? `<div class="cal-ing-row meat">🥩 ${p}</div><div class="cal-ing-row fries">🍟 ${friesKg}kg</div>`
                 : `<span style="opacity:0.2">-</span>`;
 
             ingGrid.insertAdjacentHTML("beforeend", `
@@ -476,15 +483,12 @@
             `);
         });
 
-        // 3. Donuts
         const donutOpts = { responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{legend:{position:'bottom'}} };
         const donutColors = ['#625A45', '#009ee3', '#43A047', '#D32F2F', '#f57c00'];
-        
         renderChart("payChart", "doughnut", { labels:[...payCount.keys()], datasets:[{data:[...payCount.values()], backgroundColor:donutColors}] }, donutOpts);
         renderChart("sourceChart", "doughnut", { labels:[...sourceCount.keys()], datasets:[{data:[...sourceCount.values()], backgroundColor:donutColors}] }, donutOpts);
         renderChart("statusChart", "doughnut", { labels:[...statusCount.keys()], datasets:[{data:[...statusCount.values()], backgroundColor:donutColors}] }, donutOpts);
 
-        // Heatmaps
         renderHeatmapWeekByDay(hmMatrix, labels);
         renderHourHeatmap(hourMatrix, labels);
         printHourSummary(hourMatrix);
@@ -492,7 +496,7 @@
       }catch(e){ console.error("KPI Error:", e); }
     }
 
-    // --- TABLA Y CALENDARIO VENTAS (Reutilizando lógica) ---
+    // --- TABLA Y CALENDARIO VENTAS (Principal) ---
     async function loadBurgersByMonth(){
       const tbody = $("#bmBody"); tbody.innerHTML = `<tr><td colspan="4" class="muted">Cargando...</td></tr>`;
       try {
@@ -543,24 +547,51 @@
             const orders = await fetchUnifiedOrders(start, end);
             const counts = Array(daysInMonth).fill(0);
             const totals = Array(daysInMonth).fill(0);
+            
+            // Contadores Mensuales de Insumos
+            let monthPatties = 0;
+            let monthFriesKg = 0;
 
             orders.forEach(data => {
                 const dt = parseDateAny(data.createdAt);
                 if(!dt || dt.getMonth() + 1 !== m) return;
                 const idx = dt.getDate() - 1;
+                
                 if(idx >= 0 && idx < daysInMonth){
                     totals[idx] += Number(data.total || 0);
                     let bCount = 0;
+                    
                     const items = Array.isArray(data.items) ? data.items : [];
-                    items.forEach(it => { if(isBurgerItem(it)) bCount += (Number(it.qty||1)); });
+                    items.forEach(it => { 
+                        const qty = Number(it.qty||1);
+                        if(isBurgerItem(it)) {
+                            bCount += qty;
+                            // Calcular Insumos Totales del Mes
+                            monthFriesKg += (0.2 * qty); // 200g papas
+                            
+                            let pat = 1;
+                            const n = (it.name||'').toLowerCase();
+                            if(n.includes('doble')) pat = 2;
+                            if(n.includes('triple')) pat = 3;
+                            if(it.extras?.patty) pat += Number(it.extras.patty);
+                            monthPatties += (pat * qty);
+                        }
+                    });
                     counts[idx] += bCount;
                 }
             });
 
             const totalBurgersMonth = counts.reduce((a, b) => a + b, 0);
             const totalMoneyMonth   = totals.reduce((a, b) => a + b, 0);
+            
+            // 🔥 ACTUALIZAR EL TOTAL DEL MES CON INSUMOS 🔥
             if(totalBadge) {
-                totalBadge.innerHTML = `Total Mes: 💵 ${money(totalMoneyMonth)} (${totalBurgersMonth} burgers)`;
+                totalBadge.innerHTML = `
+                    <div class="metric-item">💵 <b>${money(totalMoneyMonth)}</b></div>
+                    <div class="metric-item">🍔 <b>${totalBurgersMonth}</b></div>
+                    <div class="metric-item" style="color:#8d6e63">🥩 <b>${monthPatties}</b> Medallones</div>
+                    <div class="metric-item" style="color:#f59e0b">🍟 <b>${monthFriesKg.toFixed(1)}kg</b> Papas</div>
+                `;
             }
 
             const startDay = start.getDay(); 
