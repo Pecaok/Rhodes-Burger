@@ -344,6 +344,14 @@
 
   <script>
   window.addEventListener('DOMContentLoaded', () => {
+    // 🔊 FIX PARA AUDIO BLOQUEADO: 
+    // Habilitar audio con el primer clic del usuario en cualquier parte
+    document.body.addEventListener('click', function() {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContext();
+        if(ctx.state === 'suspended') ctx.resume();
+    }, { once: true });
+
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     let currentFilter = "recibidos"; let lastSnap = null;
     
@@ -365,11 +373,43 @@
     const updAP = ()=>{ btnAP.classList.toggle("active", autoP); }; updAP();
     btnAP.onclick = ()=>{ autoP=!autoP; localStorage.setItem("rb_autop", autoP); updAP(); };
 
+    // 🔊 NUEVO SONIDO: 4 VECES, FUERTE Y AGUDO
     const playBeep = ()=>{
         if(!soundOn) return;
-        try{ const c=new(window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(); const g=c.createGain();
-        o.type="square"; o.frequency.value=750; o.connect(g); g.connect(c.destination);
-        o.start(); g.gain.exponentialRampToValueAtTime(0.00001, c.currentTime+0.2); o.stop(c.currentTime+0.2); }catch(e){}
+        
+        // Helper para crear un solo "beep"
+        const beep = (ctx, start, freq) => {
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = "square"; // Cuadrada = Más fuerte y penetrante
+            o.frequency.value = freq; 
+            o.connect(g);
+            g.connect(ctx.destination);
+
+            o.start(start);
+            g.gain.setValueAtTime(1, start); // Volumen máximo
+            // Duración de 0.3 segundos por pitido
+            g.gain.exponentialRampToValueAtTime(0.00001, start + 0.3);
+            o.stop(start + 0.3);
+        };
+
+        try{ 
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            const ctx = new AudioContext();
+            
+            // Si el audio está bloqueado por falta de interacción, intentamos resumirlo
+            if(ctx.state === 'suspended') ctx.resume();
+
+            const now = ctx.currentTime;
+            const tono = 880; // La5 (Alto y claro)
+
+            // Programamos 4 pitidos seguidos
+            beep(ctx, now,       tono); // 1
+            beep(ctx, now + 0.4, tono); // 2
+            beep(ctx, now + 0.8, tono); // 3
+            beep(ctx, now + 1.2, tono); // 4
+
+        } catch(e){ console.error("Audio error:", e); }
     };
 
     let isInit=true; setTimeout(()=>isInit=false, 3000);
@@ -378,7 +418,7 @@
         renderList(snap);
         snap.docChanges().forEach(ch => {
             if(ch.type==='added' && !isInit){
-                if(navigator.vibrate) navigator.vibrate(200);
+                if(navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]); // Vibración fuerte
                 playBeep(); 
                 if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id));
             }
