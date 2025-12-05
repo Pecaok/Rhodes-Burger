@@ -342,16 +342,66 @@
     <div id="orders"><div class="empty-state">Cargando...</div></div>
   </main>
 
-  <script>
+ <script>
   window.addEventListener('DOMContentLoaded', () => {
-    // 🔊 FIX PARA AUDIO BLOQUEADO: 
-    // Habilitar audio con el primer clic del usuario en cualquier parte
-    document.body.addEventListener('click', function() {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AudioContext();
-        if(ctx.state === 'suspended') ctx.resume();
-    }, { once: true });
+    // --- 1. CONFIGURACIÓN DE AUDIO ROBUSTA ---
+    let audioCtx = null;
 
+    // Función para iniciar/desbloquear el audio
+    const initAudio = () => {
+        if (!audioCtx) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContext();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+    };
+
+    // Desbloquear audio con cualquier clic en la página (necesario para Chrome)
+    document.body.addEventListener('click', initAudio, { once: true });
+    document.body.addEventListener('touchstart', initAudio, { once: true });
+
+    // --- 2. CONFIGURACIÓN DE SONIDO (ALARMA FUERTE) ---
+    const playBeep = () => {
+        // Si el usuario apagó el sonido o el contexto no existe, no hacemos nada
+        let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
+        if(!soundOn) return;
+
+        // Aseguramos que el audio esté activo
+        initAudio();
+
+        if (!audioCtx) return;
+
+        const now = audioCtx.currentTime;
+        
+        // Creamos 4 osciladores para los 4 pitidos
+        // Frecuencia 1200Hz (más aguda y penetrante tipo alarma)
+        // Tipo 'square' o 'sawtooth' son más ruidosas que 'sine'
+        const createBeep = (startTime) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'square'; 
+            osc.frequency.setValueAtTime(1000, startTime); // Tono agudo
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start(startTime);
+            gain.gain.setValueAtTime(0.5, startTime); // Volumen medio-alto
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15); // Duración corta
+            osc.stop(startTime + 0.15);
+        };
+
+        // Secuencia de 4 pitidos rápidos: Piiip Piiip Piiip Piiip
+        createBeep(now);
+        createBeep(now + 0.25);
+        createBeep(now + 0.50);
+        createBeep(now + 0.75);
+    };
+
+
+    // --- 3. LÓGICA DE LA INTERFAZ ---
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     let currentFilter = "recibidos"; let lastSnap = null;
     
@@ -363,63 +413,55 @@
         if(window.lastSnap) renderList(window.lastSnap);
     });
 
+    // Botón Campana (Sonido)
     const btnBell = document.getElementById("btnBell");
     let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
-    const updBell = ()=>{ btnBell.classList.toggle("active", soundOn); }; updBell();
-    btnBell.onclick = ()=>{ soundOn=!soundOn; localStorage.setItem("rb_sound", soundOn); updBell(); };
+    const updBell = ()=>{ 
+        btnBell.classList.toggle("active", soundOn); 
+        btnBell.style.background = soundOn ? '#e0f2fe' : '#fff'; // Feedback visual extra
+        btnBell.style.borderColor = soundOn ? '#0284c7' : '#e5e7eb';
+        btnBell.innerText = soundOn ? '🔔' : '🔕';
+    }; 
+    updBell();
 
+    btnBell.onclick = ()=>{ 
+        // AL CLICAR, FORZAMOS EL INICIO DEL AUDIO
+        initAudio();
+        
+        soundOn = !soundOn; 
+        localStorage.setItem("rb_sound", soundOn); 
+        updBell();
+        
+        // Prueba de sonido al activar
+        if(soundOn) playBeep(); 
+    };
+
+    // Botón Autoimprimir
     const btnAP = document.getElementById("btnAutoPrint");
     let autoP = JSON.parse(localStorage.getItem("rb_autop")||"false");
     const updAP = ()=>{ btnAP.classList.toggle("active", autoP); }; updAP();
     btnAP.onclick = ()=>{ autoP=!autoP; localStorage.setItem("rb_autop", autoP); updAP(); };
 
-    // 🔊 NUEVO SONIDO: 4 VECES, FUERTE Y AGUDO
-    const playBeep = ()=>{
-        if(!soundOn) return;
-        
-        // Helper para crear un solo "beep"
-        const beep = (ctx, start, freq) => {
-            const o = ctx.createOscillator();
-            const g = ctx.createGain();
-            o.type = "square"; // Cuadrada = Más fuerte y penetrante
-            o.frequency.value = freq; 
-            o.connect(g);
-            g.connect(ctx.destination);
 
-            o.start(start);
-            g.gain.setValueAtTime(1, start); // Volumen máximo
-            // Duración de 0.3 segundos por pitido
-            g.gain.exponentialRampToValueAtTime(0.00001, start + 0.3);
-            o.stop(start + 0.3);
-        };
-
-        try{ 
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            const ctx = new AudioContext();
-            
-            // Si el audio está bloqueado por falta de interacción, intentamos resumirlo
-            if(ctx.state === 'suspended') ctx.resume();
-
-            const now = ctx.currentTime;
-            const tono = 880; // La5 (Alto y claro)
-
-            // Programamos 4 pitidos seguidos
-            beep(ctx, now,       tono); // 1
-            beep(ctx, now + 0.4, tono); // 2
-            beep(ctx, now + 0.8, tono); // 3
-            beep(ctx, now + 1.2, tono); // 4
-
-        } catch(e){ console.error("Audio error:", e); }
-    };
-
+    // --- 4. CONEXIÓN A FIREBASE Y DETECCIÓN DE PEDIDOS ---
     let isInit=true; setTimeout(()=>isInit=false, 3000);
+    
     db.collection("orders").orderBy("orderNumber", "desc").limit(300).onSnapshot(snap => {
         window.lastSnap = snap;
         renderList(snap);
+        
         snap.docChanges().forEach(ch => {
             if(ch.type==='added' && !isInit){
-                if(navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]); // Vibración fuerte
+                // PEDIDO NUEVO DETECTADO
+                console.log("🔔 Nuevo pedido recibido:", ch.doc.data().orderNumber);
+                
+                // 1. Vibrar (si es celular)
+                if(navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); 
+                
+                // 2. Sonar (Llamamos a la función segura)
                 playBeep(); 
+                
+                // 3. Imprimir
                 if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id));
             }
         });
@@ -427,6 +469,7 @@
         document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
     });
 
+    // --- FUNCIONES DE RENDERIZADO (Igual que antes) ---
     function renderList(snap){
         let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
         window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
@@ -544,6 +587,7 @@
         </div>`;
     }
 
+    // (Aquí va window.trySilentPrint... igual que antes)
     window.trySilentPrint = function(docSnap){
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
