@@ -164,12 +164,27 @@
 
   <div class="group">
     <label>Medio de pago</label>
-    <div class="chips">
-      <label class="chip"><input type="radio" name="pago" value="mercado_pago"> Transferencia</label>
-      <label class="chip"><input type="radio" name="pago" value="efectivo"> En Local</label>
+    <div style="
+      background-color: #fff8e1; 
+      border: 1px solid #ffe0b2; 
+      color: #e65100; 
+      padding: 14px; 
+      border-radius: 12px; 
+      text-align: center; 
+      font-weight: 800;
+      font-size: 15px;
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      gap: 10px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    ">
+      <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+        <path d="M8 1a2.5 2.5 0 0 1 2.5 2.5V4h-5v-.5A2.5 2.5 0 0 1 8 1zm3.5 3v-.5a3.5 3.5 0 1 0-7 0V4H1v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4h-3.5zM2 5h12v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5z"/>
+      </svg>
+      Abonás en el local al retirar
     </div>
   </div>
-
   <div class="group">
     <label>Tipo de entrega</label>
     <div class="chips">
@@ -259,10 +274,10 @@ async function cargarSlots(){
   limpiarListeners();
   const slots=[]; let cur=new Date(parseHHMM(SLOT_START)); const end=parseHHMM(SLOT_END);
   while(cur<=end){ slots.push(new Date(cur)); cur=new Date(cur.getTime()+SLOT_INTERVAL_MIN*60000); }
-  
+   
   slotObjects=slots.map(d=>({date:d, key:slotKey(d), gramsUsed:0, full:false}));
   $("#slotLabel").textContent="Cargando…";
-  
+   
   slotObjects.forEach(s=>{
     const ref=db.collection("slots_grams").doc(s.key);
     const unsub=ref.onSnapshot(doc=>{
@@ -287,7 +302,7 @@ function reconstruirVisibles(){
   const now=new Date(); const m=now.getMinutes(); const q=Math.floor(m/15)*15;
   const base=new Date(now); base.setMinutes(q); base.setSeconds(0); base.setMilliseconds(0);
   const cutoff=new Date(base.getTime()+20*60000);
-  
+   
   visibles = visibles.filter(s=>s.date>=cutoff).sort((a,b)=>a.date-b.date);
   if(visibles.length===0) currentIndex=-1; else if(currentIndex<0||currentIndex>=visibles.length) currentIndex=0;
   actualizarUI();
@@ -355,15 +370,18 @@ $("#btnConfirmar").onclick=async()=>{
   const btn=$("#btnConfirmar");
   const nombre=$("#inpNombre").value.trim();
   const tel=$("#inpTelefono").value.trim();
-  const pago=document.querySelector("input[name='pago']:checked");
+  
+  // MODIFICADO: Ya no buscamos inputs de radio, forzamos el valor "efectivo"
+  const pago = { value: "" }; 
+  
   const notas=$("#inpNotas").value.trim();
   const slot=$("#slotsCarousel").selectedSlot;
   const cart=loadCart();
 
   if(!nombre){alert("Ingresá tu nombre");return;}
-  if(!pago){alert("Elegí el medio de pago");return;}
+  // if(!pago){alert("Elegí el medio de pago");return;} // YA NO ES NECESARIO
   if(!slot){alert("Elegí un horario de retiro");return;}
-  
+   
   let items=0; Object.values(cart.burger).forEach(o=>items+=o.qty);
   if(items===0){alert("Carrito vacío");return;}
 
@@ -416,15 +434,11 @@ $("#btnConfirmar").onclick=async()=>{
       entrega: "take_away", pago: pago.value, payment_status: "pending_payment"
     });
 
-    // GENERAR LINK DE TRACKING CORRECTO
-    // Truco: Usamos la URL actual y reemplazamos el archivo final por gracias.html
-    // Ejemplo: misitio.com/pedido.html -> misitio.com/gracias.html
+    // GENERAR LINK DE TRACKING
     let baseUrl = window.location.href.split('?')[0];
-    // Si termina en .html, lo sacamos
     if(baseUrl.endsWith('.html')) {
         baseUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/'));
     }
-    // Si termina en /, le sacamos la barra
     if(baseUrl.endsWith('/')) {
         baseUrl = baseUrl.substring(0, baseUrl.length - 1);
     }
@@ -435,7 +449,7 @@ $("#btnConfirmar").onclick=async()=>{
     const msg = 
 `*Nuevo Pedido #${orderNumber}*
 Nombre: ${nombre}
-Pago: ${pago.value==="mercado_pago"?"Transferencia":"En Local"}
+Pago: Abonar en el local
 Retiro: ${slot.pretty}
 
 ${detalle}
