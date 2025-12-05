@@ -311,12 +311,19 @@
     </div>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
-  <script>
+<script>
+    // 1. VARIABLES GLOBALES (Al inicio para evitar errores de referencia)
+    let CURRENT_ORDERS = [];
+    let ALL_EXPENSES = [];
+    let mainChart, d1, d2;
+
     document.addEventListener('DOMContentLoaded', () => {
+        
+        // 2. CONFIGURACIÓN FIREBASE
         const firebaseConfig = {
           apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
           authDomain: "rhodes-burguers.firebaseapp.com",
@@ -328,8 +335,10 @@
         try { firebase.initializeApp(firebaseConfig); } catch(e) {}
         const db = firebase.firestore();
 
+        // 3. HELPERS
         const $ = s => document.getElementById(s);
         const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+        
         function parseDateAny(val){
             if(!val) return null;
             if(val.toDate) return val.toDate();
@@ -340,41 +349,35 @@
         // LOGOUT
         if($('btnLogout')){
             $('btnLogout').onclick = ()=>{
-                localStorage.removeItem('rb_auth_v2'); localStorage.removeItem('rb_admin_ok');
+                localStorage.removeItem('rb_auth_v2'); 
+                localStorage.removeItem('rb_admin_ok');
                 location.replace('login.html');
             };
         }
 
-        // DATA STORE
-        let ALL_ORDERS = [];
-        let ALL_EXPENSES = []; // STORE DE GASTOS
-        let mainChart, d1, d2;
-
-        // INIT UI
+        // 4. INICIALIZACIÓN DE FECHAS
         const now = new Date();
         const ym = now.toISOString().slice(0,7);
         if($('monthPicker')) $('monthPicker').value = ym;
         if($('calMonth')) $('calMonth').value = ym;
-        if($('exDate')) $('exDate').valueAsDate = now; // Default fecha hoy en gastos
+        if($('exDate')) $('exDate').valueAsDate = now;
 
-        // EVENTS
+        // 5. EVENTOS (BOTONES)
         if($('btnReload')) $('btnReload').onclick = loadKPI;
         if($('calPrev')) $('calPrev').onclick = () => { stepMonth(-1); renderCalendar(); };
         if($('calNext')) $('calNext').onclick = () => { stepMonth(1); renderCalendar(); };
         if($('btnExport')) $('btnExport').onclick = exportExcel;
         if($('btnAddExpense')) $('btnAddExpense').onclick = addExpense;
 
-        // LOAD EVERYTHING
+        // 6. CARGA DE DATOS AUTOMÁTICA
         loadData();
 
-        /* =========================================
-           1. CARGA DE DATOS (VENTAS + GASTOS)
-           ========================================= */
         function loadData() {
             // Escuchar Ventas
             db.collection('orders').orderBy('createdAt', 'desc').limit(200).onSnapshot(snap => {
-                ALL_ORDERS = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                loadKPI(); renderCalendar();
+                CURRENT_ORDERS = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                loadKPI(); 
+                renderCalendar();
             });
             // Escuchar Gastos
             db.collection('expenses').orderBy('date', 'desc').limit(50).onSnapshot(snap => {
@@ -383,9 +386,9 @@
             });
         }
 
-        /* =========================================
-           2. PROCESAMIENTO Y KPIs
-           ========================================= */
+        // =========================================
+        // LÓGICA PRINCIPAL (KPIs + Tablas + Gráficos)
+        // =========================================
         async function loadKPI(){
             const fromInp = $('fromDate').value;
             const toInp = $('toDate').value;
@@ -402,32 +405,30 @@
                end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
             }
 
-            // Filtrar Ventas
-            const filteredOrders = ALL_ORDERS.filter(o => {
+            // Filtrar en Memoria
+            const filteredOrders = CURRENT_ORDERS.filter(o => {
                 const dt = parseDateAny(o.createdAt);
                 if(!dt) return false;
-                if(o.status?.includes('cancel')) return false;
+                if(o.status?.includes('cancel')) return false; // Ignorar cancelados
                 return dt >= start && dt <= end;
             });
 
-            // Filtrar Gastos
             const filteredExpenses = ALL_EXPENSES.filter(e => {
                 const dt = parseDateAny(e.date);
                 if(!dt) return false;
                 return dt >= start && dt <= end;
             });
 
-            // --- CALCULOS ---
+            // Cálculos
             let totalRevenue = 0, totalOrders = 0;
             const payStats = {}, sourceStats = {}, clientStats = {};
             
-            // Ventas
             filteredOrders.forEach(o => {
                 const total = Number(o.total || o.rawTotal || 0);
                 totalOrders++;
                 totalRevenue += total;
 
-                // Stats Pagos
+                // Stats Pago
                 let pay = (o.pago || 'otro').toLowerCase();
                 if(pay.includes('efectivo')) pay = 'Efectivo';
                 else if(pay.includes('mercado')||pay.includes('mp')) pay = 'Mercado Pago';
@@ -439,27 +440,23 @@
                 let src = (o.source || 'web').toLowerCase();
                 sourceStats[src] = (sourceStats[src]||0) + 1;
 
-                // Stats Clientes
+                // Stats Cliente
                 const cli = (o.nombre||'Anónimo').trim();
                 if(!clientStats[cli]) clientStats[cli]={total:0};
                 clientStats[cli].total+=total;
             });
 
-            // Gastos Total
-            let totalExpenses = filteredExpenses.reduce((sum, e) => sum + (Number(e.amount)||0), 0);
+            const totalExpenses = filteredExpenses.reduce((sum, e) => sum + (Number(e.amount)||0), 0);
+            const netProfit = totalRevenue - totalExpenses;
 
-            // Ganancia Neta
-            let netProfit = totalRevenue - totalExpenses;
-
-            // --- RENDER DOM ---
+            // Renderizar DOM
             $('kpiCount').textContent = totalOrders;
             $('kpiRevenue').textContent = money(totalRevenue);
             $('kpiExpenses').textContent = money(totalExpenses);
             $('kpiProfit').textContent = money(netProfit);
-            // Color dinamico ganancia
             $('kpiProfit').className = 'kvalue ' + (netProfit >= 0 ? 'gold' : 'red');
 
-            // Render Caja (Breakdown)
+            // Render Caja
             let cashHTML = '';
             for(const [k,v] of Object.entries(payStats)) cashHTML += `<div class="cash-row"><span>${k}</span><span>${money(v)}</span></div>`;
             cashHTML += `<div class="cash-row cash-total"><span>TOTAL VENTAS</span><span>${money(totalRevenue)}</span></div>`;
@@ -477,20 +474,19 @@
                 </tr>`;
             }).join('');
 
-            // Render Top Clientes
+            // Top Clientes
             const topCli = Object.entries(clientStats).sort((a,b)=>b[1].total - a[1].total).slice(0,5);
             $('topClientsTable').querySelector('tbody').innerHTML = topCli.map(([n,d])=>`<tr><td>${n}</td><td class="num-cell">${money(d.total)}</td></tr>`).join('');
 
             // Gráficos
             if(!isRange) renderMixedChart(filteredOrders, filteredExpenses, end.getDate());
-            
             renderDoughnut("payChart", Object.keys(payStats), Object.values(payStats));
             renderDoughnut("sourceChart", Object.keys(sourceStats), Object.values(sourceStats));
         }
 
-        /* =========================================
-           3. FUNCIONES DE GASTOS
-           ========================================= */
+        // =========================================
+        // FUNCIONES DE GASTOS
+        // =========================================
         async function addExpense() {
             const desc = $('exDesc').value.trim();
             const amount = Number($('exAmount').value);
@@ -498,7 +494,7 @@
 
             if (!desc || amount <= 0 || !dateVal) return alert("Completá todos los datos.");
 
-            const dateObj = new Date(dateVal + "T12:00:00"); // Fix zona horaria simple
+            const dateObj = new Date(dateVal + "T12:00:00"); 
             try {
                 await db.collection('expenses').add({
                     description: desc,
@@ -516,7 +512,7 @@
         };
 
         function exportExcel(){
-            if(!CURRENT_ORDERS.length) return alert("Sin datos.");
+            if(!CURRENT_ORDERS.length) return alert("Sin datos para exportar.");
             let csv = "Fecha,Pedido,Cliente,Pago,Total,Estado\n";
             CURRENT_ORDERS.forEach(o=>{
                 const d = parseDateAny(o.createdAt)?.toLocaleDateString()||'';
@@ -525,11 +521,13 @@
             const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
-            link.download = "ventas.csv";
+            link.download = "ventas_rhodes.csv";
             link.click();
         }
 
-        // --- CALENDARIO ---
+        // =========================================
+        // CALENDARIO E INSUMOS
+        // =========================================
         async function renderCalendar(){
             const ym = $('calMonth').value;
             if(!ym) return;
@@ -537,9 +535,8 @@
             const start = new Date(y, m-1, 1);
             const end = new Date(y, m, 0, 23, 59, 59);
             
-            // Usamos la data ya cargada si es posible, o fetch si es histórico
-            // Para simplificar, usamos ALL_ORDERS filtrado (carga inicial trae 200, si falta historial no aparecerá en cal)
-            const orders = ALL_ORDERS.filter(o => {
+            // Usamos CURRENT_ORDERS que ya tiene todo
+            const orders = CURRENT_ORDERS.filter(o => {
                 const dt = parseDateAny(o.createdAt);
                 return dt && dt >= start && dt <= end && !o.status?.includes('cancel');
             });
@@ -569,6 +566,7 @@
                 });
             });
 
+            // Render Calendario
             const grid = $('calendarGrid');
             grid.innerHTML = '';
             const startDay = new Date(y, m-1, 1).getDay(); 
@@ -581,7 +579,7 @@
             });
             $('calRange').textContent = `Total: ${money(totals.reduce((a,b)=>a+b,0))}`;
 
-            // Supply Grid
+            // Render Insumos
             const supplyGrid = $('supplyGrid');
             if(supplyGrid){
                 supplyGrid.innerHTML = '';
@@ -603,14 +601,13 @@
             $('calMonth').value = d.toISOString().slice(0,7);
         }
 
-        // --- CHARTS ---
+        // --- GRÁFICOS ---
         const DONUT_COLORS = ['#625A45', '#d97706', '#dc2626', '#2563eb', '#16a34a', '#9333ea'];
         
         function renderMixedChart(orders, expenses, daysInMonth){
             const ctx = $('ordersChart').getContext('2d');
             if(mainChart) mainChart.destroy();
 
-            // Preparar data por día
             const dataIncome = Array(daysInMonth).fill(0);
             const dataExpense = Array(daysInMonth).fill(0);
 
@@ -623,7 +620,6 @@
                 if(d>=0 && d<daysInMonth) dataExpense[d] += Number(e.amount||0);
             });
 
-            // Gradiente Verde
             let gradGreen = ctx.createLinearGradient(0, 0, 0, 300);
             gradGreen.addColorStop(0, 'rgba(16, 185, 129, 0.2)');
             gradGreen.addColorStop(1, 'rgba(16, 185, 129, 0.0)');
@@ -634,22 +630,14 @@
                     labels: Array.from({length:daysInMonth},(_,i)=>i+1),
                     datasets: [
                         { 
-                            label:'Ingresos', 
-                            data:dataIncome, 
-                            borderColor:'#10b981',
-                            backgroundColor: gradGreen,
-                            fill: true,
-                            tension: 0.3,
-                            order: 2
+                            label:'Ingresos', data:dataIncome, 
+                            borderColor:'#10b981', backgroundColor: gradGreen,
+                            fill: true, tension: 0.3, order: 2
                         },
                         { 
-                            label:'Gastos', 
-                            data:dataExpense, 
-                            borderColor:'#ef4444',
-                            backgroundColor: 'transparent',
-                            borderDash: [5, 5],
-                            tension: 0.3,
-                            order: 1
+                            label:'Gastos', data:dataExpense, 
+                            borderColor:'#ef4444', backgroundColor: 'transparent',
+                            borderDash: [5, 5], tension: 0.3, order: 1
                         }
                     ]
                 },
@@ -678,6 +666,6 @@
             if(id==='sourceChart') d2=chart;
         }
     });
-  </script>
+</script>
 </body>
 </html>
