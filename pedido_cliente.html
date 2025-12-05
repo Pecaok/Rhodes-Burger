@@ -185,6 +185,7 @@
       Abonás en el local al retirar
     </div>
   </div>
+
   <div class="group">
     <label>Tipo de entrega</label>
     <div class="chips">
@@ -298,7 +299,6 @@ function reconstruirVisibles(){
     return restante>=pedidoGramos;
   });
 
-  // Filtro Tiempo Real + 20 min
   const now=new Date(); const m=now.getMinutes(); const q=Math.floor(m/15)*15;
   const base=new Date(now); base.setMinutes(q); base.setSeconds(0); base.setMilliseconds(0);
   const cutoff=new Date(base.getTime()+20*60000);
@@ -366,20 +366,22 @@ async function reservarMultiBloque(horaInicioKey, gramosTotales) {
   }
 }
 
+// ==========================================
+// BOTÓN CONFIRMAR CON CORRECCIÓN DE HORA
+// ==========================================
 $("#btnConfirmar").onclick=async()=>{
   const btn=$("#btnConfirmar");
   const nombre=$("#inpNombre").value.trim();
   const tel=$("#inpTelefono").value.trim();
   
-  // MODIFICADO: Ya no buscamos inputs de radio, forzamos el valor "efectivo"
-  const pago = { value: "" }; 
+  // Forzamos PAGO EFECTIVO (Abonar en local)
+  const pago = { value: "efectivo" };
   
   const notas=$("#inpNotas").value.trim();
   const slot=$("#slotsCarousel").selectedSlot;
   const cart=loadCart();
 
   if(!nombre){alert("Ingresá tu nombre");return;}
-  // if(!pago){alert("Elegí el medio de pago");return;} // YA NO ES NECESARIO
   if(!slot){alert("Elegí un horario de retiro");return;}
    
   let items=0; Object.values(cart.burger).forEach(o=>items+=o.qty);
@@ -400,6 +402,13 @@ $("#btnConfirmar").onclick=async()=>{
        if(o.notes) detalle+=`   Nota: ${o.notes}\n`;
     }
 
+    // --- CORRECCIÓN DE HORA LOCAL ---
+    const now = new Date();
+    // Restamos el offset para que el string ISO final sea la hora local de Argentina
+    const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
+    const localISO = localDate.toISOString().slice(0, -1); 
+    // --------------------------------
+
     // Guardar Pedido Privado
     const pedidoData = {
       source:"web",
@@ -414,14 +423,15 @@ $("#btnConfirmar").onclick=async()=>{
       pickup_time_pretty:slot.pretty,
       pickup_slot:slot.key,
       status:"accepted",
-      statusHistory:[{to:"accepted",at:new Date().toISOString()}],
+      // Usamos localISO para el historial también
+      statusHistory:[{to:"accepted",at:localISO}],
       items:Object.values(cart.burger).map(o=>({
         name:o.item.name, price:o.item.price, qty:o.qty,
         fries:o.fries, notes:o.notes?[o.notes]:[],
         extras:{patty:o.extras.patty, cheddar:o.extras.cheddar, EXTRA_PRICE_PATTY:2500, EXTRA_PRICE_CHEDDAR:300}
       })),
       total,
-      createdAt:new Date().toISOString(),
+      createdAt: localISO, // <--- HORA CORREGIDA
       trackToken: trackToken
     };
 
@@ -430,18 +440,15 @@ $("#btnConfirmar").onclick=async()=>{
 
     // Guardar Pública
     await db.collection("order_public").doc(trackToken).set({
-      orderNumber, nombre, status: "accepted", updatedAt: new Date().toISOString(),
+      orderNumber, nombre, status: "accepted", 
+      updatedAt: localISO, // <--- HORA CORREGIDA
       entrega: "take_away", pago: pago.value, payment_status: "pending_payment"
     });
 
     // GENERAR LINK DE TRACKING
     let baseUrl = window.location.href.split('?')[0];
-    if(baseUrl.endsWith('.html')) {
-        baseUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/'));
-    }
-    if(baseUrl.endsWith('/')) {
-        baseUrl = baseUrl.substring(0, baseUrl.length - 1);
-    }
+    if(baseUrl.endsWith('.html')) baseUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/'));
+    if(baseUrl.endsWith('/')) baseUrl = baseUrl.substring(0, baseUrl.length - 1);
     
     const trackLink = `${baseUrl}/gracias.html?id=${docRef.id}&t=${trackToken}`;
 
@@ -460,10 +467,8 @@ ${trackLink}`;
 
     localStorage.removeItem(CART_KEY);
 
-    // 1. Abrir WhatsApp (Nueva Pestaña)
     window.open("https://wa.me/"+WHATSAPP_NUMBER+"?text="+encodeURIComponent(msg), '_blank');
 
-    // 2. Redirigir a Gracias (Misma Pestaña) con pequeño delay
     setTimeout(() => {
         window.location.href = trackLink;
     }, 500);
