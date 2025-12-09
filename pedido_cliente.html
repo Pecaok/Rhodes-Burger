@@ -262,7 +262,7 @@ const G_POR_SIDE=700;
 const SLOT_START="19:15"; const SLOT_END="23:45"; const SLOT_INTERVAL_MIN=15;
 const WHATSAPP_NUMBER = "5491170596483"; 
 
-// 🔥 PRECIOS EXTRAS (Deben coincidir con tu sistema)
+// 🔥 PRECIOS EXTRAS
 const PRICE_PATTY = 2500;
 const PRICE_CHEDDAR = 300;
 
@@ -277,7 +277,7 @@ function generateToken() { return Math.random().toString(36).substr(2) + Date.no
 function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{},side:{}}; }catch{ return {burger:{},drink:{},side:{}}; } }
 function gramosDelPedido(){ const c=loadCart(); let g=0; for(const k in c.burger) g+=(c.burger[k].qty||0)*G_POR_BURGER; for(const k in c.side) g+=(c.side[k].qty||0)*G_POR_SIDE; return g; }
 
-/* SLOTS (TIEMPO REAL + 20 MIN) */
+/* SLOTS */
 let slotObjects=[], visibles=[], listeners=[], currentIndex=0;
 function limpiarListeners(){ listeners.forEach(u=>{try{u()}catch{}}); listeners=[]; }
 async function cargarSlots(){
@@ -330,36 +330,34 @@ $("#slotNext").onclick=()=>{if(currentIndex<visibles.length-1){currentIndex++;ac
 $("#btnRefreshSlots").onclick=cargarSlots;
 setInterval(reconstruirVisibles,10000);
 
-/* RESUMEN - 🔥 CORREGIDO PARA SUMAR EXTRAS */
+/* RESUMEN - 🔥 CORREGIDO (DETALLE ABAJO) */
 function renderResumen(){
   const c=loadCart(); const box=$("#resumen"); box.innerHTML=""; let t=0;
   for(const o of Object.values(c.burger)){
-    // Calculamos precio unitario con extras
     const extrasCost = (o.extras?.patty||0)*PRICE_PATTY + (o.extras?.cheddar||0)*PRICE_CHEDDAR;
     const unitPrice = o.item.price + extrasCost;
     const subt = o.qty * unitPrice;
     t += subt;
 
-    // Generamos texto de extras
-    let extrasTxt = "";
-    if(o.extras?.patty) extrasTxt += ` <span style="font-size:11px;color:#d32f2f">+${o.extras.patty} carne</span>`;
-    if(o.extras?.cheddar) extrasTxt += ` <span style="font-size:11px;color:#f57f17">+${o.extras.cheddar} cheddar</span>`;
+    // Generamos las líneas de extras (con divs propios para que bajen)
+    let extrasHtml = "";
+    if(o.extras?.patty) extrasHtml += `<div class="muted" style="color:#d32f2f; font-size:13px">• +${o.extras.patty} carne</div>`;
+    if(o.extras?.cheddar) extrasHtml += `<div class="muted" style="color:#f57f17; font-size:13px">• +${o.extras.cheddar} cheddar</div>`;
 
     box.innerHTML+=`<div style="margin-bottom:8px">
-        <strong>${o.item.name} x${o.qty}</strong> ${extrasTxt}
-        <div class="muted">Papas: ${normalizeFriesLabel(o.fries)}</div>
+        <strong>${o.item.name} x${o.qty}</strong>
+        ${extrasHtml} <div class="muted">Papas: ${normalizeFriesLabel(o.fries)}</div>
         <div class="muted">Subtotal: $${subt.toLocaleString("es-AR")}</div>
     </div>`;
   }
   
-  // Sumamos bebidas y guarniciones extra
   for(const k in c.drink){ t += c.drink[k].qty * c.drink[k].item.price; }
   for(const k in c.side){ t += c.side[k].qty * c.side[k].item.price; }
 
   $("#resTotal").textContent="$ "+t.toLocaleString("es-AR");
 }
 
-/* CONFIRMAR PEDIDO - 🔥 CORREGIDO CÁLCULO TOTAL Y DETALLE */
+/* CONFIRMAR PEDIDO */
 async function obtenerYIncrementarOrderNumber() {
   const ref = db.collection("config").doc("counters");
   let nuevoNumero = null;
@@ -398,7 +396,7 @@ $("#btnConfirmar").onclick=async()=>{
   const btn=$("#btnConfirmar");
   const nombre=$("#inpNombre").value.trim();
   const tel=$("#inpTelefono").value.trim();
-  const pagoVal = ""; // Pago vacío para admin
+  const pagoVal = ""; // Vacio para que el admin lo setee
   const notas=$("#inpNotas").value.trim();
   const slot=$("#slotsCarousel").selectedSlot;
   const cart=loadCart();
@@ -419,7 +417,6 @@ $("#btnConfirmar").onclick=async()=>{
     let total=0;
     let detalle="";
     
-    // 🔥 RECORRIDO CORREGIDO PARA TOTAL Y DETALLE
     for(const o of Object.values(cart.burger)){
        const extrasCost = (o.extras?.patty||0)*PRICE_PATTY + (o.extras?.cheddar||0)*PRICE_CHEDDAR;
        const unitTotal = o.item.price + extrasCost;
@@ -433,7 +430,6 @@ $("#btnConfirmar").onclick=async()=>{
        if(o.notes) detalle+=`   Nota: ${o.notes}\n`;
     }
     
-    // Sumar bebidas y otros
     for(const o of Object.values(cart.drink)){
         total += o.qty * o.item.price;
         detalle+=`• ${o.item.name} x${o.qty}\n`;
@@ -466,7 +462,7 @@ $("#btnConfirmar").onclick=async()=>{
         fries:o.fries, notes:o.notes?[o.notes]:[],
         extras:{patty:o.extras.patty, cheddar:o.extras.cheddar, EXTRA_PRICE_PATTY:PRICE_PATTY, EXTRA_PRICE_CHEDDAR:PRICE_CHEDDAR}
       })),
-      total, // Total correcto
+      total,
       createdAt: localISO,
       trackToken: trackToken
     };
