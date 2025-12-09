@@ -132,14 +132,15 @@
     .chart-card { background: #fff; border: 1px solid var(--ring); border-radius: 12px; padding: 16px; }
     .chart-title { font-size: 15px; font-weight: 700; color: #374151; margin-bottom: 12px; display: block; }
     
-    /* CALENDARS (Igual que antes) */
+    /* CALENDARS */
     .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-top: 16px; }
     .cal-day { background: #fff; border-radius: 12px; height: 100px; padding: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid #e5e7eb; }
     .cal-empty { background: #f9fafb; border-style: dashed; }
     .cal-num { font-size: 12px; font-weight: 700; color: #9ca3af; text-align: right; }
     .cal-content { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; }
     .cal-pill { background: #ecfdf5; color: #047857; border-radius: 99px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
-    
+    .cal-burger-hero { font-size: 13px; font-weight: 800; color: #333; }
+
     /* SUPPLY */
     .supply-card { border-top: 4px solid var(--warning); }
     .supply-pill-meat { color:#795548; font-weight:800; font-size:13px; background: #efebe9; padding: 2px 6px; border-radius: 4px; }
@@ -297,8 +298,8 @@
 
         <div class="card supply-card" style="margin-top:24px; border:1px solid var(--ring); box-shadow:none; background:#fff;">
           <div style="display:flex; justify-content:space-between; flex-wrap:wrap; margin-bottom:15px;">
-             <strong>🥩 Control de Insumos (Estimado)</strong>
-             <span id="supplyRange" style="font-size:13px; font-weight:600; color:#555;">—</span>
+              <strong>🥩 Control de Insumos (Estimado)</strong>
+              <span id="supplyRange" style="font-size:13px; font-weight:600; color:#555;">—</span>
           </div>
           <div style="display:flex; gap:15px; margin-bottom:10px; font-size:12px;">
             <span class="supply-pill-meat">🥩 = Medallones</span>
@@ -316,7 +317,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
-    // 1. VARIABLES GLOBALES (Al inicio para evitar errores de referencia)
+    // 1. VARIABLES GLOBALES
     let CURRENT_ORDERS = [];
     let ALL_EXPENSES = [];
     let mainChart, d1, d2;
@@ -362,7 +363,7 @@
         if($('calMonth')) $('calMonth').value = ym;
         if($('exDate')) $('exDate').valueAsDate = now;
 
-        // 5. EVENTOS (BOTONES)
+        // 5. EVENTOS
         if($('btnReload')) $('btnReload').onclick = loadKPI;
         if($('calPrev')) $('calPrev').onclick = () => { stepMonth(-1); renderCalendar(); };
         if($('calNext')) $('calNext').onclick = () => { stepMonth(1); renderCalendar(); };
@@ -424,6 +425,7 @@
             const payStats = {}, sourceStats = {}, clientStats = {};
             
             filteredOrders.forEach(o => {
+                // Aquí usamos el TOTAL GUARDADO, que YA INCLUYE EXTRAS
                 const total = Number(o.total || o.rawTotal || 0);
                 totalOrders++;
                 totalRevenue += total;
@@ -526,7 +528,7 @@
         }
 
         // =========================================
-        // CALENDARIO E INSUMOS
+        // CALENDARIO E INSUMOS (LOGICA MEJORADA)
         // =========================================
         async function renderCalendar(){
             const ym = $('calMonth').value;
@@ -535,7 +537,6 @@
             const start = new Date(y, m-1, 1);
             const end = new Date(y, m, 0, 23, 59, 59);
             
-            // Usamos CURRENT_ORDERS que ya tiene todo
             const orders = CURRENT_ORDERS.filter(o => {
                 const dt = parseDateAny(o.createdAt);
                 return dt && dt >= start && dt <= end && !o.status?.includes('cancel');
@@ -556,12 +557,28 @@
                 (o.items||[]).forEach(item => {
                     const name = (item.name || '').toLowerCase();
                     const qty = Number(item.qty || 1);
-                    let patties = 1; 
-                    if(name.includes('doble')) patties = 2;
-                    if(name.includes('triple')) patties = 3;
-                    if(name.includes('cuadruple')) patties = 4;
-                    if(name.match(/bebida|salsa|helado|agua|cerveza|postre/)) patties = 0;
+                    
+                    // --- LOGICA MEJORADA DE CONTEO DE MEDALLONES ---
+                    let patties = 0; // Por defecto 0 (para gaseosas, etc.)
+
+                    // 1. Detectar si es hamburguesa
+                    const esBurger = item.type === 'burger' || name.includes('hamburguesa') || name.includes('burger') || name.includes('doble') || name.includes('simple') || name.includes('royal') || name.includes('crispy') || name.includes('cuarto') || name.includes('big');
+
+                    if (esBurger) {
+                        patties = 1; // Base simple
+                        if(name.includes('doble')) patties = 2;
+                        if(name.includes('triple')) patties = 3;
+                        if(name.includes('cuadruple')) patties = 4;
+
+                        // 2. SUMAR EXTRAS MANUALES (La clave del arreglo)
+                        if(item.extras && item.extras.patty){
+                            patties += Number(item.extras.patty);
+                        }
+                    }
+
                     meatCounts[d] += (patties * qty);
+                    
+                    // Conteo de Papas (0.2kg por hamburguesa vendida)
                     if(patties > 0 && !name.includes('extra')) friesKilos[d] += (0.200 * qty);
                 });
             });
