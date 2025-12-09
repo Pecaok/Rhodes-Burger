@@ -55,13 +55,9 @@
     .icon-btn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--ring); background: #fff; cursor: pointer; font-size: 16px; flex-shrink: 0; transition: all 0.2s; }
     .icon-btn:hover { background: #f0f0f0; }
     
-    /* ESTILOS ACTIVOS PARA BOTONES DE HERRAMIENTAS */
+    /* ESTILOS ACTIVOS PARA BOTONES */
     .icon-btn.active { box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }
-    
-    /* Botón Campana Activo (Azul) */
     .icon-btn#btnBell.active { background: #e0f2fe; border-color: #0284c7; color: #0284c7; }
-    
-    /* Botón Impresora Activo (Verde) */
     .icon-btn#btnAutoPrint.active { background: #dcfce7; border-color: #16a34a; color: #15803d; }
     
     .btn-danger { color: #d32f2f; background: #ffebee; border: 1px solid #ffcdd2; }
@@ -350,37 +346,29 @@
 
  <script>
   window.addEventListener('DOMContentLoaded', () => {
-    // --- 1. CONFIGURACIÓN DE AUDIO ROBUSTA ---
+    // --- 1. CONFIGURACIÓN DE AUDIO ---
     let audioCtx = null;
-
     const initAudio = () => {
         if (!audioCtx) {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             audioCtx = new AudioContext();
         }
-        if (audioCtx.state === 'suspended') {
-            audioCtx.resume();
-        }
+        if (audioCtx.state === 'suspended') audioCtx.resume();
     };
-
     document.body.addEventListener('click', initAudio, { once: true });
     document.body.addEventListener('touchstart', initAudio, { once: true });
 
-    // --- 2. CONFIGURACIÓN DE SONIDO (ALARMA FUERTE) ---
     const playBeep = () => {
         let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
         if(!soundOn) return;
         initAudio();
         if (!audioCtx) return;
-
         const now = audioCtx.currentTime;
         const createBeep = (startTime) => {
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.type = 'square'; 
-            osc.frequency.setValueAtTime(1000, startTime); 
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            osc.type = 'square'; osc.frequency.setValueAtTime(1000, startTime); 
+            osc.connect(gain); gain.connect(audioCtx.destination);
             osc.start(startTime);
             gain.gain.setValueAtTime(0.5, startTime); 
             gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15);
@@ -389,8 +377,7 @@
         createBeep(now); createBeep(now + 0.25); createBeep(now + 0.50); createBeep(now + 0.75);
     };
 
-
-    // --- 3. LÓGICA DE LA INTERFAZ ---
+    // --- 2. LOGICA INTERFAZ ---
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     let currentFilter = "recibidos"; let lastSnap = null;
     
@@ -402,49 +389,26 @@
         if(window.lastSnap) renderList(window.lastSnap);
     });
 
-    // --- BOTÓN CAMPANA (VISUAL + FUNCIONAL) ---
+    // Botones
     const btnBell = document.getElementById("btnBell");
     let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
-    
-    const updBell = ()=>{ 
-        btnBell.classList.toggle("active", soundOn);
-        btnBell.innerText = soundOn ? '🔔' : '🔕';
-    }; 
+    const updBell = ()=>{ btnBell.classList.toggle("active", soundOn); btnBell.innerText = soundOn ? '🔔' : '🔕'; }; 
     updBell();
+    btnBell.onclick = ()=>{ initAudio(); soundOn = !soundOn; localStorage.setItem("rb_sound", soundOn); updBell(); if(soundOn) playBeep(); };
 
-    btnBell.onclick = ()=>{ 
-        initAudio(); // Importante para desbloquear audio
-        soundOn = !soundOn; 
-        localStorage.setItem("rb_sound", soundOn); 
-        updBell();
-        if(soundOn) playBeep(); 
-    };
-
-    // --- BOTÓN AUTOIMPRIMIR (VISUAL + FUNCIONAL) ---
     const btnAP = document.getElementById("btnAutoPrint");
     let autoP = JSON.parse(localStorage.getItem("rb_autop")||"false");
-    
-    const updAP = ()=>{ 
-        btnAP.classList.toggle("active", autoP); 
-    }; 
-    updAP();
+    const updAP = ()=>{ btnAP.classList.toggle("active", autoP); }; updAP();
+    btnAP.onclick = ()=>{ autoP = !autoP; localStorage.setItem("rb_autop", autoP); updAP(); };
 
-    btnAP.onclick = ()=>{ 
-        autoP = !autoP; 
-        localStorage.setItem("rb_autop", autoP); 
-        updAP(); 
-    };
-
-
-    // --- 4. CONEXIÓN A FIREBASE Y DETECCIÓN DE PEDIDOS ---
+    // --- 3. FIREBASE ---
     let isInit=true; setTimeout(()=>isInit=false, 3000);
-    
     db.collection("orders").orderBy("orderNumber", "desc").limit(300).onSnapshot(snap => {
         window.lastSnap = snap;
         renderList(snap);
         snap.docChanges().forEach(ch => {
             if(ch.type==='added' && !isInit){
-                console.log("🔔 Nuevo pedido recibido:", ch.doc.data().orderNumber);
+                console.log("🔔 Nuevo:", ch.doc.data().orderNumber);
                 if(navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); 
                 playBeep(); 
                 if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id));
@@ -454,36 +418,42 @@
         document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
     });
 
-    // --- HELPER PARA LIMPIAR HORARIOS "FEOS" ---
+    // --- HELPER HORARIOS ---
     function getCleanTime(o, defaultTime) {
-        // 1. Intentar usar pickup_slot (Mostrador: "21:30")
-        if (o.pickup_slot && typeof o.pickup_slot === 'string' && o.pickup_slot.includes(':')) {
-            return o.pickup_slot;
-        }
-
-        // 2. Buscar en pickup_time o pickup_time_pretty (Web puede venir "20251206_2330")
+        if (o.pickup_slot && typeof o.pickup_slot === 'string' && o.pickup_slot.includes(':')) return o.pickup_slot;
         let raw = o.pickup_time_pretty || o.pickup_time;
-
         if (raw && typeof raw === 'string') {
-            // Fix formato sucio
             if (raw.includes('_')) {
-                const parts = raw.split('_');
-                const timePart = parts[parts.length - 1]; // "2330"
-                if (timePart.length === 4 && !isNaN(timePart)) {
-                    return timePart.substring(0, 2) + ':' + timePart.substring(2, 4);
-                }
+                const parts = raw.split('_'); const timePart = parts[parts.length - 1]; 
+                if (timePart.length === 4 && !isNaN(timePart)) return timePart.substring(0, 2) + ':' + timePart.substring(2, 4);
             }
-            // Fix formato limpio
-            if (raw.includes(':') && raw.length <= 5) {
-                return raw;
-            }
+            if (raw.includes(':') && raw.length <= 5) return raw;
         }
-
-        // 3. Fallback: Hora de creación
         return defaultTime;
     }
 
-    // --- FUNCIONES DE RENDERIZADO ---
+    // 🔥🔥🔥 NUEVA FUNCIÓN: AGRUPAR ÍTEMS IDÉNTICOS 🔥🔥🔥
+    function consolidateItems(list) {
+        const map = new Map();
+        list.forEach(it => {
+            let exKey = "";
+            if(it.extras) {
+                 const keys = Object.keys(it.extras).sort();
+                 exKey = keys.map(k => `${k}:${it.extras[k]}`).join("-");
+            }
+            const noteKey = (it.notes || "").trim().toLowerCase();
+            const key = `${it.name.trim()}_${exKey}_${noteKey}`;
+            
+            if(map.has(key)){
+                map.get(key).qty += (Number(it.qty)||1);
+            } else {
+                map.set(key, { ...it, qty: (Number(it.qty)||1) });
+            }
+        });
+        return Array.from(map.values());
+    }
+
+    // --- RENDER ---
     function renderList(snap){
         let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
         window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
@@ -498,7 +468,7 @@
         });
 
         const cont = document.getElementById("orders");
-        if(filtered.length===0){ cont.innerHTML = '<div class="empty-state">No hay pedidos en esta sección.</div>'; return; }
+        if(filtered.length===0){ cont.innerHTML = '<div class="empty-state">No hay pedidos.</div>'; return; }
         cont.innerHTML = filtered.map(x => buildOrderHTML(x.ref)).join("");
     }
 
@@ -509,23 +479,20 @@
         const st = o.status || 'accepted';
         const isPaid = (o.payment_status==='paid') || !!o.paid;
         
-        // Usamos la función helper para el display en tarjeta también
         const displayTime = getCleanTime(o, ""); 
         
         const LABELS = {accepted:'Recibido', in_prep:'Cocina', ready:'Listo', delivered:'Entregado'};
         const btns = ['accepted','in_prep','ready','delivered'].map(k => {
             const isOn = (k === st) ? 'on' : '';
             const opacity = (k==='delivered' && !isPaid) ? 'opacity:0.5' : '';
-            return `<div class="state-btn ${isOn} state-${k}" style="${opacity}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})">
-                <span>${LABELS[k]}</span>
-            </div>`;
+            return `<div class="state-btn ${isOn} state-${k}" style="${opacity}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})"><span>${LABELS[k]}</span></div>`;
         }).join('');
 
         let payVal = o.pago;
         if(payVal === 'mostrador_sin_especificar') payVal = "";
 
         const items = Array.isArray(o.items) ? o.items : [];
-        const cats = { b:[], f:[], d:[], o:[] };
+        let cats = { b:[], f:[], d:[], o:[] };
         items.forEach(it => {
             const cat = window.getCat(it);
             if(cat === 'b'){
@@ -536,6 +503,12 @@
                 if(fName && fName !== 'sin_papas') cats.f.push({name: fName, qty: it.qty||1});
             } else { cats[cat].push(it); }
         });
+
+        // 🔥 APLICAMOS CONSOLIDACIÓN PARA LA VISTA EN PANTALLA
+        cats.b = consolidateItems(cats.b);
+        cats.f = consolidateItems(cats.f);
+        cats.d = consolidateItems(cats.d);
+        cats.o = consolidateItems(cats.o);
 
         const renderSec = (list, icon, title) => {
             if(!list.length) return "";
@@ -602,7 +575,7 @@
         </div>`;
     }
 
-    // --- FUNCIÓN DE IMPRESIÓN CORREGIDA PARA LIMPIAR EL FORMATO ---
+    // --- IMPRESIÓN ---
     window.trySilentPrint = function(docSnap){
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -610,9 +583,8 @@
        
        const dt = window.pickDate(o);
        const dateStr = dt.toLocaleDateString("es-AR");
-       const timeStr = dt.toLocaleTimeString("es-AR",{hour12:false}); // HH:mm:ss
+       const timeStr = dt.toLocaleTimeString("es-AR",{hour12:false});
 
-       // 🔥 USAMOS EL HELPER PARA OBTENER LA HORA LIMPIA
        const horarioRetiro = getCleanTime(o, timeStr.substring(0, 5));
 
        let payTxt = o.pago;
@@ -624,7 +596,7 @@
        const stPay = isPaid ? "PAGADO" : "PENDIENTE";
        
        const items = Array.isArray(o.items) ? o.items : [];
-       const cats = { b:[], f:[], d:[], o:[] };
+       let cats = { b:[], f:[], d:[], o:[] };
        items.forEach(it => {
           const cat = window.getCat(it);
           if(cat==='b'){
@@ -635,6 +607,12 @@
              if(fName && fName!=='sin_papas') cats.f.push({name: fName, qty: it.qty||1});
           } else { cats[cat].push(it); }
        });
+
+       // 🔥 APLICAMOS CONSOLIDACIÓN PARA EL TICKET
+       cats.b = consolidateItems(cats.b);
+       cats.f = consolidateItems(cats.f);
+       cats.d = consolidateItems(cats.d);
+       cats.o = consolidateItems(cats.o);
        
        const rSec = (l, ti) => {
          if(!l.length) return "";
