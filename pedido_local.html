@@ -461,6 +461,10 @@
         const st = o.status || 'accepted';
         const isPaid = (o.payment_status==='paid') || !!o.paid;
         
+        // Determinar qué mostrar en la tarjeta (UI)
+        let displayTime = o.pickup_slot || ""; 
+        if(!displayTime && o.pickup_time_pretty) displayTime = o.pickup_time_pretty;
+        
         const LABELS = {accepted:'Recibido', in_prep:'Cocina', ready:'Listo', delivered:'Entregado'};
         const btns = ['accepted','in_prep','ready','delivered'].map(k => {
             const isOn = (k === st) ? 'on' : '';
@@ -520,7 +524,7 @@
                  <div class="order-meta">
                     <span>${timeStr}</span>
                     <span class="chip ${o.source==='mostrador'?'mostrador':''}">${esc(o.entrega||'take_away')}</span>
-                    ${o.pickup_time_pretty ? `<span class="chip time">⏰ ${esc(o.pickup_time_pretty)}</span>` : ''}
+                    ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}
                  </div>
               </div>
               <div class="price-tag">${money(total)}</div>
@@ -551,7 +555,7 @@
         </div>`;
     }
 
-    // --- FUNCIÓN DE IMPRESIÓN MODIFICADA PARA ARREGLAR FORMATO FECHA ---
+    // --- FUNCIÓN DE IMPRESIÓN MODIFICADA Y CORREGIDA ---
     window.trySilentPrint = function(docSnap){
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -561,22 +565,32 @@
        const dateStr = dt.toLocaleDateString("es-AR");
        const timeStr = dt.toLocaleTimeString("es-AR",{hour12:false}); // HH:mm:ss
 
-       // 1. Lógica del Horario de Retiro (FIX para formato "20251206_2330")
-       let horarioRetiro = o.pickup_time_pretty;
-       
-       if(!horarioRetiro || horarioRetiro === "") {
-           // Si no hay horario (Mostrador), usamos la hora del pedido (sin segundos)
-           horarioRetiro = timeStr.substring(0, 5);
-       } else {
-           // Si viene texto largo tipo "20251206_2330", lo convertimos a "23:30"
+       // =========================================================
+       // 🔥 LÓGICA DE PRIORIDAD PARA EL HORARIO EN EL TICKET 🔥
+       // =========================================================
+       let horarioRetiro = "";
+
+       // 1. Prioridad: Mostrador (pickup_slot viene limpio ej "21:30")
+       if(o.pickup_slot) {
+           horarioRetiro = o.pickup_slot;
+       }
+       // 2. Prioridad: Web (pickup_time_pretty ej "20251206_2330" o limpio)
+       else if(o.pickup_time_pretty) {
+           horarioRetiro = o.pickup_time_pretty;
+           // Fix formato sucio de la web si aparece
            if(horarioRetiro.includes('_') && horarioRetiro.length > 10) {
               const parts = horarioRetiro.split('_');
-              const timePart = parts[1]; // ej: "2330"
+              const timePart = parts[1]; // "2330"
               if(timePart && timePart.length === 4) {
                  horarioRetiro = timePart.substring(0,2) + ":" + timePart.substring(2,4);
               }
            }
        }
+       // 3. Fallback: Hora del pedido (si no hay nada más)
+       else {
+           horarioRetiro = timeStr.substring(0, 5); // "HH:mm"
+       }
+       // =========================================================
 
        let payTxt = o.pago;
        if(!payTxt || payTxt==='mostrador_sin_especificar' || payTxt==="") payTxt="A COBRAR EN CAJA";
