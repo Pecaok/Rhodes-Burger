@@ -435,6 +435,36 @@
         document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
     });
 
+    // --- HELPER PARA LIMPIAR HORARIOS "FEOS" ---
+    function getCleanTime(o, defaultTime) {
+        // 1. Intentar usar pickup_slot (que suele venir "21:30" desde Mostrador)
+        if (o.pickup_slot && typeof o.pickup_slot === 'string' && o.pickup_slot.includes(':')) {
+            return o.pickup_slot;
+        }
+
+        // 2. Buscar en pickup_time o pickup_time_pretty (Web puede guardar "20251206_2330")
+        // Revisamos ambas variables por si acaso
+        let raw = o.pickup_time_pretty || o.pickup_time;
+
+        if (raw && typeof raw === 'string') {
+            // CASO SUCIO: "20251206_2330" --> Convertir a "23:30"
+            if (raw.includes('_')) {
+                const parts = raw.split('_');
+                const timePart = parts[parts.length - 1]; // Toma "2330"
+                if (timePart.length === 4 && !isNaN(timePart)) {
+                    return timePart.substring(0, 2) + ':' + timePart.substring(2, 4);
+                }
+            }
+            // CASO LIMPIO: Ya viene como "23:30"
+            if (raw.includes(':') && raw.length <= 5) {
+                return raw;
+            }
+        }
+
+        // 3. Si todo falla, devolver la hora actual de creación
+        return defaultTime;
+    }
+
     // --- FUNCIONES DE RENDERIZADO ---
     function renderList(snap){
         let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
@@ -461,9 +491,8 @@
         const st = o.status || 'accepted';
         const isPaid = (o.payment_status==='paid') || !!o.paid;
         
-        // Determinar qué mostrar en la tarjeta (UI)
-        let displayTime = o.pickup_slot || ""; 
-        if(!displayTime && o.pickup_time_pretty) displayTime = o.pickup_time_pretty;
+        // Usamos la función helper también para la tarjeta en pantalla
+        const displayTime = getCleanTime(o, ""); 
         
         const LABELS = {accepted:'Recibido', in_prep:'Cocina', ready:'Listo', delivered:'Entregado'};
         const btns = ['accepted','in_prep','ready','delivered'].map(k => {
@@ -555,7 +584,7 @@
         </div>`;
     }
 
-    // --- FUNCIÓN DE IMPRESIÓN MODIFICADA Y CORREGIDA ---
+    // --- FUNCIÓN DE IMPRESIÓN CORREGIDA PARA LIMPIAR EL FORMATO ---
     window.trySilentPrint = function(docSnap){
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -565,32 +594,8 @@
        const dateStr = dt.toLocaleDateString("es-AR");
        const timeStr = dt.toLocaleTimeString("es-AR",{hour12:false}); // HH:mm:ss
 
-       // =========================================================
-       // 🔥 LÓGICA DE PRIORIDAD PARA EL HORARIO EN EL TICKET 🔥
-       // =========================================================
-       let horarioRetiro = "";
-
-       // 1. Prioridad: Mostrador (pickup_slot viene limpio ej "21:30")
-       if(o.pickup_slot) {
-           horarioRetiro = o.pickup_slot;
-       }
-       // 2. Prioridad: Web (pickup_time_pretty ej "20251206_2330" o limpio)
-       else if(o.pickup_time_pretty) {
-           horarioRetiro = o.pickup_time_pretty;
-           // Fix formato sucio de la web si aparece
-           if(horarioRetiro.includes('_') && horarioRetiro.length > 10) {
-              const parts = horarioRetiro.split('_');
-              const timePart = parts[1]; // "2330"
-              if(timePart && timePart.length === 4) {
-                 horarioRetiro = timePart.substring(0,2) + ":" + timePart.substring(2,4);
-              }
-           }
-       }
-       // 3. Fallback: Hora del pedido (si no hay nada más)
-       else {
-           horarioRetiro = timeStr.substring(0, 5); // "HH:mm"
-       }
-       // =========================================================
+       // 🔥 USAMOS EL HELPER PARA OBTENER LA HORA LIMPIA (Ej: "23:30")
+       const horarioRetiro = getCleanTime(o, timeStr.substring(0, 5));
 
        let payTxt = o.pago;
        if(!payTxt || payTxt==='mostrador_sin_especificar' || payTxt==="") payTxt="A COBRAR EN CAJA";
