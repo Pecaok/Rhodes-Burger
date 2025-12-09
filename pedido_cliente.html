@@ -262,6 +262,10 @@ const G_POR_SIDE=700;
 const SLOT_START="19:15"; const SLOT_END="23:45"; const SLOT_INTERVAL_MIN=15;
 const WHATSAPP_NUMBER = "5491170596483"; 
 
+// 🔥 PRECIOS EXTRAS (Deben coincidir con tu sistema)
+const PRICE_PATTY = 2500;
+const PRICE_CHEDDAR = 300;
+
 function $(s){ return document.querySelector(s); }
 function parseHHMM(str){ const [h,m]=str.split(":").map(Number); const now=new Date(); return new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0); }
 function slotKey(date){ const y=date.getFullYear(); const M=String(date.getMonth()+1).padStart(2,"0"); const d=String(date.getDate()).padStart(2,"0"); const H=String(date.getHours()).padStart(2,"0"); const m=String(date.getMinutes()).padStart(2,"0"); return `${y}${M}${d}_${H}${m}`; }
@@ -326,17 +330,36 @@ $("#slotNext").onclick=()=>{if(currentIndex<visibles.length-1){currentIndex++;ac
 $("#btnRefreshSlots").onclick=cargarSlots;
 setInterval(reconstruirVisibles,10000);
 
-/* RESUMEN */
+/* RESUMEN - 🔥 CORREGIDO PARA SUMAR EXTRAS */
 function renderResumen(){
   const c=loadCart(); const box=$("#resumen"); box.innerHTML=""; let t=0;
   for(const o of Object.values(c.burger)){
-    const subt=o.qty*o.item.price; t+=subt;
-    box.innerHTML+=`<div style="margin-bottom:8px"><strong>${o.item.name} x${o.qty}</strong><div class="muted">Papas: ${normalizeFriesLabel(o.fries)}</div><div class="muted">Subtotal: $${subt.toLocaleString("es-AR")}</div></div>`;
+    // Calculamos precio unitario con extras
+    const extrasCost = (o.extras?.patty||0)*PRICE_PATTY + (o.extras?.cheddar||0)*PRICE_CHEDDAR;
+    const unitPrice = o.item.price + extrasCost;
+    const subt = o.qty * unitPrice;
+    t += subt;
+
+    // Generamos texto de extras
+    let extrasTxt = "";
+    if(o.extras?.patty) extrasTxt += ` <span style="font-size:11px;color:#d32f2f">+${o.extras.patty} carne</span>`;
+    if(o.extras?.cheddar) extrasTxt += ` <span style="font-size:11px;color:#f57f17">+${o.extras.cheddar} cheddar</span>`;
+
+    box.innerHTML+=`<div style="margin-bottom:8px">
+        <strong>${o.item.name} x${o.qty}</strong> ${extrasTxt}
+        <div class="muted">Papas: ${normalizeFriesLabel(o.fries)}</div>
+        <div class="muted">Subtotal: $${subt.toLocaleString("es-AR")}</div>
+    </div>`;
   }
+  
+  // Sumamos bebidas y guarniciones extra
+  for(const k in c.drink){ t += c.drink[k].qty * c.drink[k].item.price; }
+  for(const k in c.side){ t += c.side[k].qty * c.side[k].item.price; }
+
   $("#resTotal").textContent="$ "+t.toLocaleString("es-AR");
 }
 
-/* CONFIRMAR PEDIDO */
+/* CONFIRMAR PEDIDO - 🔥 CORREGIDO CÁLCULO TOTAL Y DETALLE */
 async function obtenerYIncrementarOrderNumber() {
   const ref = db.collection("config").doc("counters");
   let nuevoNumero = null;
@@ -371,17 +394,11 @@ async function reservarMultiBloque(horaInicioKey, gramosTotales) {
   }
 }
 
-// ==========================================
-// BOTÓN CONFIRMAR (PAGO VACÍO PARA ADMIN)
-// ==========================================
 $("#btnConfirmar").onclick=async()=>{
   const btn=$("#btnConfirmar");
   const nombre=$("#inpNombre").value.trim();
   const tel=$("#inpTelefono").value.trim();
-  
-  // 🔥 ESTA ES LA CLAVE: Enviamos VACÍO para que en Pedidos no se seleccione nada
-  const pagoVal = "";
-  
+  const pagoVal = ""; // Pago vacío para admin
   const notas=$("#inpNotas").value.trim();
   const slot=$("#slotsCarousel").selectedSlot;
   const cart=loadCart();
@@ -401,10 +418,29 @@ $("#btnConfirmar").onclick=async()=>{
 
     let total=0;
     let detalle="";
+    
+    // 🔥 RECORRIDO CORREGIDO PARA TOTAL Y DETALLE
     for(const o of Object.values(cart.burger)){
-       total+=o.qty*o.item.price;
-       detalle+=`• ${o.item.name} x${o.qty} (${normalizeFriesLabel(o.fries)})\n`;
+       const extrasCost = (o.extras?.patty||0)*PRICE_PATTY + (o.extras?.cheddar||0)*PRICE_CHEDDAR;
+       const unitTotal = o.item.price + extrasCost;
+       total += o.qty * unitTotal;
+       
+       let exTxt = "";
+       if(o.extras?.patty) exTxt += ` (+${o.extras.patty} carne)`;
+       if(o.extras?.cheddar) exTxt += ` (+${o.extras.cheddar} cheddar)`;
+
+       detalle+=`• ${o.item.name} x${o.qty} ${exTxt} (${normalizeFriesLabel(o.fries)})\n`;
        if(o.notes) detalle+=`   Nota: ${o.notes}\n`;
+    }
+    
+    // Sumar bebidas y otros
+    for(const o of Object.values(cart.drink)){
+        total += o.qty * o.item.price;
+        detalle+=`• ${o.item.name} x${o.qty}\n`;
+    }
+    for(const o of Object.values(cart.side)){
+        total += o.qty * o.item.price;
+        detalle+=`• ${o.item.name} x${o.qty}\n`;
     }
 
     const now = new Date();
@@ -416,7 +452,7 @@ $("#btnConfirmar").onclick=async()=>{
       orderNumber,
       nombre,
       telefono: tel,
-      pago: pagoVal, // <-- Se envía vacío
+      pago: pagoVal,
       payment_method: pagoVal,
       payment_status:"pending_payment",
       paid:false,
@@ -428,9 +464,9 @@ $("#btnConfirmar").onclick=async()=>{
       items:Object.values(cart.burger).map(o=>({
         name:o.item.name, price:o.item.price, qty:o.qty,
         fries:o.fries, notes:o.notes?[o.notes]:[],
-        extras:{patty:o.extras.patty, cheddar:o.extras.cheddar, EXTRA_PRICE_PATTY:2500, EXTRA_PRICE_CHEDDAR:300}
+        extras:{patty:o.extras.patty, cheddar:o.extras.cheddar, EXTRA_PRICE_PATTY:PRICE_PATTY, EXTRA_PRICE_CHEDDAR:PRICE_CHEDDAR}
       })),
-      total,
+      total, // Total correcto
       createdAt: localISO,
       trackToken: trackToken
     };
