@@ -55,7 +55,7 @@
       flex-direction:column;
       align-items:center;
       justify-content:center;
-      min-width:160px; /* Un poquito más ancho para el texto nuevo */
+      min-width:170px;
       padding:8px 14px;
       border-radius:16px;
       font-weight:700;
@@ -63,8 +63,8 @@
       border:1px solid var(--ring);
       color:#222;
       text-align:center;
-      gap:0px; /* Menos espacio entre líneas */
-      line-height: 1.2;
+      gap:0px;
+      line-height: 1.25;
     }
     .status-open{
       background:#ECE7DD;
@@ -76,9 +76,8 @@
       border-color:#eaeaea;
       color:#444;
     }
-    
     .status-main { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .status-sub { font-size: 12px; font-weight: 500; opacity: 0.85; }
+    .status-sub { font-size: 12px; font-weight: 500; opacity: 0.9; }
 
     .spacer{flex:1}
 
@@ -556,12 +555,15 @@
 
   <script>
     /* ====== Horarios de apertura ====== */
-    // 24:00 es el cierre
+    // DOM:0, LUN:1, MAR:2, MIE:3, JUE:4, VIE:5, SAB:6
     const HOURS = {
-      0: [[19,00,24,0]], 1: [],
-      2: [[19,00,24,0]],
-      4: [[19,00,24,0]], 5: [[19,00,24,0]],
-      6: [[19,00,24,0]]
+      0: [[19,0,24,0]], // Domingo
+      1: [],            // Lunes (Cerrado)
+      2: [],            // Martes (Cerrado)
+      3: [[19,0,24,0]], // Miércoles
+      4: [[19,0,24,0]], // Jueves
+      5: [[19,0,24,0]], // Viernes
+      6: [[19,0,24,0]]  // Sábado
     };
 
     function fmtHM(h,m){
@@ -580,19 +582,34 @@
       return {open:false};
     }
 
-    // Devuelve objeto { label: "hoy", time: "19:00" } para formatear mejor
-    function nextOpenInfo(d=new Date()){
-      for(let i=0;i<8;i++){
-        const t=new Date(d.getTime()+i*86400000);
-        const blocks=HOURS[t.getDay()];
-        if(blocks.length){
-          const [h1,m1]=blocks[0];
-          const label = i===0?"hoy": i===1?"mañana": t.toLocaleDateString("es-AR",{weekday:"long"});
-          const time = fmtHM(h1,m1);
-          return { label, time };
+    // Calcula el próximo horario de apertura
+    function getNextOpenInfo() {
+        const now = new Date();
+        const curMin = now.getHours() * 60 + now.getMinutes();
+        
+        for (let i = 0; i < 7; i++) {
+            const futureDate = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
+            const day = futureDate.getDay();
+            const blocks = HOURS[day] || [];
+            
+            for (const [h1, m1, h2, m2] of blocks) {
+                const startMin = h1 * 60 + m1;
+                
+                // Si es hoy (i=0), solo nos sirve si abre más tarde
+                if (i === 0 && startMin <= curMin) continue;
+                
+                // Encontramos el próximo bloque
+                let dayLabel = "hoy";
+                if (i === 1) dayLabel = "mañana";
+                else if (i > 1) {
+                    const days = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+                    dayLabel = "el " + days[day];
+                }
+                
+                return { dayLabel, time: fmtHM(h1, m1) };
+            }
         }
-      }
-      return null;
+        return null;
     }
 
     /* ====== Estado forzado Firestore ====== */
@@ -610,7 +627,6 @@
         pill.classList.remove("status-closed");
         main.textContent="Abierto";
 
-        // Muestra hasta cuándo (forzado)
         const untilStr = untilActive 
             ? `hasta las ${fmtHM(FORCE_UNTIL.getHours(),FORCE_UNTIL.getMinutes())} hs`
             : (FORCE_MSG||"Apertura especial");
@@ -636,10 +652,10 @@
         pill.classList.add("status-closed");
         main.textContent="Cerrado";
         
-        const nextInfo = nextOpenInfo();
-        if(nextInfo){
+        const next = getNextOpenInfo();
+        if(next){
             // 🔥 TEXTO: "abrimos hoy a las 19:00 hs"
-            sub.textContent=`abrimos ${nextInfo.label} a las ${nextInfo.time} hs`;
+            sub.textContent=`abrimos ${next.dayLabel} a las ${next.time} hs`;
         } else {
             sub.textContent="abrimos pronto";
         }
