@@ -55,15 +55,16 @@
       flex-direction:column;
       align-items:center;
       justify-content:center;
-      min-width:140px;
-      padding:10px 14px;
+      min-width:160px; /* Un poquito más ancho para el texto nuevo */
+      padding:8px 14px;
       border-radius:16px;
       font-weight:700;
       background:#f4f4f4;
       border:1px solid var(--ring);
       color:#222;
       text-align:center;
-      gap:2px
+      gap:0px; /* Menos espacio entre líneas */
+      line-height: 1.2;
     }
     .status-open{
       background:#ECE7DD;
@@ -75,6 +76,9 @@
       border-color:#eaeaea;
       color:#444;
     }
+    
+    .status-main { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .status-sub { font-size: 12px; font-weight: 500; opacity: 0.85; }
 
     .spacer{flex:1}
 
@@ -449,9 +453,9 @@
         <strong>Rhodes Burgers</strong>
       </a>
 
-      <span id="statusPill" class="status-pill status-open" aria-live="polite">
-        <span class="status-main">Abierto</span>
-        <span class="status-sub">hasta 00:00</span>
+      <span id="statusPill" class="status-pill status-closed" aria-live="polite">
+        <span class="status-main">Cargando...</span>
+        <span class="status-sub">...</span>
       </span>
 
       <div class="spacer"></div>
@@ -552,6 +556,7 @@
 
   <script>
     /* ====== Horarios de apertura ====== */
+    // 24:00 es el cierre
     const HOURS = {
       0: [[19,00,24,0]], 1: [],
       2: [[19,00,24,0]],
@@ -560,7 +565,7 @@
     };
 
     function fmtHM(h,m){
-      // 🔥 FIX: SI ES 24, MOSTRAR 00
+      // 🔥 FIX: SI ES 24, MOSTRAR 00:00
       if(h === 24) h = 0;
       return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");
     }
@@ -575,14 +580,16 @@
       return {open:false};
     }
 
-    function nextOpen(d=new Date()){
+    // Devuelve objeto { label: "hoy", time: "19:00" } para formatear mejor
+    function nextOpenInfo(d=new Date()){
       for(let i=0;i<8;i++){
         const t=new Date(d.getTime()+i*86400000);
         const blocks=HOURS[t.getDay()];
         if(blocks.length){
           const [h1,m1]=blocks[0];
-          const lab = i===0?"hoy": i===1?"mañana": t.toLocaleDateString("es-AR",{weekday:"long"});
-          return `${lab} ${fmtHM(h1,m1)}`;
+          const label = i===0?"hoy": i===1?"mañana": t.toLocaleDateString("es-AR",{weekday:"long"});
+          const time = fmtHM(h1,m1);
+          return { label, time };
         }
       }
       return null;
@@ -603,9 +610,11 @@
         pill.classList.remove("status-closed");
         main.textContent="Abierto";
 
-        sub.textContent = untilActive
-          ? `hasta ${fmtHM(FORCE_UNTIL.getHours(),FORCE_UNTIL.getMinutes())}`
-          : (FORCE_MSG||"apertura especial");
+        // Muestra hasta cuándo (forzado)
+        const untilStr = untilActive 
+            ? `hasta las ${fmtHM(FORCE_UNTIL.getHours(),FORCE_UNTIL.getMinutes())} hs`
+            : (FORCE_MSG||"Apertura especial");
+        sub.textContent = untilStr;
 
         setOrderable(true);
         return;
@@ -613,17 +622,28 @@
 
       const st=isOpenNow();
       if(st.open){
+        // ESTADO: ABIERTO
         pill.classList.add("status-open");
         pill.classList.remove("status-closed");
         main.textContent="Abierto";
         const [h,m]=st.until;
-        sub.textContent=`hasta ${fmtHM(h,m)}`;
+        // 🔥 TEXTO: "hasta las 00:00 hs"
+        sub.textContent=`hasta las ${fmtHM(h,m)} hs`;
         setOrderable(true);
       }else{
+        // ESTADO: CERRADO
         pill.classList.remove("status-open");
         pill.classList.add("status-closed");
         main.textContent="Cerrado";
-        sub.textContent="abrimos "+(nextOpen()||"pronto");
+        
+        const nextInfo = nextOpenInfo();
+        if(nextInfo){
+            // 🔥 TEXTO: "abrimos hoy a las 19:00 hs"
+            sub.textContent=`abrimos ${nextInfo.label} a las ${nextInfo.time} hs`;
+        } else {
+            sub.textContent="abrimos pronto";
+        }
+        
         setOrderable(false);
       }
     }
