@@ -19,9 +19,6 @@
       --danger:#d32f2f;
       --success:#2e7d32;
       --warn:#ff9800;
-
-      --price-cheddar:300;
-      --price-patty:2500;
     }
 
     *{ box-sizing:border-box; }
@@ -291,7 +288,9 @@
     </div>
 
     <div id="rowPatties" class="row" style="display:none;margin-top:20px;">
-      <div style="font-size:14px"><strong>Carne extra</strong> (+$2500)</div>
+      <div style="font-size:14px">
+          <strong>Carne extra</strong> <span id="lblPricePatty" class="muted" style="font-weight:400; font-size:12px"></span>
+      </div>
       <div class="qty-ctrl">
         <button id="patDec" class="qtybtn">-</button>
         <span id="patVal" style="font-weight:bold; min-width:16px; text-align:center">0</span>
@@ -300,7 +299,9 @@
     </div>
 
     <div id="rowCheddar" class="row" style="display:none;margin-top:15px;">
-      <div style="font-size:14px"><strong>Cheddar extra</strong> (+$300)</div>
+      <div style="font-size:14px">
+          <strong>Cheddar extra</strong> <span id="lblPriceCheddar" class="muted" style="font-weight:400; font-size:12px"></span>
+      </div>
       <div class="qty-ctrl">
         <button id="cheDec" class="qtybtn">-</button>
         <span id="cheVal" style="font-weight:bold; min-width:16px; text-align:center">0</span>
@@ -346,8 +347,22 @@ const $ = s => document.querySelector(s);
 const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 const FALLBACK_IMG = "images/logo.png";
 
-const EXTRA_PRICE_PATTY   = 2500;
-const EXTRA_PRICE_CHEDDAR = 300;
+// 🔥 PRECIOS DINÁMICOS (Defaults por si no hay conexión)
+let EXTRA_PRICE_PATTY   = 2500;
+let EXTRA_PRICE_CHEDDAR = 300;
+
+// Cargar precios de la DB
+db.collection("config").doc("prices").onSnapshot(doc => {
+    if(doc.exists) {
+        const d = doc.data();
+        if(d.patty) EXTRA_PRICE_PATTY = Number(d.patty);
+        if(d.cheddar) EXTRA_PRICE_CHEDDAR = Number(d.cheddar);
+        
+        // Actualizar textos modal si está abierto o se abre luego
+        if($("#lblPricePatty")) $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
+        if($("#lblPriceCheddar")) $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
+    }
+});
 
 /* ============= LOGICA PAGO (DEFAULT PENDIENTE) ============= */
 let isOrderPaid = false; 
@@ -390,7 +405,8 @@ db.collection("products").onSnapshot(snap=>{
       img: d.img || FALLBACK_IMG,
       description: d.description || "",
       category: d.category,
-      kind: d.kind || ""
+      kind: d.kind || "",
+      allowedExtras: d.allowedExtras || {} // 🔥 LEER CONFIG DE EXTRAS
     };
     if(d.available === false) availability.set(doc.id, false);
     const cat = (d.category||"").toLowerCase();
@@ -475,6 +491,7 @@ function renderCart(){
   // Hamburguesas
   for(const id in cart.burger){
     const b = cart.burger[id];
+    // Usar precios dinámicos
     const unit = b.item.price + b.extras.patty * EXTRA_PRICE_PATTY + b.extras.cheddar * EXTRA_PRICE_CHEDDAR;
     total += unit * b.qty;
 
@@ -496,11 +513,11 @@ function renderCart(){
           <div class="cart-item-desc">${extras.join(" ")}</div>
         </div>
         <div style="display:flex; flex-direction:column; align-items:flex-end">
-           <span class="cart-item-price">${money(unit * b.qty)}</span>
-           <div class="cart-actions">
-             <button class="btn-icon" onclick="editBurger('${id}')" title="Editar">✏️</button>
-             <button class="btn-icon" onclick="removeFromCart('${id}', 'burger')" style="color:#b00" title="Eliminar">✕</button>
-           </div>
+            <span class="cart-item-price">${money(unit * b.qty)}</span>
+            <div class="cart-actions">
+              <button class="btn-icon" onclick="editBurger('${id}')" title="Editar">✏️</button>
+              <button class="btn-icon" onclick="removeFromCart('${id}', 'burger')" style="color:#b00" title="Eliminar">✕</button>
+            </div>
         </div>
       </div>
     `;
@@ -517,10 +534,10 @@ function renderCart(){
           <div class="cart-item-desc">Bebida</div>
         </div>
         <div style="display:flex; flex-direction:column; align-items:flex-end">
-           <span class="cart-item-price">${money(d.item.price*d.qty)}</span>
-           <div class="cart-actions">
-             <button class="btn-icon" onclick="removeFromCart('${id}', 'drink')" style="color:#b00">✕</button>
-           </div>
+            <span class="cart-item-price">${money(d.item.price*d.qty)}</span>
+            <div class="cart-actions">
+              <button class="btn-icon" onclick="removeFromCart('${id}', 'drink')" style="color:#b00">✕</button>
+            </div>
         </div>
       </div>
     `;
@@ -537,10 +554,10 @@ function renderCart(){
           <div class="cart-item-desc">Extra</div>
         </div>
         <div style="display:flex; flex-direction:column; align-items:flex-end">
-           <span class="cart-item-price">${money(s.item.price*s.qty)}</span>
-           <div class="cart-actions">
-             <button class="btn-icon" onclick="removeFromCart('${id}', 'side')" style="color:#b00">✕</button>
-           </div>
+            <span class="cart-item-price">${money(s.item.price*s.qty)}</span>
+            <div class="cart-actions">
+              <button class="btn-icon" onclick="removeFromCart('${id}', 'side')" style="color:#b00">✕</button>
+            </div>
         </div>
       </div>
     `;
@@ -561,9 +578,14 @@ function openCustomize(item){
   $("#notesCount").textContent="0/200";
   document.querySelectorAll("input[name='fries']").forEach(x=> x.checked=false);
 
-  const name=item.name.toLowerCase();
-  $("#rowPatties").style.display = name.includes("doble") ? "flex":"none";
-  $("#rowCheddar").style.display = (name.includes("doble")||name.includes("pollo")) ? "flex":"none";
+  // 🔥 MOSTRAR U OCULTAR EXTRAS SEGÚN CONFIG DEL ADMIN
+  const allowed = item.allowedExtras || {};
+  $("#rowPatties").style.display = allowed.patty ? "flex" : "none";
+  $("#rowCheddar").style.display = allowed.cheddar ? "flex" : "none";
+  
+  // Actualizar textos de precios
+  $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
+  $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
   
   $("#modTitle").textContent = "Personalizar " + item.name;
   updatePreview();
@@ -592,9 +614,14 @@ function editBurger(id){
   $("#notes").value = b.notes || "";
   $("#notesCount").textContent = (b.notes || "").length + "/200";
 
-  const name = b.item.name.toLowerCase();
-  $("#rowPatties").style.display = name.includes("doble") ? "flex" : "none";
-  $("#rowCheddar").style.display = (name.includes("doble") || name.includes("pollo")) ? "flex" : "none";
+  // Check config
+  const allowed = b.item.allowedExtras || {};
+  $("#rowPatties").style.display = allowed.patty ? "flex" : "none";
+  $("#rowCheddar").style.display = allowed.cheddar ? "flex" : "none";
+  
+  // Precios
+  $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
+  $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
   
   $("#modTitle").textContent = "Editar " + b.item.name;
   updatePreview();
@@ -719,8 +746,6 @@ function loadSlotsMostrador(){
 // 🔥 LOGICA HORA LOCAL (UTC-3) + 30 MIN
 function updateRealTimeSlot(){
     const now = new Date();
-    // Forzar zona horaria UTC-3 si el dispositivo está mal configurado (opcional, pero recomendado)
-    // En este caso confiamos en la hora del sistema del usuario
     
     const minutes = now.getMinutes();
     const quarter = Math.floor(minutes / 15) * 15;
@@ -819,6 +844,7 @@ async function sendToFirestore(){
 
       for(const id in cart.burger){
         const b=cart.burger[id];
+        // Calcular total con precios dinámicos
         const unit = b.item.price + b.extras.patty*EXTRA_PRICE_PATTY + b.extras.cheddar*EXTRA_PRICE_CHEDDAR;
         rawTotal += unit*b.qty;
         items.push({
@@ -869,12 +895,10 @@ async function sendToFirestore(){
       const statusFinal = 'accepted'; 
       const payStatusFinal = isOrderPaid ? 'paid' : 'pending_payment';
       
-      // 🔥 FECHA CORREGIDA A HORA LOCAL (ISO sin Z)
-      // Esto soluciona que en la DB se vea mal la hora
       const now = new Date();
       const offset = now.getTimezoneOffset() * 60000;
       const localDate = new Date(now.getTime() - offset);
-      const createdAtLocal = localDate.toISOString().slice(0, -1); // Quitamos la 'Z'
+      const createdAtLocal = localDate.toISOString().slice(0, -1);
 
       const order = {
         orderNumber,
@@ -892,7 +916,7 @@ async function sendToFirestore(){
         total: rawTotal,
         rawTotal,
         source: "mostrador",
-        createdAt: createdAtLocal, // 🔥 USAMOS LA HORA LOCAL
+        createdAt: createdAtLocal,
         createdAt_server: firebase.firestore.FieldValue.serverTimestamp()
       };
 
