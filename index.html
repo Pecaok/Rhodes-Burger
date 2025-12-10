@@ -442,7 +442,6 @@
 </head>
 <body>
 
-  <!-- HEADER -->
   <header>
     <div class="topbar">
       <a href="index.html" class="brand">
@@ -464,7 +463,6 @@
     </div>
   </header>
 
-  <!-- CONTENIDO PRINCIPAL -->
   <main class="container">
     <h1>Menú</h1>
 
@@ -477,7 +475,6 @@
     <h2>Bebidas</h2>
     <div id="drinksGrid" class="grid"></div>
   </main>
-  <!-- DRAWER CARRITO -->
   <aside class="drawer" id="drawer">
     <header>
       <strong>Tu pedido</strong>
@@ -501,7 +498,6 @@
     </div>
   </aside>
 
-  <!-- MODAL PERSONALIZAR -->
   <div class="overlay" id="overlay">
     <div class="modal">
 
@@ -517,7 +513,7 @@
       </div>
 
       <div id="rowPatties" class="row" style="display:none;margin-top:22px;justify-content:space-between">
-        <div style="font-weight:600">Medallones extra</div>
+        <div style="font-weight:600">Medallones extra <span id="lblPricePatty" style="font-weight:400;font-size:13px;color:#666"></span></div>
         <div style="display:flex;gap:10px;align-items:center">
           <button id="patDec" class="qtybtn">-</button>
           <span id="patVal" style="min-width:20px;text-align:center;font-weight:700">0</span>
@@ -526,7 +522,7 @@
       </div>
 
       <div id="rowCheddar" class="row" style="display:none;margin-top:18px;justify-content:space-between">
-        <div style="font-weight:600">Fetas de cheddar extra</div>
+        <div style="font-weight:600">Fetas de cheddar extra <span id="lblPriceCheddar" style="font-weight:400;font-size:13px;color:#666"></span></div>
         <div style="display:flex;gap:10px;align-items:center">
           <button id="cheDec" class="qtybtn">-</button>
           <span id="cheVal" style="min-width:20px;text-align:center;font-weight:700">0</span>
@@ -551,7 +547,6 @@
 
     </div>
   </div>
-  <!-- ==== FIREBASE ==== -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
@@ -686,14 +681,14 @@
         lbl.classList.toggle("disabled",!enabled);
       });
 
-      if(disabled.length){
+      if(disabled.length && note){
         const human = disabled.map(k=>{
           if(k==="con_sazon") return "Sazonadas";
           if(k==="con_sal")   return "Con sal";
           if(k==="sin_sal")   return "Sin sal";
         }).join(", ");
         note.textContent="Variantes deshabilitadas: "+human;
-      } else {
+      } else if(note) {
         note.textContent="";
       }
     }
@@ -753,7 +748,8 @@
         img:d.img||FALLBACK_IMG,
         desc:d.description||"",
         category:d.category||"",
-        kind:d.kind||""
+        kind:d.kind||"",
+        allowedExtras: d.allowedExtras || {} // 🔥 LEER CONFIG DE EXTRAS
       };
     }
 
@@ -788,8 +784,18 @@
       maximumFractionDigits:0
     });
 
-    const EXTRA_PRICE_PATTY  = 2500;
-    const EXTRA_PRICE_CHEDDAR = 300;
+    // 🔥 PRECIOS DINÁMICOS
+    let EXTRA_PRICE_PATTY = 2500;
+    let EXTRA_PRICE_CHEDDAR = 300;
+    
+    db.collection("config").doc("prices").onSnapshot(doc => {
+        if(doc.exists) {
+            const d = doc.data();
+            if(d.patty) EXTRA_PRICE_PATTY = Number(d.patty);
+            if(d.cheddar) EXTRA_PRICE_CHEDDAR = Number(d.cheddar);
+        }
+    });
+
     const CART_KEY = "rhodes_cart_v3";
 
     /* ====== CARRITO ====== */
@@ -943,11 +949,9 @@
       saveCart();
       renderCart();
     }
-    /* ==== función que usa el customizer.js para agregar hamburguesas ==== */
+    
     function addToCart(item, fries, extras = {}, notes = "") {
-
-      // Asegurar valores válidos SIEMPRE
-      const safeFries = fries || "con_sal";   // valor obligatorio por defecto
+      const safeFries = fries || "con_sal";
       const safePatty = Number(extras.patty ?? 0);
       const safeCheddar = Number(extras.cheddar ?? 0);
       const safeNotes = (notes || "").trim();
@@ -966,7 +970,6 @@
         item
       };
 
-      // key idéntica a pedido_cliente
       const key =
         item.id +
         "|fries:" + safeFries +
@@ -974,7 +977,6 @@
         "|cheddar:" + safeCheddar +
         "|notes:" + safeNotes;
 
-      // Si venimos de un pedido confirmado → reset real del carrito
       if (localStorage.getItem("cart_just_cleared") === "1") {
         cart = { burger:{}, drink:{}, side:{} };
         saveCart();
@@ -982,7 +984,6 @@
         localStorage.removeItem("cart_just_cleared");
       }
 
-      // agregar
       if (!cart.burger[key]) {
         cart.burger[key] = burgaData;
       } else {
@@ -1040,7 +1041,7 @@
         addBtn.onclick = ()=> ok && orderable && addDrink(item);
       } 
       else if(type==="side"){
-        addBtn.onclick = ()=> {}; // futuro uso para guarniciones
+        addBtn.onclick = ()=> {}; 
       } 
       else {
         // hamburguesas → abre el customizer
@@ -1070,7 +1071,7 @@
       refreshAvailabilityUI();
       renderCart();
     }
-     /* ==== DRAWER — ABRIR / CERRAR ==== */
+      /* ==== DRAWER — ABRIR / CERRAR ==== */
     const drawer        = document.getElementById("drawer");
     const btnCart       = document.getElementById("btnCart");
     const closeDrawerBtn= document.getElementById("closeDrawer");
@@ -1080,10 +1081,9 @@
     function openDrawer(){ drawer.classList.add("open"); }
     function closeDrawer(){ drawer.classList.remove("open"); }
 
-    if(btnCart)        btnCart.onclick        = openDrawer;
+    if(btnCart)         btnCart.onclick         = openDrawer;
     if(closeDrawerBtn) closeDrawerBtn.onclick = closeDrawer;
 
-    // 🗑 Vaciar carrito
     if(btnVaciar){
       btnVaciar.onclick = () => {
         cart = { burger:{}, drink:{}, side:{} };
@@ -1092,7 +1092,6 @@
       };
     }
 
-    // 👉 Ir a pagar
     if(btnPagar){
       btnPagar.onclick = () => {
         if(cartCount() === 0){
@@ -1103,8 +1102,7 @@
       };
     }
 
-    /* 🕒 LIMPIAR CARRITO SI PASARON 20 MINUTOS */
-    const MAX_CART_AGE = 20 * 60 * 1000; // 20 minutos
+    const MAX_CART_AGE = 20 * 60 * 1000;
     const lastSaved = Number(localStorage.getItem("cart_saved_at") || 0);
 
     if (Date.now() - lastSaved > MAX_CART_AGE) {
@@ -1112,16 +1110,14 @@
       saveCart();
     }
 
-    /* Render inicial */
     renderCart();
     renderStatus();
   </script>
 
-  <!-- Customizer.js (módulo) -->
   <script type="module">
     import { setupCustomizer } from "./js/customizer.js";
 
-    const openCustomize = setupCustomizer({
+    const originalOpenCustomize = setupCustomizer({
       overlay: document.getElementById("overlay"),
       modTitle: document.getElementById("modTitle"),
       rowPatties: document.getElementById("rowPatties"),
@@ -1141,8 +1137,22 @@
       }
     });
 
-    // lo deja global para usarlo desde renderCard
-    window.openCustomize = openCustomize;
+    // 🔥 LOGICA PARA MOSTRAR/OCULTAR EXTRAS SEGUN CONFIG
+    window.openCustomize = (item) => {
+        // 1. Mostrar/Ocultar filas
+        const allowed = item.allowedExtras || {};
+        document.getElementById("rowPatties").style.display = allowed.patty ? "flex" : "none";
+        document.getElementById("rowCheddar").style.display = allowed.cheddar ? "flex" : "none";
+
+        // 2. Actualizar precios visuales
+        if(document.getElementById("lblPricePatty")) 
+            document.getElementById("lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
+        if(document.getElementById("lblPriceCheddar")) 
+            document.getElementById("lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
+
+        // 3. Abrir modal original
+        originalOpenCustomize(item);
+    };
   </script>
 
 </body>
