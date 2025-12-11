@@ -263,6 +263,42 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
 .muted { color: var(--muted); }
 .text-small { font-size: 13px; }
 
+/* 🔥 SEARCH & FILTER BAR */
+.search-bar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+.search-input {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--ring);
+    background: #fff;
+    font-size: 14px;
+}
+.filter-tabs {
+    display: flex;
+    gap: 6px;
+}
+.filter-tab {
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid var(--ring);
+    color: #666;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+}
+.filter-tab.active {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+}
+
 /* Drag Grid */
 #orderGrid {
   display: grid;
@@ -306,6 +342,8 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
 @media (max-width: 900px) {
   .topbar { padding: 0 15px; }
   .nav-right { display: none; } 
+  .search-bar { flex-direction: column; }
+  .filter-tabs { overflow-x: auto; padding-bottom: 5px; }
 }
 </style>
 </head>
@@ -447,6 +485,16 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
 
   <h3>Listado Actual</h3>
 
+  <div class="search-bar">
+      <input type="text" id="prdSearch" class="search-input" placeholder="🔍 Buscar por nombre o ID...">
+      <div class="filter-tabs" id="prdFilters">
+          <div class="filter-tab active" data-f="all">Todos</div>
+          <div class="filter-tab" data-f="hamburguesas">Burgers</div>
+          <div class="filter-tab" data-f="bebidas">Bebidas</div>
+          <div class="filter-tab" data-f="guarniciones">Papas</div>
+      </div>
+  </div>
+
   <div class="table-container">
     <table>
       <thead>
@@ -456,7 +504,8 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
           <th>Nombre</th>
           <th>Cat.</th>
           <th>Precio</th>
-          <th>Extras</th> <th>Estado</th>
+          <th>Extras</th> 
+          <th>Estado</th>
           <th>Acciones</th>
         </tr>
       </thead>
@@ -613,13 +662,10 @@ async function saveProduct(){
   if(!(price>0)){ alert("Precio inválido"); return; }
 
   // 🔥 LOGICA INTELIGENTE DE IMAGEN
-  let finalImg = urlImg; // Si el usuario escribió una URL, úsala
-  
+  let finalImg = urlImg; 
   if(file){
-    // Si subió archivo, usa el archivo
     finalImg = await fileToBase64(file);
   } else if(!finalImg && editingProductImg){
-    // Si NO subió archivo Y NO escribió URL, pero estamos editando => Mantener la vieja
     finalImg = editingProductImg;
   }
 
@@ -658,22 +704,18 @@ function clearProductForm(){
   $('#prdDesc').value = '';
   $('#prdExPatty').checked = false;
   $('#prdExCheddar').checked = false;
-  editingProductImg = null; // Resetear memoria
+  editingProductImg = null; 
 }
 
-/* 5. LOAD FORM (CORREGIDO) */
+/* 5. LOAD FORM */
 function loadProductIntoForm(data, id){
   $('#prdId').value = id;
   $('#prdName').value = data.name || '';
   $('#prdCategory').value = data.category || 'hamburguesas';
   $('#prdPrice').value = data.price || '';
   
-  // 🔥 GUARDAR IMAGEN EN MEMORIA
   editingProductImg = data.img || null;
-  
-  // Solo mostrar en input si es URL corta, no Base64 gigante
   $('#prdImg').value = (data.img && !data.img.startsWith("data:")) ? data.img : '';
-  
   $('#prdImgFile').value = '';
   $('#prdDesc').value = data.description || '';
   
@@ -700,63 +742,100 @@ async function toggleProductAvailability(id, current){
   }catch(e){ alert("Error."); }
 }
 
-/* 8. RENDER TABLE */
+/* 8. RENDER TABLE (CON FILTROS Y BÚSQUEDA) */
+let ALL_PRODUCTS_DATA = []; // Cache local para filtrar rápido
+let FILTER_CAT = "all";
+let FILTER_TXT = "";
+
 function renderProductsTable(snapshot){
-  const tbody = $('#prdTable');
-  tbody.innerHTML = '';
-
-  snapshot.forEach(doc=>{
-    const p = doc.data();
-    const tr = document.createElement('tr');
-    
-    const imgTag = p.img 
-      ? `<img src="${p.img}" class="img-preview">` 
-      : `<div class="img-preview"></div>`;
-
-    const availableTag = p.available
-      ? `<span class="pill ok">Activo</span>`
-      : `<span class="pill off">Pausado</span>`;
-
-    let exIcons = "";
-    const ex = p.allowedExtras || {};
-    if(ex.patty) exIcons += "🥩 ";
-    if(ex.cheddar) exIcons += "🧀";
-    if(!exIcons) exIcons = '<span style="color:#ccc; font-size:12px">-</span>';
-
-    tr.innerHTML = `
-      <td><strong>${doc.id}</strong></td>
-      <td>${imgTag}</td>
-      <td>${p.name}</td>
-      <td>${p.category}</td>
-      <td>$${p.price}</td>
-      <td>${exIcons}</td>
-      <td>${availableTag}</td>
-      <td class="row">
-        <button class="mini-btn good" data-act="edit" data-id="${doc.id}">Editar</button>
-        <button class="mini-btn warn" data-act="toggle" data-id="${doc.id}" data-av="${p.available}">
-          ${p.available ? "Pausar" : "Activar"}
-        </button>
-        <button class="mini-btn bad" data-act="delete" data-id="${doc.id}">Borrar</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
+  // Guardamos datos
+  ALL_PRODUCTS_DATA = [];
+  snapshot.forEach(doc => {
+      ALL_PRODUCTS_DATA.push({ id: doc.id, ...doc.data() });
   });
-
-  tbody.querySelectorAll("button").forEach(btn=>{
-    btn.onclick = async()=>{
-      const id = btn.dataset.id;
-      const act = btn.dataset.act;
-      if(act === "edit"){
-        const d = await productsCol.doc(id).get();
-        loadProductIntoForm(d.data(), id);
-      } else if(act === "toggle"){
-        toggleProductAvailability(id, btn.dataset.av === "true");
-      } else if(act === "delete"){
-        deleteProduct(id);
-      }
-    };
-  });
+  applyFilters();
 }
+
+// 🔥 FUNCIÓN DE FILTRADO
+function applyFilters(){
+    const tbody = $('#prdTable');
+    tbody.innerHTML = '';
+
+    const filtered = ALL_PRODUCTS_DATA.filter(p => {
+        const matchCat = FILTER_CAT === "all" || p.category === FILTER_CAT;
+        const txt = FILTER_TXT.toLowerCase();
+        const matchTxt = !txt || p.name.toLowerCase().includes(txt) || p.id.toLowerCase().includes(txt);
+        return matchCat && matchTxt;
+    });
+
+    filtered.forEach(p=>{
+        const tr = document.createElement('tr');
+        
+        const imgTag = p.img 
+          ? `<img src="${p.img}" class="img-preview">` 
+          : `<div class="img-preview"></div>`;
+
+        const availableTag = p.available
+          ? `<span class="pill ok">Activo</span>`
+          : `<span class="pill off">Pausado</span>`;
+
+        let exIcons = "";
+        const ex = p.allowedExtras || {};
+        if(ex.patty) exIcons += "🥩 ";
+        if(ex.cheddar) exIcons += "🧀";
+        if(!exIcons) exIcons = '<span style="color:#ccc; font-size:12px">-</span>';
+
+        tr.innerHTML = `
+          <td><strong>${p.id}</strong></td>
+          <td>${imgTag}</td>
+          <td>${p.name}</td>
+          <td>${p.category}</td>
+          <td>$${p.price}</td>
+          <td>${exIcons}</td>
+          <td>${availableTag}</td>
+          <td class="row">
+            <button class="mini-btn good" data-act="edit" data-id="${p.id}">Editar</button>
+            <button class="mini-btn warn" data-act="toggle" data-id="${p.id}" data-av="${p.available}">
+              ${p.available ? "Pausar" : "Activar"}
+            </button>
+            <button class="mini-btn bad" data-act="delete" data-id="${p.id}">Borrar</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    // Reasignar eventos
+    tbody.querySelectorAll("button").forEach(btn=>{
+        btn.onclick = async()=>{
+          const id = btn.dataset.id;
+          const act = btn.dataset.act;
+          if(act === "edit"){
+            const d = await productsCol.doc(id).get();
+            loadProductIntoForm(d.data(), id);
+          } else if(act === "toggle"){
+            toggleProductAvailability(id, btn.dataset.av === "true");
+          } else if(act === "delete"){
+            deleteProduct(id);
+          }
+        };
+    });
+}
+
+// 🔥 EVENTOS DE BÚSQUEDA
+$('#prdSearch').addEventListener('input', (e) => {
+    FILTER_TXT = e.target.value;
+    applyFilters();
+});
+
+document.querySelectorAll('#prdFilters .filter-tab').forEach(btn => {
+    btn.onclick = () => {
+        document.querySelectorAll('#prdFilters .filter-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        FILTER_CAT = btn.dataset.f;
+        applyFilters();
+    };
+});
+
 productsCol.onSnapshot(renderProductsTable);
 
 /* ============================================================
