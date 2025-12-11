@@ -566,6 +566,9 @@ const productsCol = db.collection('products');
 /* Helpers */
 const $ = s => document.querySelector(s);
 
+/* 🔥 VARIABLE GLOBAL PARA GUARDAR IMAGEN AL EDITAR */
+let editingProductImg = null;
+
 /* 1. AUTO DETECT KIND */
 function autoDetectKind(id, name = "", desc = "") {
   id    = id.toLowerCase();
@@ -591,7 +594,7 @@ async function fileToBase64(file){
   });
 }
 
-/* 3. SAVE PRODUCT */
+/* 3. SAVE PRODUCT (CORREGIDO) */
 async function saveProduct(){
   const id = $('#prdId').value.trim();
   const name = $('#prdName').value.trim();
@@ -600,7 +603,6 @@ async function saveProduct(){
   const urlImg = $('#prdImg').value.trim();
   const desc = $('#prdDesc').value.trim();
   
-  // 🔥 LEER CHECKBOXES DE EXTRAS
   const exPatty = $('#prdExPatty').checked;
   const exCheddar = $('#prdExCheddar').checked;
 
@@ -610,9 +612,15 @@ async function saveProduct(){
   if(!name){ alert("Ingresá un nombre"); return; }
   if(!(price>0)){ alert("Precio inválido"); return; }
 
-  let finalImg = urlImg || null;
+  // 🔥 LOGICA INTELIGENTE DE IMAGEN
+  let finalImg = urlImg; // Si el usuario escribió una URL, úsala
+  
   if(file){
+    // Si subió archivo, usa el archivo
     finalImg = await fileToBase64(file);
+  } else if(!finalImg && editingProductImg){
+    // Si NO subió archivo Y NO escribió URL, pero estamos editando => Mantener la vieja
+    finalImg = editingProductImg;
   }
 
   const payload = {
@@ -620,7 +628,6 @@ async function saveProduct(){
     img: finalImg,
     description: desc || null,
     available: true,
-    // 🔥 GUARDAR CONFIG DE EXTRAS
     allowedExtras: {
         patty: exPatty,
         cheddar: exCheddar
@@ -649,22 +656,27 @@ function clearProductForm(){
   $('#prdImg').value = '';
   $('#prdImgFile').value = '';
   $('#prdDesc').value = '';
-  // Reset checkboxes
   $('#prdExPatty').checked = false;
   $('#prdExCheddar').checked = false;
+  editingProductImg = null; // Resetear memoria
 }
 
-/* 5. LOAD FORM */
+/* 5. LOAD FORM (CORREGIDO) */
 function loadProductIntoForm(data, id){
   $('#prdId').value = id;
   $('#prdName').value = data.name || '';
   $('#prdCategory').value = data.category || 'hamburguesas';
   $('#prdPrice').value = data.price || '';
+  
+  // 🔥 GUARDAR IMAGEN EN MEMORIA
+  editingProductImg = data.img || null;
+  
+  // Solo mostrar en input si es URL corta, no Base64 gigante
   $('#prdImg').value = (data.img && !data.img.startsWith("data:")) ? data.img : '';
+  
   $('#prdImgFile').value = '';
   $('#prdDesc').value = data.description || '';
   
-  // Cargar checkboxes
   const extras = data.allowedExtras || {};
   $('#prdExPatty').checked = !!extras.patty;
   $('#prdExCheddar').checked = !!extras.cheddar;
@@ -705,7 +717,6 @@ function renderProductsTable(snapshot){
       ? `<span class="pill ok">Activo</span>`
       : `<span class="pill off">Pausado</span>`;
 
-    // Iconos de extras
     let exIcons = "";
     const ex = p.allowedExtras || {};
     if(ex.patty) exIcons += "🥩 ";
@@ -753,7 +764,6 @@ productsCol.onSnapshot(renderProductsTable);
 =============================================================== */
 const pricesRef = db.collection("config").doc("prices");
 
-// Cargar precios al iniciar
 pricesRef.get().then(doc => {
     if(doc.exists) {
         const d = doc.data();
@@ -762,13 +772,10 @@ pricesRef.get().then(doc => {
     }
 });
 
-// Guardar precios
 $('#btnSaveExtras').onclick = async () => {
     const pPatty = Number($('#pricePatty').value);
     const pCheddar = Number($('#priceCheddar').value);
-    
     if(!pPatty || !pCheddar) { alert("Ingresá ambos precios"); return; }
-
     try {
         await pricesRef.set({ patty: pPatty, cheddar: pCheddar }, {merge:true});
         alert("Precios de extras actualizados.");
