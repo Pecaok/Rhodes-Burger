@@ -95,6 +95,9 @@
     .chip { padding: 2px 8px; border-radius: 6px; background: #f3f4f6; font-weight: 600; font-size: 11px; color: #374151; }
     .chip.mostrador { background: #e0f2fe; color: #0369a1; }
     .chip.time { background: #fef3c7; color: #92400e; }
+    .chip.pedidosya { background: #fce7f3; color: #be185d; }
+    .chip.rappi { background: #ffedd5; color: #c2410c; }
+    
     .price-tag { font-size: 20px; font-weight: 900; color: var(--primary); white-space: nowrap; }
 
     /* ITEMS */
@@ -120,8 +123,14 @@
     .state-btn.on.state-delivered { background: var(--st-delivered); color: #fff; border-color: var(--st-delivered); box-shadow: 0 4px 10px rgba(34, 197, 94, 0.3); }
     .state-btn.cancelled { grid-column: span 4; border-color: #fee2e2; color: #ef4444; margin-top: 5px; }
 
-    .pay-toolbar { display: flex; gap: 8px; }
-    .pay-select { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid var(--ring); font-size: 14px; background: #fff; -webkit-appearance: none; }
+    /* CONTROL ROW (PAGO + ORIGEN) */
+    .control-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .pay-select, .source-select { 
+        padding: 10px; border-radius: 10px; border: 1px solid var(--ring); 
+        font-size: 13px; background: #fff; -webkit-appearance: none; font-weight: 600;
+        flex: 1;
+    }
+
     .pay-btn { padding: 0 16px; border-radius: 10px; border: none; font-weight: 700; font-size: 13px; color: #fff; display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; justify-content: center; }
     .pay-btn.pending { background: var(--pay-pending); }
     .pay-btn.paid { background: var(--pay-paid); }
@@ -135,8 +144,8 @@
         .order-head { flex-direction: column; gap: 10px; }
         .price-tag { align-self: flex-end; margin-top: -30px; }
         .stateBtns { grid-template-columns: 1fr 1fr; }
-        .pay-toolbar { flex-wrap: wrap; }
-        .pay-select { min-width: 100%; }
+        .control-row { flex-wrap: wrap; }
+        .pay-select, .source-select { min-width: 48%; }
     }
     .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
   </style>
@@ -200,7 +209,7 @@
         let huboCambios = false;
 
         pedido.items.forEach(item => {
-            const prodName = item.name.trim(); 
+            const prodName = String(item.name||"").trim(); 
             const prodNameLower = prodName.toLowerCase();
             const qtyPedida = Number(item.qty || 1);
 
@@ -298,11 +307,41 @@
         try{ await db.collection("orders").doc(id).update({ paid: !currentPaid, payment_status: !currentPaid ? 'paid' : 'pending_payment' }); }catch(e){}
     };
     
-    window.updatePago = async (id, val) => { try{ await db.collection("orders").doc(id).update({pago:val}); }catch(e){} };
+    // Función inteligente de pago (auto-paga si es MP, Debito, etc)
+    window.updatePago = async (id, val) => { 
+        try { 
+            const updateData = { pago: val };
+            if (['mercado_pago', 'debito', 'transferencia'].includes(val)) {
+                updateData.paid = true;
+                updateData.payment_status = 'paid';
+            }
+            await db.collection("orders").doc(id).update(updateData); 
+        } catch(e) { console.error(e); } 
+    };
+
+    window.updateSource = async (id, val) => { 
+        try { await db.collection("orders").doc(id).update({ source: val }); } catch(e) {} 
+    };
+
     window.printOrder = (id) => { const doc = window.idToDoc.get(id); if(doc) window.trySilentPrint(doc); };
     window.pickDate = (o) => { if(o.createdAt?.toDate) return o.createdAt.toDate(); if(typeof o.createdAt==='string') return new Date(o.createdAt); return new Date(); };
     window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
-    window.getCat = (item) => { const n = (item.name||"").toLowerCase(); const t = (item.type||"").toLowerCase(); if(t==='burger' || n.includes('hamburguesa') || n.includes('doble') || n.includes('simple') || n.includes('crispy')) return 'b'; if(t==='side' || n.includes('papas') || n.includes('fritas') || n.includes('sazon') || n.includes('sin sal') || n.includes('con sal')) return 'f'; if(t==='drink' || n.includes('coca') || n.includes('agua') || n.includes('cerveza')) return 'd'; return 'o'; };
+    
+    // 🔥 CATEGORIZACIÓN CORREGIDA (PARA DETECTAR BEBIDAS DE INDEX) 🔥
+    window.getCat = (item) => {
+        const n = String(item.name || "").toLowerCase();
+        const t = String(item.type || "").toLowerCase();
+
+        // 1. BEBIDAS (Lista ampliada)
+        const drinks = ['coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 'imperial', 'sprite', 'levite', 'paso de los toros'];
+        if (t === 'drink' || drinks.some(k => n.includes(k))) return 'd';
+
+        // 2. PAPAS / GUARNICION
+        if (t === 'side' || n.includes('papas') || n.includes('fritas') || n.includes('aros') || n.includes('nugget')) return 'f';
+
+        // 3. BURGERS (Si no es bebida ni papa, es burger)
+        return 'b'; 
+    };
   </script>
 </head>
 
@@ -516,6 +555,8 @@
         let payVal = o.pago;
         if(payVal === 'mostrador_sin_especificar') payVal = "";
 
+        let srcVal = o.source || 'web'; // Default Web si no tiene
+
         const items = Array.isArray(o.items) ? o.items : [];
         let cats = { b:[], f:[], d:[], o:[] };
         items.forEach(it => {
@@ -545,7 +586,6 @@
                 let dName = esc(it.name);
                 if(title.includes("PAPAS")) dName = window.cleanFries(it.name);
 
-                // 🔥 CAMBIO AQUÍ: LISTAR EXTRAS UNO DEBAJO DE OTRO EN LUGAR DE EN LÍNEA
                 const extrasHtml = ex.map(e => `<div class="it-sub" style="color:#d97706; font-weight:600">• ${e}</div>`).join('');
 
                 return `<div class="it-row">
@@ -570,8 +610,8 @@
               <div>
                  <div class="order-title">#${o.orderNumber||'--'} — ${o.source==='mostrador'?esc(o.nombre)+' (Local)':esc(o.nombre)}</div>
                  <div class="order-meta">
-                    <span>${dateStr} ${timeStr}</span> <span class="chip ${o.source==='mostrador'?'mostrador':''}">${esc(o.entrega||'take_away')}</span>
-                    ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}
+                    <span>${dateStr} ${timeStr}</span> 
+                    <span class="chip ${srcVal}">${esc(srcVal)}</span> ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}
                  </div>
               </div>
               <div class="price-tag">${money(total)}</div>
@@ -580,14 +620,24 @@
            <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
 
            <div class="actions-area">
-              <div class="pay-toolbar">
+              <div class="control-row">
                  <select class="pay-select" onchange="updatePago('${doc.id}', this.value)">
-                    <option value="" ${!payVal?'selected':''}>Forma de Pago...</option>
+                    <option value="" ${!payVal?'selected':''}>Pago...</option>
                     <option value="efectivo" ${payVal==='efectivo'?'selected':''}>Efectivo</option>
                     <option value="mercado_pago" ${payVal==='mercado_pago'?'selected':''}>QR (MP)</option>
                     <option value="debito" ${payVal==='debito'?'selected':''}>Débito</option>
                     <option value="transferencia" ${payVal==='transferencia'?'selected':''}>Transferencia</option>
                  </select>
+
+                 <select class="source-select" onchange="updateSource('${doc.id}', this.value)">
+                    <option value="web" ${srcVal==='web'?'selected':''}>Web</option>
+                    <option value="mostrador" ${srcVal==='mostrador'?'selected':''}>Local</option>
+                    <option value="pedidosya" ${srcVal==='pedidosya'?'selected':''}>PedidosYa</option>
+                    <option value="rappi" ${srcVal==='rappi'?'selected':''}>Rappi</option>
+                 </select>
+              </div>
+
+              <div class="control-row">
                  <button class="pay-btn ${isPaid?'paid':'pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal}')">
                     ${isPaid ? 'PAGADO' : 'COBRAR'}
                  </button>
@@ -635,7 +685,6 @@
           } else { cats[cat].push(it); }
        });
 
-       // 🔥 APLICAMOS CONSOLIDACIÓN PARA EL TICKET
        cats.b = consolidateItems(cats.b);
        cats.f = consolidateItems(cats.f);
        cats.d = consolidateItems(cats.d);
