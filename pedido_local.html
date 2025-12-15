@@ -169,10 +169,23 @@
     checkSession(); setInterval(checkSession, 5*60*1000);
 
     // =================================================================
-    // 🔥 SISTEMA DE STOCK INTELIGENTE 🔥
+    // 🔥 DATA DE SOPORTE (RECETAS, INVENTARIO, CATALOGO) 🔥
     // =================================================================
     let RECETAS_DB = {}; 
     let INVENTARIO_DB = {}; 
+    let PRODUCT_CATALOG = {}; // 🔥 Para saber categoría real (bebida/burger)
+
+    // Cargar Catálogo de Productos para identificar categorías
+    db.collection('products').onSnapshot(snap => {
+        PRODUCT_CATALOG = {};
+        snap.forEach(doc => { 
+            const d = doc.data();
+            // Guardamos por ID y por Nombre para búsqueda rápida
+            PRODUCT_CATALOG[doc.id] = d.category;
+            PRODUCT_CATALOG[d.name.trim().toLowerCase()] = d.category;
+        });
+        if(window.lastSnap) renderList(window.lastSnap); // Re-renderizar si cambia el catálogo
+    });
 
     db.collection('recipes').onSnapshot(snap => {
         RECETAS_DB = {};
@@ -263,7 +276,18 @@
                 }
             }
 
-            const esBurger = prodNameLower.includes('hamburguesa') || prodNameLower.includes('burger') || prodNameLower.includes('doble') || prodNameLower.includes('simple') || prodNameLower.includes('royal') || prodNameLower.includes('crispy') || prodNameLower.includes('cuarto') || prodNameLower.includes('big');
+            // Detección de burger para descontar pan y papas (si no hay receta explícita)
+            // 🔥 USAMOS LA MISMA LÓGICA QUE EN FINANZAS
+            const catDB = PRODUCT_CATALOG[prodNameLower] || PRODUCT_CATALOG[item.id];
+            let esBurger = false;
+            
+            if (catDB) {
+                if (catDB === 'hamburguesas') esBurger = true;
+            } else {
+                // Fallback por nombre
+                esBurger = prodNameLower.includes('hamburguesa') || prodNameLower.includes('burger') || prodNameLower.includes('doble') || prodNameLower.includes('simple') || prodNameLower.includes('royal') || prodNameLower.includes('crispy') || prodNameLower.includes('cuarto') || prodNameLower.includes('big');
+            }
+
             if (esBurger) {
                 const papasID = findSmartId(['papas', 'bastones', 'papas fritas', 'congeladas', 'bolsa de papas']);
                 if (papasID) {
@@ -327,19 +351,34 @@
     window.pickDate = (o) => { if(o.createdAt?.toDate) return o.createdAt.toDate(); if(typeof o.createdAt==='string') return new Date(o.createdAt); return new Date(); };
     window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
     
-    // 🔥 CATEGORIZACIÓN CORREGIDA (PARA DETECTAR BEBIDAS DE INDEX) 🔥
+    // 🔥 CATEGORIZACIÓN INTELIGENTE: USA EL CATÁLOGO DE LA DB 🔥
     window.getCat = (item) => {
-        const n = String(item.name || "").toLowerCase();
+        const n = String(item.name || "").trim().toLowerCase();
         const t = String(item.type || "").toLowerCase();
+        const id = item.id;
 
-        // 1. BEBIDAS (Lista ampliada)
+        // 1. Prioridad: Tipo explícito (del mostrador)
+        if (t === 'drink') return 'd';
+        if (t === 'side') return 'f';
+        if (t === 'burger') return 'b';
+
+        // 2. Prioridad: Buscar en Catálogo (para pedidos web)
+        // Buscamos por ID o por Nombre en el mapa que cargamos al inicio
+        const catDB = PRODUCT_CATALOG[id] || PRODUCT_CATALOG[n];
+        
+        if (catDB) {
+            if (catDB === 'bebidas') return 'd';
+            if (catDB === 'guarniciones') return 'f';
+            if (catDB === 'hamburguesas') return 'b';
+        }
+
+        // 3. Fallback: Palabras clave (si no está en catálogo)
         const drinks = ['coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 'imperial', 'sprite', 'levite', 'paso de los toros'];
-        if (t === 'drink' || drinks.some(k => n.includes(k))) return 'd';
+        if (drinks.some(k => n.includes(k))) return 'd';
 
-        // 2. PAPAS / GUARNICION
-        if (t === 'side' || n.includes('papas') || n.includes('fritas') || n.includes('aros') || n.includes('nugget')) return 'f';
+        if (n.includes('papas') || n.includes('fritas') || n.includes('aros') || n.includes('nugget')) return 'f';
 
-        // 3. BURGERS (Si no es bebida ni papa, es burger)
+        // Si no es nada de lo anterior, asumimos que es plato principal (Burger)
         return 'b'; 
     };
   </script>
