@@ -272,7 +272,7 @@
 
         <div class="charts-row">
           <div class="chart-card"><span class="chart-title">Medios de pago</span><div class="chartWrap"><canvas id="payChart"></canvas></div></div>
-          <div class="chart-card"><span class="chart-title">Origen (Canal)</span><div class="chartWrap"><canvas id="sourceChart"></canvas></div></div>
+          <div class="chart-card"><span class="chart-title">Origen (Canal $)</span><div class="chartWrap"><canvas id="sourceChart"></canvas></div></div>
           <div class="chart-card"><span class="chart-title">Top 5 Clientes</span>
              <div class="table-responsive" style="margin-top:10px">
                 <table id="topClientsTable">
@@ -425,7 +425,6 @@
             const payStats = {}, sourceStats = {}, clientStats = {};
             
             filteredOrders.forEach(o => {
-                // Aquí usamos el TOTAL GUARDADO, que YA INCLUYE EXTRAS
                 const total = Number(o.total || o.rawTotal || 0);
                 totalOrders++;
                 totalRevenue += total;
@@ -438,9 +437,9 @@
                 else if(pay.includes('transfer')) pay = 'Transferencia';
                 payStats[pay] = (payStats[pay]||0) + total;
 
-                // Stats Source
+                // Stats Source ($)
                 let src = (o.source || 'web').toLowerCase();
-                sourceStats[src] = (sourceStats[src]||0) + 1;
+                sourceStats[src] = (sourceStats[src]||0) + total; // 🔥 AHORA SUMA DINERO
 
                 // Stats Cliente
                 const cli = (o.nombre||'Anónimo').trim();
@@ -462,6 +461,13 @@
             let cashHTML = '';
             for(const [k,v] of Object.entries(payStats)) cashHTML += `<div class="cash-row"><span>${k}</span><span>${money(v)}</span></div>`;
             cashHTML += `<div class="cash-row cash-total"><span>TOTAL VENTAS</span><span>${money(totalRevenue)}</span></div>`;
+            
+            // 🔥 AGREGAR DESGLOSE POR ORIGEN EN CAJA
+            cashHTML += '<hr style="margin:8px 0; border:0; border-top:1px dashed #ddd">';
+            for(const [src, total] of Object.entries(sourceStats)) {
+                cashHTML += `<div class="cash-row" style="font-size:13px; color:#555"><span>Canal: ${src.toUpperCase()}</span><span>${money(total)}</span></div>`;
+            }
+
             $('cashBreakdown').innerHTML = cashHTML;
 
             // Render Tabla Gastos
@@ -515,10 +521,10 @@
 
         function exportExcel(){
             if(!CURRENT_ORDERS.length) return alert("Sin datos para exportar.");
-            let csv = "Fecha,Pedido,Cliente,Pago,Total,Estado\n";
+            let csv = "Fecha,Pedido,Cliente,Pago,Total,Estado,Canal\n";
             CURRENT_ORDERS.forEach(o=>{
                 const d = parseDateAny(o.createdAt)?.toLocaleDateString()||'';
-                csv += `${d},${o.orderNumber},"${(o.nombre||'').replace(/"/g,'')}",${o.pago},${o.total},${o.status}\n`;
+                csv += `${d},${o.orderNumber},"${(o.nombre||'').replace(/"/g,'')}",${o.pago},${o.total},${o.status},${o.source||'web'}\n`;
             });
             const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
             const link = document.createElement("a");
@@ -528,7 +534,7 @@
         }
 
         // =========================================
-        // CALENDARIO E INSUMOS (LOGICA MEJORADA)
+        // CALENDARIO E INSUMOS (LOGICA MEJORADA 🔥)
         // =========================================
         async function renderCalendar(){
             const ym = $('calMonth').value;
@@ -558,11 +564,14 @@
                     const name = (item.name || '').toLowerCase();
                     const qty = Number(item.qty || 1);
                     
-                    // --- LOGICA MEJORADA DE CONTEO DE MEDALLONES ---
-                    let patties = 0; // Por defecto 0 (para gaseosas, etc.)
+                    // 🔥 LOGICA MEJORADA DE CONTEO DE MEDALLONES E IDENTIFICACION DE BURGERS
+                    let patties = 0; 
 
-                    // 1. Detectar si es hamburguesa
-                    const esBurger = item.type === 'burger' || name.includes('hamburguesa') || name.includes('burger') || name.includes('doble') || name.includes('simple') || name.includes('royal') || name.includes('crispy') || name.includes('cuarto') || name.includes('big');
+                    // 1. Detectar si es hamburguesa (incluso Web que no trae type='burger')
+                    const esBurger = item.type === 'burger' || 
+                                     (item.fries !== undefined) || // Si trae papas, es burger
+                                     (item.extras && (item.extras.patty || item.extras.cheddar)) || // Si trae extras, es burger
+                                     name.includes('hamburguesa') || name.includes('burger') || name.includes('doble') || name.includes('simple') || name.includes('royal') || name.includes('crispy') || name.includes('cuarto') || name.includes('big');
 
                     if (esBurger) {
                         patties = 1; // Base simple
@@ -570,7 +579,7 @@
                         if(name.includes('triple')) patties = 3;
                         if(name.includes('cuadruple')) patties = 4;
 
-                        // 2. SUMAR EXTRAS MANUALES (La clave del arreglo)
+                        // Sumar extras manuales
                         if(item.extras && item.extras.patty){
                             patties += Number(item.extras.patty);
                         }
