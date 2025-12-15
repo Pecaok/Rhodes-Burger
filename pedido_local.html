@@ -198,6 +198,12 @@
             INVENTARIO_DB[doc.data().name.trim().toLowerCase()] = doc.id; 
         });
     });
+    
+    // Cargar precios (por si se necesita recalcular ticket)
+    let PRICES_DB = { patty: 2500, cheddar: 300 };
+    db.collection('config').doc('prices').onSnapshot(doc => {
+        if(doc.exists) PRICES_DB = doc.data();
+    });
 
     function findSmartId(keywords) {
         const stockNames = Object.keys(INVENTARIO_DB);
@@ -278,11 +284,14 @@
 
             // Detección de burger para descontar pan y papas (si no hay receta explícita)
             // 🔥 USAMOS LA MISMA LÓGICA QUE EN FINANZAS
-            const catDB = PRODUCT_CATALOG[prodNameLower] || PRODUCT_CATALOG[item.id];
+            // Normalizar categoría de DB a minúsculas
+            let catDB = PRODUCT_CATALOG[prodNameLower] || PRODUCT_CATALOG[item.id];
+            if (catDB) catDB = String(catDB).toLowerCase().trim();
+
             let esBurger = false;
             
             if (catDB) {
-                if (catDB === 'hamburguesas') esBurger = true;
+                if (catDB.includes('hamburguesa') || catDB.includes('burger')) esBurger = true;
             } else {
                 // Fallback por nombre
                 esBurger = prodNameLower.includes('hamburguesa') || prodNameLower.includes('burger') || prodNameLower.includes('doble') || prodNameLower.includes('simple') || prodNameLower.includes('royal') || prodNameLower.includes('crispy') || prodNameLower.includes('cuarto') || prodNameLower.includes('big');
@@ -363,17 +372,18 @@
         if (t === 'burger') return 'b';
 
         // 2. Prioridad: Buscar en Catálogo (para pedidos web)
-        // Buscamos por ID o por Nombre en el mapa que cargamos al inicio
-        const catDB = PRODUCT_CATALOG[id] || PRODUCT_CATALOG[n];
+        let catDB = PRODUCT_CATALOG[id] || PRODUCT_CATALOG[n];
         
         if (catDB) {
-            if (catDB === 'bebidas') return 'd';
-            if (catDB === 'guarniciones') return 'f';
-            if (catDB === 'hamburguesas') return 'b';
+            // Convertimos a minúscula y checkeamos
+            catDB = String(catDB).toLowerCase().trim();
+            if (catDB.includes('bebida') || catDB.includes('drink')) return 'd';
+            if (catDB.includes('guarnicion') || catDB.includes('papa') || catDB.includes('side')) return 'f';
+            if (catDB.includes('hamburguesa') || catDB.includes('burger')) return 'b';
         }
 
         // 3. Fallback: Palabras clave (si no está en catálogo)
-        const drinks = ['coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 'imperial', 'sprite', 'levite', 'paso de los toros'];
+        const drinks = ['coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 'imperial', 'sprite', 'levite', 'paso de los toros', 'vino', 'fanta', 'gaseosa'];
         if (drinks.some(k => n.includes(k))) return 'd';
 
         if (n.includes('papas') || n.includes('fritas') || n.includes('aros') || n.includes('nugget')) return 'f';
