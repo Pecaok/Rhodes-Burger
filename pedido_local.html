@@ -181,10 +181,12 @@
         snap.forEach(doc => { 
             const d = doc.data();
             // Guardamos por ID y por Nombre para búsqueda rápida
-            PRODUCT_CATALOG[doc.id] = d.category;
-            PRODUCT_CATALOG[d.name.trim().toLowerCase()] = d.category;
+            // 🔥 GUARDAR TODO EN MINÚSCULA PARA EVITAR ERRORES DE TIPEO
+            const cat = (d.category || "").toLowerCase().trim();
+            PRODUCT_CATALOG[doc.id] = cat;
+            PRODUCT_CATALOG[d.name.trim().toLowerCase()] = cat;
         });
-        if(window.lastSnap) renderList(window.lastSnap); // Re-renderizar si cambia el catálogo
+        if(window.lastSnap) renderList(window.lastSnap); 
     });
 
     db.collection('recipes').onSnapshot(snap => {
@@ -283,17 +285,13 @@
             }
 
             // Detección de burger para descontar pan y papas (si no hay receta explícita)
-            // 🔥 USAMOS LA MISMA LÓGICA QUE EN FINANZAS
-            // Normalizar categoría de DB a minúsculas
+            // 🔥 USAMOS LA MISMA LÓGICA DE CATEGORIZACIÓN
             let catDB = PRODUCT_CATALOG[prodNameLower] || PRODUCT_CATALOG[item.id];
-            if (catDB) catDB = String(catDB).toLowerCase().trim();
-
             let esBurger = false;
             
             if (catDB) {
                 if (catDB.includes('hamburguesa') || catDB.includes('burger')) esBurger = true;
             } else {
-                // Fallback por nombre
                 esBurger = prodNameLower.includes('hamburguesa') || prodNameLower.includes('burger') || prodNameLower.includes('doble') || prodNameLower.includes('simple') || prodNameLower.includes('royal') || prodNameLower.includes('crispy') || prodNameLower.includes('cuarto') || prodNameLower.includes('big');
             }
 
@@ -360,7 +358,7 @@
     window.pickDate = (o) => { if(o.createdAt?.toDate) return o.createdAt.toDate(); if(typeof o.createdAt==='string') return new Date(o.createdAt); return new Date(); };
     window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
     
-    // 🔥 CATEGORIZACIÓN INTELIGENTE: USA EL CATÁLOGO DE LA DB 🔥
+    // 🔥 CATEGORIZACIÓN INTELIGENTE (VERSIÓN CORREGIDA) 🔥
     window.getCat = (item) => {
         const n = String(item.name || "").trim().toLowerCase();
         const t = String(item.type || "").toLowerCase();
@@ -374,16 +372,25 @@
         // 2. Prioridad: Buscar en Catálogo (para pedidos web)
         let catDB = PRODUCT_CATALOG[id] || PRODUCT_CATALOG[n];
         
+        // 🔥 AQUI ESTABA EL ERROR: catDB puede venir como "Bebidas" (con B mayus)
+        // Ahora lo forzamos a minuscula antes de comparar
         if (catDB) {
-            // Convertimos a minúscula y checkeamos
             catDB = String(catDB).toLowerCase().trim();
+            
             if (catDB.includes('bebida') || catDB.includes('drink')) return 'd';
             if (catDB.includes('guarnicion') || catDB.includes('papa') || catDB.includes('side')) return 'f';
             if (catDB.includes('hamburguesa') || catDB.includes('burger')) return 'b';
         }
+        
+        // 3. Si tiene categoría explícita en el objeto item (algunos pedidos web lo traen)
+        if (item.category) {
+            const catItem = String(item.category).toLowerCase();
+            if (catItem.includes('bebida')) return 'd';
+            if (catItem.includes('guarnicion')) return 'f';
+        }
 
-        // 3. Fallback: Palabras clave (si no está en catálogo)
-        const drinks = ['coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 'imperial', 'sprite', 'levite', 'paso de los toros', 'vino', 'fanta', 'gaseosa'];
+        // 4. Fallback: Palabras clave (Nuclear)
+        const drinks = ['coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 'imperial', 'sprite', 'levite', 'paso de los toros', 'vino', 'fanta', 'gaseosa', 'lata', 'botella', 'ml', '1.5'];
         if (drinks.some(k => n.includes(k))) return 'd';
 
         if (n.includes('papas') || n.includes('fritas') || n.includes('aros') || n.includes('nugget')) return 'f';
