@@ -25,7 +25,7 @@
       --success: #10b981;
       --danger: #ef4444;
       --warning: #f59e0b;
-      --gold: #d97706; /* Color para Ganancia */
+      --gold: #d97706; 
     }
 
     * { box-sizing: border-box; }
@@ -101,7 +101,7 @@
     .btn-dash:hover { background: #f9fafb; }
     .btn-dash.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
     .btn-dash.success { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
-    .btn-dash.danger { background: #fef2f2; color: #dc2626; border-color: #fecaca; } /* Para botón borrar */
+    .btn-dash.danger { background: #fef2f2; color: #dc2626; border-color: #fecaca; } 
     .btn-dash.danger:hover { background: #fee2e2; }
 
     /* KPIs GRID */
@@ -320,6 +320,7 @@
     // 1. VARIABLES GLOBALES
     let CURRENT_ORDERS = [];
     let ALL_EXPENSES = [];
+    let ALL_PRODUCTS = []; // 🔥 CATÁLOGO COMPLETO
     let mainChart, d1, d2;
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -336,7 +337,6 @@
         try { firebase.initializeApp(firebaseConfig); } catch(e) {}
         const db = firebase.firestore();
 
-        // 3. HELPERS
         const $ = s => document.getElementById(s);
         const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
         
@@ -347,7 +347,6 @@
             return new Date(val);
         }
 
-        // LOGOUT
         if($('btnLogout')){
             $('btnLogout').onclick = ()=>{
                 localStorage.removeItem('rb_auth_v2'); 
@@ -356,40 +355,38 @@
             };
         }
 
-        // 4. INICIALIZACIÓN DE FECHAS
         const now = new Date();
         const ym = now.toISOString().slice(0,7);
         if($('monthPicker')) $('monthPicker').value = ym;
         if($('calMonth')) $('calMonth').value = ym;
         if($('exDate')) $('exDate').valueAsDate = now;
 
-        // 5. EVENTOS
         if($('btnReload')) $('btnReload').onclick = loadKPI;
         if($('calPrev')) $('calPrev').onclick = () => { stepMonth(-1); renderCalendar(); };
         if($('calNext')) $('calNext').onclick = () => { stepMonth(1); renderCalendar(); };
         if($('btnExport')) $('btnExport').onclick = exportExcel;
         if($('btnAddExpense')) $('btnAddExpense').onclick = addExpense;
 
-        // 6. CARGA DE DATOS AUTOMÁTICA
         loadData();
 
         function loadData() {
-            // Escuchar Ventas
+            // 🔥 LEER PRODUCTOS REALES PARA SABER QUÉ ES BURGER
+            db.collection('products').onSnapshot(snap => {
+                ALL_PRODUCTS = snap.docs.map(d => d.data());
+                if(CURRENT_ORDERS.length) loadKPI(); // Recalcular si ya hay ordenes
+            });
+
             db.collection('orders').orderBy('createdAt', 'desc').limit(200).onSnapshot(snap => {
                 CURRENT_ORDERS = snap.docs.map(d => ({id: d.id, ...d.data()}));
                 loadKPI(); 
                 renderCalendar();
             });
-            // Escuchar Gastos
             db.collection('expenses').orderBy('date', 'desc').limit(50).onSnapshot(snap => {
                 ALL_EXPENSES = snap.docs.map(d => ({id: d.id, ...d.data()}));
                 loadKPI(); 
             });
         }
 
-        // =========================================
-        // LÓGICA PRINCIPAL (KPIs + Tablas + Gráficos)
-        // =========================================
         async function loadKPI(){
             const fromInp = $('fromDate').value;
             const toInp = $('toDate').value;
@@ -406,11 +403,10 @@
                end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
             }
 
-            // Filtrar en Memoria
             const filteredOrders = CURRENT_ORDERS.filter(o => {
                 const dt = parseDateAny(o.createdAt);
                 if(!dt) return false;
-                if(o.status?.includes('cancel')) return false; // Ignorar cancelados
+                if(o.status?.includes('cancel')) return false; 
                 return dt >= start && dt <= end;
             });
 
@@ -420,7 +416,6 @@
                 return dt >= start && dt <= end;
             });
 
-            // Cálculos
             let totalRevenue = 0, totalOrders = 0;
             const payStats = {}, sourceStats = {}, clientStats = {};
             
@@ -429,7 +424,6 @@
                 totalOrders++;
                 totalRevenue += total;
 
-                // Stats Pago
                 let pay = (o.pago || 'otro').toLowerCase();
                 if(pay.includes('efectivo')) pay = 'Efectivo';
                 else if(pay.includes('mercado')||pay.includes('mp')) pay = 'Mercado Pago';
@@ -437,11 +431,9 @@
                 else if(pay.includes('transfer')) pay = 'Transferencia';
                 payStats[pay] = (payStats[pay]||0) + total;
 
-                // Stats Source ($)
                 let src = (o.source || 'web').toLowerCase();
-                sourceStats[src] = (sourceStats[src]||0) + total; // 🔥 AHORA SUMA DINERO
+                sourceStats[src] = (sourceStats[src]||0) + total; 
 
-                // Stats Cliente
                 const cli = (o.nombre||'Anónimo').trim();
                 if(!clientStats[cli]) clientStats[cli]={total:0};
                 clientStats[cli].total+=total;
@@ -450,74 +442,49 @@
             const totalExpenses = filteredExpenses.reduce((sum, e) => sum + (Number(e.amount)||0), 0);
             const netProfit = totalRevenue - totalExpenses;
 
-            // Renderizar DOM
             $('kpiCount').textContent = totalOrders;
             $('kpiRevenue').textContent = money(totalRevenue);
             $('kpiExpenses').textContent = money(totalExpenses);
             $('kpiProfit').textContent = money(netProfit);
             $('kpiProfit').className = 'kvalue ' + (netProfit >= 0 ? 'gold' : 'red');
 
-            // Render Caja
             let cashHTML = '';
             for(const [k,v] of Object.entries(payStats)) cashHTML += `<div class="cash-row"><span>${k}</span><span>${money(v)}</span></div>`;
             cashHTML += `<div class="cash-row cash-total"><span>TOTAL VENTAS</span><span>${money(totalRevenue)}</span></div>`;
-            
-            // 🔥 AGREGAR DESGLOSE POR ORIGEN EN CAJA
             cashHTML += '<hr style="margin:8px 0; border:0; border-top:1px dashed #ddd">';
             for(const [src, total] of Object.entries(sourceStats)) {
                 cashHTML += `<div class="cash-row" style="font-size:13px; color:#555"><span>Canal: ${src.toUpperCase()}</span><span>${money(total)}</span></div>`;
             }
-
             $('cashBreakdown').innerHTML = cashHTML;
 
-            // Render Tabla Gastos
             const expBody = $('expensesTable').querySelector('tbody');
             expBody.innerHTML = filteredExpenses.map(e => {
                 const d = parseDateAny(e.date).toLocaleDateString();
-                return `<tr>
-                    <td>${d}</td>
-                    <td>${e.description}</td>
-                    <td class="num-cell" style="color:var(--danger)">-$${(e.amount||0).toLocaleString()}</td>
-                    <td style="text-align:right"><button class="btn-dash danger" onclick="deleteExpense('${e.id}')" style="padding:4px 8px; font-size:12px">X</button></td>
-                </tr>`;
+                return `<tr><td>${d}</td><td>${e.description}</td><td class="num-cell" style="color:var(--danger)">-$${(e.amount||0).toLocaleString()}</td><td style="text-align:right"><button class="btn-dash danger" onclick="deleteExpense('${e.id}')" style="padding:4px 8px; font-size:12px">X</button></td></tr>`;
             }).join('');
 
-            // Top Clientes
             const topCli = Object.entries(clientStats).sort((a,b)=>b[1].total - a[1].total).slice(0,5);
             $('topClientsTable').querySelector('tbody').innerHTML = topCli.map(([n,d])=>`<tr><td>${n}</td><td class="num-cell">${money(d.total)}</td></tr>`).join('');
 
-            // Gráficos
             if(!isRange) renderMixedChart(filteredOrders, filteredExpenses, end.getDate());
             renderDoughnut("payChart", Object.keys(payStats), Object.values(payStats));
             renderDoughnut("sourceChart", Object.keys(sourceStats), Object.values(sourceStats));
         }
 
-        // =========================================
-        // FUNCIONES DE GASTOS
-        // =========================================
         async function addExpense() {
             const desc = $('exDesc').value.trim();
             const amount = Number($('exAmount').value);
             const dateVal = $('exDate').value;
-
             if (!desc || amount <= 0 || !dateVal) return alert("Completá todos los datos.");
-
             const dateObj = new Date(dateVal + "T12:00:00"); 
             try {
-                await db.collection('expenses').add({
-                    description: desc,
-                    amount: amount,
-                    date: firebase.firestore.Timestamp.fromDate(dateObj),
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
+                await db.collection('expenses').add({ description: desc, amount: amount, date: firebase.firestore.Timestamp.fromDate(dateObj), createdAt: firebase.firestore.FieldValue.serverTimestamp() });
                 $('exDesc').value = ''; $('exAmount').value = '';
                 alert("Gasto guardado.");
             } catch (e) { alert("Error al guardar."); }
         }
 
-        window.deleteExpense = async (id) => {
-            if(confirm("¿Borrar este gasto?")) await db.collection('expenses').doc(id).delete();
-        };
+        window.deleteExpense = async (id) => { if(confirm("¿Borrar este gasto?")) await db.collection('expenses').doc(id).delete(); };
 
         function exportExcel(){
             if(!CURRENT_ORDERS.length) return alert("Sin datos para exportar.");
@@ -533,9 +500,6 @@
             link.click();
         }
 
-        // =========================================
-        // CALENDARIO E INSUMOS (LOGICA MEJORADA 🔥)
-        // =========================================
         async function renderCalendar(){
             const ym = $('calMonth').value;
             if(!ym) return;
@@ -564,41 +528,33 @@
                     const name = (item.name || '').toLowerCase();
                     const qty = Number(item.qty || 1);
                     
-                    // 🔥 LOGICA "TODOTERRENO" PARA DETECTAR BURGERS 🔥
-                    // Busca palabras clave de todas tus hamburguesas
-                    let patties = 0; 
-                    const esBurger = item.type === 'burger' || 
-                                     (item.fries !== undefined && item.fries !== '') || // Si tiene papas definidas
-                                     (item.extras && (item.extras.patty > 0 || item.extras.cheddar > 0)) ||
-                                     name.includes('hamburguesa') || name.includes('burger') || 
-                                     name.includes('doble') || name.includes('simple') || 
-                                     name.includes('royal') || name.includes('crispy') || 
-                                     name.includes('cuarto') || name.includes('big') ||
-                                     name.includes('cheese') || name.includes('bacon') || 
-                                     name.includes('nba') || name.includes('oklahoma') || 
-                                     name.includes('cebolla') || name.includes('huevo') ||
-                                     name.includes('triple') || name.includes('cuadruple');
+                    // 🔥 BUSCAR EN CATALOGO REAL
+                    const prodDB = ALL_PRODUCTS.find(p => p.name.trim().toLowerCase() === name.trim().toLowerCase());
+                    let isBurger = false;
 
-                    if (esBurger) {
-                        patties = 1; // Base simple
-                        if(name.includes('doble')) patties = 2;
-                        if(name.includes('triple')) patties = 3;
-                        if(name.includes('cuadruple')) patties = 4;
-
-                        // Sumar extras manuales
-                        if(item.extras && item.extras.patty){
-                            patties += Number(item.extras.patty);
+                    if (prodDB) {
+                        // Si está en la base de datos, confiar en su categoría
+                        if (prodDB.category === 'hamburguesas') isBurger = true;
+                    } else {
+                        // FALLBACK: Si lo borraste de la DB, usar nombres conocidos
+                        if (name.includes('hamburguesa') || name.includes('burger') || name.includes('doble') || name.includes('simple') || name.includes('royal') || name.includes('big') || name.includes('crispy')) {
+                            isBurger = true;
                         }
                     }
 
-                    meatCounts[d] += (patties * qty);
-                    
-                    // Conteo de Papas (0.2kg por hamburguesa vendida)
-                    if(patties > 0 && !name.includes('extra')) friesKilos[d] += (0.200 * qty);
+                    if (isBurger) {
+                        let patties = 1; 
+                        if(name.includes('doble')) patties = 2;
+                        if(name.includes('triple')) patties = 3;
+                        if(name.includes('cuadruple')) patties = 4;
+                        if(item.extras && item.extras.patty) patties += Number(item.extras.patty);
+                        
+                        meatCounts[d] += (patties * qty);
+                        friesKilos[d] += (0.200 * qty);
+                    }
                 });
             });
 
-            // Render Calendario
             const grid = $('calendarGrid');
             grid.innerHTML = '';
             const startDay = new Date(y, m-1, 1).getDay(); 
@@ -611,7 +567,6 @@
             });
             $('calRange').textContent = `Total: ${money(totals.reduce((a,b)=>a+b,0))}`;
 
-            // Render Insumos
             const supplyGrid = $('supplyGrid');
             if(supplyGrid){
                 supplyGrid.innerHTML = '';
@@ -661,16 +616,8 @@
                 data:{
                     labels: Array.from({length:daysInMonth},(_,i)=>i+1),
                     datasets: [
-                        { 
-                            label:'Ingresos', data:dataIncome, 
-                            borderColor:'#10b981', backgroundColor: gradGreen,
-                            fill: true, tension: 0.3, order: 2
-                        },
-                        { 
-                            label:'Gastos', data:dataExpense, 
-                            borderColor:'#ef4444', backgroundColor: 'transparent',
-                            borderDash: [5, 5], tension: 0.3, order: 1
-                        }
+                        { label:'Ingresos', data:dataIncome, borderColor:'#10b981', backgroundColor: gradGreen, fill: true, tension: 0.3, order: 2 },
+                        { label:'Gastos', data:dataExpense, borderColor:'#ef4444', backgroundColor: 'transparent', borderDash: [5, 5], tension: 0.3, order: 1 }
                     ]
                 },
                 options:{ 
