@@ -404,7 +404,12 @@ $("#btnConfirmar").onclick=async()=>{
   if(!nombre){ alert("Ingresá tu nombre"); return; }
   if(!slot){ alert("Elegí un horario de retiro"); return; }
     
-  let items=0; Object.values(cart.burger).forEach(o=>items+=o.qty);
+  // Verificar carrito completo, no solo burgers
+  let items=0; 
+  Object.values(cart.burger).forEach(o=>items+=o.qty);
+  Object.values(cart.drink).forEach(o=>items+=o.qty);
+  Object.values(cart.side).forEach(o=>items+=o.qty);
+  
   if(items===0){alert("Carrito vacío");return;}
 
   btn.disabled=true; btn.textContent="Procesando...";
@@ -443,6 +448,29 @@ $("#btnConfirmar").onclick=async()=>{
     const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
     const localISO = localDate.toISOString().slice(0, -1); 
 
+    // 🔥🔥🔥 AQUÍ ESTÁ EL ARREGLO: COMBINAMOS TODO EN UNA LISTA 🔥🔥🔥
+    const allItems = [
+        // 1. Hamburguesas
+        ...Object.values(cart.burger).map(o=>({
+            type: 'burger',
+            name:o.item.name, price:o.item.price, qty:o.qty,
+            fries:o.fries, notes:o.notes?[o.notes]:[],
+            extras:{patty:o.extras.patty, cheddar:o.extras.cheddar, EXTRA_PRICE_PATTY:PRICE_PATTY, EXTRA_PRICE_CHEDDAR:PRICE_CHEDDAR}
+        })),
+        // 2. Bebidas (Ahora SÍ se guardan)
+        ...Object.values(cart.drink).map(o=>({
+            type: 'drink',
+            name:o.item.name, price:o.item.price, qty:o.qty,
+            category: 'bebida'
+        })),
+        // 3. Acompañamientos (Ahora SÍ se guardan)
+        ...Object.values(cart.side).map(o=>({
+            type: 'side',
+            name:o.item.name, price:o.item.price, qty:o.qty,
+            category: 'guarnicion'
+        }))
+    ];
+
     const pedidoData = {
       source:"web",
       orderNumber,
@@ -457,11 +485,7 @@ $("#btnConfirmar").onclick=async()=>{
       pickup_slot:slot.key,
       status:"accepted",
       statusHistory:[{to:"accepted",at:localISO}],
-      items:Object.values(cart.burger).map(o=>({
-        name:o.item.name, price:o.item.price, qty:o.qty,
-        fries:o.fries, notes:o.notes?[o.notes]:[],
-        extras:{patty:o.extras.patty, cheddar:o.extras.cheddar, EXTRA_PRICE_PATTY:PRICE_PATTY, EXTRA_PRICE_CHEDDAR:PRICE_CHEDDAR}
-      })),
+      items: allItems, // Enviamos la lista completa combinada
       total,
       createdAt: localISO,
       trackToken: trackToken
