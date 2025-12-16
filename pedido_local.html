@@ -173,9 +173,9 @@
     // =================================================================
     let RECETAS_DB = {}; 
     let INVENTARIO_DB = {}; 
-    let PRODUCT_CATALOG = {}; // 🔥 Para saber categoría real (bebida/burger)
+    let PRODUCT_CATALOG = {}; 
 
-    // Cargar Catálogo de Productos para identificar categorías
+    // Cargar Catálogo
     db.collection('products').onSnapshot(snap => {
         PRODUCT_CATALOG = {};
         snap.forEach(doc => { 
@@ -199,7 +199,6 @@
         });
     });
     
-    // Cargar precios (por si se necesita recalcular ticket)
     let PRICES_DB = { patty: 2500, cheddar: 300 };
     db.collection('config').doc('prices').onSnapshot(doc => {
         if(doc.exists) PRICES_DB = doc.data();
@@ -227,7 +226,6 @@
         const batch = db.batch();
         let huboCambios = false;
 
-        // Unificar items para stock también
         let itemsCalc = Array.isArray(pedido.items) ? [...pedido.items] : [];
         if(Array.isArray(pedido.bebidas)) itemsCalc = itemsCalc.concat(pedido.bebidas);
         if(Array.isArray(pedido.drinks)) itemsCalc = itemsCalc.concat(pedido.drinks);
@@ -287,7 +285,6 @@
                 }
             }
 
-            // Detección de burger para descontar pan y papas (si no hay receta explícita)
             let catDB = PRODUCT_CATALOG[prodNameLower] || PRODUCT_CATALOG[item.id];
             let esBurger = false;
             
@@ -340,7 +337,6 @@
         try{ await db.collection("orders").doc(id).update({ paid: !currentPaid, payment_status: !currentPaid ? 'paid' : 'pending_payment' }); }catch(e){}
     };
     
-    // Función inteligente de pago (auto-paga si es MP, Debito, etc)
     window.updatePago = async (id, val) => { 
         try { 
             const updateData = { pago: val };
@@ -360,18 +356,16 @@
     window.pickDate = (o) => { if(o.createdAt?.toDate) return o.createdAt.toDate(); if(typeof o.createdAt==='string') return new Date(o.createdAt); return new Date(); };
     window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
     
-    // 🔥 CATEGORIZACIÓN INTELIGENTE MEJORADA 🔥
+    // 🔥 CATEGORIZACIÓN INTELIGENTE
     window.getCat = (item) => {
         const n = String(item.name || "").trim().toLowerCase();
         const t = String(item.type || "").toLowerCase();
         const id = item.id;
 
-        // 1. Prioridad: Tipo explícito (del mostrador o app)
         if (t === 'drink' || t === 'bebida') return 'd';
         if (t === 'side' || t === 'guarnicion' || t === 'papa') return 'f';
         if (t === 'burger' || t === 'hamburguesa') return 'b';
 
-        // 2. Prioridad: Buscar en Catálogo (para pedidos web)
         let catDB = PRODUCT_CATALOG[id] || PRODUCT_CATALOG[n];
         if (catDB) {
             catDB = String(catDB).toLowerCase().trim();
@@ -380,14 +374,12 @@
             if (catDB.includes('hamburguesa') || catDB.includes('burger')) return 'b';
         }
         
-        // 3. Si tiene categoría explícita en el objeto item
         if (item.category) {
             const catItem = String(item.category).toLowerCase();
             if (catItem.includes('bebida')) return 'd';
             if (catItem.includes('guarnicion')) return 'f';
         }
 
-        // 4. Fallback: Palabras clave (Lista ampliada)
         const drinks = [
             'coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 
             'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 
@@ -400,9 +392,43 @@
 
         if (n.includes('papas') || n.includes('fritas') || n.includes('aros') || n.includes('nugget')) return 'f';
 
-        // Si no es nada de lo anterior, asumimos que es plato principal (Burger)
         return 'b'; 
     };
+
+    function consolidateItems(list) {
+        const map = new Map();
+        list.forEach(it => {
+            let exKey = "";
+            if(it.extras) {
+                 const keys = Object.keys(it.extras).sort();
+                 exKey = keys.map(k => `${k}:${it.extras[k]}`).join("-");
+            }
+            const noteKey = String(it.notes || "").trim().toLowerCase();
+            const nameKey = String(it.name || "").trim();
+            const key = `${nameKey}_${exKey}_${noteKey}`;
+            
+            if(map.has(key)){
+                map.get(key).qty += (Number(it.qty)||1);
+            } else {
+                map.set(key, { ...it, qty: (Number(it.qty)||1) });
+            }
+        });
+        return Array.from(map.values());
+    }
+
+    // --- HELPER HORARIOS ---
+    function getCleanTime(o, defaultTime) {
+        if (o.pickup_slot && typeof o.pickup_slot === 'string' && o.pickup_slot.includes(':')) return o.pickup_slot;
+        let raw = o.pickup_time_pretty || o.pickup_time;
+        if (raw && typeof raw === 'string') {
+            if (raw.includes('_')) {
+                const parts = raw.split('_'); const timePart = parts[parts.length - 1]; 
+                if (timePart.length === 4 && !isNaN(timePart)) return timePart.substring(0, 2) + ':' + timePart.substring(2, 4);
+            }
+            if (raw.includes(':') && raw.length <= 5) return raw;
+        }
+        return defaultTime;
+    }
   </script>
 </head>
 
@@ -410,12 +436,9 @@
   <header>
     <div class="topbar">
       <a class="brand" href="#"><img src="images/logo.png" alt=""><span>Pedidos</span></a>
-      
       <div class="spacer"></div>
-
       <a href="pedido_local.html" class="nav-btn active">📦 Pedidos</a>
       <a href="finanzas.html" class="nav-btn">📈 Finanzas</a>
-      
       <div class="dropdown">
             <button onclick="document.querySelector('.dropdown').classList.toggle('show')" class="nav-btn">📋 Stock ▾</button>
             <div class="dropdown-content">
@@ -423,10 +446,8 @@
                 <a href="ingresos.html">📥 Ingresos</a>
             </div>
       </div>
-      
       <a href="mostrador.html" class="nav-btn">🧾 Mostrador</a>
       <a href="admin.html" class="nav-btn">⚙️ Admin</a>
-      
       <button id="btnBell" class="icon-btn" title="Sonido">🔔</button>
       <button id="btnAutoPrint" class="icon-btn" title="Autoimprimir">🖨️</button>
       <button onclick="window.logout()" class="nav-btn btn-danger">Salir</button>
@@ -489,7 +510,6 @@
         if(window.lastSnap) renderList(window.lastSnap);
     });
 
-    // --- BOTONES CON ESTADO VISUAL ---
     const btnBell = document.getElementById("btnBell");
     let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
     
@@ -500,7 +520,7 @@
     updBell();
 
     btnBell.onclick = ()=>{ 
-        initAudio(); // Importante
+        initAudio(); 
         soundOn = !soundOn; 
         localStorage.setItem("rb_sound", soundOn); 
         updBell(); 
@@ -510,9 +530,7 @@
     const btnAP = document.getElementById("btnAutoPrint");
     let autoP = JSON.parse(localStorage.getItem("rb_autop")||"false");
     
-    const updAP = ()=>{ 
-        btnAP.classList.toggle("active", autoP); 
-    }; 
+    const updAP = ()=>{ btnAP.classList.toggle("active", autoP); }; 
     updAP();
 
     btnAP.onclick = ()=>{ 
@@ -527,53 +545,27 @@
         window.lastSnap = snap;
         renderList(snap);
         snap.docChanges().forEach(ch => {
-            if(ch.type==='added' && !isInit){
-                console.log("🔔 Nuevo:", ch.doc.data().orderNumber);
-                if(navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); 
-                playBeep(); 
-                if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id));
+            // 🔥 CORRECCIÓN: FILTRO DE TIEMPO
+            if(ch.type === 'added' && !isInit){
+                const data = ch.doc.data();
+                const fechaPedido = window.pickDate(data);
+                const ahora = new Date();
+                const diferenciaMinutos = (ahora - fechaPedido) / 1000 / 60; // Diferencia en minutos
+
+                // Solo notificamos si el pedido tiene menos de 30 minutos de antigüedad
+                if(diferenciaMinutos < 30) {
+                    console.log("🔔 Nuevo (Real):", data.orderNumber);
+                    if(navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); 
+                    playBeep(); 
+                    if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id));
+                } else {
+                    console.log("💤 Pedido viejo cargado (Silencioso):", data.orderNumber);
+                }
             }
         });
     }, err => {
         document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
     });
-
-    // --- HELPER HORARIOS ---
-    function getCleanTime(o, defaultTime) {
-        if (o.pickup_slot && typeof o.pickup_slot === 'string' && o.pickup_slot.includes(':')) return o.pickup_slot;
-        let raw = o.pickup_time_pretty || o.pickup_time;
-        if (raw && typeof raw === 'string') {
-            if (raw.includes('_')) {
-                const parts = raw.split('_'); const timePart = parts[parts.length - 1]; 
-                if (timePart.length === 4 && !isNaN(timePart)) return timePart.substring(0, 2) + ':' + timePart.substring(2, 4);
-            }
-            if (raw.includes(':') && raw.length <= 5) return raw;
-        }
-        return defaultTime;
-    }
-
-    function consolidateItems(list) {
-        const map = new Map();
-        list.forEach(it => {
-            let exKey = "";
-            if(it.extras) {
-                 const keys = Object.keys(it.extras).sort();
-                 exKey = keys.map(k => `${k}:${it.extras[k]}`).join("-");
-            }
-            
-            const noteKey = String(it.notes || "").trim().toLowerCase();
-            const nameKey = String(it.name || "").trim();
-            
-            const key = `${nameKey}_${exKey}_${noteKey}`;
-            
-            if(map.has(key)){
-                map.get(key).qty += (Number(it.qty)||1);
-            } else {
-                map.set(key, { ...it, qty: (Number(it.qty)||1) });
-            }
-        });
-        return Array.from(map.values());
-    }
 
     // --- RENDER ---
     function renderList(snap){
@@ -614,7 +606,7 @@
         let payVal = o.pago;
         if(payVal === 'mostrador_sin_especificar') payVal = "";
 
-        let srcVal = o.source || 'web'; // Default Web si no tiene
+        let srcVal = o.source || 'web'; 
 
         // 🔥 UNIFICACIÓN DE LISTAS
         let items = Array.isArray(o.items) ? [...o.items] : [];
@@ -627,7 +619,6 @@
             if(cat === 'b'){
                 cats.b.push(it);
                 
-                // --- Extracción de Papas (ya lo tenías) ---
                 let fName = it.fries;
                 if(!fName && it.extras?.fries) fName = it.extras.fries;
                 if(!fName && it.guarnicion) fName = it.guarnicion;
@@ -638,7 +629,6 @@
                    }
                 }
 
-                // --- 🔥 EXTRACCIÓN DE BEBIDAS (NUEVO) ---
                 let dName = it.bebida || it.drink; 
                 if(!dName && it.extras?.bebida) dName = it.extras.bebida;
                 if(!dName && it.extras?.drink) dName = it.extras.drink;
@@ -655,7 +645,6 @@
             } else { cats[cat].push(it); }
         });
 
-        // Consolidación
         cats.b = consolidateItems(cats.b);
         cats.f = consolidateItems(cats.f);
         cats.d = consolidateItems(cats.d);
@@ -757,7 +746,6 @@
        const isPaid = (o.payment_status === 'paid') || o.paid;
        const stPay = isPaid ? "PAGADO" : "PENDIENTE";
        
-       // 🔥 UNIFICACIÓN DE LISTAS TAMBIÉN PARA IMPRESIÓN
        let items = Array.isArray(o.items) ? [...o.items] : [];
        if(Array.isArray(o.bebidas)) items = items.concat(o.bebidas);
        if(Array.isArray(o.drinks)) items = items.concat(o.drinks);
@@ -768,7 +756,6 @@
           if(cat==='b'){
              cats.b.push(it);
              
-             // --- Papas ---
              let fName = it.fries;
              if(!fName && it.extras?.fries) fName = it.extras.fries;
              if(!fName && it.guarnicion) fName = it.guarnicion;
@@ -779,7 +766,6 @@
                  }
              }
 
-             // --- 🔥 Bebidas (Nuevo) ---
              let dName = it.bebida || it.drink; 
              if(!dName && it.extras?.bebida) dName = it.extras.bebida;
              if(!dName && it.extras?.drink) dName = it.extras.drink;
