@@ -222,6 +222,15 @@
     <label>Notas (opcional)</label>
     <textarea id="inpNotas" placeholder="Aclaraciones sobre el pedido..."></textarea>
   </div>
+  
+  <div class="group" style="border-top: 1px dashed var(--ring); padding-top: 14px;">
+    <label>Cupón de descuento</label>
+    <div style="display:flex; gap:8px;">
+        <input id="inpCupon" type="text" placeholder="CÓDIGO" style="text-transform:uppercase; letter-spacing:1px; font-weight:700;">
+        <button id="btnAplicarCupon" class="btn ghost small">Aplicar</button>
+    </div>
+    <div id="msgCupon" class="muted-small"></div>
+  </div>
 
   <div class="actions">
     <a class="btn ghost" href="index.html">Cancelar</a>
@@ -265,6 +274,10 @@ const WHATSAPP_NUMBER = "5491170596483";
 // 🔥 PRECIOS EXTRAS
 const PRICE_PATTY = 2500;
 const PRICE_CHEDDAR = 300;
+
+// VARIABLES CUPÓN
+let activeDiscount = 0;
+let activeCouponCode = "";
 
 function $(s){ return document.querySelector(s); }
 function parseHHMM(str){ const [h,m]=str.split(":").map(Number); const now=new Date(); return new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0); }
@@ -330,7 +343,7 @@ $("#slotNext").onclick=()=>{if(currentIndex<visibles.length-1){currentIndex++;ac
 $("#btnRefreshSlots").onclick=cargarSlots;
 setInterval(reconstruirVisibles,10000);
 
-/* RESUMEN - 🔥 CORREGIDO (DETALLE LIMPIO) */
+/* RESUMEN - 🔥 CORREGIDO (DETALLE LIMPIO + CUPÓN) */
 function renderResumen(){
   const c=loadCart(); const box=$("#resumen"); box.innerHTML=""; let t=0;
   for(const o of Object.values(c.burger)){
@@ -339,7 +352,6 @@ function renderResumen(){
     const subt = o.qty * unitPrice;
     t += subt;
 
-    // 🔥 Extras sin color rojo, usando la clase .muted igual que las papas
     let extrasHtml = "";
     if(o.extras?.patty) extrasHtml += `<div class="muted">• Extra carne: +${o.extras.patty}</div>`;
     if(o.extras?.cheddar) extrasHtml += `<div class="muted">• Extra cheddar: +${o.extras.cheddar}</div>`;
@@ -354,8 +366,54 @@ function renderResumen(){
   for(const k in c.drink){ t += c.drink[k].qty * c.drink[k].item.price; }
   for(const k in c.side){ t += c.side[k].qty * c.side[k].item.price; }
 
-  $("#resTotal").textContent="$ "+t.toLocaleString("es-AR");
+  // Restar cupón
+  let finalTotal = t - activeDiscount;
+  if(finalTotal < 0) finalTotal = 0;
+
+  if(activeDiscount > 0) {
+      box.innerHTML += `<div style="margin-top:10px; padding-top:10px; border-top:1px dashed #ccc; color: #16a34a; font-weight:700;">
+        🏷️ Cupón (${activeCouponCode}): -$${activeDiscount.toLocaleString("es-AR")}
+      </div>`;
+  }
+
+  $("#resTotal").textContent="$ "+finalTotal.toLocaleString("es-AR");
+  return finalTotal; // Retornamos para usar en confirmación
 }
+
+/* 🎟️ LÓGICA DE CUPÓN */
+$("#btnAplicarCupon").onclick = async () => {
+    const code = $("#inpCupon").value.trim().toUpperCase();
+    const msg = $("#msgCupon");
+    
+    if(!code) return;
+    $("#btnAplicarCupon").textContent = "⏳";
+    
+    try {
+        // Busca en colección 'coupons'
+        const snap = await db.collection('coupons').where('code', '==', code).where('active', '==', true).get();
+        if(snap.empty) {
+            msg.textContent = "❌ Cupón inválido o expirado";
+            msg.style.color = "#dc2626";
+            activeDiscount = 0;
+            activeCouponCode = "";
+        } else {
+            const data = snap.docs[0].data();
+            // Asumimos que el cupón tiene campo 'amount' (monto fijo)
+            if(data.amount) {
+                activeDiscount = Number(data.amount);
+                activeCouponCode = code;
+                msg.textContent = `✅ ¡Descuento de $${activeDiscount} aplicado!`;
+                msg.style.color = "#16a34a";
+            }
+        }
+    } catch(e) {
+        console.error(e);
+        msg.textContent = "Error al verificar";
+    }
+    
+    renderResumen();
+    $("#btnAplicarCupon").textContent = "Aplicar";
+};
 
 /* CONFIRMAR PEDIDO */
 async function obtenerYIncrementarOrderNumber() {
@@ -404,28 +462,31 @@ $("#btnConfirmar").onclick=async()=>{
   if(!nombre){ alert("Ingresá tu nombre"); return; }
   if(!slot){ alert("Elegí un horario de retiro"); return; }
     
-  // Verificar carrito completo, no solo burgers
-  let items=0; 
-  Object.values(cart.burger).forEach(o=>items+=o.qty);
-  Object.values(cart.drink).forEach(o=>items+=o.qty);
-  Object.values(cart.side).forEach(o=>items+=o.qty);
+  let itemsCount=0; 
+  Object.values(cart.burger).forEach(o=>itemsCount+=o.qty);
+  Object.values(cart.drink).forEach(o=>itemsCount+=o.qty);
+  Object.values(cart.side).forEach(o=>itemsCount+=o.qty);
   
-  if(items===0){alert("Carrito vacío");return;}
+  if(itemsCount===0){alert("Carrito vacío");return;}
 
   btn.disabled=true; btn.textContent="Procesando...";
+
+  // 🧠 RECORDARME (GUARDAR DATOS)
+  localStorage.setItem('rb_user_name', nombre);
+  if(tel) localStorage.setItem('rb_user_phone', tel);
 
   try{
     await reservarMultiBloque(slot.key, gramosDelPedido());
     const orderNumber = await obtenerYIncrementarOrderNumber();
     const trackToken = generateToken();
 
-    let total=0;
+    let totalCalculado=0;
     let detalle="";
     
     for(const o of Object.values(cart.burger)){
        const extrasCost = (o.extras?.patty||0)*PRICE_PATTY + (o.extras?.cheddar||0)*PRICE_CHEDDAR;
        const unitTotal = o.item.price + extrasCost;
-       total += o.qty * unitTotal;
+       totalCalculado += o.qty * unitTotal;
        
        let exTxt = "";
        if(o.extras?.patty) exTxt += ` (+${o.extras.patty} carne)`;
@@ -436,34 +497,34 @@ $("#btnConfirmar").onclick=async()=>{
     }
     
     for(const o of Object.values(cart.drink)){
-        total += o.qty * o.item.price;
+        totalCalculado += o.qty * o.item.price;
         detalle+=`• ${o.item.name} x${o.qty}\n`;
     }
     for(const o of Object.values(cart.side)){
-        total += o.qty * o.item.price;
+        totalCalculado += o.qty * o.item.price;
         detalle+=`• ${o.item.name} x${o.qty}\n`;
     }
+
+    // APLICAR DESCUENTO AL TOTAL FINAL
+    let totalFinal = totalCalculado - activeDiscount;
+    if(totalFinal < 0) totalFinal = 0;
 
     const now = new Date();
     const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
     const localISO = localDate.toISOString().slice(0, -1); 
 
-    // 🔥🔥🔥 AQUÍ ESTÁ EL ARREGLO: COMBINAMOS TODO EN UNA LISTA 🔥🔥🔥
     const allItems = [
-        // 1. Hamburguesas
         ...Object.values(cart.burger).map(o=>({
             type: 'burger',
             name:o.item.name, price:o.item.price, qty:o.qty,
             fries:o.fries, notes:o.notes?[o.notes]:[],
             extras:{patty:o.extras.patty, cheddar:o.extras.cheddar, EXTRA_PRICE_PATTY:PRICE_PATTY, EXTRA_PRICE_CHEDDAR:PRICE_CHEDDAR}
         })),
-        // 2. Bebidas (Ahora SÍ se guardan)
         ...Object.values(cart.drink).map(o=>({
             type: 'drink',
             name:o.item.name, price:o.item.price, qty:o.qty,
             category: 'bebida'
         })),
-        // 3. Acompañamientos (Ahora SÍ se guardan)
         ...Object.values(cart.side).map(o=>({
             type: 'side',
             name:o.item.name, price:o.item.price, qty:o.qty,
@@ -485,8 +546,11 @@ $("#btnConfirmar").onclick=async()=>{
       pickup_slot:slot.key,
       status:"accepted",
       statusHistory:[{to:"accepted",at:localISO}],
-      items: allItems, // Enviamos la lista completa combinada
-      total,
+      items: allItems, 
+      total: totalFinal, // 🔥 Total con descuento
+      subtotal: totalCalculado, // 🔥 Guardamos el subtotal real
+      discount: activeDiscount, // 🔥 Guardamos cuánto se descontó
+      coupon: activeCouponCode, // 🔥 Guardamos qué cupón se usó
       createdAt: localISO,
       trackToken: trackToken
     };
@@ -511,7 +575,7 @@ Pago: A Coordinar / En el local
 Retiro: ${slot.pretty}
 
 ${detalle}
-*Total:* $${total.toLocaleString("es-AR")}
+${activeDiscount > 0 ? `Cupón ${activeCouponCode}: -$${activeDiscount}\n` : ''}*Total:* $${totalFinal.toLocaleString("es-AR")}
 
 🔗 *Seguí tu pedido acá:*
 ${trackLink}`;
@@ -532,7 +596,15 @@ ${trackLink}`;
   }
 };
 
-window.addEventListener("DOMContentLoaded",()=>{cargarSlots();renderResumen();});
+window.addEventListener("DOMContentLoaded",()=>{
+    cargarSlots();
+    renderResumen();
+    // 🧠 RECORDARME (CARGAR DATOS)
+    const savedName = localStorage.getItem('rb_user_name');
+    const savedPhone = localStorage.getItem('rb_user_phone');
+    if(savedName) $("#inpNombre").value = savedName;
+    if(savedPhone) $("#inpTelefono").value = savedPhone;
+});
 </script>
 </body>
 </html>
