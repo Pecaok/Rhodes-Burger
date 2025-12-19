@@ -325,7 +325,7 @@
     // 1. VARIABLES GLOBALES
     let CURRENT_ORDERS = [];
     let ALL_EXPENSES = [];
-    let mainChart, d1, d2, monthlyChartInstance; // 🔥 Variable para el nuevo gráfico
+    let mainChart, d1, d2, monthlyChartInstance; 
 
     document.addEventListener('DOMContentLoaded', () => {
         
@@ -380,11 +380,11 @@
 
         function loadData() {
             // 🔥 AUMENTADO LÍMITE A 1000 PARA VER HISTORIA MES A MES
-            db.collection('orders').orderBy('createdAt', 'desc').limit(5000).onSnapshot(snap => {
+            db.collection('orders').orderBy('createdAt', 'desc').limit(1000).onSnapshot(snap => {
                 CURRENT_ORDERS = snap.docs.map(d => ({id: d.id, ...d.data()}));
                 loadKPI(); 
                 renderCalendar();
-                renderMonthlyChart(CURRENT_ORDERS); // 🔥 Renderiza el gráfico histórico
+                renderMonthlyChart(CURRENT_ORDERS); 
             });
             // Escuchar Gastos
             db.collection('expenses').orderBy('date', 'desc').limit(50).onSnapshot(snap => {
@@ -539,18 +539,15 @@
         }
 
         // =========================================
-        // 🔥 NUEVO GRÁFICO MES A MES
+        // 🔥 NUEVO GRÁFICO MES A MES "PREMIUM"
         // =========================================
         function renderMonthlyChart(orders) {
-            // Agrupar por Mes
             const groups = {};
             orders.forEach(o => {
                 const d = parseDateAny(o.createdAt);
                 if(!d || o.status?.includes('cancel')) return;
-                
-                const key = `${d.getMonth()+1}/${d.getFullYear()}`; // Ej: "12/2023"
-                const sortKey = d.getFullYear()*100 + (d.getMonth()+1); // Para ordenar
-                
+                const key = `${d.getMonth()+1}/${d.getFullYear()}`; 
+                const sortKey = d.getFullYear()*100 + (d.getMonth()+1); 
                 if(!groups[sortKey]) groups[sortKey] = { label: key, money: 0, count: 0 };
                 groups[sortKey].money += Number(o.total||0);
                 groups[sortKey].count += 1;
@@ -564,6 +561,11 @@
             const ctx = $('monthlyChart').getContext('2d');
             if(monthlyChartInstance) monthlyChartInstance.destroy();
 
+            // 🔥 DEGRADADO DORADO PARA BARRAS
+            let gradGold = ctx.createLinearGradient(0, 0, 0, 400);
+            gradGold.addColorStop(0, '#d97706'); // Dorado oscuro arriba
+            gradGold.addColorStop(1, '#78350f'); // Marrón abajo
+
             monthlyChartInstance = new Chart(ctx, {
                 type: 'bar',
                 data: {
@@ -572,9 +574,9 @@
                         {
                             label: 'Ventas ($)',
                             data: dataMoney,
-                            backgroundColor: 'rgba(98, 90, 69, 0.7)',
-                            borderColor: '#625A45',
-                            borderWidth: 1,
+                            backgroundColor: gradGold,
+                            borderRadius: 8,
+                            barPercentage: 0.6,
                             yAxisID: 'y',
                             order: 2
                         },
@@ -582,10 +584,15 @@
                             label: 'Cant. Pedidos',
                             data: dataCount,
                             type: 'line',
-                            borderColor: '#d97706', // Color Oro/Naranja
-                            backgroundColor: '#d97706',
-                            borderWidth: 2,
-                            tension: 0.3,
+                            borderColor: '#fbbf24', // Amarillo Brillante
+                            backgroundColor: '#fff',
+                            borderWidth: 4,
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            pointBackgroundColor: '#fbbf24',
+                            pointBorderColor: '#fff',
+                            pointBorderWidth: 2,
+                            tension: 0.4,
                             yAxisID: 'y1',
                             order: 1
                         }
@@ -595,13 +602,27 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'top', labels: { usePointStyle: true, font: { weight: '700' } } },
+                        tooltip: {
+                            backgroundColor: '#fff',
+                            titleColor: '#111',
+                            bodyColor: '#333',
+                            borderColor: '#ddd',
+                            borderWidth: 1,
+                            padding: 10,
+                            displayColors: true,
+                            usePointStyle: true
+                        }
+                    },
                     scales: {
                         y: {
                             type: 'linear',
                             display: true,
                             position: 'left',
                             beginAtZero: true,
-                            grid: { drawOnChartArea: true }
+                            grid: { borderDash: [5, 5], color: '#e5e7eb' },
+                            ticks: { callback: function(value) { return '$' + value.toLocaleString(); } }
                         },
                         y1: {
                             type: 'linear',
@@ -609,6 +630,9 @@
                             position: 'right',
                             beginAtZero: true,
                             grid: { drawOnChartArea: false }
+                        },
+                        x: {
+                            grid: { display: false }
                         }
                     }
                 }
