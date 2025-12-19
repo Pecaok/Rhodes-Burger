@@ -109,6 +109,7 @@
     .it-det { flex: 1; }
     .it-name { font-weight: 600; font-size: 15px; color: #374151; line-height: 1.3; }
     .it-sub { font-size: 13px; color: #6b7280; display: block; margin-top: 2px; }
+    .it-price { font-weight: 700; font-size: 14px; color: var(--primary); margin-left: auto; white-space: nowrap; }
     .it-note { font-size: 12px; color: #ef4444; font-weight: 600; background: #fef2f2; display: inline-block; padding: 2px 6px; border-radius: 4px; margin-top: 2px; }
 
     /* ACTIONS */
@@ -545,21 +546,20 @@
         window.lastSnap = snap;
         renderList(snap);
         snap.docChanges().forEach(ch => {
-            // 🔥 CORRECCIÓN: FILTRO DE TIEMPO
+            // 🔥 FILTRO DE TIEMPO (20 min)
             if(ch.type === 'added' && !isInit){
                 const data = ch.doc.data();
                 const fechaPedido = window.pickDate(data);
                 const ahora = new Date();
-                const diferenciaMinutos = (ahora - fechaPedido) / 1000 / 60; // Diferencia en minutos
+                const diferenciaMinutos = (ahora - fechaPedido) / 1000 / 60; 
 
-                // Solo notificamos si el pedido tiene menos de 30 minutos de antigüedad
-                if(diferenciaMinutos < 30) {
+                if(diferenciaMinutos < 20) {
                     console.log("🔔 Nuevo (Real):", data.orderNumber);
                     if(navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); 
                     playBeep(); 
                     if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id));
                 } else {
-                    console.log("💤 Pedido viejo cargado (Silencioso):", data.orderNumber);
+                    console.log("💤 Pedido viejo (Silencioso):", data.orderNumber);
                 }
             }
         });
@@ -608,7 +608,6 @@
 
         let srcVal = o.source || 'web'; 
 
-        // 🔥 UNIFICACIÓN DE LISTAS
         let items = Array.isArray(o.items) ? [...o.items] : [];
         if(Array.isArray(o.bebidas)) items = items.concat(o.bebidas);
         if(Array.isArray(o.drinks)) items = items.concat(o.drinks);
@@ -618,7 +617,6 @@
             const cat = window.getCat(it);
             if(cat === 'b'){
                 cats.b.push(it);
-                
                 let fName = it.fries;
                 if(!fName && it.extras?.fries) fName = it.extras.fries;
                 if(!fName && it.guarnicion) fName = it.guarnicion;
@@ -628,20 +626,16 @@
                        cats.f.push({name: fName, qty: it.qty||1});
                    }
                 }
-
                 let dName = it.bebida || it.drink; 
                 if(!dName && it.extras?.bebida) dName = it.extras.bebida;
                 if(!dName && it.extras?.drink) dName = it.extras.drink;
                 if(!dName && it.extras?.gaseosa) dName = it.extras.gaseosa;
-                if(!dName && it.extras?.refresco) dName = it.extras.refresco;
-                
                 if(dName) {
                     const dClean = String(dName).toLowerCase();
                     if(dClean !== 'sin_bebida' && dClean !== 'ninguna' && dClean !== '') {
                         cats.d.push({name: dName, qty: it.qty||1});
                     }
                 }
-
             } else { cats[cat].push(it); }
         });
 
@@ -654,6 +648,13 @@
             if(!list.length) return "";
             const rows = list.map(it => {
                 let ex = [];
+                // Calcular subtotal de línea para visualización
+                let basePrice = Number(it.price) || 0;
+                let extraPatty = (it.extras?.patty || 0) * 2500;
+                let extraCheddar = (it.extras?.cheddar || 0) * 300;
+                let unitFinal = basePrice + extraPatty + extraCheddar;
+                let lineTotal = unitFinal * (it.qty || 1);
+
                 if(it.extras?.patty) ex.push(`+${it.extras.patty} carne`);
                 if(it.extras?.cheddar) ex.push(`+${it.extras.cheddar} cheddar`);
                 
@@ -669,6 +670,7 @@
                       ${extrasHtml}
                       ${it.notes ? `<div class="it-note">${esc(it.notes)}</div>` : ''}
                    </div>
+                   <div class="it-price">${money(lineTotal)}</div>
                 </div>`;
             }).join("");
             return `<div class="cat-group"><div class="cat-title">${icon} ${title}</div>${rows}</div>`;
@@ -677,6 +679,15 @@
         const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
         const itemsHTML = renderSec(cats.b,'🍔','HAMBURGUESAS') + renderSec(cats.f,'🍟','PAPAS') + renderSec(cats.d,'🥤','BEBIDAS') + renderSec(cats.o,'🔸','OTROS');
         const total = o.total || items.reduce((a,i)=>a+((i.price||0)*(i.qty||1)),0);
+
+        // --- Visualización del Cupón ---
+        let discountHTML = "";
+        if (o.discount > 0) {
+            discountHTML = `<div style="display:flex;justify-content:space-between;color:#16a34a;font-weight:700;padding:0 16px;margin-bottom:8px">
+                <span>🏷️ Descuento (${esc(o.coupon||'')}):</span>
+                <span>-${money(o.discount)}</span>
+            </div>`;
+        }
 
         return `
         <div class="order ${st==='cancelled'?'cancelled':''}">
@@ -692,6 +703,7 @@
            </div>
            
            <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
+           ${discountHTML}
 
            <div class="actions-area">
               <div class="control-row">
@@ -726,7 +738,7 @@
         </div>`;
     }
 
-    // --- IMPRESIÓN ---
+    // --- IMPRESIÓN CON PRECIOS Y DESCUENTOS ---
     window.trySilentPrint = function(docSnap){
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -755,7 +767,6 @@
           const cat = window.getCat(it);
           if(cat==='b'){
              cats.b.push(it);
-             
              let fName = it.fries;
              if(!fName && it.extras?.fries) fName = it.extras.fries;
              if(!fName && it.guarnicion) fName = it.guarnicion;
@@ -765,7 +776,6 @@
                     cats.f.push({name: fName, qty: it.qty||1});
                  }
              }
-
              let dName = it.bebida || it.drink; 
              if(!dName && it.extras?.bebida) dName = it.extras.bebida;
              if(!dName && it.extras?.drink) dName = it.extras.drink;
@@ -776,7 +786,6 @@
                      cats.d.push({name: dName, qty: it.qty||1});
                  }
              }
-
           } else { cats[cat].push(it); }
        });
 
@@ -790,7 +799,16 @@
          const r = l.map(i => {
             let dName = esc(i.name);
             if(ti.includes("PAPA")) dName = window.cleanFries(i.name);
-            let h = `<div class="row name"><div class="l">${i.qty||1} × ${dName}</div></div>`;
+            
+            // Cálculo Subtotal para Ticket
+            let basePrice = Number(i.price) || 0;
+            let extraPatty = (i.extras?.patty || 0) * 2500;
+            let extraCheddar = (i.extras?.cheddar || 0) * 300;
+            let unitFinal = basePrice + extraPatty + extraCheddar;
+            let lineTotal = unitFinal * (i.qty || 1);
+
+            let h = `<div class="row name"><div class="l">${i.qty||1} × ${dName}</div><div class="r">${m(lineTotal)}</div></div>`;
+            
             if(!ti.includes("PAPA")){
                if(i.extras?.patty) h+=`<div class="sub">• +${i.extras.patty} carne</div>`;
                if(i.extras?.cheddar) h+=`<div class="sub">• +${i.extras.cheddar} cheddar</div>`;
@@ -806,10 +824,17 @@
        const total = o.total || items.reduce((a,i)=>a+((i.price||0)*(i.qty||1)),0);
        const name = o.source==='mostrador' ? (o.nombre+' (Local)') : o.nombre;
 
+       // Render Descuento en Ticket
+       let discountRow = "";
+       if (o.discount > 0) {
+           discountRow = `<div class="row"><div class="l">DESC. (${esc(o.coupon||'')})</div><div class="r">-${m(o.discount)}</div></div>`;
+       }
+
        const html = `<!doctype html><html><head><style>
        @page{size:58mm auto;margin:0} body{width:58mm;margin:0 auto;padding:5px;font-family:monospace;font-size:12px;font-weight:700;color:#000;line-height:1.2}
        .c{text-align:center} .hr{border-top:1px dashed #000;margin:6px 0} .row{display:flex;justify-content:space-between}
        .lbl{font-size:10px;text-transform:uppercase} .sub{font-size:11px;margin-left:5px;font-weight:400} .sep{border-top:1px dotted #999;margin:3px 0}
+       .r{text-align:right}
        </style></head><body>
          <div class="c" style="font-size:16px;margin-bottom:4px">Rhodes Burgers</div>
          <div class="c" style="font-size:14px">#${o.orderNumber||'--'}</div>
@@ -822,7 +847,8 @@
          <div class="hr"></div>
          ${body}
          <div class="hr"></div>
-         <div class="row"><div class="l">TOTAL</div><div>${m(total)}</div></div>
+         ${discountRow}
+         <div class="row"><div class="l">TOTAL</div><div class="r">${m(total)}</div></div>
          <div class="c" style="margin-top:10px;font-size:10px">${dateStr} ${timeStr}</div>
          <script>window.onload=()=>{setTimeout(()=>{window.print()},200)}<\/script>
        </body></html>`;
