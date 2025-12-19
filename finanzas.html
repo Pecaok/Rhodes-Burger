@@ -266,7 +266,12 @@
         </div>
 
         <div style="margin-top:32px">
-          <h3 class="chart-title">Evolución: Ingresos vs Gastos</h3>
+            <h3 class="chart-title">📊 Evolución Mensual (Dinero y Cantidad)</h3>
+            <div class="chartWrapTall"><canvas id="monthlyChart"></canvas></div>
+        </div>
+
+        <div style="margin-top:32px">
+          <h3 class="chart-title">Evolución Diaria (Mes Seleccionado)</h3>
           <div class="chartWrapTall"><canvas id="ordersChart"></canvas></div>
         </div>
 
@@ -320,7 +325,7 @@
     // 1. VARIABLES GLOBALES
     let CURRENT_ORDERS = [];
     let ALL_EXPENSES = [];
-    let mainChart, d1, d2;
+    let mainChart, d1, d2, monthlyChartInstance; // 🔥 Variable para el nuevo gráfico
 
     document.addEventListener('DOMContentLoaded', () => {
         
@@ -374,11 +379,12 @@
         loadData();
 
         function loadData() {
-            // Escuchar Ventas
-            db.collection('orders').orderBy('createdAt', 'desc').limit(200).onSnapshot(snap => {
+            // 🔥 AUMENTADO LÍMITE A 1000 PARA VER HISTORIA MES A MES
+            db.collection('orders').orderBy('createdAt', 'desc').limit(5000).onSnapshot(snap => {
                 CURRENT_ORDERS = snap.docs.map(d => ({id: d.id, ...d.data()}));
                 loadKPI(); 
                 renderCalendar();
+                renderMonthlyChart(CURRENT_ORDERS); // 🔥 Renderiza el gráfico histórico
             });
             // Escuchar Gastos
             db.collection('expenses').orderBy('date', 'desc').limit(50).onSnapshot(snap => {
@@ -462,7 +468,6 @@
             for(const [k,v] of Object.entries(payStats)) cashHTML += `<div class="cash-row"><span>${k}</span><span>${money(v)}</span></div>`;
             cashHTML += `<div class="cash-row cash-total"><span>TOTAL VENTAS</span><span>${money(totalRevenue)}</span></div>`;
             
-            // 🔥 AGREGAR DESGLOSE POR ORIGEN EN CAJA
             cashHTML += '<hr style="margin:8px 0; border:0; border-top:1px dashed #ddd">';
             for(const [src, total] of Object.entries(sourceStats)) {
                 cashHTML += `<div class="cash-row" style="font-size:13px; color:#555"><span>Canal: ${src.toUpperCase()}</span><span>${money(total)}</span></div>`;
@@ -534,7 +539,84 @@
         }
 
         // =========================================
-        // CALENDARIO E INSUMOS (LOGICA "FUERZA BRUTA" 🔥)
+        // 🔥 NUEVO GRÁFICO MES A MES
+        // =========================================
+        function renderMonthlyChart(orders) {
+            // Agrupar por Mes
+            const groups = {};
+            orders.forEach(o => {
+                const d = parseDateAny(o.createdAt);
+                if(!d || o.status?.includes('cancel')) return;
+                
+                const key = `${d.getMonth()+1}/${d.getFullYear()}`; // Ej: "12/2023"
+                const sortKey = d.getFullYear()*100 + (d.getMonth()+1); // Para ordenar
+                
+                if(!groups[sortKey]) groups[sortKey] = { label: key, money: 0, count: 0 };
+                groups[sortKey].money += Number(o.total||0);
+                groups[sortKey].count += 1;
+            });
+
+            const sortedKeys = Object.keys(groups).sort((a,b) => a - b);
+            const labels = sortedKeys.map(k => groups[k].label);
+            const dataMoney = sortedKeys.map(k => groups[k].money);
+            const dataCount = sortedKeys.map(k => groups[k].count);
+
+            const ctx = $('monthlyChart').getContext('2d');
+            if(monthlyChartInstance) monthlyChartInstance.destroy();
+
+            monthlyChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Ventas ($)',
+                            data: dataMoney,
+                            backgroundColor: 'rgba(98, 90, 69, 0.7)',
+                            borderColor: '#625A45',
+                            borderWidth: 1,
+                            yAxisID: 'y',
+                            order: 2
+                        },
+                        {
+                            label: 'Cant. Pedidos',
+                            data: dataCount,
+                            type: 'line',
+                            borderColor: '#d97706', // Color Oro/Naranja
+                            backgroundColor: '#d97706',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            yAxisID: 'y1',
+                            order: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            beginAtZero: true,
+                            grid: { drawOnChartArea: true }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            beginAtZero: true,
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+        }
+
+        // =========================================
+        // CALENDARIO E INSUMOS
         // =========================================
         async function renderCalendar(){
             const ym = $('calMonth').value;
@@ -550,7 +632,7 @@
             
             const days = end.getDate();
             const totals = Array(days).fill(0);
-            const counts = Array(days).fill(0); // 🔥 AHORA ES UN CONTEO DE BURGERS, NO DE PEDIDOS
+            const counts = Array(days).fill(0); 
             const meatCounts = Array(days).fill(0); 
             const friesKilos = Array(days).fill(0); 
 
@@ -563,35 +645,26 @@
                     const name = (item.name || '').toLowerCase();
                     const qty = Number(item.qty || 1);
                     
-                    // 🚨 IDENTIFICACIÓN POR DESCARTE (Si NO es bebida NI papa => Es Burger)
-                    
-                    // Lista negra de bebidas
                     const bebidas = ['agua', 'cola', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 'imperial', 'sprite', 'levite', 'paso de los toros'];
                     const esBebida = bebidas.some(b => name.includes(b)) || item.type === 'drink';
                     
-                    // Lista negra de guarniciones
                     const guarniciones = ['papas', 'fritas', 'nugget', 'aros', 'bastones', 'guarnicion'];
                     const esPapas = guarniciones.some(g => name.includes(g)) || item.type === 'side';
 
-                    // 🔥 LOGICA FINAL: Si no es ninguna de las anteriores, la contamos como Burger
                     const esBurger = !esBebida && !esPapas;
 
                     if (esBurger) {
-                        // 🔥 ESTE ERA EL FIX QUE FALTABA: SUMAR AL CALENDARIO DE VENTAS
                         counts[d] += qty; 
 
-                        let patties = 1; // Base simple
+                        let patties = 1; 
                         if(name.includes('doble')) patties = 2;
                         if(name.includes('triple')) patties = 3;
                         if(name.includes('cuadruple')) patties = 4;
 
-                        // Sumar extras manuales
                         if(item.extras && item.extras.patty){
                             patties += Number(item.extras.patty);
                         }
                         meatCounts[d] += (patties * qty);
-                        
-                        // Conteo de Papas (0.2kg por hamburguesa vendida)
                         friesKilos[d] += (0.200 * qty);
                     }
                 });
