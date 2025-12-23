@@ -271,8 +271,8 @@ const G_POR_SIDE=700;
 const SLOT_START="19:15"; const SLOT_END="23:45"; const SLOT_INTERVAL_MIN=15;
 const WHATSAPP_NUMBER = "5491170596483"; 
 
-// 🔥 PRECIOS EXTRAS
-const PRICE_PATTY = 2500;
+// 🔥 PRECIOS EXTRAS (CORREGIDO A 2800)
+const PRICE_PATTY = 2800;
 const PRICE_CHEDDAR = 300;
 
 // VARIABLES CUPÓN
@@ -343,7 +343,7 @@ $("#slotNext").onclick=()=>{if(currentIndex<visibles.length-1){currentIndex++;ac
 $("#btnRefreshSlots").onclick=cargarSlots;
 setInterval(reconstruirVisibles,10000);
 
-/* RESUMEN - 🔥 CORREGIDO (DETALLE LIMPIO + CUPÓN) */
+/* RESUMEN - 🔥 LÓGICA DE CUPONES INTEGRADA */
 function renderResumen(){
   const c=loadCart(); const box=$("#resumen"); box.innerHTML=""; let t=0;
   for(const o of Object.values(c.burger)){
@@ -366,7 +366,7 @@ function renderResumen(){
   for(const k in c.drink){ t += c.drink[k].qty * c.drink[k].item.price; }
   for(const k in c.side){ t += c.side[k].qty * c.side[k].item.price; }
 
-  // Restar cupón
+  // Aplicar descuento visual
   let finalTotal = t - activeDiscount;
   if(finalTotal < 0) finalTotal = 0;
 
@@ -377,10 +377,10 @@ function renderResumen(){
   }
 
   $("#resTotal").textContent="$ "+finalTotal.toLocaleString("es-AR");
-  return finalTotal; // Retornamos para usar en confirmación
+  return finalTotal; 
 }
 
-/* 🎟️ LÓGICA DE CUPÓN */
+/* 🎟️ HANDLER DE CUPÓN */
 $("#btnAplicarCupon").onclick = async () => {
     const code = $("#inpCupon").value.trim().toUpperCase();
     const msg = $("#msgCupon");
@@ -389,7 +389,6 @@ $("#btnAplicarCupon").onclick = async () => {
     $("#btnAplicarCupon").textContent = "⏳";
     
     try {
-        // Busca en colección 'coupons'
         const snap = await db.collection('coupons').where('code', '==', code).where('active', '==', true).get();
         if(snap.empty) {
             msg.textContent = "❌ Cupón inválido o expirado";
@@ -398,7 +397,6 @@ $("#btnAplicarCupon").onclick = async () => {
             activeCouponCode = "";
         } else {
             const data = snap.docs[0].data();
-            // Asumimos que el cupón tiene campo 'amount' (monto fijo)
             if(data.amount) {
                 activeDiscount = Number(data.amount);
                 activeCouponCode = code;
@@ -513,6 +511,7 @@ $("#btnConfirmar").onclick=async()=>{
     const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
     const localISO = localDate.toISOString().slice(0, -1); 
 
+    // 🔥 UNIFICACIÓN DE LISTA DE ITEMS (FIX BEBIDAS)
     const allItems = [
         ...Object.values(cart.burger).map(o=>({
             type: 'burger',
@@ -547,10 +546,10 @@ $("#btnConfirmar").onclick=async()=>{
       status:"accepted",
       statusHistory:[{to:"accepted",at:localISO}],
       items: allItems, 
-      total: totalFinal, // 🔥 Total con descuento
-      subtotal: totalCalculado, // 🔥 Guardamos el subtotal real
-      discount: activeDiscount, // 🔥 Guardamos cuánto se descontó
-      coupon: activeCouponCode, // 🔥 Guardamos qué cupón se usó
+      total: totalFinal, // Total con descuento
+      subtotal: totalCalculado, // Subtotal real
+      discount: activeDiscount, // Cuánto descontó
+      coupon: activeCouponCode, // Qué cupón usó
       createdAt: localISO,
       trackToken: trackToken
     };
