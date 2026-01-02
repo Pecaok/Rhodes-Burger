@@ -23,7 +23,7 @@
     #pageLoader {
       position: fixed;
       top: 0; left: 0; width: 100%; height: 100%;
-      background-color: #000000; /* Fondo negro puro */
+      background-color: #000000;
       z-index: 99999;
       display: flex;
       align-items: center;
@@ -45,7 +45,6 @@
       mix-blend-mode: screen; 
     }
 
-    /* 🔥 AJUSTE PARA PC */
     @media (min-width: 768px) {
         #pageLoader video { width: 500px; }
     }
@@ -167,6 +166,11 @@
       cursor:pointer; font-size:14px; user-select:none;
     }
     .chip input { accent-color: var(--primary); }
+    /* Estilo para chip seleccionado (para que se note más) */
+    .chip:has(input:checked) {
+        background-color: #fce7f3; /* Un tono suave */
+        border-color: var(--primary);
+    }
 
     .qtybox{
       display: inline-flex; align-items: center; gap: 10px;
@@ -297,12 +301,47 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    /* ====== CONFIGURACIÓN ====== */
+    /* ==============================================
+       1. VARIABLES GLOBALES Y HELPERS (AL INICIO)
+       ============================================== */
     const HOURS = {
       0: [[19,0,24,0]], 1: [], 2: [], 3: [[19,0,24,0]], 
       4: [[19,0,24,0]], 5: [[19,0,24,0]], 6: [[19,0,24,0]]
     };
+    let BURGERS=[], DRINKS=[], SIDES=[], MENU_ORDER={};
+    let EXTRA_PRICE_PATTY = 2500;
+    let EXTRA_PRICE_CHEDDAR = 300;
+    let FORCE_OPEN=false, FORCE_MSG="", FORCE_UNTIL=null, orderable=true;
+    let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
+    const CART_KEY = "rhodes_cart_v3";
+    const FALLBACK_IMG="images/logo.png";
+    const availability=new Map();
+    
+    // Función para formatear dinero
+    const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency",currency:"ARS",maximumFractionDigits:0});
 
+    // Función que faltaba (definida al principio)
+    function refreshAvailabilityUI(){
+      document.querySelectorAll(".card[data-id]").forEach(card=>{
+        const id=card.dataset.id;
+        const ok=availability.has(id) ? availability.get(id) : true;
+        card.dataset.soldout = ok?"0":"1";
+
+        let badge=card.querySelector(".soldout-badge");
+        if(!ok){
+          if(!badge){
+            badge=document.createElement("div");
+            badge.className="soldout-badge";
+            badge.textContent="SIN STOCK";
+            card.querySelector(".imgwrap").appendChild(badge);
+          }
+        }else{
+          if(badge) badge.remove();
+        }
+      });
+    }
+
+    // Funciones de horario
     function fmtHM(h,m){ if(h===24) h=0; return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0"); }
     function isOpenNow(d=new Date()){
       const cur=d.getHours()*60+d.getMinutes();
@@ -336,45 +375,6 @@
         return null;
     }
 
-    /* ====== Estado forzado Firestore ====== */
-    let FORCE_OPEN=false, FORCE_MSG="", FORCE_UNTIL=null, orderable=true;
-
-    function renderStatus(){
-      const pill=document.getElementById("statusPill");
-      const main=pill.querySelector(".status-main");
-      const sub =pill.querySelector(".status-sub");
-
-      const untilActive = FORCE_UNTIL && FORCE_UNTIL.getTime()>Date.now();
-
-      if(FORCE_OPEN || untilActive){
-        pill.className = "status-pill status-open";
-        main.textContent="Abierto";
-        sub.textContent = untilActive ? `hasta las ${fmtHM(FORCE_UNTIL.getHours(),FORCE_UNTIL.getMinutes())} hs` : (FORCE_MSG||"Apertura especial");
-        setOrderable(true);
-        return;
-      }
-      const st=isOpenNow();
-      if(st.open){
-        pill.className = "status-pill status-open";
-        main.textContent="Abierto";
-        sub.textContent=`hasta las ${fmtHM(st.until[0],st.until[1])} hs`;
-        setOrderable(true);
-      }else{
-        pill.className = "status-pill status-closed";
-        main.textContent="Cerrado";
-        const next = getNextOpenInfo();
-        sub.textContent = next ? `abrimos ${next.dayLabel} a las ${next.time} hs` : "abrimos pronto";
-        setOrderable(false);
-      }
-    }
-    function setOrderable(v){
-      orderable = !!v;
-      document.querySelectorAll("[data-add]").forEach(btn=>{
-        btn.disabled = !v;
-        if(v) btn.classList.remove("disabled"); else btn.classList.add("disabled");
-      });
-    }
-
     /* ===== Firebase Init ===== */
     const firebaseConfig = {
       apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
@@ -387,7 +387,143 @@
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    /* ======= Store override ======= */
+    /* ==============================================
+       2. LÓGICA DE CARRITO (CART COUNT FIX)
+       ============================================== */
+    let cart = loadCart();
+
+    function loadCart(){
+      try {
+        const c = JSON.parse(localStorage.getItem(CART_KEY)) || {};
+        return {
+          burger: c.burger || {},
+          drink:  c.drink  || {},
+          side:   c.side   || {}
+        };
+      } catch {
+        return { burger:{}, drink:{}, side:{} };
+      }
+    }
+
+    function saveCart(){
+      localStorage.setItem(CART_KEY, JSON.stringify(cart));
+      localStorage.setItem("cart_saved_at", Date.now());
+    }
+
+    // 🔥 AHORA SÍ ESTÁ DISPONIBLE GLOBALMENTE
+    function cartCount(){
+      let n=0;
+      Object.values(cart.burger).forEach(o=>n+=o.qty);
+      Object.values(cart.drink ).forEach(o=>n+=o.qty);
+      return n;
+    }
+
+    function calcTotal(){
+      let t=0;
+      for(const obj of Object.values(cart.burger)){
+        const base=obj.item.price;
+        t += ( base +
+               obj.extras.patty*EXTRA_PRICE_PATTY +
+               obj.extras.cheddar*EXTRA_PRICE_CHEDDAR ) * obj.qty;
+      }
+      for(const obj of Object.values(cart.drink)){
+        t += obj.item.price * obj.qty;
+      }
+      return t;
+    }
+
+    function friesLabel(code){
+      if(code === "con_sazon") return "Sazonadas";
+      if(code === "con_sal")   return "Con sal";
+      if(code === "sin_sal")   return "Sin sal";
+      return code || "—";
+    }
+
+    function renderCart(){
+      const cartItems = document.getElementById("cartItems");
+      const cartTotal = document.getElementById("cartTotal");
+      if(!cartItems) return;
+
+      cartItems.innerHTML="";
+
+      for(const [key,obj] of Object.entries(cart.burger)){
+        const exP = obj.extras.patty * EXTRA_PRICE_PATTY;
+        const exC = obj.extras.cheddar * EXTRA_PRICE_CHEDDAR;
+        const unit = obj.item.price + exP + exC;
+        const total = unit * obj.qty;
+        const friesTxt = friesLabel(obj.fries);
+
+        let detalleExtras = "";
+        if(obj.extras.patty > 0) detalleExtras += `<div class="muted">• Medallones extra (x${obj.extras.patty}): ${money(exP)}</div>`;
+        if(obj.extras.cheddar > 0) detalleExtras += `<div class="muted">• Cheddar extra (x${obj.extras.cheddar}): ${money(exC)}</div>`;
+
+        cartItems.innerHTML += `
+          <div class="item">
+            <div>
+              <strong>${obj.item.name}</strong><br>
+              <div class="muted">Papas: ${friesTxt}</div>
+              ${detalleExtras}
+              <div class="muted" style="margin-top:4px;">Subtotal: <strong>${money(unit)}</strong></div>
+              ${obj.notes ? `<div class="muted">Nota: ${obj.notes}</div>` : ""}
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="qtybtn" onclick="changeQty('burger','${encodeURIComponent(key)}',-1)">-</button>
+              <span>${obj.qty}</span>
+              <button class="qtybtn" onclick="changeQty('burger','${encodeURIComponent(key)}',1)">+</button>
+              <span>${money(total)}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      for(const [key,obj] of Object.entries(cart.drink)){
+        const total = obj.qty * obj.item.price;
+        cartItems.innerHTML += `
+          <div class="item">
+            <div><strong>${obj.item.name}</strong></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="qtybtn" onclick="changeQty('drink','${encodeURIComponent(key)}',-1)">-</button>
+              <span>${obj.qty}</span>
+              <button class="qtybtn" onclick="changeQty('drink','${encodeURIComponent(key)}',1)">+</button>
+              <span>${money(total)}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      cartTotal.textContent = money(calcTotal());
+      document.getElementById("cartBubble").textContent = `(${cartCount()})`;
+    }
+
+    window.changeQty = function(type, encodedKey, delta){
+      const key = decodeURIComponent(encodedKey);
+      const bucket = cart[type];
+      if(!bucket[key]) return;
+      bucket[key].qty += delta;
+      if(bucket[key].qty <= 0) delete bucket[key];
+      saveCart();
+      renderCart();
+    };
+
+    function addDrink(item){
+      if(!cart.drink[item.id]) cart.drink[item.id] = {qty:0, item};
+      cart.drink[item.id].qty++;
+      saveCart(); renderCart();
+    }
+    
+    function addToCart(item, fries, extras, notes) {
+      const key = `${item.id}|${fries}|${extras.patty}|${extras.cheddar}|${notes}`;
+      if (!cart.burger[key]) {
+        cart.burger[key] = { id: item.id, item, qty: 1, fries, extras, notes };
+      } else {
+        cart.burger[key].qty++;
+      }
+      saveCart(); renderCart();
+    }
+
+    /* ==============================================
+       3. CARGA DE DATOS (LISTENERS)
+       ============================================== */
     db.collection("config").doc("store").onSnapshot(s=>{
       const d=s.exists?(s.data()||{}):{};
       FORCE_OPEN = !!d.forceOpen;
@@ -406,70 +542,41 @@
 
     db.collection("config").doc("sides").onSnapshot(s=>{
       const d=s.exists?(s.data()||{}):{};
-      SIDES_STATE = { con_sazon: d.con_sazon!==false, con_sal: d.con_sal!==false, sin_sal: d.sin_sal!==false };
+      SIDES_STATE = {
+        con_sazon: d.con_sazon!==false,
+        con_sal:   d.con_sal!==false,
+        sin_sal:   d.sin_sal!==false
+      };
+      applySidesToUI();
     });
 
-    /* ======= DISPONIBILIDAD ======= */
-    const availability=new Map();
-    const isAvailable=id => availability.has(id)?availability.get(id):true;
-
-    // 🔥 FUNCIÓN QUE FALTABA (ARREGLADA)
-    function refreshAvailabilityUI(){
-      document.querySelectorAll(".card[data-id]").forEach(card=>{
-        const id=card.dataset.id;
-        const ok=isAvailable(id);
-        card.dataset.soldout = ok?"0":"1";
-
-        let badge=card.querySelector(".soldout-badge");
-        if(!ok){
-          if(!badge){
-            badge=document.createElement("div");
-            badge.className="soldout-badge";
-            badge.textContent="SIN STOCK";
-            card.querySelector(".imgwrap").appendChild(badge);
-          }
-        }else{
-          if(badge) badge.remove();
-        }
+    function applySidesToUI(){
+      const note = document.getElementById("friesStateNote");
+      const disabled = Object.entries(SIDES_STATE).filter(([k,v])=>v===false).map(([k])=>k);
+      document.querySelectorAll('input[name="fries"]').forEach(input=>{
+        const val=input.value;
+        const enabled = SIDES_STATE[val]!==false;
+        input.disabled = !enabled;
+        input.parentElement.classList.toggle("disabled",!enabled);
       });
+      if(disabled.length && note){
+        const human = disabled.map(k=> k==="con_sazon"?"Sazonadas":k==="con_sal"?"Con sal":"Sin sal").join(", ");
+        note.textContent="Variantes deshabilitadas: "+human;
+      } else if(note) note.textContent="";
     }
 
     db.collection("products").onSnapshot(snap=>{
       availability.clear();
-      snap.forEach(doc=>{
-        const d=doc.data();
-        availability.set(doc.id, d.available!==false);
-      });
-      refreshAvailabilityUI();
-    });
-
-    /* ===== PRODUCTOS FIRESTORE ===== */
-    let BURGERS=[], DRINKS=[], SIDES=[], MENU_ORDER={};
-    let EXTRA_PRICE_PATTY = 2500;
-    let EXTRA_PRICE_CHEDDAR = 300;
-    let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
-    const CART_KEY = "rhodes_cart_v3";
-    let cart = loadCart();
-    const FALLBACK_IMG="images/logo.png";
-
-    function mapProduct(doc){
-      const d=doc.data();
-      return {
-        id:doc.id,
-        name:d.name,
-        price:d.price,
-        img:d.img||FALLBACK_IMG,
-        desc:d.description||"",
-        category:d.category||"",
-        kind:d.kind||"",
-        allowedExtras: d.allowedExtras || {} // 🔥 LEER CONFIG DE EXTRAS
-      };
-    }
-
-    db.collection("products").onSnapshot(snap=>{
       const b=[], d=[], s=[];
       snap.forEach(doc=>{
-        const p=mapProduct(doc);
+        const data=doc.data();
+        availability.set(doc.id, data.available!==false);
+        const p={
+          id:doc.id, name:data.name, price:data.price,
+          img:data.img||FALLBACK_IMG, desc:data.description||"",
+          category:data.category||"", kind:data.kind||"",
+          allowedExtras: data.allowedExtras || {}
+        };
         if(p.category==="hamburguesas") b.push(p);
         if(p.category==="guarniciones") s.push(p);
         if(p.category==="bebidas")      d.push(p);
@@ -483,8 +590,9 @@
       mount();
     });
 
-    const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency",currency:"ARS",maximumFractionDigits:0});
-
+    /* ==============================================
+       4. RENDERIZADO (MOUNT)
+       ============================================== */
     function mount(){
       const gridBurgers = document.getElementById("burgersGrid");
       const gridSides = document.getElementById("sidesGrid");
@@ -497,11 +605,10 @@
       orderedList("guarniciones", SIDES).forEach(s=> gridSides.appendChild(renderCard(s,"side")));
       orderedList("bebidas", DRINKS).forEach(d=> gridDrinks.appendChild(renderCard(d,"drink")));
 
-      refreshAvailabilityUI(); // 🔥 Ahora sí existe y se llama correctamente
+      refreshAvailabilityUI();
       
-      // 🔥 Ocultar loader cuando termina de cargar
+      // 🔥 OCULTAR LOADER AHORA QUE TODO ESTÁ LISTO
       document.getElementById("pageLoader").classList.add("hidden");
-      
       renderCart();
     }
 
@@ -516,11 +623,13 @@
     }
 
     function renderCard(item, type){
-      const ok = availability.get(item.id);
+      const ok = isAvailable(item.id);
+      const isSoldOut = !ok;
       const card=document.createElement("div");
       card.className="card";
       card.dataset.id=item.id;
-      card.dataset.soldout = ok?"0":"1";
+      card.dataset.soldout = isSoldOut?"1":"0";
+      
       card.innerHTML=`
         <div class="imgwrap"><img src="${item.img}" onerror="this.src='images/logo.png'"></div>
         <div class="content">
@@ -540,83 +649,15 @@
       
       return card;
     }
-
-    /* ====== CARRITO ====== */
-    function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{},side:{}}; }catch{ return {burger:{},drink:{},side:{}}; } }
-    function saveCart(){ localStorage.setItem(CART_KEY, JSON.stringify(cart)); localStorage.setItem("cart_saved_at", Date.now()); }
     
-    function addDrink(item){
-      if(!cart.drink[item.id]) cart.drink[item.id] = {qty:0, item};
-      cart.drink[item.id].qty++;
-      saveCart(); renderCart();
-    }
+    // helper isAvailable
+    function isAvailable(id){ return availability.has(id)?availability.get(id):true; }
 
-    function addToCart(item, fries, extras, notes){
-      const key = `${item.id}|${fries}|${extras.patty}|${extras.cheddar}|${notes}`;
-      if(!cart.burger[key]) cart.burger[key] = {
-        id: item.id, item, qty:0, fries, notes, extras
-      };
-      cart.burger[key].qty++;
-      saveCart(); renderCart();
-    }
-
-    function renderCart(){
-      const c = document.getElementById("cartItems");
-      c.innerHTML = "";
-      let total = 0;
-      let count = 0;
-
-      for(const [k,o] of Object.entries(cart.burger)){
-        const exP = o.extras.patty * EXTRA_PRICE_PATTY;
-        const exC = o.extras.cheddar * EXTRA_PRICE_CHEDDAR;
-        const sub = (o.item.price + exP + exC) * o.qty;
-        total += sub; count += o.qty;
-        
-        let det = "";
-        if(o.extras.patty) det+=`<div>• Medallones x${o.extras.patty} (${money(exP)})</div>`;
-        if(o.extras.cheddar) det+=`<div>• Cheddar x${o.extras.cheddar} (${money(exC)})</div>`;
-
-        c.innerHTML += `<div class="item">
-          <div>
-            <strong>${o.item.name}</strong>
-            <div class="muted">Papas: ${o.fries.replace(/_/g,' ')}</div>
-            <div class="muted" style="font-size:13px">${det}</div>
-            <div class="muted">Sub: ${money(sub)}</div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-             <button class="btn ghost" onclick="changeQty('burger','${k}',-1)">-</button>
-             <b>${o.qty}</b>
-             <button class="btn ghost" onclick="changeQty('burger','${k}',1)">+</button>
-          </div>
-        </div>`;
-      }
-
-      for(const [k,o] of Object.entries(cart.drink)){
-        const sub = o.item.price * o.qty;
-        total += sub; count += o.qty;
-        c.innerHTML += `<div class="item">
-          <div><strong>${o.item.name}</strong><div>${money(sub)}</div></div>
-          <div style="display:flex;gap:8px;align-items:center">
-             <button class="btn ghost" onclick="changeQty('drink','${k}',-1)">-</button>
-             <b>${o.qty}</b>
-             <button class="btn ghost" onclick="changeQty('drink','${k}',1)">+</button>
-          </div>
-        </div>`;
-      }
-
-      document.getElementById("cartTotal").textContent = money(total);
-      document.getElementById("cartBubble").textContent = `(${count})`;
-    }
-
-    window.changeQty = (type, k, d) => {
-      if(cart[type][k]){
-        cart[type][k].qty += d;
-        if(cart[type][k].qty <= 0) delete cart[type][k];
-        saveCart(); renderCart();
-      }
-    };
-
-    /* ====== MODAL INTERNO (LÓGICA CORREGIDA) ====== */
+    /* ==============================================
+       5. INTERFAZ (MODAL, DRAWER)
+       ============================================== */
+    
+    // --- MODAL PERSONALIZAR ---
     let curItem = null, curPatty=0, curCheddar=0;
 
     function openCustomize(item){
@@ -626,19 +667,17 @@
       document.getElementById("notes").value="";
       document.getElementById("modTitle").textContent = "Personalizar: " + item.name;
 
-      // Mostrar/Ocultar extras segun config
       const allowed = item.allowedExtras || {};
       document.getElementById("rowPatties").style.display = allowed.patty ? "flex" : "none";
       document.getElementById("rowCheddar").style.display = allowed.cheddar ? "flex" : "none";
 
-      // Actualizar precios visuales
       document.getElementById("lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
       document.getElementById("lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
 
-      // Papas
+      // 🔥 RESETEAR PAPAS (NINGUNA SELECCIONADA)
       const radios = document.getElementsByName("fries");
       for(let r of radios) { 
-        r.checked = (r.value==="con_sal"); 
+        r.checked = false; // Nadie seleccionado por defecto
         r.parentElement.style.display = SIDES_STATE[r.value]===false ? 'none' : 'flex';
       }
       
@@ -653,51 +692,36 @@
       document.getElementById("unitPreview").textContent = money(total);
     }
 
-    // 🔥 LIMITES DE EXTRAS APLICADOS (2 carne, 3 cheddar)
-    document.getElementById("patInc").onclick = () => { 
-        if(curPatty < 2) { 
-            curPatty++; 
-            document.getElementById("patVal").textContent=curPatty; 
-            updateModalTotal(); 
-        }
-    };
-    document.getElementById("patDec").onclick = () => { 
-        if(curPatty>0) {
-            curPatty--; 
-            document.getElementById("patVal").textContent=curPatty; 
-            updateModalTotal(); 
-        }
-    };
-    document.getElementById("cheInc").onclick = () => { 
-        if(curCheddar < 3) { 
-            curCheddar++; 
-            document.getElementById("cheVal").textContent=curCheddar; 
-            updateModalTotal(); 
-        }
-    };
-    document.getElementById("cheDec").onclick = () => { 
-        if(curCheddar>0) {
-            curCheddar--; 
-            document.getElementById("cheVal").textContent=curCheddar; 
-            updateModalTotal(); 
-        }
-    };
+    // LIMITES
+    document.getElementById("patInc").onclick = () => { if(curPatty < 2) { curPatty++; document.getElementById("patVal").textContent=curPatty; updateModalTotal(); }};
+    document.getElementById("patDec").onclick = () => { if(curPatty>0) { curPatty--; document.getElementById("patVal").textContent=curPatty; updateModalTotal(); }};
+    document.getElementById("cheInc").onclick = () => { if(curCheddar < 3) { curCheddar++; document.getElementById("cheVal").textContent=curCheddar; updateModalTotal(); }};
+    document.getElementById("cheDec").onclick = () => { if(curCheddar>0) { curCheddar--; document.getElementById("cheVal").textContent=curCheddar; updateModalTotal(); }};
     
     document.getElementById("btnCancel").onclick = () => document.getElementById("overlay").classList.remove("open");
     
     document.getElementById("btnAdd").onclick = () => {
-      const fries = document.querySelector('input[name="fries"]:checked')?.value || "con_sal";
+      // 🔥 VALIDAR PAPAS
+      const friesInput = document.querySelector('input[name="fries"]:checked');
+      if(!friesInput){
+          alert("⚠️ Por favor, seleccioná una opción de papas.");
+          return;
+      }
+      const fries = friesInput.value;
       const notes = document.getElementById("notes").value.trim();
+      
       addToCart(curItem, fries, {patty: curPatty, cheddar: curCheddar}, notes);
       document.getElementById("overlay").classList.remove("open");
     };
 
-    /* ====== DRAWER EVENTS ====== */
+    // --- DRAWER ---
     const drawer = document.getElementById("drawer");
     document.getElementById("btnCart").onclick = () => drawer.classList.add("open");
     document.getElementById("closeDrawer").onclick = () => drawer.classList.remove("open");
     document.getElementById("btnVaciar").onclick = () => { cart={burger:{},drink:{},side:{}}; saveCart(); renderCart(); };
+    
     document.getElementById("btnPagar").onclick = () => {
+       // Ahora cartCount() ya existe y funciona
        if(cartCount()===0) return alert("Carrito vacío");
        window.location.href = "pedido_cliente.html";
     };
@@ -706,6 +730,8 @@
     if(Date.now() - (Number(localStorage.getItem("cart_saved_at"))||0) > 20*60*1000){
       cart={burger:{},drink:{},side:{}}; saveCart();
     }
+    
+    renderStatus();
   </script>
 </body>
 </html>
