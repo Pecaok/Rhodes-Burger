@@ -166,11 +166,6 @@
       cursor:pointer; font-size:14px; user-select:none;
     }
     .chip input { accent-color: var(--primary); }
-    /* Estilo para chip seleccionado (para que se note más) */
-    .chip:has(input:checked) {
-        background-color: #fce7f3; /* Un tono suave */
-        border-color: var(--primary);
-    }
 
     .qtybox{
       display: inline-flex; align-items: center; gap: 10px;
@@ -302,31 +297,35 @@
 
   <script>
     /* ==============================================
-       1. VARIABLES GLOBALES Y HELPERS (AL INICIO)
+       1. VARIABLES Y FUNCIONES GLOBALES (ANTES DE TODO)
        ============================================== */
     const HOURS = {
       0: [[19,0,24,0]], 1: [], 2: [], 3: [[19,0,24,0]], 
       4: [[19,0,24,0]], 5: [[19,0,24,0]], 6: [[19,0,24,0]]
     };
+    
+    // Variables Globales
     let BURGERS=[], DRINKS=[], SIDES=[], MENU_ORDER={};
-    let EXTRA_PRICE_PATTY = 2500;
+    let EXTRA_PRICE_PATTY = 2800; // 🔥 PRECIO CARNE CORREGIDO
     let EXTRA_PRICE_CHEDDAR = 300;
     let FORCE_OPEN=false, FORCE_MSG="", FORCE_UNTIL=null, orderable=true;
     let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
     const CART_KEY = "rhodes_cart_v3";
     const FALLBACK_IMG="images/logo.png";
     const availability=new Map();
-    
-    // Función para formatear dinero
-    const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency",currency:"ARS",maximumFractionDigits:0});
+    let cart = loadCart();
 
-    // Función que faltaba (definida al principio)
+    // Helpers
+    const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency",currency:"ARS",maximumFractionDigits:0});
+    function fmtHM(h,m){ if(h===24) h=0; return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0"); }
+    
+    // 🔥 FUNCIONES CRÍTICAS (DEFINIDAS AL PRINCIPIO PARA EVITAR ERRORES)
+    
     function refreshAvailabilityUI(){
       document.querySelectorAll(".card[data-id]").forEach(card=>{
         const id=card.dataset.id;
         const ok=availability.has(id) ? availability.get(id) : true;
         card.dataset.soldout = ok?"0":"1";
-
         let badge=card.querySelector(".soldout-badge");
         if(!ok){
           if(!badge){
@@ -341,8 +340,49 @@
       });
     }
 
-    // Funciones de horario
-    function fmtHM(h,m){ if(h===24) h=0; return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0"); }
+    function renderStatus(){
+      const pill=document.getElementById("statusPill");
+      const main=pill.querySelector(".status-main");
+      const sub =pill.querySelector(".status-sub");
+      const untilActive = FORCE_UNTIL && FORCE_UNTIL.getTime()>Date.now();
+
+      if(FORCE_OPEN || untilActive){
+        pill.className = "status-pill status-open";
+        main.textContent="Abierto";
+        sub.textContent = untilActive ? `hasta las ${fmtHM(FORCE_UNTIL.getHours(),FORCE_UNTIL.getMinutes())} hs` : (FORCE_MSG||"Apertura especial");
+        setOrderable(true);
+        return;
+      }
+      const st=isOpenNow();
+      if(st.open){
+        pill.className = "status-pill status-open";
+        main.textContent="Abierto";
+        sub.textContent=`hasta las ${fmtHM(st.until[0],st.until[1])} hs`;
+        setOrderable(true);
+      }else{
+        pill.className = "status-pill status-closed";
+        main.textContent="Cerrado";
+        const next = getNextOpenInfo();
+        sub.textContent = next ? `abrimos ${next.dayLabel} a las ${next.time} hs` : "abrimos pronto";
+        setOrderable(false);
+      }
+    }
+
+    function cartCount(){
+      let n=0;
+      Object.values(cart.burger).forEach(o=>n+=o.qty);
+      Object.values(cart.drink ).forEach(o=>n+=o.qty);
+      return n;
+    }
+
+    function setOrderable(v){
+      orderable = !!v;
+      document.querySelectorAll("[data-add]").forEach(btn=>{
+        btn.disabled = !v;
+        if(v) btn.classList.remove("disabled"); else btn.classList.add("disabled");
+      });
+    }
+
     function isOpenNow(d=new Date()){
       const cur=d.getHours()*60+d.getMinutes();
       const blocks=HOURS[d.getDay()]||[];
@@ -352,7 +392,7 @@
       }
       return {open:false};
     }
-    
+
     function getNextOpenInfo() {
         const now = new Date();
         const curMin = now.getHours() * 60 + now.getMinutes();
@@ -388,18 +428,86 @@
     const db = firebase.firestore();
 
     /* ==============================================
-       2. LÓGICA DE CARRITO (CART COUNT FIX)
+       2. CARGA DE DATOS (LISTENERS)
        ============================================== */
-    let cart = loadCart();
+    
+    // Status
+    db.collection("config").doc("store").onSnapshot(s=>{
+      const d=s.exists?(s.data()||{}):{};
+      FORCE_OPEN = !!d.forceOpen;
+      FORCE_MSG  = d.forceOpenMessage || "";
+      FORCE_UNTIL = d.forceOpenUntil ? (d.forceOpenUntil.toDate ? d.forceOpenUntil.toDate() : new Date(d.forceOpenUntil)) : null;
+      renderStatus();
+    });
 
+    // Precios
+    db.collection("config").doc("prices").onSnapshot(doc => {
+        if(doc.exists) {
+            const d = doc.data();
+            if(d.patty) EXTRA_PRICE_PATTY = Number(d.patty);
+            if(d.cheddar) EXTRA_PRICE_CHEDDAR = Number(d.cheddar);
+        }
+    });
+
+    // Sides (Papas)
+    db.collection("config").doc("sides").onSnapshot(s=>{
+      const d=s.exists?(s.data()||{}):{};
+      SIDES_STATE = {
+        con_sazon: d.con_sazon!==false,
+        con_sal:   d.con_sal!==false,
+        sin_sal:   d.sin_sal!==false
+      };
+      applySidesToUI();
+    });
+
+    function applySidesToUI(){
+      const note = document.getElementById("friesStateNote");
+      const disabled = Object.entries(SIDES_STATE).filter(([k,v])=>v===false).map(([k])=>k);
+      document.querySelectorAll('input[name="fries"]').forEach(input=>{
+        const val=input.value;
+        const enabled = SIDES_STATE[val]!==false;
+        input.disabled = !enabled;
+        input.parentElement.classList.toggle("disabled",!enabled);
+      });
+      if(disabled.length && note){
+        const human = disabled.map(k=> k==="con_sazon"?"Sazonadas":k==="con_sal"?"Con sal":"Sin sal").join(", ");
+        note.textContent="Variantes deshabilitadas: "+human;
+      } else if(note) note.textContent="";
+    }
+
+    // Productos
+    db.collection("products").onSnapshot(snap=>{
+      availability.clear();
+      const b=[], d=[], s=[];
+      snap.forEach(doc=>{
+        const data=doc.data();
+        availability.set(doc.id, data.available!==false);
+        const p={
+          id:doc.id, name:data.name, price:data.price,
+          img:data.img||FALLBACK_IMG, desc:data.description||"",
+          category:data.category||"", kind:data.kind||"",
+          allowedExtras: data.allowedExtras || {}
+        };
+        if(p.category==="hamburguesas") b.push(p);
+        if(p.category==="guarniciones") s.push(p);
+        if(p.category==="bebidas")      d.push(p);
+      });
+      BURGERS=b; SIDES=s; DRINKS=d;
+      mount();
+    });
+
+    db.collection("config").doc("menuOrder").onSnapshot(snap=>{
+      MENU_ORDER = snap.exists ? snap.data() : {};
+      mount();
+    });
+
+    /* ==============================================
+       3. FUNCIONES DE INTERFAZ Y CARRITO
+       ============================================== */
     function loadCart(){
       try {
         const c = JSON.parse(localStorage.getItem(CART_KEY)) || {};
-        return {
-          burger: c.burger || {},
-          drink:  c.drink  || {},
-          side:   c.side   || {}
-        };
+        return { burger: c.burger || {}, drink: c.drink || {}, side: c.side || {} };
       } catch {
         return { burger:{}, drink:{}, side:{} };
       }
@@ -408,14 +516,6 @@
     function saveCart(){
       localStorage.setItem(CART_KEY, JSON.stringify(cart));
       localStorage.setItem("cart_saved_at", Date.now());
-    }
-
-    // 🔥 AHORA SÍ ESTÁ DISPONIBLE GLOBALMENTE
-    function cartCount(){
-      let n=0;
-      Object.values(cart.burger).forEach(o=>n+=o.qty);
-      Object.values(cart.drink ).forEach(o=>n+=o.qty);
-      return n;
     }
 
     function calcTotal(){
@@ -521,78 +621,7 @@
       saveCart(); renderCart();
     }
 
-    /* ==============================================
-       3. CARGA DE DATOS (LISTENERS)
-       ============================================== */
-    db.collection("config").doc("store").onSnapshot(s=>{
-      const d=s.exists?(s.data()||{}):{};
-      FORCE_OPEN = !!d.forceOpen;
-      FORCE_MSG  = d.forceOpenMessage || "";
-      FORCE_UNTIL = d.forceOpenUntil ? (d.forceOpenUntil.toDate ? d.forceOpenUntil.toDate() : new Date(d.forceOpenUntil)) : null;
-      renderStatus();
-    });
-
-    db.collection("config").doc("prices").onSnapshot(doc => {
-        if(doc.exists) {
-            const d = doc.data();
-            if(d.patty) EXTRA_PRICE_PATTY = Number(d.patty);
-            if(d.cheddar) EXTRA_PRICE_CHEDDAR = Number(d.cheddar);
-        }
-    });
-
-    db.collection("config").doc("sides").onSnapshot(s=>{
-      const d=s.exists?(s.data()||{}):{};
-      SIDES_STATE = {
-        con_sazon: d.con_sazon!==false,
-        con_sal:   d.con_sal!==false,
-        sin_sal:   d.sin_sal!==false
-      };
-      applySidesToUI();
-    });
-
-    function applySidesToUI(){
-      const note = document.getElementById("friesStateNote");
-      const disabled = Object.entries(SIDES_STATE).filter(([k,v])=>v===false).map(([k])=>k);
-      document.querySelectorAll('input[name="fries"]').forEach(input=>{
-        const val=input.value;
-        const enabled = SIDES_STATE[val]!==false;
-        input.disabled = !enabled;
-        input.parentElement.classList.toggle("disabled",!enabled);
-      });
-      if(disabled.length && note){
-        const human = disabled.map(k=> k==="con_sazon"?"Sazonadas":k==="con_sal"?"Con sal":"Sin sal").join(", ");
-        note.textContent="Variantes deshabilitadas: "+human;
-      } else if(note) note.textContent="";
-    }
-
-    db.collection("products").onSnapshot(snap=>{
-      availability.clear();
-      const b=[], d=[], s=[];
-      snap.forEach(doc=>{
-        const data=doc.data();
-        availability.set(doc.id, data.available!==false);
-        const p={
-          id:doc.id, name:data.name, price:data.price,
-          img:data.img||FALLBACK_IMG, desc:data.description||"",
-          category:data.category||"", kind:data.kind||"",
-          allowedExtras: data.allowedExtras || {}
-        };
-        if(p.category==="hamburguesas") b.push(p);
-        if(p.category==="guarniciones") s.push(p);
-        if(p.category==="bebidas")      d.push(p);
-      });
-      BURGERS=b; SIDES=s; DRINKS=d;
-      mount();
-    });
-
-    db.collection("config").doc("menuOrder").onSnapshot(snap=>{
-      MENU_ORDER = snap.exists ? snap.data() : {};
-      mount();
-    });
-
-    /* ==============================================
-       4. RENDERIZADO (MOUNT)
-       ============================================== */
+    /* ====== MOUNT & RENDER ====== */
     function mount(){
       const gridBurgers = document.getElementById("burgersGrid");
       const gridSides = document.getElementById("sidesGrid");
@@ -607,7 +636,6 @@
 
       refreshAvailabilityUI();
       
-      // 🔥 OCULTAR LOADER AHORA QUE TODO ESTÁ LISTO
       document.getElementById("pageLoader").classList.add("hidden");
       renderCart();
     }
@@ -623,12 +651,11 @@
     }
 
     function renderCard(item, type){
-      const ok = isAvailable(item.id);
-      const isSoldOut = !ok;
+      const ok = availability.has(item.id) ? availability.get(item.id) : true;
       const card=document.createElement("div");
       card.className="card";
       card.dataset.id=item.id;
-      card.dataset.soldout = isSoldOut?"1":"0";
+      card.dataset.soldout = ok?"0":"1";
       
       card.innerHTML=`
         <div class="imgwrap"><img src="${item.img}" onerror="this.src='images/logo.png'"></div>
@@ -649,15 +676,8 @@
       
       return card;
     }
-    
-    // helper isAvailable
-    function isAvailable(id){ return availability.has(id)?availability.get(id):true; }
 
-    /* ==============================================
-       5. INTERFAZ (MODAL, DRAWER)
-       ============================================== */
-    
-    // --- MODAL PERSONALIZAR ---
+    /* ====== MODAL PERSONALIZAR ====== */
     let curItem = null, curPatty=0, curCheddar=0;
 
     function openCustomize(item){
@@ -674,10 +694,10 @@
       document.getElementById("lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
       document.getElementById("lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
 
-      // 🔥 RESETEAR PAPAS (NINGUNA SELECCIONADA)
+      // 🔥 PAPAS: NINGUNA SELECCIONADA AL ABRIR
       const radios = document.getElementsByName("fries");
       for(let r of radios) { 
-        r.checked = false; // Nadie seleccionado por defecto
+        r.checked = false; 
         r.parentElement.style.display = SIDES_STATE[r.value]===false ? 'none' : 'flex';
       }
       
@@ -700,8 +720,8 @@
     
     document.getElementById("btnCancel").onclick = () => document.getElementById("overlay").classList.remove("open");
     
+    // 🔥 VALIDACIÓN DE PAPAS
     document.getElementById("btnAdd").onclick = () => {
-      // 🔥 VALIDAR PAPAS
       const friesInput = document.querySelector('input[name="fries"]:checked');
       if(!friesInput){
           alert("⚠️ Por favor, seleccioná una opción de papas.");
@@ -714,24 +734,21 @@
       document.getElementById("overlay").classList.remove("open");
     };
 
-    // --- DRAWER ---
+    /* ====== DRAWER EVENTS ====== */
     const drawer = document.getElementById("drawer");
     document.getElementById("btnCart").onclick = () => drawer.classList.add("open");
     document.getElementById("closeDrawer").onclick = () => drawer.classList.remove("open");
     document.getElementById("btnVaciar").onclick = () => { cart={burger:{},drink:{},side:{}}; saveCart(); renderCart(); };
     
     document.getElementById("btnPagar").onclick = () => {
-       // Ahora cartCount() ya existe y funciona
        if(cartCount()===0) return alert("Carrito vacío");
        window.location.href = "pedido_cliente.html";
     };
 
-    // Auto-borrado carrito viejo
+    // Auto-borrado
     if(Date.now() - (Number(localStorage.getItem("cart_saved_at"))||0) > 20*60*1000){
       cart={burger:{},drink:{},side:{}}; saveCart();
     }
-    
-    renderStatus();
   </script>
 </body>
 </html>
