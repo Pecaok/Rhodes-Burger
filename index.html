@@ -23,7 +23,7 @@
     #pageLoader {
       position: fixed;
       top: 0; left: 0; width: 100%; height: 100%;
-      background-color: #000000;
+      background-color: #000000; /* Fondo negro puro */
       z-index: 99999;
       display: flex;
       align-items: center;
@@ -45,7 +45,7 @@
       mix-blend-mode: screen; 
     }
 
-    /* Ajuste para PC */
+    /* 🔥 AJUSTE PARA PC */
     @media (min-width: 768px) {
         #pageLoader video { width: 500px; }
     }
@@ -336,32 +336,14 @@
         return null;
     }
 
-    /* ====== FIRESTORE INIT ====== */
-    const firebaseConfig = {
-      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-      authDomain: "rhodes-burguers.firebaseapp.com",
-      projectId: "rhodes-burguers",
-      storageBucket: "rhodes-burguers.firebasestorage.app",
-      messagingSenderId: "951646688091",
-      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
-    };
-    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-
-    /* ====== VARIABLES GLOBALES ====== */
-    let BURGERS=[], DRINKS=[], SIDES=[], MENU_ORDER={};
-    let EXTRA_PRICE_PATTY = 2500;
-    let EXTRA_PRICE_CHEDDAR = 300;
+    /* ====== Estado forzado Firestore ====== */
     let FORCE_OPEN=false, FORCE_MSG="", FORCE_UNTIL=null, orderable=true;
-    let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
-    const CART_KEY = "rhodes_cart_v3";
-    let cart = loadCart();
 
-    /* ====== STATUS TIENDA ====== */
     function renderStatus(){
       const pill=document.getElementById("statusPill");
       const main=pill.querySelector(".status-main");
       const sub =pill.querySelector(".status-sub");
+
       const untilActive = FORCE_UNTIL && FORCE_UNTIL.getTime()>Date.now();
 
       if(FORCE_OPEN || untilActive){
@@ -393,6 +375,19 @@
       });
     }
 
+    /* ===== Firebase Init ===== */
+    const firebaseConfig = {
+      apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+      authDomain: "rhodes-burguers.firebaseapp.com",
+      projectId: "rhodes-burguers",
+      storageBucket: "rhodes-burguers.firebasestorage.app",
+      messagingSenderId: "951646688091",
+      appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    /* ======= Store override ======= */
     db.collection("config").doc("store").onSnapshot(s=>{
       const d=s.exists?(s.data()||{}):{};
       FORCE_OPEN = !!d.forceOpen;
@@ -414,23 +409,70 @@
       SIDES_STATE = { con_sazon: d.con_sazon!==false, con_sal: d.con_sal!==false, sin_sal: d.sin_sal!==false };
     });
 
-    /* ====== MENU ====== */
+    /* ======= DISPONIBILIDAD ======= */
     const availability=new Map();
+    const isAvailable=id => availability.has(id)?availability.get(id):true;
+
+    // 🔥 FUNCIÓN QUE FALTABA (ARREGLADA)
+    function refreshAvailabilityUI(){
+      document.querySelectorAll(".card[data-id]").forEach(card=>{
+        const id=card.dataset.id;
+        const ok=isAvailable(id);
+        card.dataset.soldout = ok?"0":"1";
+
+        let badge=card.querySelector(".soldout-badge");
+        if(!ok){
+          if(!badge){
+            badge=document.createElement("div");
+            badge.className="soldout-badge";
+            badge.textContent="SIN STOCK";
+            card.querySelector(".imgwrap").appendChild(badge);
+          }
+        }else{
+          if(badge) badge.remove();
+        }
+      });
+    }
+
     db.collection("products").onSnapshot(snap=>{
       availability.clear();
+      snap.forEach(doc=>{
+        const d=doc.data();
+        availability.set(doc.id, d.available!==false);
+      });
+      refreshAvailabilityUI();
+    });
+
+    /* ===== PRODUCTOS FIRESTORE ===== */
+    let BURGERS=[], DRINKS=[], SIDES=[], MENU_ORDER={};
+    let EXTRA_PRICE_PATTY = 2500;
+    let EXTRA_PRICE_CHEDDAR = 300;
+    let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
+    const CART_KEY = "rhodes_cart_v3";
+    let cart = loadCart();
+    const FALLBACK_IMG="images/logo.png";
+
+    function mapProduct(doc){
+      const d=doc.data();
+      return {
+        id:doc.id,
+        name:d.name,
+        price:d.price,
+        img:d.img||FALLBACK_IMG,
+        desc:d.description||"",
+        category:d.category||"",
+        kind:d.kind||"",
+        allowedExtras: d.allowedExtras || {} // 🔥 LEER CONFIG DE EXTRAS
+      };
+    }
+
+    db.collection("products").onSnapshot(snap=>{
       const b=[], d=[], s=[];
       snap.forEach(doc=>{
-        const data=doc.data();
-        availability.set(doc.id, data.available!==false);
-        const p={
-          id:doc.id, name:data.name, price:data.price,
-          img:data.img||"images/logo.png", desc:data.description||"",
-          category:data.category||"", kind:data.kind||"",
-          allowedExtras: data.allowedExtras || {}
-        };
+        const p=mapProduct(doc);
         if(p.category==="hamburguesas") b.push(p);
         if(p.category==="guarniciones") s.push(p);
-        if(p.category==="bebidas") d.push(p);
+        if(p.category==="bebidas")      d.push(p);
       });
       BURGERS=b; SIDES=s; DRINKS=d;
       mount();
@@ -455,7 +497,7 @@
       orderedList("guarniciones", SIDES).forEach(s=> gridSides.appendChild(renderCard(s,"side")));
       orderedList("bebidas", DRINKS).forEach(d=> gridDrinks.appendChild(renderCard(d,"drink")));
 
-      refreshAvailabilityUI();
+      refreshAvailabilityUI(); // 🔥 Ahora sí existe y se llama correctamente
       
       // 🔥 Ocultar loader cuando termina de cargar
       document.getElementById("pageLoader").classList.add("hidden");
