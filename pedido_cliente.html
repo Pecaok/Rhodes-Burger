@@ -24,6 +24,40 @@
       color:var(--text);
       font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif
     }
+
+    /* ===== PANTALLA DE CARGA (VIDEO) ===== */
+    #pageLoader {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background-color: #000000; /* Fondo negro puro */
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.5s ease, visibility 0.5s;
+    }
+    
+    #pageLoader.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    #pageLoader video {
+      width: 250px; /* Tamaño móvil */
+      max-width: 90%;
+      height: auto;
+      object-fit: contain;
+      mix-blend-mode: screen; 
+    }
+
+    /* 🔥 TAMAÑO GRANDE PARA PC */
+    @media (min-width: 768px) {
+        #pageLoader video {
+            width: 500px; 
+        }
+    }
+
     header{
       position:sticky; top:0; z-index:10;
       background:#fff;
@@ -142,6 +176,14 @@
 </head>
 
 <body>
+
+<div id="pageLoader">
+  <video autoplay loop muted playsinline>
+    <source src="images/loader.mp4" type="video/mp4">
+    <img src="images/logo.png" alt="Cargando..." style="width:100px;">
+  </video>
+</div>
+
 <header>
   <div class="topbar">
     <a class="brand" href="index.html">
@@ -271,7 +313,7 @@ const G_POR_SIDE=700;
 const SLOT_START="19:15"; const SLOT_END="23:45"; const SLOT_INTERVAL_MIN=15;
 const WHATSAPP_NUMBER = "5491170596483"; 
 
-// 🔥 PRECIOS EXTRAS (CORREGIDO A 2800)
+// 🔥 PRECIOS EXTRAS
 const PRICE_PATTY = 2800;
 const PRICE_CHEDDAR = 300;
 
@@ -343,7 +385,7 @@ $("#slotNext").onclick=()=>{if(currentIndex<visibles.length-1){currentIndex++;ac
 $("#btnRefreshSlots").onclick=cargarSlots;
 setInterval(reconstruirVisibles,10000);
 
-/* RESUMEN - 🔥 LÓGICA DE CUPONES INTEGRADA */
+/* RESUMEN - 🔥 CORREGIDO (DETALLE LIMPIO + CUPÓN) */
 function renderResumen(){
   const c=loadCart(); const box=$("#resumen"); box.innerHTML=""; let t=0;
   for(const o of Object.values(c.burger)){
@@ -352,6 +394,7 @@ function renderResumen(){
     const subt = o.qty * unitPrice;
     t += subt;
 
+    // 🔥 Extras sin color rojo, usando la clase .muted igual que las papas
     let extrasHtml = "";
     if(o.extras?.patty) extrasHtml += `<div class="muted">• Extra carne: +${o.extras.patty}</div>`;
     if(o.extras?.cheddar) extrasHtml += `<div class="muted">• Extra cheddar: +${o.extras.cheddar}</div>`;
@@ -366,7 +409,7 @@ function renderResumen(){
   for(const k in c.drink){ t += c.drink[k].qty * c.drink[k].item.price; }
   for(const k in c.side){ t += c.side[k].qty * c.side[k].item.price; }
 
-  // Aplicar descuento visual
+  // Restar cupón
   let finalTotal = t - activeDiscount;
   if(finalTotal < 0) finalTotal = 0;
 
@@ -377,10 +420,10 @@ function renderResumen(){
   }
 
   $("#resTotal").textContent="$ "+finalTotal.toLocaleString("es-AR");
-  return finalTotal; 
+  return finalTotal; // Retornamos para usar en confirmación
 }
 
-/* 🎟️ HANDLER DE CUPÓN */
+/* 🎟️ LÓGICA DE CUPÓN */
 $("#btnAplicarCupon").onclick = async () => {
     const code = $("#inpCupon").value.trim().toUpperCase();
     const msg = $("#msgCupon");
@@ -389,6 +432,7 @@ $("#btnAplicarCupon").onclick = async () => {
     $("#btnAplicarCupon").textContent = "⏳";
     
     try {
+        // Busca en colección 'coupons'
         const snap = await db.collection('coupons').where('code', '==', code).where('active', '==', true).get();
         if(snap.empty) {
             msg.textContent = "❌ Cupón inválido o expirado";
@@ -397,6 +441,7 @@ $("#btnAplicarCupon").onclick = async () => {
             activeCouponCode = "";
         } else {
             const data = snap.docs[0].data();
+            // Asumimos que el cupón tiene campo 'amount' (monto fijo)
             if(data.amount) {
                 activeDiscount = Number(data.amount);
                 activeCouponCode = code;
@@ -460,12 +505,13 @@ $("#btnConfirmar").onclick=async()=>{
   if(!nombre){ alert("Ingresá tu nombre"); return; }
   if(!slot){ alert("Elegí un horario de retiro"); return; }
     
-  let itemsCount=0; 
-  Object.values(cart.burger).forEach(o=>itemsCount+=o.qty);
-  Object.values(cart.drink).forEach(o=>itemsCount+=o.qty);
-  Object.values(cart.side).forEach(o=>itemsCount+=o.qty);
+  // Verificar carrito completo, no solo burgers
+  let items=0; 
+  Object.values(cart.burger).forEach(o=>items+=o.qty);
+  Object.values(cart.drink).forEach(o=>items+=o.qty);
+  Object.values(cart.side).forEach(o=>items+=o.qty);
   
-  if(itemsCount===0){alert("Carrito vacío");return;}
+  if(items===0){alert("Carrito vacío");return;}
 
   btn.disabled=true; btn.textContent="Procesando...";
 
@@ -511,7 +557,7 @@ $("#btnConfirmar").onclick=async()=>{
     const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
     const localISO = localDate.toISOString().slice(0, -1); 
 
-    // 🔥 UNIFICACIÓN DE LISTA DE ITEMS (FIX BEBIDAS)
+    // 🔥 UNIFICACIÓN DE LISTAS
     const allItems = [
         ...Object.values(cart.burger).map(o=>({
             type: 'burger',
@@ -546,10 +592,10 @@ $("#btnConfirmar").onclick=async()=>{
       status:"accepted",
       statusHistory:[{to:"accepted",at:localISO}],
       items: allItems, 
-      total: totalFinal, // Total con descuento
-      subtotal: totalCalculado, // Subtotal real
-      discount: activeDiscount, // Cuánto descontó
-      coupon: activeCouponCode, // Qué cupón usó
+      total: totalFinal, 
+      subtotal: totalCalculado, 
+      discount: activeDiscount, 
+      coupon: activeCouponCode, 
       createdAt: localISO,
       trackToken: trackToken
     };
@@ -603,6 +649,15 @@ window.addEventListener("DOMContentLoaded",()=>{
     const savedPhone = localStorage.getItem('rb_user_phone');
     if(savedName) $("#inpNombre").value = savedName;
     if(savedPhone) $("#inpTelefono").value = savedPhone;
+
+    // 🔥 OCULTAR LOADER CUANDO CARGAN DATOS (SIMULADO)
+    setTimeout(() => {
+        const loader = document.getElementById("pageLoader");
+        if(loader) {
+            loader.classList.add("hidden");
+            setTimeout(()=>loader.remove(), 500);
+        }
+    }, 1500); // 1.5s de carga estética
 });
 </script>
 </body>
