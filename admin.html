@@ -177,6 +177,7 @@ main {
 .pill.ok { background: #e8f5e9; color: var(--good); border: 1px solid #c8e6c9; }
 .pill.off { background: #f5f5f5; color: #777; border: 1px solid #e0e0e0; }
 .pill.blue { background: #e0f2fe; color: #0284c7; border: 1px solid #bae6fd; }
+.pill.warn { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
 
 .mini-btn {
   border: none;
@@ -371,33 +372,48 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
 <main>
 
 <section class="card" style="border-left: 4px solid var(--primary);">
-  <div class="store-bar">
+  <div style="margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
     <div>
       <h2>Estado de la Tienda</h2>
-      <div id="storeSub" class="text-small muted">—</div>
+      <div id="storeSub" class="text-small muted">Cargando estado...</div>
     </div>
+    <div id="storePill" class="pill off">...</div>
+  </div>
 
-    <div style="display:flex; flex-direction:column; gap:10px; align-items:flex-end;">
-      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
-        <div id="storePill" class="pill off">CERRADO</div>
-
-        <div style="display:flex; gap:8px">
-          <button class="mini-btn good" id="btnForceOpen">Abrir Tienda</button>
-          <button class="mini-btn bad" id="btnForceClose">Cerrar con Mensaje</button>
-        </div>
-      </div>
-
-      <div style="width:100%; max-width:400px;">
-        <input id="closeMsgInput" type="text" placeholder="Mensaje de cierre (Ej: Volvemos 20:00hs)" 
-               style="padding:8px; font-size:13px; border:1px solid #ffcdd2; background:#fff5f5;">
-      </div>
+  <div class="store-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:30px;">
     
-      <div style="display:flex; align-items:center; gap:6px; margin-top:5px">
-        <span class="text-small muted">O programar hasta:</span>
-        <input id="forceUntil" type="datetime-local" style="padding:6px; font-size:12px; width:auto"/>
-        <button class="mini-btn primary" id="btnSaveUntil">Programar</button>
+    <div style="background:#f9f9f9; padding:15px; border-radius:12px; border:1px solid #eee;">
+      <h3 style="margin-top:0; font-size:16px;">⚡ Control Diario</h3>
+      <p class="text-small muted">Abrir o cerrar manualmente ahora mismo.</p>
+      <div style="display:flex; gap:10px; margin-top:15px;">
+        <button class="btn good" id="btnSimpleOpen" style="flex:1;">Abrir Tienda</button>
+        <button class="btn bad" id="btnSimpleClose" style="flex:1;">Cerrar Tienda</button>
       </div>
     </div>
+
+    <div style="background:#fff5f5; padding:15px; border-radius:12px; border:1px solid #ffcdd2;">
+      <h3 style="margin-top:0; font-size:16px; color:#d32f2f;">🛠️ Mantenimiento / Vacaciones</h3>
+      <p class="text-small muted">Programar cierre con mensaje y fechas.</p>
+      
+      <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+        <input id="maintMsg" type="text" placeholder="Mensaje (Ej: Cerrado por vacaciones)" 
+               style="border:1px solid #ffcdd2;">
+        
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <div>
+                <label style="font-size:11px;">Desde:</label>
+                <input id="maintFrom" type="datetime-local" style="font-size:12px;">
+            </div>
+            <div>
+                <label style="font-size:11px;">Hasta:</label>
+                <input id="maintTo" type="datetime-local" style="font-size:12px;">
+            </div>
+        </div>
+
+        <button class="btn warn" id="btnSetMaint" style="width:100%;">Programar Cierre</button>
+      </div>
+    </div>
+
   </div>
 </section>
 
@@ -1048,98 +1064,136 @@ function renderSidesUI(state){
 sidesRef().onSnapshot(snap=>{ renderSidesUI(snap.exists ? snap.data() : {}); });
 
 /* ============================================================
-     STORE OVERRIDE LOGIC (MODIFICADA)
+     STORE OVERRIDE LOGIC (NUEVA VERSIÓN)
 =============================================================== */
 const storeRef = () => db.collection("config").doc("store");
 const storePill = document.querySelector("#storePill");
 const storeSub = document.querySelector("#storeSub");
-const btnOpen = document.querySelector("#btnForceOpen");
-const btnClose = document.querySelector("#btnForceClose");
-const forceUntilInput = document.querySelector("#forceUntil");
-const btnSaveUntil = document.querySelector("#btnSaveUntil");
-const closeMsgInput = document.querySelector("#closeMsgInput");
 
-function applyStoreDocToUI(d){
-  const on = !!d.forceOpen;
-  let until = null;
+// Elementos Control Diario
+const btnSimpleOpen = document.querySelector("#btnSimpleOpen");
+const btnSimpleClose = document.querySelector("#btnSimpleClose");
 
-  // Lógica del input de mensaje
-  if(d.forceOpenMessage){
-      closeMsgInput.value = d.forceOpenMessage;
-  } else {
-      closeMsgInput.value = "";
-  }
+// Elementos Mantenimiento
+const maintMsg = document.querySelector("#maintMsg");
+const maintFrom = document.querySelector("#maintFrom");
+const maintTo = document.querySelector("#maintTo");
+const btnSetMaint = document.querySelector("#btnSetMaint");
 
-  if(d.forceOpenUntil){
-    try{
-      if(typeof d.forceOpenUntil.toDate === "function") until = d.forceOpenUntil.toDate();
-      else if(d.forceOpenUntil.seconds) until = new Date(d.forceOpenUntil.seconds * 1000);
-      else until = new Date(d.forceOpenUntil);
-    }catch(e){}
-  }
-  const active = on || (until && until.getTime() > Date.now());
-  
-  if(active){
-    storePill.className = "pill ok";
-    storePill.textContent = "ABIERTO";
-    // Deshabilitamos el input si la tienda está abierta
-    closeMsgInput.disabled = true;
-    closeMsgInput.placeholder = "Tienda abierta...";
-    closeMsgInput.style.opacity = "0.5";
-  } else {
-    storePill.className = "pill off";
-    storePill.textContent = "CERRADO";
-    // Habilitamos para que puedas escribir
-    closeMsgInput.disabled = false;
-    closeMsgInput.placeholder = "Mensaje de cierre (Ej: Volvemos 20hs)";
-    closeMsgInput.style.opacity = "1";
-  }
-  
-  if(until && until.getTime() > Date.now()){
-    const h = String(until.getHours()).padStart(2,"0");
-    const m = String(until.getMinutes()).padStart(2,"0");
-    storeSub.textContent = `Programado hasta las ${h}:${m}`;
-    const local = new Date(until.getTime() - until.getTimezoneOffset()*60000);
-    forceUntilInput.value = local.toISOString().slice(0,16);
-  } else {
-    storeSub.textContent = d.forceOpenMessage ? `Mensaje: "${d.forceOpenMessage}"` : "Operación normal / Cerrado";
-    forceUntilInput.value = "";
-  }
+// 1. ABRIR TIENDA (Borra cualquier mantenimiento)
+btnSimpleOpen.onclick = async () => {
+    if(!confirm("¿Abrir la tienda y cancelar mantenimientos programados?")) return;
+    try {
+        await storeRef().set({
+            forceOpen: true,
+            maintenance: firebase.firestore.FieldValue.delete(), // Borra datos de mantenimiento
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, {merge: true});
+    } catch(e) { alert("Error al abrir"); }
+};
+
+// 2. CERRAR TIENDA (Manual simple)
+btnSimpleClose.onclick = async () => {
+    try {
+        await storeRef().set({
+            forceOpen: false,
+            maintenance: firebase.firestore.FieldValue.delete(), // Borra datos de mantenimiento para que sea cierre simple
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, {merge: true});
+    } catch(e) { alert("Error al cerrar"); }
+};
+
+// 3. PROGRAMAR MANTENIMIENTO
+btnSetMaint.onclick = async () => {
+    const msg = maintMsg.value.trim();
+    const fromVal = maintFrom.value;
+    const toVal = maintTo.value;
+
+    if(!msg) { alert("Escribí un mensaje para el cliente."); return; }
+    if(!fromVal || !toVal) { alert("Seleccioná fecha DESDE y HASTA."); return; }
+
+    const dateFrom = new Date(fromVal);
+    const dateTo = new Date(toVal);
+
+    if(dateTo <= dateFrom) { alert("La fecha 'Hasta' debe ser después de 'Desde'."); return; }
+
+    try {
+        // Guardamos el objeto de mantenimiento
+        await storeRef().set({
+            forceOpen: false, // Aseguramos que el flag manual esté apagado
+            maintenance: {
+                active: true,
+                message: msg,
+                start: firebase.firestore.Timestamp.fromDate(dateFrom),
+                end: firebase.firestore.Timestamp.fromDate(dateTo)
+            },
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, {merge: true});
+        alert("Mantenimiento programado correctamente.");
+    } catch(e) { 
+        console.error(e);
+        alert("Error al guardar mantenimiento."); 
+    }
+};
+
+// 4. ACTUALIZAR UI AL RECIBIR DATOS
+function applyStoreDocToUI(d) {
+    const now = new Date();
+    let isOpen = false;
+    let statusText = "Estado desconocido";
+    let pillClass = "off";
+
+    // Revisar si hay mantenimiento activo
+    let maintActive = false;
+    if(d.maintenance && d.maintenance.active) {
+        const start = d.maintenance.start.toDate();
+        const end = d.maintenance.end.toDate();
+        
+        // Rellenar inputs (para que veas lo que guardaste)
+        maintMsg.value = d.maintenance.message || "";
+        // Ajuste de zona horaria para inputs datetime-local
+        maintFrom.value = new Date(start.getTime() - start.getTimezoneOffset()*60000).toISOString().slice(0,16);
+        maintTo.value = new Date(end.getTime() - end.getTimezoneOffset()*60000).toISOString().slice(0,16);
+
+        // ¿Estamos DENTRO del rango de mantenimiento?
+        if(now >= start && now <= end) {
+            maintActive = true;
+            statusText = `⚠️ MANTENIMIENTO: "${d.maintenance.message}"`;
+            isOpen = false;
+        } else if (now < start) {
+             statusText = `🕒 Programado: ${d.maintenance.message} (Inicia: ${start.toLocaleString()})`;
+             // Si no empezó, respetamos el forceOpen manual o asumimos cerrado
+             isOpen = !!d.forceOpen; 
+        } else {
+             // Ya terminó el mantenimiento
+             isOpen = !!d.forceOpen;
+             statusText = "Operación normal";
+        }
+    } else {
+        // No hay mantenimiento, limpiar inputs
+        maintMsg.value = "";
+        maintFrom.value = "";
+        maintTo.value = "";
+        isOpen = !!d.forceOpen;
+        statusText = isOpen ? "Tienda Abierta Manualmente" : "Tienda Cerrada";
+    }
+
+    // Actualizar Pill y Texto
+    if(maintActive) {
+        storePill.textContent = "MANTENIMIENTO";
+        storePill.className = "pill warn"; // Naranja o Amarillo
+    } else if(isOpen) {
+        storePill.textContent = "ABIERTO";
+        storePill.className = "pill ok";
+    } else {
+        storePill.textContent = "CERRADO";
+        storePill.className = "pill off";
+    }
+
+    storeSub.textContent = statusText;
 }
-storeRef().onSnapshot(snap=>{ applyStoreDocToUI(snap.exists ? snap.data() : {}); });
 
-btnOpen.onclick = async()=>{
-  // Al abrir, borramos el mensaje de cierre para limpiar
-  await storeRef().set({
-      forceOpen:true, 
-      forceOpenMessage: firebase.firestore.FieldValue.delete(),
-      updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-  },{merge:true});
-};
-
-btnClose.onclick = async()=>{
-  // Al cerrar, guardamos el mensaje que escribiste
-  const msg = closeMsgInput.value.trim();
-  await storeRef().set({
-    forceOpen:false,
-    forceOpenMessage: msg || null, // Si está vacío, guarda null
-    forceOpenUntil: firebase.firestore.FieldValue.delete(),
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  },{merge:true});
-  alert("Tienda Cerrada" + (msg ? " con mensaje: " + msg : "."));
-};
-
-btnSaveUntil.onclick = async()=>{
-  const v = forceUntilInput.value;
-  if(!v){ alert("Elegí fecha y hora"); return; }
-  const local = new Date(v);
-  await storeRef().set({
-    forceOpen:true,
-    forceOpenUntil: firebase.firestore.Timestamp.fromDate(local),
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  },{merge:true});
-  alert("Guardado.");
-};
+storeRef().onSnapshot(snap => { applyStoreDocToUI(snap.exists ? snap.data() : {}); });
 
 /* ============================================================
      CUPONES LOGIC
