@@ -389,6 +389,9 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
         <button class="btn good" id="btnSimpleOpen" style="flex:1;">Abrir Tienda</button>
         <button class="btn bad" id="btnSimpleClose" style="flex:1;">Cerrar Tienda</button>
       </div>
+      <button class="btn" id="btnResetStore" style="background:#e0f2fe; color:#0284c7; border:1px solid #bae6fd; width:100%; margin-top:15px;">
+        🔄 Restablecer a Automático
+      </button>
     </div>
 
     <div style="background:#fff5f5; padding:15px; border-radius:12px; border:1px solid #ffcdd2;">
@@ -1064,7 +1067,7 @@ function renderSidesUI(state){
 sidesRef().onSnapshot(snap=>{ renderSidesUI(snap.exists ? snap.data() : {}); });
 
 /* ============================================================
-     STORE OVERRIDE LOGIC (NUEVA VERSIÓN)
+     STORE OVERRIDE LOGIC (CON RESET)
 =============================================================== */
 const storeRef = () => db.collection("config").doc("store");
 const storePill = document.querySelector("#storePill");
@@ -1073,6 +1076,7 @@ const storeSub = document.querySelector("#storeSub");
 // Elementos Control Diario
 const btnSimpleOpen = document.querySelector("#btnSimpleOpen");
 const btnSimpleClose = document.querySelector("#btnSimpleClose");
+const btnResetStore = document.querySelector("#btnResetStore"); // Botón nuevo
 
 // Elementos Mantenimiento
 const maintMsg = document.querySelector("#maintMsg");
@@ -1080,30 +1084,48 @@ const maintFrom = document.querySelector("#maintFrom");
 const maintTo = document.querySelector("#maintTo");
 const btnSetMaint = document.querySelector("#btnSetMaint");
 
-// 1. ABRIR TIENDA (Borra cualquier mantenimiento)
+// 1. ABRIR TIENDA (Manual)
 btnSimpleOpen.onclick = async () => {
-    if(!confirm("¿Abrir la tienda y cancelar mantenimientos programados?")) return;
+    if(!confirm("¿Abrir la tienda manualmente?")) return;
     try {
         await storeRef().set({
             forceOpen: true,
-            maintenance: firebase.firestore.FieldValue.delete(), // Borra datos de mantenimiento
+            maintenance: firebase.firestore.FieldValue.delete(), // Borra mantenimientos
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, {merge: true});
     } catch(e) { alert("Error al abrir"); }
 };
 
-// 2. CERRAR TIENDA (Manual simple)
+// 2. CERRAR TIENDA (Manual)
 btnSimpleClose.onclick = async () => {
     try {
         await storeRef().set({
             forceOpen: false,
-            maintenance: firebase.firestore.FieldValue.delete(), // Borra datos de mantenimiento para que sea cierre simple
+            maintenance: firebase.firestore.FieldValue.delete(),
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, {merge: true});
     } catch(e) { alert("Error al cerrar"); }
 };
 
-// 3. PROGRAMAR MANTENIMIENTO
+// 3. RESET TOTAL (Volver a automático)
+btnResetStore.onclick = async () => {
+    if(!confirm("¿Borrar configuraciones manuales y usar SOLO horario automático?")) return;
+    try {
+        await storeRef().set({
+            forceOpen: firebase.firestore.FieldValue.delete(),
+            forceOpenMessage: firebase.firestore.FieldValue.delete(),
+            forceOpenUntil: firebase.firestore.FieldValue.delete(),
+            maintenance: firebase.firestore.FieldValue.delete(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, {merge: true});
+        alert("Configuración reseteada. La tienda ahora obedece al horario automático.");
+    } catch(e) { 
+        console.error(e);
+        alert("Error al resetear."); 
+    }
+};
+
+// 4. PROGRAMAR MANTENIMIENTO
 btnSetMaint.onclick = async () => {
     const msg = maintMsg.value.trim();
     const fromVal = maintFrom.value;
@@ -1118,9 +1140,8 @@ btnSetMaint.onclick = async () => {
     if(dateTo <= dateFrom) { alert("La fecha 'Hasta' debe ser después de 'Desde'."); return; }
 
     try {
-        // Guardamos el objeto de mantenimiento
         await storeRef().set({
-            forceOpen: false, // Aseguramos que el flag manual esté apagado
+            forceOpen: false, 
             maintenance: {
                 active: true,
                 message: msg,
@@ -1136,58 +1157,65 @@ btnSetMaint.onclick = async () => {
     }
 };
 
-// 4. ACTUALIZAR UI AL RECIBIR DATOS
+// 5. ACTUALIZAR UI AL RECIBIR DATOS
 function applyStoreDocToUI(d) {
     const now = new Date();
     let isOpen = false;
     let statusText = "Estado desconocido";
     let pillClass = "off";
 
-    // Revisar si hay mantenimiento activo
     let maintActive = false;
     if(d.maintenance && d.maintenance.active) {
         const start = d.maintenance.start.toDate();
         const end = d.maintenance.end.toDate();
         
-        // Rellenar inputs (para que veas lo que guardaste)
         maintMsg.value = d.maintenance.message || "";
-        // Ajuste de zona horaria para inputs datetime-local
         maintFrom.value = new Date(start.getTime() - start.getTimezoneOffset()*60000).toISOString().slice(0,16);
         maintTo.value = new Date(end.getTime() - end.getTimezoneOffset()*60000).toISOString().slice(0,16);
 
-        // ¿Estamos DENTRO del rango de mantenimiento?
         if(now >= start && now <= end) {
             maintActive = true;
             statusText = `⚠️ MANTENIMIENTO: "${d.maintenance.message}"`;
             isOpen = false;
         } else if (now < start) {
-             statusText = `🕒 Programado: ${d.maintenance.message} (Inicia: ${start.toLocaleString()})`;
-             // Si no empezó, respetamos el forceOpen manual o asumimos cerrado
-             isOpen = !!d.forceOpen; 
+             statusText = `🕒 Programado: ${d.maintenance.message}`;
+             isOpen = d.forceOpen === true; 
         } else {
-             // Ya terminó el mantenimiento
-             isOpen = !!d.forceOpen;
+             isOpen = d.forceOpen === true;
              statusText = "Operación normal";
         }
     } else {
-        // No hay mantenimiento, limpiar inputs
         maintMsg.value = "";
         maintFrom.value = "";
         maintTo.value = "";
-        isOpen = !!d.forceOpen;
-        statusText = isOpen ? "Tienda Abierta Manualmente" : "Tienda Cerrada";
+        
+        if (d.forceOpen === true) {
+            isOpen = true;
+            statusText = "Abierto Manualmente";
+        } else if (d.forceOpen === false) {
+            isOpen = false;
+            statusText = "Cerrado Manualmente";
+        } else {
+            // Ni true ni false = AUTOMÁTICO (Reset)
+            statusText = "Modo Automático (Horarios)";
+            // Aquí en el admin no calculamos el horario, solo mostramos el estado de la config
+            isOpen = false; // Visualmente gris, pero index decide
+            pillClass = "blue"; // Color diferente para automático
+        }
     }
 
-    // Actualizar Pill y Texto
     if(maintActive) {
         storePill.textContent = "MANTENIMIENTO";
-        storePill.className = "pill warn"; // Naranja o Amarillo
-    } else if(isOpen) {
-        storePill.textContent = "ABIERTO";
+        storePill.className = "pill warn";
+    } else if (d.forceOpen === true) {
+        storePill.textContent = "ABIERTO (MANUAL)";
         storePill.className = "pill ok";
-    } else {
-        storePill.textContent = "CERRADO";
+    } else if (d.forceOpen === false) {
+        storePill.textContent = "CERRADO (MANUAL)";
         storePill.className = "pill off";
+    } else {
+        storePill.textContent = "AUTOMÁTICO";
+        storePill.className = "pill blue";
     }
 
     storeSub.textContent = statusText;
