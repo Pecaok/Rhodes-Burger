@@ -19,7 +19,7 @@
       font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif
     }
 
-    /* ===== LOADER DE VIDEO NEON ===== */
+    /* ===== LOADER ===== */
     #pageLoader {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       background-color: #000000; z-index: 99999;
@@ -30,7 +30,7 @@
     #pageLoader video { width: 250px; max-width: 90%; height: auto; object-fit: contain; mix-blend-mode: screen; }
     @media (min-width: 768px) { #pageLoader video { width: 500px; } }
 
-    /* ===== PANTALLA DE BLOQUEO (SOLO MANTENIMIENTO) ===== */
+    /* ===== PANTALLA DE BLOQUEO (MANTENIMIENTO) ===== */
     #storeBlocker {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       background: rgba(0,0,0,0.95); z-index: 99990;
@@ -263,9 +263,16 @@
     /* ==============================================
        1. VARIABLES Y FUNCIONES GLOBALES
        ============================================== */
+    
+    // 🔥 HORARIOS DEFINIDOS: Lunes y Martes cerrados. Mié a Dom de 19:00 a 24:00
     const HOURS = {
-      0: [[19,0,24,0]], 1: [], 2: [], 3: [[19,0,24,0]], 
-      4: [[19,0,24,0]], 5: [[19,0,24,0]], 6: [[19,0,24,0]]
+      0: [[19,0,24,0]], // Domingo
+      1: [],            // Lunes
+      2: [],            // Martes
+      3: [[19,0,24,0]], // Miércoles
+      4: [[19,0,24,0]], // Jueves
+      5: [[19,0,24,0]], // Viernes
+      6: [[19,0,24,0]]  // Sábado
     };
     
     let BURGERS=[], DRINKS=[], SIDES=[], MENU_ORDER={};
@@ -274,6 +281,7 @@
     
     // Estado de la tienda
     let orderable = true;
+    let currentStoreData = {}; // Cache global del estado de Firebase
     let SIDES_STATE = { con_sazon:true, con_sal:true, sin_sal:true };
     const CART_KEY = "rhodes_cart_v3";
     const FALLBACK_IMG="images/logo.png";
@@ -319,8 +327,11 @@
       });
     }
 
-    // 🔥 LOGICA CENTRAL DE ESTADO (CORREGIDA)
+    // 🔥 LOGICA CENTRAL DE ESTADO (MANTENIMIENTO / MANUAL / AUTO)
     function checkStoreState(d){
+        // Guardamos data localmente para el reloj
+        currentStoreData = d || {};
+        
         const pill=document.getElementById("statusPill");
         const main=pill.querySelector(".status-main");
         const sub =pill.querySelector(".status-sub");
@@ -335,7 +346,6 @@
             }catch(e){ console.error(e); }
 
             if(start && end && now >= start && now <= end){
-                // MANTENIMIENTO ACTIVO -> PANTALLA NEGRA
                 showBlocker("EN MANTENIMIENTO", d.maintenance.message || "Volvemos pronto.", "🛠️");
                 setOrderable(false);
                 pill.className = "status-pill status-closed";
@@ -347,7 +357,6 @@
 
         // 2. CHEQUEO MANUAL (Botones Izquierda) -> NO BLOQUEA PANTALLA
         if (d.forceOpen === true) {
-            // FORZADO ABIERTO
             hideBlocker();
             setOrderable(true);
             pill.className = "status-pill status-open";
@@ -357,13 +366,10 @@
         }
 
         if (d.forceOpen === false) {
-            // FORZADO CERRADO (Manual) -> SIN PANTALLA NEGRA
             hideBlocker(); 
             setOrderable(false);
             pill.className = "status-pill status-closed";
             main.textContent="Cerrado";
-            
-            // ACA ESTÁ EL CAMBIO: Muestra el horario próximo aunque sea cierre manual
             const next = getNextOpenInfo();
             sub.textContent = next ? `abrimos ${next.dayLabel} a las ${next.time} hs` : "Cerrado por ahora";
             return;
@@ -378,7 +384,6 @@
             main.textContent="Abierto";
             sub.textContent=`hasta las ${fmtHM(st.until[0],st.until[1])} hs`;
         } else {
-            // CERRADO POR HORARIO
             hideBlocker();
             setOrderable(false);
             pill.className = "status-pill status-closed";
@@ -434,6 +439,11 @@
         }
         return null;
     }
+
+    // 🔥 RELOJ INTERNO: Actualiza el estado cada minuto por si cambia el horario (Ej: se hacen las 19:00)
+    setInterval(() => {
+        checkStoreState(currentStoreData);
+    }, 60000);
 
     /* ===== Firebase Init ===== */
     const firebaseConfig = {
