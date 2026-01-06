@@ -395,11 +395,11 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
     </div>
 
     <div style="background:#fff5f5; padding:15px; border-radius:12px; border:1px solid #ffcdd2;">
-      <h3 style="margin-top:0; font-size:16px; color:#d32f2f;">🛠️ Mantenimiento / Vacaciones</h3>
-      <p class="text-small muted">Programar cierre con mensaje y fechas.</p>
+      <h3 style="margin-top:0; font-size:16px; color:#d32f2f;">🛠️ Configurar Cierre Especial</h3>
+      <p class="text-small muted">Seleccioná fechas y motivo de cierre.</p>
       
       <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
-        <input id="maintTitle" type="text" placeholder="MOTIVO DEL CIERRE (Ej: Vacaciones 🌴)" 
+        <input id="maintTitle" type="text" placeholder="Título Opcional (O dejalo vacío y usá botones abajo)" 
                style="border:1px solid #ffcdd2; font-weight:700;">
         
         <input id="maintMsg" type="text" placeholder="Mensaje adicional (Ej: Volvemos el Lunes)" 
@@ -416,7 +416,14 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
             </div>
         </div>
 
-        <button class="btn warn" id="btnSetMaint" style="width:100%;">Programar Cierre</button>
+        <div style="display:flex; gap:10px; margin-top:5px;">
+            <button class="btn" id="btnSetVacation" style="flex:1; background:#e0f7fa; color:#006064; border:1px solid #b2ebf2; font-size:13px;">
+                ✈️ Vacaciones
+            </button>
+            <button class="btn warn" id="btnSetMaint" style="flex:1; font-size:13px;">
+                🛠️ Mantenimiento
+            </button>
+        </div>
       </div>
     </div>
 
@@ -1070,7 +1077,7 @@ function renderSidesUI(state){
 sidesRef().onSnapshot(snap=>{ renderSidesUI(snap.exists ? snap.data() : {}); });
 
 /* ============================================================
-     STORE OVERRIDE LOGIC (CON RESET)
+     STORE OVERRIDE LOGIC (CON RESET & DOBLE BOTON)
 =============================================================== */
 const storeRef = () => db.collection("config").doc("store");
 const storePill = document.querySelector("#storePill");
@@ -1079,13 +1086,15 @@ const storeSub = document.querySelector("#storeSub");
 // Elementos Control Diario
 const btnSimpleOpen = document.querySelector("#btnSimpleOpen");
 const btnSimpleClose = document.querySelector("#btnSimpleClose");
-const btnResetStore = document.querySelector("#btnResetStore"); // Botón nuevo
+const btnResetStore = document.querySelector("#btnResetStore");
 
 // Elementos Mantenimiento
-const maintTitle = document.querySelector("#maintTitle"); // Nuevo input título
+const maintTitle = document.querySelector("#maintTitle"); 
 const maintMsg = document.querySelector("#maintMsg");
 const maintFrom = document.querySelector("#maintFrom");
 const maintTo = document.querySelector("#maintTo");
+// Nuevos Botones separados
+const btnSetVacation = document.querySelector("#btnSetVacation");
 const btnSetMaint = document.querySelector("#btnSetMaint");
 
 // 1. ABRIR TIENDA (Manual)
@@ -1094,7 +1103,7 @@ btnSimpleOpen.onclick = async () => {
     try {
         await storeRef().set({
             forceOpen: true,
-            maintenance: firebase.firestore.FieldValue.delete(), // Borra mantenimientos
+            maintenance: firebase.firestore.FieldValue.delete(), 
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, {merge: true});
     } catch(e) { alert("Error al abrir"); }
@@ -1129,14 +1138,13 @@ btnResetStore.onclick = async () => {
     }
 };
 
-// 4. PROGRAMAR MANTENIMIENTO
-btnSetMaint.onclick = async () => {
-    const title = maintTitle.value.trim();
+// 4. FUNCIÓN COMÚN PARA GUARDAR VACACIONES O MANTENIMIENTO
+async function scheduleClosure(type) {
+    let title = maintTitle.value.trim();
     const msg = maintMsg.value.trim();
     const fromVal = maintFrom.value;
     const toVal = maintTo.value;
 
-    if(!title) { alert("Escribí un Motivo/Título para el cierre."); return; }
     if(!fromVal || !toVal) { alert("Seleccioná fecha DESDE y HASTA."); return; }
 
     const dateFrom = new Date(fromVal);
@@ -1144,24 +1152,40 @@ btnSetMaint.onclick = async () => {
 
     if(dateTo <= dateFrom) { alert("La fecha 'Hasta' debe ser después de 'Desde'."); return; }
 
+    // Definir título e ícono por defecto si no escribió nada
+    let icon = "🛠️";
+    if(type === "vacation") {
+        if(!title) title = "CERRADO POR VACACIONES";
+        icon = "✈️";
+    } else {
+        if(!title) title = "EN MANTENIMIENTO";
+        icon = "🛠️";
+    }
+
     try {
         await storeRef().set({
             forceOpen: false, 
             maintenance: {
                 active: true,
-                title: title, // Guardamos el título
+                title: title, 
                 message: msg,
+                icon: icon, // Guardamos el ícono en la base de datos
                 start: firebase.firestore.Timestamp.fromDate(dateFrom),
                 end: firebase.firestore.Timestamp.fromDate(dateTo)
             },
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, {merge: true});
-        alert("Mantenimiento programado correctamente.");
+        alert(`Programado: ${title}`);
     } catch(e) { 
         console.error(e);
-        alert("Error al guardar mantenimiento."); 
+        alert("Error al guardar."); 
     }
-};
+}
+
+// ASIGNAR EVENTOS A LOS DOS BOTONES
+btnSetVacation.onclick = () => scheduleClosure("vacation");
+btnSetMaint.onclick = () => scheduleClosure("maintenance");
+
 
 // 5. ACTUALIZAR UI AL RECIBIR DATOS
 function applyStoreDocToUI(d) {
@@ -1182,7 +1206,7 @@ function applyStoreDocToUI(d) {
 
         if(now >= start && now <= end) {
             maintActive = true;
-            statusText = `⚠️ ${d.maintenance.title}: "${d.maintenance.message}"`;
+            statusText = `⚠️ ${d.maintenance.icon || ""} ${d.maintenance.title}`;
             isOpen = false;
         } else if (now < start) {
              statusText = `🕒 Programado: ${d.maintenance.title}`;
