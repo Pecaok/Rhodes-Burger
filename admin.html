@@ -399,7 +399,10 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
       <p class="text-small muted">Programar cierre con mensaje y fechas.</p>
       
       <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
-        <input id="maintMsg" type="text" placeholder="Mensaje (Ej: Cerrado por vacaciones)" 
+        <input id="maintTitle" type="text" placeholder="MOTIVO DEL CIERRE (Ej: Vacaciones 🌴)" 
+               style="border:1px solid #ffcdd2; font-weight:700;">
+        
+        <input id="maintMsg" type="text" placeholder="Mensaje adicional (Ej: Volvemos el Lunes)" 
                style="border:1px solid #ffcdd2;">
         
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
@@ -1079,6 +1082,7 @@ const btnSimpleClose = document.querySelector("#btnSimpleClose");
 const btnResetStore = document.querySelector("#btnResetStore"); // Botón nuevo
 
 // Elementos Mantenimiento
+const maintTitle = document.querySelector("#maintTitle"); // Nuevo input título
 const maintMsg = document.querySelector("#maintMsg");
 const maintFrom = document.querySelector("#maintFrom");
 const maintTo = document.querySelector("#maintTo");
@@ -1127,11 +1131,12 @@ btnResetStore.onclick = async () => {
 
 // 4. PROGRAMAR MANTENIMIENTO
 btnSetMaint.onclick = async () => {
+    const title = maintTitle.value.trim();
     const msg = maintMsg.value.trim();
     const fromVal = maintFrom.value;
     const toVal = maintTo.value;
 
-    if(!msg) { alert("Escribí un mensaje para el cliente."); return; }
+    if(!title) { alert("Escribí un Motivo/Título para el cierre."); return; }
     if(!fromVal || !toVal) { alert("Seleccioná fecha DESDE y HASTA."); return; }
 
     const dateFrom = new Date(fromVal);
@@ -1144,6 +1149,7 @@ btnSetMaint.onclick = async () => {
             forceOpen: false, 
             maintenance: {
                 active: true,
+                title: title, // Guardamos el título
                 message: msg,
                 start: firebase.firestore.Timestamp.fromDate(dateFrom),
                 end: firebase.firestore.Timestamp.fromDate(dateTo)
@@ -1169,22 +1175,24 @@ function applyStoreDocToUI(d) {
         const start = d.maintenance.start.toDate();
         const end = d.maintenance.end.toDate();
         
+        maintTitle.value = d.maintenance.title || "";
         maintMsg.value = d.maintenance.message || "";
         maintFrom.value = new Date(start.getTime() - start.getTimezoneOffset()*60000).toISOString().slice(0,16);
         maintTo.value = new Date(end.getTime() - end.getTimezoneOffset()*60000).toISOString().slice(0,16);
 
         if(now >= start && now <= end) {
             maintActive = true;
-            statusText = `⚠️ MANTENIMIENTO: "${d.maintenance.message}"`;
+            statusText = `⚠️ ${d.maintenance.title}: "${d.maintenance.message}"`;
             isOpen = false;
         } else if (now < start) {
-             statusText = `🕒 Programado: ${d.maintenance.message}`;
+             statusText = `🕒 Programado: ${d.maintenance.title}`;
              isOpen = d.forceOpen === true; 
         } else {
              isOpen = d.forceOpen === true;
              statusText = "Operación normal";
         }
     } else {
+        maintTitle.value = "";
         maintMsg.value = "";
         maintFrom.value = "";
         maintTo.value = "";
@@ -1196,11 +1204,9 @@ function applyStoreDocToUI(d) {
             isOpen = false;
             statusText = "Cerrado Manualmente";
         } else {
-            // Ni true ni false = AUTOMÁTICO (Reset)
             statusText = "Modo Automático (Horarios)";
-            // Aquí en el admin no calculamos el horario, solo mostramos el estado de la config
-            isOpen = false; // Visualmente gris, pero index decide
-            pillClass = "blue"; // Color diferente para automático
+            isOpen = false; 
+            pillClass = "blue";
         }
     }
 
