@@ -291,6 +291,10 @@
       <h2>Detalle del pedido</h2>
       <div id="itemsList">
         </div>
+      <div id="discountRow" style="display:none; justify-content: space-between; margin-top:10px; color:#16a34a; font-weight:700;">
+         <span>Descuento</span>
+         <span id="discountVal">-$0</span>
+      </div>
       <div class="total-row">
         <span>Total</span>
         <span id="totalPrice">$ 0</span>
@@ -322,15 +326,24 @@
   firebase.initializeApp(firebaseConfig);
   const db=firebase.firestore();
 
-  // Helpers
   const $ = s => document.querySelector(s);
   const urlParams = new URLSearchParams(window.location.search);
   const orderId = urlParams.get('id');
   const token = urlParams.get('t');
   const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-  const WHATSAPP = "5491170596483"; // Tu número
+  const WHATSAPP = "5491170596483"; 
 
-  // Mapeo de estados
+  // 🔥 PRECIOS DINÁMICOS (Fallback)
+  let PRICES_DB = { patty: 2500, cheddar: 300 };
+
+  // 🔥 LISTENER DE PRECIOS GLOBAL
+  db.collection('config').doc('prices').onSnapshot(doc => {
+      if(doc.exists) {
+          PRICES_DB = doc.data();
+          if(window.cachedOrderData) renderPage(window.cachedOrderData); // Re-render al actualizar precios
+      }
+  });
+
   const STATUS_MAP = {
     'pending_payment': { step: 'step-pending', label: 'Pago Pendiente', class: 'st-pending_payment' },
     'accepted': { step: 'step-accepted', label: 'Recibido', class: 'st-accepted' },
@@ -348,9 +361,9 @@
 
   // Inicializar
   if(orderId){
-    // Escuchar cambios en tiempo real
     db.collection("orders").doc(orderId).onSnapshot(doc => {
       if(doc.exists){
+        window.cachedOrderData = doc.data();
         renderPage(doc.data());
       } else {
         $("#loading").textContent = "Pedido no encontrado.";
@@ -380,10 +393,9 @@
     badge.className = `status-badge ${map.class}`;
     badge.textContent = map.label;
 
-    // Timeline (pintar pasos anteriores)
+    // Timeline
     const steps = ['step-pending', 'step-accepted', 'step-prep', 'step-ready', 'step-done'];
     const currentIdx = steps.indexOf(map.step);
-    
     steps.forEach((id, idx) => {
       const el = document.getElementById(id);
       el.classList.remove('active', 'done');
@@ -394,13 +406,12 @@
     // Info extra
     $("#deliveryMode").textContent = data.entrega === 'take_away' ? 'Retiro por Local' : data.entrega;
     
-    // 🔥 FORZAR VISIBILIDAD DE CAJA DE PAGO SIEMPRE
+    // FORZAR VISIBILIDAD CAJA PAGO
     $("#transferBox").style.display = "block";
     
     // Hora
     let timeShow = "--:--";
     if(data.createdAt) {
-        // Intentar parsear la fecha
         try {
             const d = new Date(data.createdAt);
             timeShow = d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
@@ -418,10 +429,31 @@
     if(data.items){
       data.items.forEach(item => {
          const extras = [];
-         if(item.fries && item.fries !== 'sin_papas') extras.push(item.fries);
-         if(item.extras?.patty) extras.push(`+${item.extras.patty} carne`);
-         if(item.extras?.cheddar) extras.push(`+${item.extras.cheddar} cheddar`);
          
+         // 🔥 CÁLCULO PRECIO DINÁMICO RENGLÓN
+         let pPatty = item.extras?.EXTRA_PRICE_PATTY || PRICES_DB.patty || 2500;
+         let pCheddar = item.extras?.EXTRA_PRICE_CHEDDAR || PRICES_DB.cheddar || 300;
+
+         let extrasCost = 0;
+         if(item.extras?.patty) {
+             extras.push(`+${item.extras.patty} carne`);
+             extrasCost += item.extras.patty * pPatty;
+         }
+         if(item.extras?.cheddar) {
+             extras.push(`+${item.extras.cheddar} cheddar`);
+             extrasCost += item.extras.cheddar * pCheddar;
+         }
+         if(item.fries && item.fries.toLowerCase() !== 'sin_papas') {
+             let friesName = item.fries.replace(/_/g, " ");
+             // Capitalize
+             friesName = friesName.charAt(0).toUpperCase() + friesName.slice(1);
+             extras.push(friesName);
+         }
+
+         // Precio unitario total
+         const unitTotal = (item.price || 0) + extrasCost;
+         const lineTotal = unitTotal * (item.qty || 1);
+
          const html = `
            <div class="item-row">
              <div>
@@ -429,16 +461,25 @@
                ${extras.length ? `<span class="item-sub">${extras.join(', ')}</span>` : ''}
                ${item.notes ? `<span class="item-sub" style="color:#d32f2f">📝 ${item.notes}</span>` : ''}
              </div>
-             <div style="font-weight:700">$${money( (item.price||0) * (item.qty||1) )}</div>
+             <div style="font-weight:700">$${money(lineTotal)}</div>
            </div>
          `;
          list.insertAdjacentHTML('beforeend', html);
       });
     }
+
+    // Descuento
+    if(data.discount > 0) {
+        $("#discountRow").style.display = "flex";
+        $("#discountVal").textContent = `-${money(data.discount)}`;
+    } else {
+        $("#discountRow").style.display = "none";
+    }
+
     $("#totalPrice").textContent = money(data.total);
   }
 
-  // Lógica de Estrellas
+  // Estrellas
   let ratingVal = 0;
   document.querySelectorAll('.star').forEach(s => {
     s.addEventListener('click', function(){
