@@ -32,10 +32,12 @@
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font); -webkit-tap-highlight-color: transparent;}
     
+    /* LOADER */
     #pageLoader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #000; z-index: 99999; display: flex; align-items: center; justify-content: center; transition: opacity 0.5s ease, visibility 0.5s; }
     #pageLoader.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
     #pageLoader video { width: 250px; max-width: 80%; height: auto; object-fit: contain; mix-blend-mode: screen; }
 
+    /* HEADER */
     header { position: sticky; top: 0; z-index: 1000; background: #fff; border-bottom: 1px solid var(--ring); }
     .topbar { max-width: 1200px; margin: 0 auto; height: 60px; padding: 0 12px; display: flex; align-items: center; gap: 6px; overflow: visible; }
     .brand { font-weight: 800; font-size: 18px; color: var(--primary); display: flex; align-items: center; text-decoration: none; margin-right: 5px; flex-shrink: 0; }
@@ -53,6 +55,7 @@
     .icon-btn#btnAutoPrint.active { background: #dcfce7; border-color: #16a34a; color: #15803d; }
     .btn-danger { color: #d32f2f; background: #ffebee; border: 1px solid #ffcdd2; }
 
+    /* DROPDOWN */
     .dropdown { position: relative; display: inline-block; }
     .dropdown-content { display: none; position: absolute; background-color: #fff; min-width: 160px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); border-radius: 12px; border: 1px solid var(--ring); z-index: 2000; top: 115%; right: 0; padding: 5px; }
     .dropdown.show .dropdown-content { display: block; animation: slideDown 0.2s ease; }
@@ -60,6 +63,7 @@
     .dropdown-content a:hover { background: #f3f4f6; color: var(--primary); }
     @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 
+    /* LAYOUT */
     .container { max-width: 800px; margin: 20px auto; padding: 0 16px; padding-bottom: 80px; }
     h1 { font-size: 24px; font-weight: 800; color: #111; margin-bottom: 16px; }
 
@@ -305,6 +309,16 @@
         }catch(e){console.error(e);}
     };
 
+    window.deleteOrder = async (id) => {
+        if(!confirm("⚠️ ¿Estás seguro de eliminar este pedido permanentemente?\n\nEsta acción borrará el pedido de la base de datos y no se puede deshacer.")) return;
+        try {
+            await db.collection("orders").doc(id).delete();
+        } catch(e) {
+            console.error(e);
+            alert("Error al eliminar: " + e.message);
+        }
+    };
+
     window.setPaymentStatus = async (id, currentPaid, currentMethod) => {
         if(!currentPaid && (!currentMethod || currentMethod === "")){ 
             alert("⚠️ Seleccioná un MÉTODO DE PAGO primero."); return; 
@@ -312,7 +326,6 @@
         try{ await db.collection("orders").doc(id).update({ paid: !currentPaid, payment_status: !currentPaid ? 'paid' : 'pending_payment' }); }catch(e){}
     };
     
-    // UPDATE PAGO
     window.updatePago = async (id, val) => { 
         try { 
             const updateData = { pago: val };
@@ -332,7 +345,7 @@
     window.pickDate = (o) => { if(o.createdAt?.toDate) return o.createdAt.toDate(); if(typeof o.createdAt==='string') return new Date(o.createdAt); return new Date(); };
     window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con Sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
     
-    // CATEGORIZACIÓN (Simulando objeto item)
+    // CATEGORIZACIÓN
     window.getCat = (item) => {
         const n = String(item.name || "").trim().toLowerCase();
         const t = String(item.type || "").toLowerCase();
@@ -438,7 +451,7 @@
                 const paymentStr = r['forma de pago'] || r['pago'];
                 const itemsStr = r['artículos'] || r['productos'];
                 
-                // Nombre del cliente (PedidosYa a veces no lo da, pero si está lo usamos)
+                // Nombre del cliente
                 const clientName = r['nombre del cliente'] || r['cliente'] || r['usuario'] || ('Cliente Py #' + id);
 
                 if (!id || !totalStr) continue;
@@ -464,8 +477,6 @@
                     const parts = String(itemsStr).split(','); 
                     parts.forEach(p => {
                         p = p.trim();
-                        // Intentar separar cantidad "2x Burger" o "2 Burger"
-                        // Regex: Comienza con numero, espacio opcional 'x', espacio, nombre
                         const match = p.match(/^(\d+)\s*[xX]?\s+(.*)$/);
                         let qty = 1;
                         let itemName = p;
@@ -475,7 +486,7 @@
                             itemName = match[2];
                         }
 
-                        // Categorizar para el ícono
+                        // Categorizar
                         const catCode = window.getCat({name: itemName});
                         let type = 'other';
                         let category = 'other';
@@ -486,7 +497,7 @@
                         itemsList.push({ 
                             qty: qty, 
                             name: itemName, 
-                            price: 0, // En reporte viene total global, no unitario exacto
+                            price: 0, 
                             type: type, 
                             category: category 
                         });
@@ -506,11 +517,9 @@
                 let isoDate = new Date().toISOString();
                 if(dateStr) {
                     if(typeof dateStr === 'number') {
-                        // Fecha Excel serial
                         const excelEpoch = new Date(1899, 11, 30);
                         isoDate = new Date(excelEpoch.getTime() + dateStr * 86400000).toISOString();
                     } else {
-                        // String "2026-01-14 19:41"
                         try { isoDate = new Date(dateStr).toISOString(); } catch(e){}
                     }
                 }
@@ -838,6 +847,7 @@
                     ${isPaid ? 'PAGADO' : 'COBRAR'}
                  </button>
                  <div class="icon-btn-lg" onclick="printOrder('${doc.id}')">🖨️</div>
+                 <div class="icon-btn-lg" style="color:#d32f2f; border-color:#ffcdd2; background:#ffebee;" onclick="deleteOrder('${doc.id}')">🗑️</div>
               </div>
 
               <div class="stateBtns">
@@ -911,11 +921,8 @@
             if(ti.includes("PAPA")) dName = window.cleanFries(i.name);
             
             let basePrice = Number(i.price) || 0;
-            
-            // 🔥 PRECIO DINÁMICO EN IMPRESIÓN TAMBIÉN
             let extraPatty = (i.extras?.patty || 0) * (PRICES_DB.patty || 2500);
             let extraCheddar = (i.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300);
-            
             let unitFinal = basePrice + extraPatty + extraCheddar;
             let lineTotal = unitFinal * (i.qty || 1);
 
