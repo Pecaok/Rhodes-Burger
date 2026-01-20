@@ -11,6 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
   <style>
     :root{
@@ -213,7 +215,7 @@
         });
     });
     
-    // 🔥 LISTENER DE PRECIOS
+    // 🔥 PRECIOS DINÁMICOS
     db.collection('config').doc('prices').onSnapshot(doc => {
         if(doc.exists) {
             PRICES_DB = doc.data();
@@ -370,7 +372,7 @@
 
     window.printOrder = (id) => { const doc = window.idToDoc.get(id); if(doc) window.trySilentPrint(doc); };
     window.pickDate = (o) => { if(o.createdAt?.toDate) return o.createdAt.toDate(); if(typeof o.createdAt==='string') return new Date(o.createdAt); return new Date(); };
-    window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
+    window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con Sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
     
     // CATEGORIZACIÓN
     window.getCat = (item) => {
@@ -445,6 +447,86 @@
         }
         return defaultTime;
     }
+
+    /* ============================================================
+       🔥 IMPORTACIÓN CSV PEDIDOS YA (Mapeo Exacto)
+    ============================================================ */
+    async function importarPedidosYa() {
+        const input = document.getElementById('csvInput');
+        if (!input.files.length) return;
+        const file = input.files[0];
+
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: async function(results) {
+                const rows = results.data;
+                let imported = 0;
+                let skipped = 0;
+                const batch = db.batch();
+                let ops = 0;
+
+                for (const row of rows) {
+                    const r = {};
+                    Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
+
+                    const id = r['nro de pedido'];
+                    let totalStr = r['total del pedido'];
+                    const dateStr = r['fecha del pedido'];
+                    const statusStr = r['estado del pedido'];
+                    const paymentStr = r['forma de pago'];
+
+                    if (!id || !totalStr) continue;
+
+                    // Parsear Total "19.000,00" -> 19000
+                    const total = Number(String(totalStr).replace(/\./g, '').replace(',', '.'));
+
+                    // Parsear Estado
+                    let status = 'delivered'; // Default
+                    if (statusStr && statusStr.toLowerCase().includes('cancelado')) status = 'cancelled';
+                    if (statusStr && statusStr.toLowerCase().includes('rechazado')) status = 'cancelled';
+
+                    // Parsear Pago
+                    let isPaid = false;
+                    let paymentMethod = 'pedidosya_online';
+                    if (paymentStr && paymentStr.toLowerCase().includes('online')) isPaid = true;
+                    if (paymentStr && paymentStr.toLowerCase().includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
+
+                    // Chequear duplicados
+                    const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
+                    if (!existing.empty) {
+                        skipped++;
+                        continue;
+                    }
+
+                    const ref = db.collection('orders').doc();
+                    batch.set(ref, {
+                        orderNumber: String(id),
+                        py_id: String(id),
+                        source: 'pedidosya',
+                        status: status,
+                        payment_status: isPaid ? 'paid' : 'pending_payment',
+                        paid: isPaid,
+                        pago: paymentMethod,
+                        entrega: 'delivery',
+                        nombre: 'Cliente Py #' + id,
+                        total: total,
+                        createdAt: dateStr ? new Date(dateStr).toISOString() : new Date().toISOString(),
+                        items: [{ name: 'Pedido PedidosYa', price: total, qty: 1, type: 'other' }] 
+                    });
+                    
+                    ops++;
+                    imported++;
+                    if(ops >= 400) { await batch.commit(); ops=0; }
+                }
+
+                if(ops > 0) await batch.commit();
+                
+                alert(`Importación completada:\n✅ ${imported} nuevos\n⏭️ ${skipped} ya existían.`);
+                input.value = ""; 
+            }
+        });
+    }
   </script>
 </head>
 
@@ -456,10 +538,17 @@
     </video>
   </div>
 
+  <input type="file" id="csvInput" style="display:none" accept=".csv" onchange="importarPedidosYa()">
+
   <header>
     <div class="topbar">
       <a class="brand" href="#"><img src="images/logo.png" alt=""><span>Pedidos</span></a>
       <div class="spacer"></div>
+      
+      <button onclick="document.getElementById('csvInput').click()" class="nav-btn" style="background:#f97316; color:white; border:none; margin-right:8px;">
+        📥 Importar PY
+      </button>
+
       <a href="pedido_local.html" class="nav-btn active">📦 Pedidos</a>
       <a href="finanzas.html" class="nav-btn">📈 Finanzas</a>
       <div class="dropdown">
@@ -490,7 +579,6 @@
 
  <script>
   window.addEventListener('DOMContentLoaded', () => {
-    // --- 1. CONFIGURACIÓN DE AUDIO ---
     let audioCtx = null;
     const initAudio = () => {
         if (!audioCtx) {
@@ -521,7 +609,6 @@
         createBeep(now); createBeep(now + 0.25); createBeep(now + 0.50); createBeep(now + 0.75);
     };
 
-    // --- 2. LOGICA INTERFAZ ---
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     let currentFilter = "recibidos"; let lastSnap = null;
     
@@ -562,7 +649,6 @@
         updAP(); 
     };
 
-    // --- 3. FIREBASE ---
     let isInit=true; setTimeout(()=>isInit=false, 3000);
     db.collection("orders").orderBy("orderNumber", "desc").limit(300).onSnapshot(snap => {
         window.lastSnap = snap;
@@ -594,7 +680,6 @@
         if(loader) loader.classList.add("hidden");
     });
 
-    // --- RENDER ---
     function renderList(snap){
         let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
         window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
@@ -642,7 +727,7 @@
         let cats = { b:[], f:[], d:[], o:[] };
         items.forEach(it => {
             const cat = window.getCat(it);
-            if(cat==='b'){
+            if(cat === 'b'){
                 cats.b.push(it);
                 let fName = it.fries;
                 if(!fName && it.extras?.fries) fName = it.extras.fries;
@@ -677,7 +762,6 @@
                 let ex = [];
                 let basePrice = Number(it.price) || 0;
                 
-                // 🔥 PRECIO DINÁMICO DESDE FIREBASE
                 let extraPatty = (it.extras?.patty || 0) * (PRICES_DB.patty || 2500);
                 let extraCheddar = (it.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300);
                 
@@ -693,7 +777,6 @@
                 const extrasHtml = ex.map(e => `<div class="it-sub" style="color:#d97706; font-weight:600">• ${e}</div>`).join('');
 
                 let displayPrice = money(lineTotal);
-                // 🔥 HIDE PRICE FOR FRIES
                 if(title.includes("PAPAS")) displayPrice = "";
                 
                 return `<div class="it-row">
@@ -837,7 +920,6 @@
             
             let basePrice = Number(i.price) || 0;
             
-            // 🔥 PRECIO DINÁMICO EN IMPRESIÓN TAMBIÉN
             let extraPatty = (i.extras?.patty || 0) * (PRICES_DB.patty || 2500);
             let extraCheddar = (i.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300);
             
@@ -845,6 +927,7 @@
             let lineTotal = unitFinal * (i.qty || 1);
 
             let displayPrice = m(lineTotal);
+            if(ti.includes("PAPA")) displayPrice = "";
             
             let h = `<div class="row name"><div class="l">${i.qty||1} × ${dName}</div><div class="r">${displayPrice}</div></div>`;
             
