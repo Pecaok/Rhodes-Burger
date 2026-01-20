@@ -187,7 +187,8 @@
     let RECETAS_DB = {}; 
     let INVENTARIO_DB = {}; 
     let PRODUCT_CATALOG = {}; 
-    let PRICES_DB = { patty: 2500, cheddar: 300 }; // Fallback inicial
+    // Variable global para precios, se actualizará desde Firebase
+    let PRICES_DB = { patty: 2500, cheddar: 300 }; 
 
     db.collection('products').onSnapshot(snap => {
         PRODUCT_CATALOG = {};
@@ -212,11 +213,11 @@
         });
     });
     
-    // 🔥 CORRECCIÓN 1: LEER PRECIOS EN TIEMPO REAL
+    // 🔥 LISTENER DE PRECIOS REALES PARA QUE COINCIDA EL TOTAL 🔥
     db.collection('config').doc('prices').onSnapshot(doc => {
         if(doc.exists) {
             PRICES_DB = doc.data();
-            if(window.lastSnap) renderList(window.lastSnap); // Recargar para actualizar precios visuales
+            if(window.lastSnap) renderList(window.lastSnap); // Refrescar visualización si cambian precios
         }
     });
 
@@ -351,7 +352,7 @@
         try{ await db.collection("orders").doc(id).update({ paid: !currentPaid, payment_status: !currentPaid ? 'paid' : 'pending_payment' }); }catch(e){}
     };
     
-    // 🔥 FUNCION MODIFICADA: AL SELECCIONAR PAGO, MARCA COMO PAGADO 🔥
+    // FUNCION UPDATE PAGO (Marca pagado automático)
     window.updatePago = async (id, val) => { 
         try { 
             const updateData = { pago: val };
@@ -676,7 +677,7 @@
                 let ex = [];
                 let basePrice = Number(it.price) || 0;
                 
-                // 🔥 CORRECCIÓN 2: USAR PRECIOS DINÁMICOS
+                // 🔥 PRECIO DINÁMICO DESDE FIREBASE
                 let extraPatty = (it.extras?.patty || 0) * (PRICES_DB.patty || 2500);
                 let extraCheddar = (it.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300);
                 
@@ -691,7 +692,6 @@
 
                 const extrasHtml = ex.map(e => `<div class="it-sub" style="color:#d97706; font-weight:600">• ${e}</div>`).join('');
 
-                // 🔥 CORRECCIÓN 3: NO OCULTAR PRECIO DE PAPAS SI TIENEN COSTO
                 let displayPrice = money(lineTotal);
                 
                 return `<div class="it-row">
@@ -835,7 +835,7 @@
             
             let basePrice = Number(i.price) || 0;
             
-            // 🔥 CORRECCIÓN 4: USAR PRECIOS DINÁMICOS TAMBIÉN EN IMPRESIÓN
+            // 🔥 PRECIO DINÁMICO EN IMPRESIÓN TAMBIÉN
             let extraPatty = (i.extras?.patty || 0) * (PRICES_DB.patty || 2500);
             let extraCheddar = (i.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300);
             
@@ -843,7 +843,6 @@
             let lineTotal = unitFinal * (i.qty || 1);
 
             let displayPrice = m(lineTotal);
-            // 🔥 CORRECCIÓN 5: MOSTRAR PRECIOS DE PAPAS EN IMPRESIÓN
             
             let h = `<div class="row name"><div class="l">${i.qty||1} × ${dName}</div><div class="r">${displayPrice}</div></div>`;
             
