@@ -32,12 +32,10 @@
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font); -webkit-tap-highlight-color: transparent;}
     
-    /* LOADER */
     #pageLoader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #000; z-index: 99999; display: flex; align-items: center; justify-content: center; transition: opacity 0.5s ease, visibility 0.5s; }
     #pageLoader.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
     #pageLoader video { width: 250px; max-width: 80%; height: auto; object-fit: contain; mix-blend-mode: screen; }
 
-    /* HEADER */
     header { position: sticky; top: 0; z-index: 1000; background: #fff; border-bottom: 1px solid var(--ring); }
     .topbar { max-width: 1200px; margin: 0 auto; height: 60px; padding: 0 12px; display: flex; align-items: center; gap: 6px; overflow: visible; }
     .brand { font-weight: 800; font-size: 18px; color: var(--primary); display: flex; align-items: center; text-decoration: none; margin-right: 5px; flex-shrink: 0; }
@@ -55,7 +53,6 @@
     .icon-btn#btnAutoPrint.active { background: #dcfce7; border-color: #16a34a; color: #15803d; }
     .btn-danger { color: #d32f2f; background: #ffebee; border: 1px solid #ffcdd2; }
 
-    /* DROPDOWN */
     .dropdown { position: relative; display: inline-block; }
     .dropdown-content { display: none; position: absolute; background-color: #fff; min-width: 160px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); border-radius: 12px; border: 1px solid var(--ring); z-index: 2000; top: 115%; right: 0; padding: 5px; }
     .dropdown.show .dropdown-content { display: block; animation: slideDown 0.2s ease; }
@@ -63,7 +60,6 @@
     .dropdown-content a:hover { background: #f3f4f6; color: var(--primary); }
     @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 
-    /* LAYOUT */
     .container { max-width: 800px; margin: 20px auto; padding: 0 16px; padding-bottom: 80px; }
     h1 { font-size: 24px; font-weight: 800; color: #111; margin-bottom: 16px; }
 
@@ -419,7 +415,7 @@
     }
 
     /* ============================================================
-       🔥 IMPORTACIÓN EXCEL PEDIDOSYA (Con Fecha, Cliente y Artículos)
+       🔥 IMPORTACIÓN EXCEL PEDIDOSYA
     ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
@@ -440,7 +436,7 @@
 
             for (const row of rows) {
                 const r = {};
-                // Normalizar keys a minusculas
+                // Normalizar keys
                 Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
 
                 // Mapeo flexible
@@ -451,7 +447,7 @@
                 const paymentStr = r['forma de pago'] || r['pago'];
                 const itemsStr = r['artículos'] || r['productos'];
                 
-                // Nombre del cliente
+                // Nombre del cliente (PedidosYa a veces no lo da, pero si está lo usamos)
                 const clientName = r['nombre del cliente'] || r['cliente'] || r['usuario'] || ('Cliente Py #' + id);
 
                 if (!id || !totalStr) continue;
@@ -471,23 +467,50 @@
                 if (paymentStr && paymentStr.toLowerCase().includes('online')) isPaid = true;
                 if (paymentStr && paymentStr.toLowerCase().includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
 
-                // Parsear Items ("1 Rhodes Doble, 2 Papas")
+                // 🔥 PARSEO ITEMS INTELIGENTE
+                // Split por comas, pero IGNORANDO comas dentro de [corchetes]
                 let itemsList = [];
                 if(itemsStr) {
-                    const parts = String(itemsStr).split(','); 
-                    parts.forEach(p => {
+                    // Regex mágico: divide por comas si NO están seguidas de un cierre de corchete sin apertura previa
+                    // En JS simple, split por coma, luego combinamos si abrió bracket sin cerrar
+                    const rawParts = String(itemsStr).split(','); 
+                    const mergedParts = [];
+                    let buffer = "";
+                    
+                    rawParts.forEach(p => {
+                        if (buffer) {
+                            buffer += "," + p;
+                            if (buffer.includes(']')) { mergedParts.push(buffer); buffer = ""; }
+                        } else {
+                            if (p.includes('[') && !p.includes(']')) { buffer = p; }
+                            else { mergedParts.push(p); }
+                        }
+                    });
+                    if(buffer) mergedParts.push(buffer); // Fallback
+
+                    mergedParts.forEach(p => {
                         p = p.trim();
-                        const match = p.match(/^(\d+)\s*[xX]?\s+(.*)$/);
-                        let qty = 1;
-                        let itemName = p;
-                        
-                        if(match) {
-                            qty = Number(match[1]);
-                            itemName = match[2];
+                        // 1. Extraer Notas [Entre corchetes]
+                        let note = "";
+                        let cleanName = p;
+                        if(cleanName.includes('[')) {
+                            const noteMatch = cleanName.match(/\[(.*?)\]/);
+                            if(noteMatch) {
+                                note = noteMatch[1];
+                                cleanName = cleanName.replace(/\[.*?\]/, "").trim();
+                            }
                         }
 
-                        // Categorizar
-                        const catCode = window.getCat({name: itemName});
+                        // 2. Extraer Cantidad (Ej: "2 Rhodes")
+                        let qty = 1;
+                        const qtyMatch = cleanName.match(/^(\d+)\s+(.*)$/);
+                        if(qtyMatch) {
+                            qty = Number(qtyMatch[1]);
+                            cleanName = qtyMatch[2];
+                        }
+
+                        // 3. Categorizar
+                        const catCode = window.getCat({name: cleanName});
                         let type = 'other';
                         let category = 'other';
                         if(catCode === 'b') { type='burger'; category='hamburguesas'; }
@@ -496,14 +519,20 @@
 
                         itemsList.push({ 
                             qty: qty, 
-                            name: itemName, 
+                            name: cleanName, 
                             price: 0, 
                             type: type, 
-                            category: category 
+                            category: category,
+                            notes: note 
                         });
                     });
                 } else {
                     itemsList = [{ name: 'Pedido PedidosYa', price: total, qty: 1, type: 'other' }];
+                }
+                
+                // 🔥 ASIGNAR PRECIO SI ES ITEM ÚNICO
+                if(itemsList.length === 1 && total > 0) {
+                    itemsList[0].price = total / itemsList[0].qty;
                 }
 
                 // Chequear duplicados
