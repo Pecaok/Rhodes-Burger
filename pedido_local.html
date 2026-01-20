@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
   
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 
   <style>
     :root{
@@ -33,33 +33,19 @@
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font); -webkit-tap-highlight-color: transparent;}
     
-    /* ===== LOADER DE VIDEO NEON ===== */
+    /* ===== LOADER ===== */
     #pageLoader {
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background-color: #000000;
-      z-index: 99999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background-color: #000000; z-index: 99999;
+      display: flex; align-items: center; justify-content: center;
       transition: opacity 0.5s ease, visibility 0.5s;
     }
-    
     #pageLoader.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
-
-    #pageLoader video {
-      width: 250px; max-width: 80%; height: auto;
-      object-fit: contain; mix-blend-mode: screen; 
-    }
+    #pageLoader video { width: 250px; max-width: 80%; height: auto; object-fit: contain; mix-blend-mode: screen; }
 
     /* --- HEADER --- */
     header { position: sticky; top: 0; z-index: 1000; background: #fff; border-bottom: 1px solid var(--ring); }
-    
-    .topbar {
-        max-width: 1200px; margin: 0 auto; height: 60px; padding: 0 12px;
-        display: flex; align-items: center; gap: 6px; overflow: visible; 
-    }
-
+    .topbar { max-width: 1200px; margin: 0 auto; height: 60px; padding: 0 12px; display: flex; align-items: center; gap: 6px; overflow: visible; }
     .brand { font-weight: 800; font-size: 18px; color: var(--primary); display: flex; align-items: center; text-decoration: none; margin-right: 5px; flex-shrink: 0; }
     .brand img { width: 32px; height: 32px; border-radius: 6px; margin-right: 8px; }
     .spacer { flex: 1; }
@@ -215,7 +201,6 @@
         });
     });
     
-    // 🔥 PRECIOS DINÁMICOS
     db.collection('config').doc('prices').onSnapshot(doc => {
         if(doc.exists) {
             PRICES_DB = doc.data();
@@ -354,7 +339,7 @@
         try{ await db.collection("orders").doc(id).update({ paid: !currentPaid, payment_status: !currentPaid ? 'paid' : 'pending_payment' }); }catch(e){}
     };
     
-    // FUNCION UPDATE PAGO (Marca pagado automático)
+    // UPDATE PAGO
     window.updatePago = async (id, val) => { 
         try { 
             const updateData = { pago: val };
@@ -434,7 +419,6 @@
         return Array.from(map.values());
     }
 
-    // --- HELPER HORARIOS ---
     function getCleanTime(o, defaultTime) {
         if (o.pickup_slot && typeof o.pickup_slot === 'string' && o.pickup_slot.includes(':')) return o.pickup_slot;
         let raw = o.pickup_time_pretty || o.pickup_time;
@@ -449,83 +433,118 @@
     }
 
     /* ============================================================
-       🔥 IMPORTACIÓN CSV PEDIDOS YA (Mapeo Exacto)
+       🔥 IMPORTACIÓN EXCEL PEDIDOSYA (Con Fecha y Artículos)
     ============================================================ */
     async function importarPedidosYa() {
-        const input = document.getElementById('csvInput');
+        const input = document.getElementById('excelInput');
         if (!input.files.length) return;
         const file = input.files[0];
 
-        Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
-            complete: async function(results) {
-                const rows = results.data;
-                let imported = 0;
-                let skipped = 0;
-                const batch = db.batch();
-                let ops = 0;
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(firstSheet, {defval:""});
 
-                for (const row of rows) {
-                    const r = {};
-                    Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
+            let imported = 0;
+            let skipped = 0;
+            const batch = db.batch();
+            let ops = 0;
 
-                    const id = r['nro de pedido'];
-                    let totalStr = r['total del pedido'];
-                    const dateStr = r['fecha del pedido'];
-                    const statusStr = r['estado del pedido'];
-                    const paymentStr = r['forma de pago'];
+            for (const row of rows) {
+                const r = {};
+                // Normalizar keys
+                Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
 
-                    if (!id || !totalStr) continue;
+                const id = r['nro de pedido'];
+                let totalStr = r['total del pedido'];
+                const dateStr = r['fecha del pedido'];
+                const statusStr = r['estado del pedido'];
+                const paymentStr = r['forma de pago'];
+                const itemsStr = r['artículos']; // "1 Rhodes Doble, 2 Coca"
+                
+                // Intento de buscar nombre de cliente (a veces no viene)
+                const clientName = r['nombre del cliente'] || r['cliente'] || r['usuario'] || ('Cliente Py #' + id);
 
-                    // Parsear Total "19.000,00" -> 19000
-                    const total = Number(String(totalStr).replace(/\./g, '').replace(',', '.'));
+                if (!id || !totalStr) continue;
 
-                    // Parsear Estado
-                    let status = 'delivered'; // Default
-                    if (statusStr && statusStr.toLowerCase().includes('cancelado')) status = 'cancelled';
-                    if (statusStr && statusStr.toLowerCase().includes('rechazado')) status = 'cancelled';
+                // Parsear Total
+                let total = 0;
+                if(typeof totalStr === 'number') total = totalStr;
+                else total = Number(String(totalStr).replace(/\./g, '').replace(',', '.'));
 
-                    // Parsear Pago
-                    let isPaid = false;
-                    let paymentMethod = 'pedidosya_online';
-                    if (paymentStr && paymentStr.toLowerCase().includes('online')) isPaid = true;
-                    if (paymentStr && paymentStr.toLowerCase().includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
+                // Parsear Estado
+                let status = 'delivered'; // Default entregado
+                if (statusStr && statusStr.toLowerCase().includes('cancelado')) status = 'cancelled';
+                if (statusStr && statusStr.toLowerCase().includes('rechazado')) status = 'cancelled';
 
-                    // Chequear duplicados
-                    const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
-                    if (!existing.empty) {
-                        skipped++;
-                        continue;
-                    }
+                // Parsear Pago
+                let isPaid = false;
+                let paymentMethod = 'pedidosya_online';
+                if (paymentStr && paymentStr.toLowerCase().includes('online')) isPaid = true;
+                if (paymentStr && paymentStr.toLowerCase().includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
 
-                    const ref = db.collection('orders').doc();
-                    batch.set(ref, {
-                        orderNumber: String(id),
-                        py_id: String(id),
-                        source: 'pedidosya',
-                        status: status,
-                        payment_status: isPaid ? 'paid' : 'pending_payment',
-                        paid: isPaid,
-                        pago: paymentMethod,
-                        entrega: 'delivery',
-                        nombre: 'Cliente Py #' + id,
-                        total: total,
-                        createdAt: dateStr ? new Date(dateStr).toISOString() : new Date().toISOString(),
-                        items: [{ name: 'Pedido PedidosYa', price: total, qty: 1, type: 'other' }] 
+                // Parsear Items (Intento básico)
+                let itemsList = [];
+                if(itemsStr) {
+                    // Ej: "1 Rhodes Doble, 1 Papas"
+                    const parts = itemsStr.split(','); 
+                    parts.forEach(p => {
+                        p = p.trim();
+                        // Intentar separar cantidad del nombre "2 Burger"
+                        const match = p.match(/^(\d+)\s+(.*)$/);
+                        if(match) {
+                            itemsList.push({ qty: Number(match[1]), name: match[2], price: 0, type: 'other' });
+                        } else {
+                            itemsList.push({ qty: 1, name: p, price: 0, type: 'other' });
+                        }
                     });
-                    
-                    ops++;
-                    imported++;
-                    if(ops >= 400) { await batch.commit(); ops=0; }
+                } else {
+                    itemsList = [{ name: 'Pedido PedidosYa', price: total, qty: 1, type: 'other' }];
                 }
 
-                if(ops > 0) await batch.commit();
+                // Chequear duplicados
+                const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
+                if (!existing.empty) {
+                    skipped++;
+                    continue;
+                }
+
+                const ref = db.collection('orders').doc();
+                // Parsear fecha si es posible, sino Now
+                let isoDate = new Date().toISOString();
+                if(dateStr) {
+                    // Excel a veces devuelve número serial, o string fecha
+                    // Si es string "YYYY-MM-DD HH:MM":
+                    try { isoDate = new Date(dateStr).toISOString(); } catch(e){}
+                }
+
+                batch.set(ref, {
+                    orderNumber: String(id),
+                    py_id: String(id),
+                    source: 'pedidosya',
+                    status: status,
+                    payment_status: isPaid ? 'paid' : 'pending_payment',
+                    paid: isPaid,
+                    pago: paymentMethod,
+                    entrega: 'delivery',
+                    nombre: clientName,
+                    total: total,
+                    createdAt: isoDate,
+                    items: itemsList
+                });
                 
-                alert(`Importación completada:\n✅ ${imported} nuevos\n⏭️ ${skipped} ya existían.`);
-                input.value = ""; 
+                ops++;
+                imported++;
+                if(ops >= 400) { await batch.commit(); ops=0; }
             }
-        });
+
+            if(ops > 0) await batch.commit();
+            alert(`Importación completada:\n✅ ${imported} nuevos\n⏭️ ${skipped} ya existían.`);
+            input.value = ""; 
+        };
+        reader.readAsArrayBuffer(file);
     }
   </script>
 </head>
@@ -538,15 +557,15 @@
     </video>
   </div>
 
-  <input type="file" id="csvInput" style="display:none" accept=".csv" onchange="importarPedidosYa()">
+  <input type="file" id="excelInput" style="display:none" accept=".xlsx, .xls" onchange="importarPedidosYa()">
 
   <header>
     <div class="topbar">
       <a class="brand" href="#"><img src="images/logo.png" alt=""><span>Pedidos</span></a>
       <div class="spacer"></div>
       
-      <button onclick="document.getElementById('csvInput').click()" class="nav-btn" style="background:#f97316; color:white; border:none; margin-right:8px;">
-        📥 Importar PY
+      <button onclick="document.getElementById('excelInput').click()" class="nav-btn" style="background:#f97316; color:white; border:none; margin-right:8px;">
+        📥 Importar Excel
       </button>
 
       <a href="pedido_local.html" class="nav-btn active">📦 Pedidos</a>
@@ -667,7 +686,6 @@
                 const diferenciaMinutos = (ahora - fechaPedido) / 1000 / 60; 
 
                 if(diferenciaMinutos < 20) {
-                    console.log("🔔 Nuevo (Real):", data.orderNumber);
                     if(navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); 
                     playBeep(); 
                     if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id));
