@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gerencia • Rhodes Burgers</title>
+  <link rel="icon" href="images/logo.png" />
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #625A45; 
+      --text: #1f2937; 
+      --bg: #f3f4f6; 
+      --card: #ffffff;
+      --ring: #e5e7eb;
+    }
+
+    * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); padding-bottom: 40px; }
+
+    /* HEADER */
+    header { background: #fff; border-bottom: 1px solid var(--ring); position: sticky; top: 0; z-index: 100; }
+    .topbar { max-width: 1400px; margin: 0 auto; height: 60px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; }
+    .brand { font-weight: 800; font-size: 18px; color: var(--primary); text-decoration: none; display: flex; align-items: center; gap: 10px; }
+    .nav-btn { padding: 8px 12px; border-radius: 8px; text-decoration: none; color: #4b5563; font-weight: 600; font-size: 14px; transition: 0.2s; }
+    .nav-btn:hover { background: #f9fafb; }
+    .nav-btn.active { background: var(--primary); color: #fff; }
+
+    .btn-danger { color: #d32f2f; background: #ffebee; border: 1px solid #ffcdd2; padding: 8px 12px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; }
+
+    /* LAYOUT */
+    .container { max-width: 1400px; margin: 30px auto; padding: 0 20px; }
+
+    /* UPLOAD ZONE */
+    .upload-zone {
+      background: #fff;
+      border: 2px dashed #cbd5e1;
+      border-radius: 16px;
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 30px;
+    }
+    .upload-zone:hover { border-color: var(--primary); background: #fdfdfc; }
+    .upload-zone h2 { margin: 0 0 10px; color: var(--primary); }
+    .upload-zone p { margin: 0; color: #64748b; }
+
+    /* CONTROLS */
+    .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; display: none; }
+    .search-input { padding: 10px 15px; border: 1px solid var(--ring); border-radius: 8px; width: 300px; font-size: 14px; }
+    
+    /* TABLE */
+    .table-container { 
+        background: #fff; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); 
+        overflow: hidden; display: none; border: 1px solid var(--ring);
+    }
+    .table-responsive { overflow-x: auto; max-height: 70vh; }
+    
+    table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+    th { 
+        background: #f8fafc; text-align: left; padding: 12px 15px; 
+        font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;
+        position: sticky; top: 0; z-index: 10; border-bottom: 2px solid #e2e8f0;
+    }
+    td { padding: 10px 15px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+    tr:hover td { background: #f8fafc; }
+
+    /* STATUS PILL (Ejemplo) */
+    .badge { padding: 4px 8px; border-radius: 99px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .badge-green { background: #dcfce7; color: #166534; }
+    .badge-red { background: #fee2e2; color: #991b1b; }
+    .badge-gray { background: #f1f5f9; color: #475569; }
+
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="topbar">
+      <a class="brand" href="index.html">
+        <img src="images/logo.png" style="width:32px; border-radius:6px;">
+        Gerencia
+      </a>
+      <div style="display:flex; gap:10px">
+        <a href="pedido_local.html" class="nav-btn">📦 Pedidos</a>
+        <a href="finanzas.html" class="nav-btn">📈 Finanzas</a>
+        <a href="#" class="nav-btn active">📊 Reportes</a>
+        <button onclick="location.href='login.html'" class="btn-danger">Salir</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+    
+    <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <h2>📂 Importar Reporte</h2>
+        <p>Hacé click o arrastrá tu Excel / CSV acá para visualizarlo.</p>
+        <input type="file" id="fileInput" style="display:none" accept=".xlsx, .xls, .csv">
+    </div>
+
+    <div class="controls" id="controls">
+        <div>
+            <h3 style="margin:0" id="fileName">Archivo cargado</h3>
+            <span style="font-size:13px; color:#666" id="rowCount">0 filas</span>
+        </div>
+        <input type="text" id="searchInput" class="search-input" placeholder="🔍 Buscar en el reporte..." onkeyup="filterTable()">
+    </div>
+
+    <div class="table-container" id="tableContainer">
+        <div class="table-responsive">
+            <table id="dataTable">
+                <thead></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+
+    // Drag & Drop visual effects
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--primary)'; dropZone.style.background = '#f0fdf4'; });
+    dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.style.borderColor = '#cbd5e1'; dropZone.style.background = '#fff'; });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = '#cbd5e1'; dropZone.style.background = '#fff';
+        if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        if(e.target.files.length) handleFile(e.target.files[0]);
+    });
+
+    function handleFile(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            
+            // Leer la primera hoja
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            
+            // Convertir a JSON (Matriz de Arrays para facilitar renderizado)
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+            
+            if(jsonData.length > 0) {
+                renderTable(jsonData, file.name);
+            } else {
+                alert("El archivo parece estar vacío.");
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function renderTable(data, name) {
+        const thead = document.querySelector('#dataTable thead');
+        const tbody = document.querySelector('#dataTable tbody');
+        
+        // Limpiar
+        thead.innerHTML = '';
+        tbody.innerHTML = '';
+
+        // Headers (Fila 0)
+        const headers = data[0];
+        let headerRow = '<tr>';
+        headers.forEach(h => {
+            headerRow += `<th>${h || ''}</th>`;
+        });
+        headerRow += '</tr>';
+        thead.innerHTML = headerRow;
+
+        // Datos (Filas 1 en adelante)
+        data.slice(1).forEach(row => {
+            if(row.length === 0) return; // Saltar filas vacías
+            let tr = '<tr>';
+            
+            // Asegurar que la fila tenga celdas para todas las columnas
+            for(let i=0; i < headers.length; i++) {
+                let cell = row[i];
+                
+                // Formateo Básico Inteligente
+                if(cell === undefined || cell === null) cell = '';
+                
+                // Si parece dinero
+                if(typeof cell === 'number' && headers[i].toLowerCase().includes('total')) {
+                    cell = '$ ' + cell.toLocaleString('es-AR');
+                }
+                
+                // Si es estado, poner badge
+                if(headers[i].toLowerCase().includes('estado')) {
+                    const st = String(cell).toLowerCase();
+                    let badgeClass = 'badge-gray';
+                    if(st.includes('entregado') || st.includes('confirmado')) badgeClass = 'badge-green';
+                    if(st.includes('cancel') || st.includes('rechazado')) badgeClass = 'badge-red';
+                    cell = `<span class="badge ${badgeClass}">${cell}</span>`;
+                }
+
+                tr += `<td>${cell}</td>`;
+            }
+            tr += '</tr>';
+            tbody.innerHTML += tr;
+        });
+
+        // Mostrar UI
+        document.getElementById('controls').style.display = 'flex';
+        document.getElementById('tableContainer').style.display = 'block';
+        document.getElementById('fileName').innerText = name;
+        document.getElementById('rowCount').innerText = (data.length - 1) + ' registros';
+        document.getElementById('dropZone').style.display = 'none'; // Ocultar zona de carga para ver tabla mejor
+    }
+
+    // Buscador en tiempo real
+    function filterTable() {
+        const input = document.getElementById("searchInput");
+        const filter = input.value.toUpperCase();
+        const table = document.getElementById("dataTable");
+        const tr = table.getElementsByTagName("tr");
+
+        // Empezamos en 1 para saltar el header
+        for (let i = 1; i < tr.length; i++) {
+            let visible = false;
+            const tds = tr[i].getElementsByTagName("td");
+            for (let j = 0; j < tds.length; j++) {
+                if (tds[j]) {
+                    const txtValue = tds[j].textContent || tds[j].innerText;
+                    if (txtValue.toUpperCase().indexOf(filter) > -1) {
+                        visible = true;
+                        break;
+                    }
+                }
+            }
+            tr[i].style.display = visible ? "" : "none";
+        }
+    }
+  </script>
+</body>
+</html>
