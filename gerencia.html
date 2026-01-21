@@ -13,7 +13,7 @@
   <style>
     :root {
       --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --border: #e2e8f0;
-      --green: #10b981; --red: #ef4444; --blue: #3b82f6; --orange: #f97316;
+      --green: #10b981; --red: #ef4444; --blue: #3b82f6; --orange: #f97316; --purple: #8b5cf6;
     }
     * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
     body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
@@ -45,6 +45,7 @@
     .btn { padding: 8px 14px; border-radius: 6px; border: none; font-weight: 600; cursor: pointer; font-size: 13px; transition: 0.2s; display: inline-flex; align-items: center; gap: 5px; }
     .btn-primary { background: var(--primary); color: white; }
     .btn-blue { background: var(--blue); color: white; }
+    .btn-purple { background: var(--purple); color: white; }
     .btn-danger { background: #fee2e2; color: var(--red); }
     .btn-sm { padding: 4px 8px; font-size: 11px; }
 
@@ -64,7 +65,7 @@
 
     /* UTIL */
     .text-red { color: var(--red); } .text-green { color: var(--green); }
-    .money-in { color: var(--green); font-weight: 700; } .money-out { color: var(--red); font-weight: 700; }
+    .sub-recipe-badge { background: #f3e8ff; color: #6b21a8; padding: 2px 6px; border-radius: 4px; font-size: 10px; border: 1px solid #d8b4fe; font-weight: 700; }
 
   </style>
 </head>
@@ -82,11 +83,11 @@
 <div class="layout">
   <aside class="sidebar">
     <div class="tab-btn active" onclick="showTab('dashboard')">📊 Rendimiento</div>
-    <div class="tab-btn" onclick="showTab('recipes')">🍔 Recetas</div>
-    <div class="tab-btn" onclick="showTab('stock')">📦 Stock & Compras</div>
+    <div class="tab-btn" onclick="showTab('stock')">📦 Stock (Insumos)</div>
+    <div class="tab-btn" onclick="showTab('subrecipes')">🧩 Armado de Items</div>
+    <div class="tab-btn" onclick="showTab('recipes')">🍔 Recetas Finales</div>
     <div class="tab-btn" onclick="showTab('fixed')">💡 Costos Fijos</div>
     <div class="tab-btn" onclick="showTab('production')">👨‍🍳 Sueldos</div>
-    <div class="tab-btn" onclick="showTab('packaging')">🥡 Packaging</div>
   </aside>
 
   <main class="content">
@@ -106,28 +107,27 @@
             <div class="kpi-val" id="kpiSales">$ 0</div>
         </div>
         <div class="kpi">
-            <div class="kpi-lbl">Compras & Gastos Reales</div>
-            <div class="kpi-val text-red" id="kpiExpenses">$ 0</div>
-            <div style="font-size:11px; color:#64748b; margin-top:5px">Incluye Fijos, Comisiones y Stock</div>
+            <div class="kpi-lbl">Costo Teórico (Recetas)</div>
+            <div class="kpi-val text-red" id="kpiTheoCMV">$ 0</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-lbl">Fijos + Comisiones</div>
+            <div class="kpi-val text-red" id="kpiFixedTotal">$ 0</div>
         </div>
         <div class="kpi" style="background: #f0fdf4; border-color: #bbf7d0;">
-            <div class="kpi-lbl text-green">Ganancia (Caja Real)</div>
-            <div class="kpi-val text-green" id="kpiCashProfit">$ 0</div>
-        </div>
-        <div class="kpi" style="background: #f8fafc;">
-            <div class="kpi-lbl">Ganancia (Teórica Receta)</div>
-            <div class="kpi-val" id="kpiTheoProfit" style="color:#64748b">$ 0</div>
+            <div class="kpi-lbl text-green">Ganancia Neta</div>
+            <div class="kpi-val text-green" id="kpiNet">$ 0</div>
         </div>
       </div>
 
       <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px">
         <div class="card">
-            <h2>Flujo de Dinero (Real)</h2>
+            <h2>Rentabilidad Real</h2>
             <canvas id="mainChart" height="220"></canvas>
         </div>
         <div class="card">
-            <h2>Últimas Compras</h2>
-            <div id="lastPurchasesList" style="font-size:13px; color:#555"></div>
+            <h2>Top Rentabilidad</h2>
+            <div id="burgerStats" style="font-size:13px; color:#555"></div>
         </div>
       </div>
     </div>
@@ -135,28 +135,60 @@
     <div id="tab-stock" style="display:none">
         <div class="card">
             <h2>
-                <span>📦 Inventario de Insumos</span>
+                <span>📦 Inventario de Insumos (Materia Prima)</span>
                 <div style="display:flex; gap:10px">
                     <button class="btn btn-blue" onclick="openPurchaseModal()">🛒 Registrar Compra</button>
-                    <button class="btn btn-primary" onclick="openProductModal()">+ Nuevo Producto</button>
+                    <button class="btn btn-primary" onclick="openProductModal()">+ Nuevo Insumo</button>
                 </div>
             </h2>
             <div style="margin-bottom:15px; display:flex; gap:10px">
-                <input type="text" id="searchStock" placeholder="🔍 Buscar ingrediente..." onkeyup="renderStockTable()">
+                <input type="text" id="searchStock" placeholder="🔍 Buscar..." onkeyup="renderStockTable()">
                 <select id="filterCat" onchange="renderStockTable()" style="width:150px">
                     <option value="all">Todo</option>
                     <option value="carniceria">Carne</option>
                     <option value="panaderia">Pan</option>
                     <option value="almacen">Almacén</option>
-                    <option value="verdularia">Verdura</option>
-                    <option value="salsas">Salsas</option>
+                    <option value="packaging">Packaging</option>
                 </select>
             </div>
             <div style="overflow-x:auto">
                 <table>
-                    <thead><tr><th>Producto</th><th>Categoría</th><th>Stock Actual</th><th>Costo Unit.</th><th>Estado</th><th></th></tr></thead>
+                    <thead><tr><th>Producto</th><th>Categoría</th><th>Stock</th><th>Costo Unit.</th><th></th></tr></thead>
                     <tbody id="stockTableBody"></tbody>
                 </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-subrecipes" style="display:none">
+        <div class="card">
+            <h2>
+                <span>🧩 Armado de Items (Medallones, Kits, Salsas)</span>
+                <button class="btn btn-purple" onclick="addNewSubRecipe()">+ Nuevo Item Compuesto</button>
+            </h2>
+            <p style="font-size:12px; color:#666; margin-bottom:15px">
+                Creá items que usan varios insumos (ej: Medallón = Carne + Grasa). Luego usalos en las recetas finales.
+            </p>
+            <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:20px">
+                <div>
+                    <table>
+                        <thead><tr><th>Item Compuesto</th><th style="text-align:right">Costo</th><th></th></tr></thead>
+                        <tbody id="subRecipesListBody"></tbody>
+                    </table>
+                </div>
+                <div id="subRecipeEditor" style="background:#fcfaff; padding:20px; border-radius:10px; border:1px solid #e9d5ff; display:none">
+                    <h3 style="margin-top:0; color:var(--purple)">Armando: <span id="subEditorTitle"></span></h3>
+                    <table style="background:#fff">
+                        <thead><tr><th>Insumo Base</th><th>Cant.</th><th>Costo</th><th></th></tr></thead>
+                        <tbody id="subRecipeIngBody"></tbody>
+                    </table>
+                    <div style="margin-top:10px; display:flex; gap:5px; border-top:1px dashed #cbd5e1; padding-top:10px">
+                        <select id="newSubIng"></select>
+                        <input type="number" id="newSubQty" placeholder="Cant" style="width:80px">
+                        <button class="btn btn-purple" onclick="addIngToSubRecipe()">+</button>
+                    </div>
+                    <div style="text-align:right; margin-top:10px">Costo Calculado: <strong id="subEditorTotalCost" class="text-red">$ 0</strong></div>
+                </div>
             </div>
         </div>
     </div>
@@ -164,20 +196,20 @@
     <div id="tab-recipes" style="display:none">
         <div class="card">
             <h2>
-                <span>🍔 Costo de Recetas</span>
+                <span>🍔 Recetas Finales (Productos de Venta)</span>
                 <button class="btn btn-primary" onclick="addNewRecipe()">+ Nueva Receta</button>
             </h2>
             <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:20px">
                 <div>
                     <table>
-                        <thead><tr><th>Producto</th><th style="text-align:right">Costo</th><th></th></tr></thead>
+                        <thead><tr><th>Producto</th><th style="text-align:right">Costo Total</th><th></th></tr></thead>
                         <tbody id="recipesListBody"></tbody>
                     </table>
                 </div>
-                <div id="recipeEditor" style="background:#f8fafc; padding:20px; border-radius:10px; border:1px solid #e2e8f0; display:none">
-                    <h3 style="margin-top:0; color:var(--primary)">Editando: <span id="editorTitle"></span></h3>
+                <div id="recipeEditor" style="background:#f0fdf4; padding:20px; border-radius:10px; border:1px solid #bbf7d0; display:none">
+                    <h3 style="margin-top:0; color:var(--green)">Receta: <span id="editorTitle"></span></h3>
                     <table style="background:#fff">
-                        <thead><tr><th>Ingrediente (Stock)</th><th>Cant.</th><th>Costo</th><th></th></tr></thead>
+                        <thead><tr><th>Componente</th><th>Cant.</th><th>Costo</th><th></th></tr></thead>
                         <tbody id="recipeIngBody"></tbody>
                     </table>
                     <div style="margin-top:10px; display:flex; gap:5px; border-top:1px dashed #cbd5e1; padding-top:10px">
@@ -207,36 +239,26 @@
       </div>
     </div>
 
-    <div id="tab-packaging" style="display:none">
-        <div class="card">
-            <h2><span>🥡 Costos Packaging</span> <button class="btn btn-primary" onclick="addPackRow()">+ Agregar</button></h2>
-            <table id="tablePack"><thead><tr><th>Item</th><th width="150">Costo Unitario ($)</th><th width="50"></th></tr></thead><tbody></tbody></table>
-            <div style="margin-top:10px; text-align:right"><button class="btn btn-blue" onclick="saveFixedData()">💾 Guardar Cambios</button></div>
-        </div>
-    </div>
-
   </main>
 </div>
 
 <div class="modal-overlay" id="modalProduct">
     <div class="modal">
-        <h3 id="mpTitle">Nuevo Producto</h3>
+        <h3 id="mpTitle">Nuevo Insumo</h3>
         <input type="hidden" id="mpId">
         <div style="margin-bottom:10px"><label>Nombre</label><input type="text" id="mpName"></div>
         <div style="margin-bottom:10px"><label>Categoría</label>
             <select id="mpCat">
                 <option value="carniceria">Carne</option><option value="panaderia">Pan</option>
                 <option value="almacen">Almacén</option><option value="verdularia">Verdura</option>
-                <option value="salsas">Salsas</option><option value="bebidas">Bebidas</option>
-                <option value="packaging">Packaging</option>
+                <option value="salsas">Salsas</option><option value="packaging">Packaging</option>
             </select>
         </div>
         <div style="display:flex; gap:10px; margin-bottom:10px">
-            <div><label>Stock Inicial</label><input type="number" id="mpQty" step="0.01"></div>
-            <div><label>Unidad</label><select id="mpUnit"><option value="kg">Kg</option><option value="u">Unid</option><option value="lt">Lt</option></select></div>
+            <div><label>Unidad</label><select id="mpUnit"><option value="kg">Kg</option><option value="u">Unid</option><option value="lt">Lt</option><option value="pq">Paq</option></select></div>
+            <div><label>Costo Unit. ($)</label><input type="number" id="mpCost" step="0.01"></div>
         </div>
-        <div style="margin-bottom:10px"><label>Costo Actual ($)</label><input type="number" id="mpCost" step="0.01"></div>
-        <div style="margin-bottom:15px"><label>Stock Mínimo</label><input type="number" id="mpMin" value="5"></div>
+        <div style="margin-bottom:15px"><label>Stock Actual</label><input type="number" id="mpQty" value="0"></div>
         <div style="display:flex; gap:10px">
             <button class="btn btn-primary" style="flex:1" onclick="saveProduct()">Guardar</button>
             <button class="btn" style="flex:1" onclick="$('#modalProduct').style.display='none'">Cancelar</button>
@@ -247,14 +269,14 @@
 <div class="modal-overlay" id="modalPurchase">
     <div class="modal">
         <h3>🛒 Registrar Compra</h3>
-        <div style="margin-bottom:10px"><label>Producto</label><select id="purProd"></select></div>
+        <div style="margin-bottom:10px"><label>Insumo</label><select id="purProd"></select></div>
         <div style="display:flex; gap:10px; margin-bottom:10px">
-            <div><label>Cantidad Comprada</label><input type="number" id="purQty" placeholder="Ej: 10"></div>
-            <div><label>Costo Total ($)</label><input type="number" id="purTotal" placeholder="Ej: 50000"></div>
+            <div><label>Cantidad Comprada</label><input type="number" id="purQty"></div>
+            <div><label>Costo Total ($)</label><input type="number" id="purTotal"></div>
         </div>
         <div style="margin-bottom:15px"><label>Fecha</label><input type="date" id="purDate"></div>
         <div style="display:flex; gap:10px">
-            <button class="btn btn-primary" style="flex:1" onclick="confirmPurchase()">Registrar Gasto</button>
+            <button class="btn btn-primary" style="flex:1" onclick="confirmPurchase()">Confirmar Compra</button>
             <button class="btn" style="flex:1" onclick="$('#modalPurchase').style.display='none'">Cancelar</button>
         </div>
     </div>
@@ -264,33 +286,35 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
-    // 1. CONFIG
+    // CONFIG
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
     try { firebase.initializeApp(firebaseConfig); } catch(e) {}
     const db = firebase.firestore();
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency", currency:"ARS", maximumFractionDigits:0});
 
-    // 2. STATE
-    let INVENTORY = [];
-    let RECIPES = [];
+    // STATE
+    let INVENTORY = []; // Materia Prima
+    let SUB_RECIPES = []; // Medallones, Salsas, Packs
+    let RECIPES = []; // Final Products
     let PURCHASES = [];
     let ORDERS = [];
-    let FIXED_DATA = { fixed:[], prod:[], pack:[], config:{pyPercent:30} };
+    let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30} };
     let currentRecipeId = null;
+    let currentSubRecipeId = null;
     let chartInstance = null;
 
-    // 3. INIT
+    // INIT
     window.addEventListener('DOMContentLoaded', () => {
         const now = new Date();
         $('#monthPicker').value = now.toISOString().slice(0,7);
         $('#purDate').valueAsDate = now;
-
-        // Listeners
+        
         $('#monthPicker').addEventListener('change', loadDashboardData);
         
-        // Load Realtime Data
+        // Listeners Realtime
         loadInventory();
+        loadSubRecipes();
         loadRecipes();
         loadFixedData();
         loadDashboardData();
@@ -301,6 +325,15 @@
         db.collection('inventory').orderBy('name').onSnapshot(snap => {
             INVENTORY = snap.docs.map(d => ({id: d.id, ...d.data()}));
             renderStockTable();
+            renderRecipesList(); // Update costs
+            renderSubRecipesList();
+        });
+    }
+    function loadSubRecipes() {
+        db.collection('subrecipes').onSnapshot(snap => {
+            SUB_RECIPES = snap.docs.map(d => ({id: d.id, ...d.data()}));
+            renderSubRecipesList();
+            renderRecipesList();
         });
     }
     function loadRecipes() {
@@ -314,8 +347,6 @@
             if(doc.exists) FIXED_DATA = doc.data();
             if(!FIXED_DATA.fixed) FIXED_DATA.fixed = [];
             if(!FIXED_DATA.prod) FIXED_DATA.prod = [];
-            if(!FIXED_DATA.pack) FIXED_DATA.pack = [];
-            
             $('#confPy').value = FIXED_DATA.config?.pyPercent || 30;
             renderFixedTables();
         });
@@ -327,302 +358,245 @@
         const start = new Date(y, m-1, 1).toISOString();
         const end = new Date(y, m, 1).toISOString();
 
-        // 1. Orders
         db.collection('orders').where('createdAt', '>=', start).where('createdAt', '<', end).get().then(snap => {
             ORDERS = snap.docs.map(d => d.data()).filter(o => o.status !== 'cancelled');
             calculateAll();
         });
-
-        // 2. Purchases (Gastos Reales)
         db.collection('purchases').where('date', '>=', start).where('date', '<', end).get().then(snap => {
             PURCHASES = snap.docs.map(d => d.data());
             calculateAll();
         });
     }
 
-    // --- STOCK & PURCHASES ---
+    // --- 1. STOCK & COMPRAS ---
     function renderStockTable() {
         const t = $('#searchStock').value.toLowerCase();
         const cat = $('#filterCat').value;
         const tbody = $('#stockTableBody');
         tbody.innerHTML = '';
-
         INVENTORY.filter(p => p.name.toLowerCase().includes(t) && (cat === 'all' || p.category === cat)).forEach(p => {
-            let stHtml = `<span class="status-dot st-ok"></span>OK`;
-            if(p.qty <= p.min) stHtml = `<span class="status-dot st-crit"></span>CRIT`;
-            else if(p.qty <= p.min*1.5) stHtml = `<span class="status-dot st-warn"></span>BAJO`;
-
-            tbody.innerHTML += `<tr>
-                <td><b>${p.name}</b></td>
-                <td><small>${p.category}</small></td>
-                <td>${Number(p.qty).toFixed(2)} ${p.unit}</td>
-                <td>${money(p.cost)}</td>
-                <td>${stHtml}</td>
-                <td><button class="btn btn-sm" onclick="openProductModal('${p.id}')">✏️</button></td>
-            </tr>`;
+            tbody.innerHTML += `<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td><td>${Number(p.qty).toFixed(2)} ${p.unit}</td><td>${money(p.cost)}</td><td><button class="btn btn-sm" onclick="openProductModal('${p.id}')">✏️</button></td></tr>`;
         });
     }
-
     window.openProductModal = (id) => {
         $('#modalProduct').style.display = 'flex';
         if(id) {
             const p = INVENTORY.find(i => i.id === id);
-            $('#mpTitle').innerText = 'Editar Producto';
-            $('#mpId').value = id;
-            $('#mpName').value = p.name;
-            $('#mpCat').value = p.category;
-            $('#mpQty').value = p.qty;
-            $('#mpUnit').value = p.unit;
-            $('#mpCost').value = p.cost || 0;
-            $('#mpMin').value = p.min;
+            $('#mpTitle').innerText = 'Editar Insumo'; $('#mpId').value = id; $('#mpName').value = p.name; $('#mpCat').value = p.category; $('#mpQty').value = p.qty; $('#mpUnit').value = p.unit; $('#mpCost').value = p.cost || 0;
         } else {
-            $('#mpTitle').innerText = 'Nuevo Producto';
-            $('#mpId').value = '';
-            $('#mpName').value = '';
-            $('#mpQty').value = 0;
-            $('#mpCost').value = 0;
+            $('#mpTitle').innerText = 'Nuevo Insumo'; $('#mpId').value = ''; $('#mpName').value = ''; $('#mpQty').value = 0; $('#mpCost').value = 0;
         }
     };
-
     window.saveProduct = async () => {
         const id = $('#mpId').value;
-        const data = {
-            name: $('#mpName').value,
-            category: $('#mpCat').value,
-            qty: Number($('#mpQty').value),
-            unit: $('#mpUnit').value,
-            cost: Number($('#mpCost').value),
-            min: Number($('#mpMin').value)
-        };
+        const data = { name: $('#mpName').value, category: $('#mpCat').value, qty: Number($('#mpQty').value), unit: $('#mpUnit').value, cost: Number($('#mpCost').value) };
         if(!data.name) return alert("Falta nombre");
-        
-        if(id) await db.collection('inventory').doc(id).update(data);
-        else await db.collection('inventory').add(data);
+        id ? await db.collection('inventory').doc(id).update(data) : await db.collection('inventory').add(data);
         $('#modalProduct').style.display = 'none';
     };
-
     window.openPurchaseModal = () => {
         $('#modalPurchase').style.display = 'flex';
-        const sel = $('#purProd');
-        sel.innerHTML = '';
-        INVENTORY.forEach(p => {
-            sel.innerHTML += `<option value="${p.id}">${p.name} (Stock: ${p.qty})</option>`;
-        });
-        $('#purQty').value = '';
-        $('#purTotal').value = '';
+        const sel = $('#purProd'); sel.innerHTML = '';
+        INVENTORY.forEach(p => sel.innerHTML += `<option value="${p.id}">${p.name} (Stock: ${p.qty})</option>`);
+        $('#purQty').value = ''; $('#purTotal').value = '';
     };
-
     window.confirmPurchase = async () => {
-        const prodId = $('#purProd').value;
-        const qty = Number($('#purQty').value);
-        const total = Number($('#purTotal').value);
-        const date = $('#purDate').value;
-
+        const prodId = $('#purProd').value, qty = Number($('#purQty').value), total = Number($('#purTotal').value), date = $('#purDate').value;
         if(!prodId || qty <= 0 || total <= 0) return alert("Datos inválidos");
-
-        // 1. Guardar Compra
-        await db.collection('purchases').add({
-            prodId, qty, total, date,
-            prodName: INVENTORY.find(i=>i.id===prodId)?.name
-        });
-
-        // 2. Actualizar Stock y Costo Promedio
+        await db.collection('purchases').add({ prodId, qty, total, date, prodName: INVENTORY.find(i=>i.id===prodId)?.name });
         const prod = INVENTORY.find(i => i.id === prodId);
-        if(prod) {
-            const newQty = Number(prod.qty) + qty;
-            // Nuevo costo unitario basado en la última compra (o promedio ponderado si prefieres)
-            const newUnitCost = total / qty; 
-            await db.collection('inventory').doc(prodId).update({
-                qty: newQty,
-                cost: newUnitCost
-            });
-        }
-
-        alert("Compra registrada y stock actualizado!");
-        $('#modalPurchase').style.display = 'none';
-        loadDashboardData(); // Refrescar finanzas
+        if(prod) await db.collection('inventory').doc(prodId).update({ qty: Number(prod.qty) + qty, cost: total / qty });
+        alert("Compra registrada!"); $('#modalPurchase').style.display = 'none'; loadDashboardData();
     };
 
-    // --- RECIPES ---
+    // --- 2. SUB-RECETAS (MEDALLONES, KITS) ---
+    function calculateSubRecipeCost(sub) {
+        return (sub.ingredients || []).reduce((sum, ing) => {
+            const item = INVENTORY.find(i => i.id === ing.id);
+            return sum + (ing.qty * (item ? item.cost : 0));
+        }, 0);
+    }
+    function renderSubRecipesList() {
+        const tbody = $('#subRecipesListBody'); tbody.innerHTML = '';
+        SUB_RECIPES.forEach(sub => {
+            const cost = calculateSubRecipeCost(sub);
+            const tr = document.createElement('tr'); tr.onclick = () => openSubRecipeEditor(sub);
+            tr.innerHTML = `<td>${sub.name}</td><td style="text-align:right"><b>${money(cost)}</b></td><td><button class="btn-sm btn-danger" onclick="delSubRecipe(event,'${sub.id}')">×</button></td>`;
+            tbody.appendChild(tr);
+        });
+    }
+    window.addNewSubRecipe = async () => {
+        const name = prompt("Nombre del Item Compuesto (Ej: Medallón 120g):");
+        if(name) await db.collection('subrecipes').add({ name, ingredients: [] });
+    };
+    window.openSubRecipeEditor = (sub) => {
+        currentSubRecipeId = sub.id;
+        $('#subRecipeEditor').style.display = 'block'; $('#subEditorTitle').innerText = sub.name;
+        const sel = $('#newSubIng'); sel.innerHTML = '<option value="">Insumo...</option>';
+        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}">${i.name} ($${Math.round(i.cost)})</option>`);
+        const tbody = $('#subRecipeIngBody'); tbody.innerHTML = '';
+        (sub.ingredients || []).forEach((ing, idx) => {
+            const item = INVENTORY.find(i => i.id === ing.id);
+            const cost = item ? item.cost : 0;
+            tbody.innerHTML += `<tr><td>${item ? item.name : '???'}</td><td>${ing.qty}</td><td>${money(cost * ing.qty)}</td><td><button style="color:red;border:none;background:none" onclick="removeSubIng('${sub.id}', ${idx})">×</button></td></tr>`;
+        });
+        $('#subEditorTotalCost').innerText = money(calculateSubRecipeCost(sub));
+    };
+    window.addIngToSubRecipe = async () => {
+        const id = $('#newSubIng').value, qty = Number($('#newSubQty').value);
+        if(!id || !qty) return;
+        const s = SUB_RECIPES.find(x => x.id === currentSubRecipeId);
+        const newIngs = [...(s.ingredients || []), {id, qty}];
+        await db.collection('subrecipes').doc(currentSubRecipeId).update({ingredients: newIngs});
+        $('#newSubQty').value = '';
+    };
+    window.removeSubIng = async (sId, idx) => {
+        const s = SUB_RECIPES.find(x => x.id === sId);
+        const newIngs = [...s.ingredients]; newIngs.splice(idx, 1);
+        await db.collection('subrecipes').doc(sId).update({ingredients: newIngs});
+    };
+    window.delSubRecipe = async (e, id) => { e.stopPropagation(); if(confirm("Borrar?")) { await db.collection('subrecipes').doc(id).delete(); $('#subRecipeEditor').style.display='none'; } };
+
+    // --- 3. RECETAS FINALES ---
+    function calculateRecipeTotal(recipe) {
+        return (recipe.ingredients || []).reduce((sum, ing) => {
+            // Check if ingredient is a Sub-Recipe
+            const sub = SUB_RECIPES.find(s => s.id === ing.id);
+            if(sub) return sum + (ing.qty * calculateSubRecipeCost(sub));
+            // Check if ingredient is Raw Stock
+            const item = INVENTORY.find(i => i.id === ing.id);
+            if(item) return sum + (ing.qty * item.cost);
+            return sum;
+        }, 0);
+    }
     function renderRecipesList() {
-        const tbody = $('#recipesListBody');
-        tbody.innerHTML = '';
+        const tbody = $('#recipesListBody'); tbody.innerHTML = '';
         RECIPES.forEach(r => {
-            // Calcular costo usando precios actuales del inventario
-            const cost = (r.ingredients || []).reduce((sum, ing) => {
-                const item = INVENTORY.find(i => i.name === ing.name); // Match por nombre
-                return sum + (ing.qty * (item ? item.cost : 0));
-            }, 0);
-            
-            const tr = document.createElement('tr');
-            tr.onclick = () => openRecipeEditor(r);
-            tr.className = 'recipe-row';
+            const cost = calculateRecipeTotal(r);
+            const tr = document.createElement('tr'); tr.onclick = () => openRecipeEditor(r);
             tr.innerHTML = `<td>${r.id}</td><td style="text-align:right"><b>${money(cost)}</b></td><td><button class="btn-sm btn-danger" onclick="delRecipe(event,'${r.id}')">×</button></td>`;
             tbody.appendChild(tr);
         });
     }
-
+    window.addNewRecipe = async () => {
+        const name = prompt("Nombre del producto final (Igual que en Pedidos):");
+        if(name) await db.collection('recipes').doc(name).set({ingredients: []});
+    };
     window.openRecipeEditor = (r) => {
         currentRecipeId = r.id;
-        $('#recipeEditor').style.display = 'block';
-        $('#editorTitle').innerText = r.id;
-        
-        // Select Ingredientes
-        const sel = $('#newRecIng');
-        sel.innerHTML = '<option value="">Agregar...</option>';
-        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.name}">${i.name} ($${Math.round(i.cost)})</option>`);
+        $('#recipeEditor').style.display = 'block'; $('#editorTitle').innerText = r.id;
+        const sel = $('#newRecIng'); sel.innerHTML = '<option value="">Agregar...</option>';
+        // Option Group for Sub-Recipes
+        sel.innerHTML += `<optgroup label="🧩 Items Compuestos">`;
+        SUB_RECIPES.forEach(s => sel.innerHTML += `<option value="${s.id}">🧩 ${s.name}</option>`);
+        sel.innerHTML += `</optgroup><optgroup label="📦 Insumos Sueltos">`;
+        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}">${i.name}</option>`);
+        sel.innerHTML += `</optgroup>`;
 
-        // Render Ingredientes Actuales
-        const tbody = $('#recipeIngBody');
-        tbody.innerHTML = '';
-        let total = 0;
+        const tbody = $('#recipeIngBody'); tbody.innerHTML = '';
         (r.ingredients || []).forEach((ing, idx) => {
-            const item = INVENTORY.find(i => i.name === ing.name);
-            const cost = item ? item.cost : 0;
-            const lineTotal = cost * ing.qty;
-            total += lineTotal;
-            tbody.innerHTML += `<tr><td>${ing.name}</td><td>${ing.qty}</td><td>${money(lineTotal)}</td><td><button style="color:red;border:none;background:none;cursor:pointer" onclick="removeRecIng('${r.id}', ${idx})">×</button></td></tr>`;
+            let name = '???', cost = 0;
+            const sub = SUB_RECIPES.find(s => s.id === ing.id);
+            const item = INVENTORY.find(i => i.id === ing.id);
+            if(sub) { name = '🧩 ' + sub.name; cost = calculateSubRecipeCost(sub); }
+            else if(item) { name = item.name; cost = item.cost; }
+            
+            tbody.innerHTML += `<tr><td>${name}</td><td>${ing.qty}</td><td>${money(cost * ing.qty)}</td><td><button style="color:red;border:none;background:none" onclick="removeRecIng('${r.id}', ${idx})">×</button></td></tr>`;
         });
-        $('#editorTotalCost').innerText = money(total);
+        $('#editorTotalCost').innerText = money(calculateRecipeTotal(r));
     };
-
-    window.addNewRecipe = async () => {
-        const name = prompt("Nombre del producto (tal cual figura en Pedidos):");
-        if(name) {
-            await db.collection('recipes').doc(name).set({ingredients: []});
-        }
-    };
-
     window.addIngToRecipe = async () => {
-        const name = $('#newRecIng').value;
-        const qty = Number($('#newRecQty').value);
-        if(!name || !qty) return;
+        const id = $('#newRecIng').value, qty = Number($('#newRecQty').value);
+        if(!id || !qty) return;
         const r = RECIPES.find(x => x.id === currentRecipeId);
-        const newIngs = [...(r.ingredients || []), {name, qty}];
+        const newIngs = [...(r.ingredients || []), {id, qty}];
         await db.collection('recipes').doc(currentRecipeId).update({ingredients: newIngs});
         $('#newRecQty').value = '';
     };
-
     window.removeRecIng = async (rId, idx) => {
         const r = RECIPES.find(x => x.id === rId);
-        const newIngs = [...r.ingredients];
-        newIngs.splice(idx, 1);
+        const newIngs = [...r.ingredients]; newIngs.splice(idx, 1);
         await db.collection('recipes').doc(rId).update({ingredients: newIngs});
-        // La suscripción onSnapshot actualizará la UI
     };
-    
-    window.delRecipe = async (e, id) => {
-        e.stopPropagation();
-        if(confirm("Borrar receta?")) {
-            await db.collection('recipes').doc(id).delete();
-            $('#recipeEditor').style.display = 'none';
-        }
-    };
+    window.delRecipe = async (e, id) => { e.stopPropagation(); if(confirm("Borrar?")) { await db.collection('recipes').doc(id).delete(); $('#recipeEditor').style.display='none'; } };
 
-    // --- FIXED, PROD, PACK TABLES ---
+    // --- 4. FIXED COSTS & PROD ---
     function renderFixedTables() {
-        renderSimpleTable('tableFixed', FIXED_DATA.fixed);
-        renderSimpleTable('tableProd', FIXED_DATA.prod);
-        renderSimpleTable('tablePack', FIXED_DATA.pack);
+        const t1=$('#tableFixed tbody'), t2=$('#tableProd tbody'); t1.innerHTML=''; t2.innerHTML='';
+        FIXED_DATA.fixed.forEach((r,i) => t1.innerHTML += `<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button onclick="delFix('fixed',${i})">×</button></td></tr>`);
+        FIXED_DATA.prod.forEach((r,i) => t2.innerHTML += `<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button onclick="delFix('prod',${i})">×</button></td></tr>`);
     }
-
-    function renderSimpleTable(id, arr) {
-        const tbody = document.querySelector('#'+id+' tbody');
-        tbody.innerHTML = '';
-        arr.forEach((row, idx) => {
-            tbody.innerHTML += `<tr>
-                <td><input value="${row.name}" onchange="updateFixedRow('${id}',${idx},'name',this.value)"></td>
-                <td><input type="number" value="${row.cost}" onchange="updateFixedRow('${id}',${idx},'cost',this.value)"></td>
-                <td><button style="color:#ccc;border:none;background:none" onclick="delFixedRow('${id}',${idx})">×</button></td>
-            </tr>`;
-        });
-    }
-
-    window.addFixedRow = (id) => {
-        let arr = id === 'tableFixed' ? FIXED_DATA.fixed : (id === 'tableProd' ? FIXED_DATA.prod : FIXED_DATA.pack);
-        arr.push({name:'', cost:0});
-        renderFixedTables();
-    };
-    window.updateFixedRow = (tableId, idx, field, val) => {
-        let arr = tableId === 'tableFixed' ? FIXED_DATA.fixed : (tableId === 'tableProd' ? FIXED_DATA.prod : FIXED_DATA.pack);
-        arr[idx][field] = field === 'cost' ? Number(val) : val;
-    };
-    window.delFixedRow = (tableId, idx) => {
-        let arr = tableId === 'tableFixed' ? FIXED_DATA.fixed : (tableId === 'tableProd' ? FIXED_DATA.prod : FIXED_DATA.pack);
-        arr.splice(idx, 1);
-        renderFixedTables();
-    };
-    window.saveFixedData = () => {
-        FIXED_DATA.config = { pyPercent: Number($('#confPy').value) };
-        db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado!"));
-    };
+    window.addFixedRow = () => { FIXED_DATA.fixed.push({name:'',cost:0}); renderFixedTables(); };
+    window.addProdRow = () => { FIXED_DATA.prod.push({name:'',cost:0}); renderFixedTables(); };
+    window.updFix = (arr, i, k, v) => { FIXED_DATA[arr][i][k] = k==='cost'?Number(v):v; };
+    window.delFix = (arr, i) => { FIXED_DATA[arr].splice(i,1); renderFixedTables(); };
+    window.saveFixedData = () => { FIXED_DATA.config = {pyPercent:Number($('#confPy').value)}; db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado")); };
     window.saveConfig = saveFixedData;
 
-    // --- CÁLCULOS FINALES ---
+    // --- 5. CÁLCULOS ---
     function calculateAll() {
-        let grossSales = 0;
-        let commissions = 0;
-        let totalFixed = FIXED_DATA.fixed.reduce((s,i)=>s+i.cost,0) + FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
-        
-        // Costo Teórico
-        let theoreticalCMV = 0;
-        const packAvg = FIXED_DATA.pack.reduce((s,i)=>s+i.cost,0); // Suma simple, aprox
-        let totalPackTheo = 0;
+        let gross = 0, comms = 0;
+        let theoCMV = 0;
+        let profitByBurger = {};
 
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0);
-            grossSales += sale;
-            if(o.source === 'pedidosya') commissions += (sale * (FIXED_DATA.config.pyPercent/100));
-            totalPackTheo += packAvg;
+            gross += sale;
+            if(o.source === 'pedidosya') comms += (sale * (FIXED_DATA.config.pyPercent/100));
 
             (o.items || []).forEach(item => {
-                const r = RECIPES.find(x => x.id === item.name); // Match exacto o aproximado
+                const name = (item.name || '').toLowerCase().trim();
+                let r = RECIPES.find(x => name.includes(x.id.toLowerCase()));
+                
+                // Fallback Match
+                if(!r) {
+                    if(name.includes('doble')) r = RECIPES.find(x => x.id.toLowerCase().includes('doble'));
+                    else if(name.includes('simple')) r = RECIPES.find(x => x.id.toLowerCase().includes('simple'));
+                }
+
                 if(r) {
-                    const unitCost = (r.ingredients || []).reduce((sum, ing) => {
-                        const stockItem = INVENTORY.find(inv => inv.name === ing.name);
-                        return sum + (ing.qty * (stockItem ? stockItem.cost : 0));
-                    }, 0);
-                    theoreticalCMV += (unitCost * Number(item.qty || 1));
+                    const cost = calculateRecipeTotal(r);
+                    theoCMV += (cost * Number(item.qty || 1));
+                    if(!profitByBurger[r.id]) profitByBurger[r.id] = 0;
+                    profitByBurger[r.id] += (sale - cost);
                 }
             });
         });
 
-        // Costo Real (Compras del Mes)
-        const realPurchases = PURCHASES.reduce((s, p) => s + Number(p.total), 0);
+        const totalFixed = FIXED_DATA.fixed.reduce((s,i)=>s+i.cost,0) + FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
+        const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
 
-        // Resultados
-        const profitCash = grossSales - (totalFixed + commissions + realPurchases);
-        const profitTheo = grossSales - (totalFixed + commissions + theoreticalCMV + totalPackTheo);
-
-        $('#kpiSales').innerText = money(grossSales);
-        $('#kpiExpenses').innerText = '-' + money(totalFixed + commissions + realPurchases);
-        $('#kpiCashProfit').innerText = money(profitCash);
+        $('#kpiSales').innerText = money(gross);
+        $('#kpiTheoCMV').innerText = '-' + money(theoCMV);
+        $('#kpiFixedTotal').innerText = '-' + money(totalFixed + comms);
+        $('#kpiExpenses').innerText = '-' + money(totalFixed + comms + realPurchases);
+        
+        // Ganancia Real (Caja)
+        const profitReal = gross - (totalFixed + comms + realPurchases);
+        $('#kpiCashProfit').innerText = money(profitReal);
+        
+        // Ganancia Teórica (Según Receta)
+        const profitTheo = gross - (totalFixed + comms + theoCMV);
         $('#kpiTheoProfit').innerText = money(profitTheo);
 
-        // Gráfico
+        renderChart(gross, (totalFixed + comms + realPurchases), profitReal);
+        
+        // Render Stats
+        const sorted = Object.entries(profitByBurger).sort((a,b)=>b[1]-a[1]).slice(0,5);
+        $('#burgerStats').innerHTML = sorted.map(([k,v])=>`<div style="display:flex;justify-content:space-between;border-bottom:1px dashed #eee;padding:5px 0"><span>${k}</span><b>${money(v)}</b></div>`).join('');
+        
+        // Last Purchases
+        $('#lastPurchasesList').innerHTML = PURCHASES.slice(0,5).map(p=>`<div style="display:flex;justify-content:space-between;border-bottom:1px dashed #eee;padding:5px 0"><span>${p.prodName||'Compra'}</span><b class="text-red">-${money(p.total)}</b></div>`).join('');
+    }
+
+    function renderChart(ing, egr, gan) {
         const ctx = $('#mainChart').getContext('2d');
         if(chartInstance) chartInstance.destroy();
         chartInstance = new Chart(ctx, {
             type: 'bar',
-            data: {
-                labels: ['Ingresos', 'Gastos Reales (Compras+Fijos)', 'Comisiones', 'Ganancia (Caja)'],
-                datasets: [{
-                    label: 'Flujo de Caja',
-                    data: [grossSales, (realPurchases + totalFixed), commissions, profitCash],
-                    backgroundColor: ['#94a3b8', '#ef4444', '#f59e0b', '#10b981'],
-                    borderRadius: 5
-                }]
-            },
-            options: { plugins: { legend: { display: false } } }
+            data: { labels: ['Ingresos', 'Gastos Totales', 'Ganancia Neta'], datasets: [{ data: [ing, egr, gan], backgroundColor: ['#94a3b8', '#ef4444', '#10b981'], borderRadius:5 }] },
+            options: { plugins: { legend: {display:false} } }
         });
-
-        // Últimas compras
-        $('#lastPurchasesList').innerHTML = PURCHASES.slice(0, 5).map(p => 
-            `<div style="display:flex; justify-content:space-between; border-bottom:1px dashed #eee; padding:5px 0">
-                <span>${p.prodName || 'Compra'}</span>
-                <strong class="text-red">-${money(p.total)}</strong>
-            </div>`
-        ).join('');
     }
 
     // TABS
@@ -632,7 +606,6 @@
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         event.target.classList.add('active');
     };
-
 </script>
 </body>
 </html>
