@@ -13,7 +13,7 @@
   <style>
     :root {
       --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --border: #e2e8f0;
-      --green: #10b981; --red: #ef4444; --blue: #3b82f6; --orange: #f97316; --purple: #8b5cf6;
+      --green: #10b981; --red: #ef4444; --blue: #3b82f6; --purple: #8b5cf6;
     }
     * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
     body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
@@ -139,7 +139,7 @@
             <canvas id="mainChart" height="220"></canvas>
         </div>
         <div class="card">
-            <h2>Últimas Compras</h2>
+            <h2>Últimas Compras Stock</h2>
             <div id="lastPurchasesList" style="font-size:13px; color:#555"></div>
         </div>
       </div>
@@ -187,8 +187,8 @@
                             <th>Insumo</th>
                             <th>Costo Compra</th>
                             <th>Formato</th>
-                            <th>Rendimiento (Trae)</th>
-                            <th style="background:#f0fdf4; color:#166534">Costo Unitario</th>
+                            <th>Rendimiento</th>
+                            <th style="background:#f0fdf4; color:#166534">Costo Unitario (Base)</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -228,22 +228,29 @@
             </h2>
             <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:20px">
                 <div>
-                    <table><thead><tr><th>Item</th><th style="text-align:right">Costo</th><th></th></tr></thead><tbody id="subRecipesListBody"></tbody></table>
+                    <table><thead><tr><th>Item Compuesto</th><th style="text-align:right">Costo</th><th></th></tr></thead><tbody id="subRecipesListBody"></tbody></table>
                 </div>
                 <div id="subRecipeEditor" style="background:#fcfaff; padding:20px; border-radius:10px; border:1px solid #e9d5ff; display:none">
                     <h3 style="margin-top:0; color:var(--purple)">Componentes de: <span id="subEditorTitle" style="font-weight:800"></span></h3>
-                    <table style="background:#fff"><thead><tr><th>Insumo</th><th>Cant.</th><th>Costo</th><th></th></tr></thead><tbody id="subRecipeIngBody"></tbody></table>
+                    <table style="background:#fff"><thead><tr><th>Insumo</th><th>Cant. Real</th><th>Costo</th><th></th></tr></thead><tbody id="subRecipeIngBody"></tbody></table>
+                    
                     <div style="margin-top:10px; border-top:1px dashed #cbd5e1; padding-top:10px">
                         <label style="font-size:11px; font-weight:700">Agregar Insumo:</label>
                         <div style="display:flex; gap:5px; margin-top:5px">
                             <select id="newSubIng" style="flex:2"></select>
                             <input type="number" id="newSubQty" placeholder="Cant." style="flex:1" step="0.001">
-                            <select id="newSubUnit" style="flex:1; background:#f0f9ff; font-weight:700">
-                                <option value="1">Unidad Base</option>
-                                <option value="0.001">Gramos (g) / ml</option>
+                            
+                            <select id="newSubUnit" style="flex:1; background:#f0f9ff; font-weight:700; font-size:12px">
+                                <option value="1">Unidad Base (kg/lt/u)</option>
+                                <option value="0.001">Gramos (g)</option>
+                                <option value="0.001">Mililitros (ml)</option>
                             </select>
+
                             <button class="btn btn-purple" onclick="addIngToSubRecipe()">+</button>
                         </div>
+                        <small style="color:#666; font-size:10px">
+                            * Si elegís "Gramos" y ponés 120, el sistema calcula 0.120 de la unidad base (Kg).
+                        </small>
                     </div>
                     <div style="text-align:right; margin-top:10px">Costo Total: <strong id="subEditorTotalCost" class="text-red">$ 0</strong></div>
                 </div>
@@ -338,18 +345,18 @@
                 <div style="flex:1">
                     <label style="font-size:11px; color:#666">Unidad de Uso</label>
                     <select id="mpUnit">
-                        <option value="u">Unidad (u)</option>
                         <option value="kg">Kilogramo (kg)</option>
                         <option value="gr">Gramos (gr)</option>
                         <option value="lt">Litro (lt)</option>
                         <option value="ml">Mililitro (ml)</option>
+                        <option value="u">Unidad (u)</option>
                         <option value="pq">Paquete</option>
                     </select>
                 </div>
             </div>
             
             <div style="margin-top:10px; text-align:right; font-size:12px">
-                Costo Unitario Resultante: <strong id="calcUnitCost" style="color:var(--green)">$ 0</strong>
+                Costo Unitario Base: <strong id="calcUnitCost" style="color:var(--green)">$ 0</strong>
             </div>
         </div>
 
@@ -505,7 +512,7 @@
                 const pCost = p.purchCost || p.cost; 
                 const pForm = p.format || 'Unidad';
                 const pYield = p.yield || 1;
-                const unitCost = pCost / pYield; // Calculate on fly or use stored cost
+                const unitCost = p.cost; // Base cost stored
                 
                 tbody.innerHTML += `<tr>
                     <td><b>${p.name}</b></td>
@@ -528,7 +535,6 @@
             const p = INVENTORY.find(i => i.id === id);
             $('#mpTitle').innerText = 'Editar Insumo'; $('#mpId').value = id; $('#mpName').value = p.name; $('#mpCat').value = p.category; $('#mpQty').value = p.qty; $('#mpUnit').value = p.unit; 
             
-            // Advanced Fields
             $('#mpPurchCost').value = p.purchCost || p.cost;
             $('#mpFormat').value = p.format || '';
             $('#mpYield').value = p.yield || 1;
@@ -552,12 +558,10 @@
             category: $('#mpCat').value, 
             qty: Number($('#mpQty').value), 
             unit: $('#mpUnit').value,
-            
-            // New structure
             purchCost: purchCost,
             format: $('#mpFormat').value,
             yield: yieldVal,
-            cost: unitCost // We store unit cost for easier calculations later
+            cost: unitCost 
         };
 
         if(!data.name) return alert("Falta nombre");
@@ -577,7 +581,7 @@
         if(!prodId || qty <= 0 || total <= 0) return alert("Datos inválidos");
         await db.collection('purchases').add({ prodId, qty, total, date, prodName: INVENTORY.find(i=>i.id===prodId)?.name });
         const prod = INVENTORY.find(i => i.id === prodId);
-        if(prod) await db.collection('inventory').doc(prodId).update({ qty: Number(prod.qty) + qty }); // Optional: Update cost average logic here
+        if(prod) await db.collection('inventory').doc(prodId).update({ qty: Number(prod.qty) + qty }); 
         alert("Compra registrada!"); $('#modalPurchase').style.display = 'none'; loadDashboardData();
     };
 
@@ -606,6 +610,7 @@
         currentSubRecipeId = sub.id;
         $('#subRecipeEditor').style.display = 'block'; $('#subEditorTitle').innerText = sub.name;
         const sel = $('#newSubIng'); sel.innerHTML = '<option value="">Seleccionar Insumo...</option>';
+        // Show unit price for debugging
         INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}">${i.name} ($${Math.round(i.cost)}/${i.unit})</option>`);
         const tbody = $('#subRecipeIngBody'); tbody.innerHTML = '';
         (sub.ingredients || []).forEach((ing, idx) => {
@@ -620,7 +625,9 @@
         const id = $('#newSubIng').value;
         const rawQty = Number($('#newSubQty').value);
         const multiplier = Number($('#newSubUnit').value); 
+        
         if(!id || rawQty <= 0) return;
+        
         const finalQty = rawQty * multiplier;
         const s = SUB_RECIPES.find(x => x.id === currentSubRecipeId);
         const newIngs = [...(s.ingredients || []), {id, qty: finalQty}];
@@ -632,6 +639,7 @@
         const newIngs = [...s.ingredients]; newIngs.splice(idx, 1);
         await db.collection('subrecipes').doc(sId).update({ingredients: newIngs});
     };
+    window.delSubRecipe = async (e, id) => { e.stopPropagation(); if(confirm("Borrar?")) { await db.collection('subrecipes').doc(id).delete(); $('#subRecipeEditor').style.display='none'; } };
 
     // --- RECETAS FINALES ---
     function calculateRecipeTotal(recipe) {
@@ -691,26 +699,27 @@
         const newIngs = [...r.ingredients]; newIngs.splice(idx, 1);
         await db.collection('recipes').doc(rId).update({ingredients: newIngs});
     };
+    window.delRecipe = async (e, id) => { e.stopPropagation(); if(confirm("Borrar?")) { await db.collection('recipes').doc(id).delete(); $('#recipeEditor').style.display='none'; } };
 
-    // --- FIXED & PROD ---
+    // --- 4. FIXED & PROD ---
     function renderFixedTables() {
         const t1=$('#tableFixed tbody'), t2=$('#tableProd tbody'); t1.innerHTML=''; t2.innerHTML='';
-        FIXED_DATA.fixed.forEach((r,i) => t1.innerHTML += `<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button onclick="delFix('fixed',${i})">×</button></td></tr>`);
-        FIXED_DATA.prod.forEach((r,i) => t2.innerHTML += `<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button onclick="delFix('prod',${i})">×</button></td></tr>`);
+        FIXED_DATA.fixed.forEach((r,i) => t1.innerHTML += `<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`);
+        FIXED_DATA.prod.forEach((r,i) => t2.innerHTML += `<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`);
     }
     window.addFixedRow = () => { FIXED_DATA.fixed.push({name:'',cost:0}); renderFixedTables(); };
     window.addProdRow = () => { FIXED_DATA.prod.push({name:'',cost:0}); renderFixedTables(); };
     window.updFix = (arr, i, k, v) => { FIXED_DATA[arr][i][k] = k==='cost'?Number(v):v; };
     window.delFix = (arr, i) => { FIXED_DATA[arr].splice(i,1); renderFixedTables(); };
     
-    // GUARDAR CONFIG
+    // --- GUARDAR CONFIG & FIJOS ---
     window.saveFixedData = () => { 
         FIXED_DATA.config = {pyPercent:Number($('#confPy').value)}; 
         db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Configuración Guardada")); 
     };
     window.saveConfig = saveFixedData;
 
-    // --- CÁLCULOS ---
+    // --- 5. CALCULATIONS ---
     function calculateAll() {
         let gross = 0, comms = 0, theoCMV = 0;
         ORDERS.forEach(o => {
