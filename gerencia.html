@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
-    :root { --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --border: #e2e8f0; --green: #10b981; --red: #ef4444; --blue: #3b82f6; --purple: #8b5cf6; }
+    :root { --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --border: #e2e8f0; --green: #10b981; --red: #ef4444; --blue: #3b82f6; --purple: #8b5cf6; --orange: #f59e0b; }
     * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
     body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
 
@@ -57,7 +57,7 @@
     /* UTIL */
     .text-red { color: var(--red); } .text-green { color: var(--green); }
     .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
-    .st-ok { background: var(--green); } .st-crit { background: var(--red); }
+    .st-ok { background: var(--green); } .st-crit { background: var(--red); } .st-warn { background: var(--orange); }
 
   </style>
 </head>
@@ -158,7 +158,7 @@
             </div>
             <div style="overflow-x:auto">
                 <table>
-                    <thead><tr><th>Producto</th><th>Categoría</th><th>Stock</th><th>Unidad</th><th>Estado</th><th></th></tr></thead>
+                    <thead><tr><th>Producto</th><th>Categoría</th><th>Stock Actual</th><th>Mínimo</th><th>Estado</th><th></th></tr></thead>
                     <tbody id="stockTableBody"></tbody>
                 </table>
             </div>
@@ -180,7 +180,7 @@
                             <th>Costo Compra</th>
                             <th>Formato</th>
                             <th>Rendimiento</th>
-                            <th style="background:#f0fdf4; color:#166534">Costo Unitario</th>
+                            <th style="background:#f0fdf4; color:#166534">Costo Unitario (Base)</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -232,7 +232,10 @@
                             <select id="newSubIng" style="flex:2" onchange="updateUnitSelect('sub')"></select>
                             <input type="number" id="newSubQty" placeholder="Cant." style="flex:1" step="0.001">
                             
-                            <select id="newSubUnit" style="flex:1; background:#f0f9ff; font-weight:700; font-size:12px"></select>
+                            <select id="newSubUnit" style="flex:1; background:#f0f9ff; font-weight:700; font-size:12px">
+                                <option value="1">Unidad Base (kg/u)</option>
+                                <option value="0.001">Gramos (g) / ml</option>
+                            </select>
 
                             <button class="btn btn-purple" onclick="addIngToSubRecipe()">+</button>
                         </div>
@@ -345,9 +348,15 @@
             </div>
         </div>
 
-        <div style="margin-bottom:15px">
-            <label style="font-size:11px; color:#666">Stock Actual (en Unidad de Uso)</label>
-            <input type="number" id="mpQty" value="0" step="0.001">
+        <div style="display:flex; gap:10px; margin-bottom:15px">
+            <div style="flex:1">
+                <label style="font-size:11px; color:#666">Stock Actual</label>
+                <input type="number" id="mpQty" value="0" step="0.001">
+            </div>
+            <div style="flex:1">
+                <label style="font-size:11px; color:#666; font-weight:700">Stock Mínimo</label>
+                <input type="number" id="mpMin" value="5" step="0.001" style="border-color:#f59e0b">
+            </div>
         </div>
 
         <div style="display:flex; gap:10px">
@@ -489,9 +498,12 @@
         const tbody = $('#stockTableBody');
         tbody.innerHTML = '';
         INVENTORY.filter(p => p.name.toLowerCase().includes(t) && (cat === 'all' || p.category === cat)).forEach(p => {
+            const min = p.min || 5; // Default 5
             let stHtml = `<span class="status-dot st-ok"></span>OK`;
-            if(p.qty <= 5) stHtml = `<span class="status-dot st-crit"></span>BAJO`;
-            tbody.innerHTML += `<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td><td>${formatQty(p.qty)}</td><td>${p.unit}</td><td>${stHtml}</td>
+            if(p.qty <= min) stHtml = `<span class="status-dot st-crit"></span>CRIT`;
+            else if(p.qty <= (min*1.5)) stHtml = `<span class="status-dot st-warn"></span>BAJO`;
+
+            tbody.innerHTML += `<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td><td>${formatQty(p.qty)} ${p.unit}</td><td>${min}</td><td>${stHtml}</td>
             <td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`;
         });
     }
@@ -530,11 +542,12 @@
             $('#mpPurchCost').value = p.purchCost || p.cost;
             $('#mpFormat').value = p.format || '';
             $('#mpYield').value = p.yield || 1;
+            $('#mpMin').value = p.min || 5;
             $('#calcUnitCost').innerText = money(p.cost);
 
         } else {
             $('#mpTitle').innerText = 'Nuevo Insumo'; $('#mpId').value = ''; $('#mpName').value = ''; $('#mpQty').value = 0; 
-            $('#mpPurchCost').value = 0; $('#mpFormat').value = ''; $('#mpYield').value = 1;
+            $('#mpPurchCost').value = 0; $('#mpFormat').value = ''; $('#mpYield').value = 1; $('#mpMin').value = 5;
             if(catPreset) $('#mpCat').value = catPreset;
         }
     };
@@ -553,6 +566,7 @@
             purchCost: purchCost,
             format: $('#mpFormat').value,
             yield: yieldVal,
+            min: Number($('#mpMin').value),
             cost: unitCost 
         };
 
@@ -602,7 +616,7 @@
         currentSubRecipeId = sub.id;
         $('#subRecipeEditor').style.display = 'block'; $('#subEditorTitle').innerText = sub.name;
         const sel = $('#newSubIng'); sel.innerHTML = '<option value="">Seleccionar Insumo...</option>';
-        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}" data-unit="${i.unit}">${i.name} ($${Math.round(i.cost)}/${i.unit})</option>`);
+        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}">${i.name} ($${Math.round(i.cost)}/${i.unit})</option>`);
         const tbody = $('#subRecipeIngBody'); tbody.innerHTML = '';
         (sub.ingredients || []).forEach((ing, idx) => {
             const item = INVENTORY.find(i => i.id === ing.id);
@@ -616,19 +630,9 @@
         const sel = mode==='sub'?$('#newSubIng'):$('#newRecIng');
         const unitSel = mode==='sub'?$('#newSubUnit'):$('#newRecUnit');
         const opt = sel.options[sel.selectedIndex];
-        const unit = opt.getAttribute('data-unit');
         
-        unitSel.innerHTML = '';
-        if(unit === 'kg') {
-            unitSel.innerHTML = `<option value="1">Kilos (Directo)</option><option value="0.001">Gramos (Convierte /1000)</option>`;
-        } else if (unit === 'lt') {
-            unitSel.innerHTML = `<option value="1">Litros (Directo)</option><option value="0.001">Mililitros (Convierte /1000)</option>`;
-        } else if (unit === 'gr' || unit === 'ml' || unit === 'u' || unit === 'paq') {
-            // Unidades pequeñas o enteras no se dividen
-            unitSel.innerHTML = `<option value="1">${unit} (Directo)</option>`;
-        } else {
-            unitSel.innerHTML = `<option value="1">${unit}</option>`;
-        }
+        // Default
+        unitSel.innerHTML = `<option value="1">Unidad Base</option><option value="0.001">Gramos / ml</option>`;
     };
     window.addIngToSubRecipe = async () => {
         const id = $('#newSubIng').value;
@@ -648,6 +652,7 @@
         const newIngs = [...s.ingredients]; newIngs.splice(idx, 1);
         await db.collection('subrecipes').doc(sId).update({ingredients: newIngs});
     };
+    window.delSubRecipe = async (e, id) => { e.stopPropagation(); if(confirm("Borrar?")) { await db.collection('subrecipes').doc(id).delete(); $('#subRecipeEditor').style.display='none'; } };
 
     // --- RECETAS FINALES ---
     function calculateRecipeTotal(recipe) {
@@ -678,9 +683,9 @@
         $('#recipeEditor').style.display = 'block'; $('#editorTitle').innerText = r.id;
         const sel = $('#newRecIng'); sel.innerHTML = '<option value="">Agregar...</option>';
         sel.innerHTML += `<optgroup label="🧩 Items Compuestos">`;
-        SUB_RECIPES.forEach(s => sel.innerHTML += `<option value="${s.id}" data-unit="u">🧩 ${s.name} ($${Math.round(calculateSubRecipeCost(s))})</option>`);
+        SUB_RECIPES.forEach(s => sel.innerHTML += `<option value="${s.id}">🧩 ${s.name} ($${Math.round(calculateSubRecipeCost(s))})</option>`);
         sel.innerHTML += `</optgroup><optgroup label="📦 Insumos Sueltos">`;
-        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}" data-unit="${i.unit}">${i.name} ($${Math.round(i.cost)}/${i.unit})</option>`);
+        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}">${i.name} ($${Math.round(i.cost)})</option>`);
         sel.innerHTML += `</optgroup>`;
 
         const tbody = $('#recipeIngBody'); tbody.innerHTML = '';
