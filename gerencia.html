@@ -120,8 +120,8 @@
             <div class="kpi-val text-red" id="kpiTotalExpenses">$ 0</div>
             <div style="font-size:10px; color:#64748b; margin-top:2px">Compras + Fijos + Sueldos + Comisiones</div>
         </div>
-        <div class="kpi" style="background: #f0fdf4; border-color: #bbf7d0;">
-            <div class="kpi-lbl text-green">Ganancia Neta (Caja)</div>
+        <div class="kpi" id="kpiNetContainer" style="background: #f0fdf4; border-color: #bbf7d0;">
+            <div class="kpi-lbl">Ganancia Neta (Caja)</div>
             <div class="kpi-val text-green" id="kpiNet">$ 0</div>
         </div>
       </div>
@@ -735,13 +735,17 @@
     };
     window.saveConfig = saveFixedData;
 
-    // --- 5. CALCULATIONS ---
+    // --- 5. CALCULATIONS (UPDATED FOR DYNAMIC CHART & BALANCE) ---
     function calculateAll() {
         let gross = 0, comms = 0, theoCMV = 0;
+        
+        // 1. Sumar Ventas y calcular Comisiones
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0);
             gross += sale;
             if(o.source === 'pedidosya') comms += (sale * (FIXED_DATA.config.pyPercent/100));
+            
+            // Calcular CMV Teórico
             (o.items || []).forEach(item => {
                 const name = (item.name || '').toLowerCase().trim();
                 let r = RECIPES.find(x => name.includes(x.id.toLowerCase()));
@@ -753,34 +757,90 @@
             });
         });
 
+        // 2. Sumar Gastos
         const totalFixed = FIXED_DATA.fixed.reduce((s,i)=>s+i.cost,0); 
         const totalSalaries = FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
         const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
         
-        // TOTAL EXPENSES FOR KPI
+        // 3. Totales y Balance
         const totalExp = realPurchases + totalFixed + totalSalaries + comms;
-        const profitReal = gross - totalExp;
+        const profitReal = gross - totalExp; // Balance Final
         
+        // 4. Actualizar KPIs (Texto)
         $('#kpiSales').innerText = money(gross);
         $('#kpiTheoCMV').innerText = '-' + money(theoCMV);
-        $('#kpiFixedTotal').innerText = '-' + money(totalFixed + comms + totalSalaries);
         $('#kpiTotalExpenses').innerText = '-' + money(totalExp);
-        $('#kpiNet').innerText = money(profitReal);
+        
+        // Visual Ganancia/Pérdida en el cuadro de KPI
+        const kpiNetElem = $('#kpiNet');
+        const kpiNetContainer = $('#kpiNetContainer'); // Contenedor del KPI
+        
+        kpiNetElem.innerText = money(profitReal);
+        
+        if(profitReal >= 0) {
+            // Estilo Ganancia
+            kpiNetElem.className = 'kpi-val text-green';
+            kpiNetContainer.style.backgroundColor = '#f0fdf4';
+            kpiNetContainer.style.borderColor = '#bbf7d0';
+            kpiNetContainer.querySelector('.kpi-lbl').className = 'kpi-lbl text-green';
+        } else {
+            // Estilo Pérdida
+            kpiNetElem.className = 'kpi-val text-red';
+            kpiNetContainer.style.backgroundColor = '#fef2f2';
+            kpiNetContainer.style.borderColor = '#fecaca';
+            kpiNetContainer.querySelector('.kpi-lbl').className = 'kpi-lbl text-red';
+        }
 
+        // 5. GRÁFICO MEJORADO (Chart.js)
         if(chartInstance) chartInstance.destroy();
+
+        // Color dinámico para la barra de balance
+        const balanceColor = profitReal >= 0 ? '#10b981' : '#ef4444';
+
         chartInstance = new Chart($('#mainChart').getContext('2d'), {
             type: 'bar',
             data: { 
-                labels: ['Ventas', 'Mercadería (Stock)', 'Fijos', 'Sueldos', 'Comisiones', 'Ganancia Neta'], 
+                labels: ['+ Ventas', '- Mercadería', '- Fijos', '- Sueldos', '- Comisiones', '= Balance'], 
                 datasets: [{ 
                     data: [gross, realPurchases, totalFixed, totalSalaries, comms, profitReal], 
-                    backgroundColor: ['#94a3b8', '#f97316', '#a855f7', '#3b82f6', '#eab308', '#10b981'], 
-                    borderRadius:5 
+                    backgroundColor: [
+                        '#64748b', // Ventas (Gris)
+                        '#f97316', // Mercadería (Naranja)
+                        '#a855f7', // Fijos (Violeta)
+                        '#3b82f6', // Sueldos (Azul)
+                        '#eab308', // Comisiones (Amarillo)
+                        balanceColor // Balance (Verde/Rojo)
+                    ], 
+                    borderRadius: 6,
+                    borderWidth: 1
                 }] 
             },
-            options: { plugins: { legend: {display:false} } }
+            options: { 
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { 
+                    legend: {display:false},
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return money(context.raw);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: '#f1f5f9' }
+                    },
+                    x: {
+                        grid: { display: false }
+                    }
+                }
+            }
         });
         
+        // Lista de últimas compras
         $('#lastPurchasesList').innerHTML = PURCHASES.slice(0,5).map(p=>`<div style="display:flex;justify-content:space-between;border-bottom:1px dashed #eee;padding:5px 0"><span>${p.prodName||'Compra'}</span><b class="text-red">-${money(p.total)}</b></div>`).join('');
     }
 
