@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-  
+   
   <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 
   <style>
@@ -143,7 +143,7 @@
     checkSession(); setInterval(checkSession, 5*60*1000);
 
     // =================================================================
-    // 🔥 DATA DE SOPORTE
+    // 🔥 DATA DE SOPORTE (STOCK)
     // =================================================================
     let RECETAS_DB = {}; 
     let INVENTARIO_DB = {}; 
@@ -415,7 +415,7 @@
     }
 
     /* ============================================================
-       🔥 IMPORTACIÓN EXCEL PEDIDOSYA
+       🔥 IMPORTACIÓN EXCEL PEDIDOSYA (CORREGIDO Y COMPLETADO)
     ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
@@ -439,44 +439,58 @@
                 // Normalizar keys
                 Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
 
-                // Mapeo flexible
+                // 1. OBTENER ID
                 const id = r['nro de pedido'] || r['id'];
-                let totalStr = r['total del pedido'] || r['total'];
-                const dateStr = r['fecha del pedido'] || r['fecha'];
-                const statusStr = r['estado del pedido'] || r['estado'];
-                const paymentStr = r['forma de pago'] || r['pago'];
-                const itemsStr = r['artículos'] || r['productos'];
-                
-                // Nombre del cliente (PedidosYa a veces no lo da, pero si está lo usamos)
-                const clientName = r['nombre del cliente'] || r['cliente'] || r['usuario'] || ('Cliente Py #' + id);
+                if (!id) continue;
 
-                if (!id || !totalStr) continue;
+                // 2. OBTENER TOTALES
+                // "Total del pedido" es lo que pagó el cliente
+                let totalStr = r['total del pedido']; 
+                // "Ingreso estimado" es lo que te queda a VOS
+                let netoStr = r['ingreso estimado']; 
 
-                // Parsear Total
+                // Parsear Total Cliente
                 let total = 0;
-                if(typeof totalStr === 'number') total = totalStr;
-                else total = Number(String(totalStr).replace(/\./g, '').replace(',', '.'));
+                if(totalStr) {
+                    if(typeof totalStr === 'number') total = totalStr;
+                    else total = Number(String(totalStr).replace(/\./g, '').replace(',', '.'));
+                }
 
-                // Parsear Estado
+                // Parsear Ganancia Local (Neto)
+                let neto = 0;
+                if(netoStr) {
+                    if(typeof netoStr === 'number') neto = netoStr;
+                    else neto = Number(String(netoStr).replace(/\./g, '').replace(',', '.'));
+                }
+
+                if (total <= 0) continue;
+
+                // 3. DATOS GENERALES
+                const dateStr = r['fecha del pedido'];
+                const statusStr = r['estado del pedido'];
+                const paymentStr = r['forma de pago'];
+                const itemsStr = r['artículos'];
+                const clientName = r['nombre del cliente'] || ('Cliente Py #' + id);
+
+                // Estado
                 let status = 'delivered'; 
                 if (statusStr && (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado'))) status = 'cancelled';
 
-                // Parsear Pago
+                // Pago
                 let isPaid = false;
-                let paymentMethod = 'pedidosya_online';
-                if (paymentStr && paymentStr.toLowerCase().includes('online')) isPaid = true;
-                if (paymentStr && paymentStr.toLowerCase().includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
+                let paymentMethod = 'pedidosya_online'; 
+                if (paymentStr) {
+                    const payLower = paymentStr.toLowerCase();
+                    if (payLower.includes('online')) isPaid = true;
+                    if (payLower.includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
+                }
 
-                // 🔥 PARSEO ITEMS INTELIGENTE
-                // Split por comas, pero IGNORANDO comas dentro de [corchetes]
+                // 4. ITEMS
                 let itemsList = [];
                 if(itemsStr) {
-                    // Regex mágico: divide por comas si NO están seguidas de un cierre de corchete sin apertura previa
-                    // En JS simple, split por coma, luego combinamos si abrió bracket sin cerrar
                     const rawParts = String(itemsStr).split(','); 
                     const mergedParts = [];
                     let buffer = "";
-                    
                     rawParts.forEach(p => {
                         if (buffer) {
                             buffer += "," + p;
@@ -486,11 +500,10 @@
                             else { mergedParts.push(p); }
                         }
                     });
-                    if(buffer) mergedParts.push(buffer); // Fallback
+                    if(buffer) mergedParts.push(buffer);
 
                     mergedParts.forEach(p => {
                         p = p.trim();
-                        // 1. Extraer Notas [Entre corchetes]
                         let note = "";
                         let cleanName = p;
                         if(cleanName.includes('[')) {
@@ -500,16 +513,12 @@
                                 cleanName = cleanName.replace(/\[.*?\]/, "").trim();
                             }
                         }
-
-                        // 2. Extraer Cantidad (Ej: "2 Rhodes")
                         let qty = 1;
                         const qtyMatch = cleanName.match(/^(\d+)\s+(.*)$/);
                         if(qtyMatch) {
                             qty = Number(qtyMatch[1]);
                             cleanName = qtyMatch[2];
                         }
-
-                        // 3. Categorizar
                         const catCode = window.getCat({name: cleanName});
                         let type = 'other';
                         let category = 'other';
@@ -530,12 +539,9 @@
                     itemsList = [{ name: 'Pedido PedidosYa', price: total, qty: 1, type: 'other' }];
                 }
                 
-                // 🔥 ASIGNAR PRECIO SI ES ITEM ÚNICO
-                if(itemsList.length === 1 && total > 0) {
-                    itemsList[0].price = total / itemsList[0].qty;
-                }
+                if(itemsList.length === 1 && total > 0) itemsList[0].price = total / itemsList[0].qty;
 
-                // Chequear duplicados
+                // 5. GUARDAR
                 const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
                 if (!existing.empty) {
                     skipped++;
@@ -564,7 +570,8 @@
                     pago: paymentMethod,
                     entrega: 'delivery',
                     nombre: clientName,
-                    total: total,
+                    total: total,         
+                    neto_excel: neto,     // 🔥 TU GANANCIA REAL
                     createdAt: isoDate,
                     items: itemsList
                 });
@@ -591,7 +598,7 @@
     </video>
   </div>
 
-  <input type="file" id="excelInput" style="display:none" accept=".xlsx, .xls" onchange="importarPedidosYa()">
+  <input type="file" id="excelInput" style="display:none" accept=".xlsx, .xls, .csv" onchange="importarPedidosYa()">
 
   <header>
     <div class="topbar">
@@ -834,6 +841,12 @@
             </div>`;
         }
 
+        // 🔥 MOSTRAR EL NETO EN VERDE SI EXISTE
+        let netHtml = "";
+        if(o.neto_excel && o.neto_excel > 0) {
+            netHtml = `<div style="font-size:12px; color:#15803d; text-align:right; font-weight:700;">Neto: ${money(o.neto_excel)}</div>`;
+        }
+
         const telHtml = o.telefono ? `<div style="margin-top:4px; font-size:13px; font-weight:600; color:#4b5563;">📞 <a href="https://wa.me/${o.telefono.replace(/\D/g,'')}" target="_blank" style="text-decoration:none; color:inherit;">${esc(o.telefono)}</a></div>` : '';
 
         return `
@@ -847,7 +860,10 @@
                     <span class="chip ${srcVal}">${esc(srcVal)}</span> ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}
                  </div>
               </div>
-              <div class="price-tag">${money(total)}</div>
+              <div style="text-align:right">
+                  <div class="price-tag">${money(total)}</div>
+                  ${netHtml}
+              </div>
            </div>
            
            <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
@@ -932,7 +948,7 @@
              if(dName) {
                  const dClean = String(dName).toLowerCase();
                  if(dClean !== 'sin_bebida' && dClean !== 'ninguna' && dClean !== '') {
-                     cats.d.push({name: dName, qty: it.qty||1});
+                      cats.d.push({name: dName, qty: it.qty||1});
                  }
              }
           } else { cats[cat].push(it); }
