@@ -253,7 +253,6 @@
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency", currency:"ARS", maximumFractionDigits:2});
     const formatQty = (n) => { let num = Number(n); if(isNaN(num)) return '0'; return parseFloat(num.toFixed(3)); };
-    // Helper seguro para fechas
     const parseDate = (val) => { if(!val) return null; return (val.toDate ? val.toDate() : new Date(val)); };
 
     // 2. VARIABLES GLOBALES
@@ -261,36 +260,22 @@
     let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30, taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
     let currentRecipeId = null, currentSubRecipeId = null, chartInstance = null, tempAliasList = [];
 
-    // 3. PARSER DE ARTICULOS IMPORTADOS (EL NUEVO CÓDIGO)
-    // Transforma: "1 Coca Cola, 2 Hamburguesa Doble" -> [{qty:1, name:"Coca Cola"}, {qty:2, name:"Hamburguesa Doble"}]
-    window.normalizeItems = function(order) {
-        // 1. Si ya es un array (Pedidos Web/Local directos), devolverlo tal cual
-        if (Array.isArray(order.items)) return order.items;
-
-        // 2. Buscar si hay string en 'items' o 'Artículos' o 'articulos' (Importación Excel)
-        let rawString = order.items || order.Artículos || order.articulos;
-        
-        if (typeof rawString === 'string') {
-            // Separar por comas (pero cuidado si el nombre tiene comas, asumimos separador ", ")
-            // Estrategia simple: split por "," y trim
-            let parts = rawString.split(',');
-            return parts.map(p => {
-                p = p.trim();
-                // Intentar extraer cantidad al inicio: "2 Hamburguesa" -> match [2, Hamburguesa]
-                let match = p.match(/^(\d+)\s+(.*)$/);
-                if (match) {
-                    return { qty: Number(match[1]), name: match[2].trim() };
-                } else {
-                    // Si no hay numero, asumimos 1
-                    return { qty: 1, name: p };
-                }
-            });
-        }
-
-        return []; // Fallback vacio
+    // --- CARGADORES DE DATOS ---
+    window.loadInventory = function() { db.collection('inventory').orderBy('name').onSnapshot(snap => { INVENTORY=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderStockTable(); window.renderCostTables(); window.renderRecipesList(); window.renderSubRecipesList(); }); };
+    window.loadSubRecipes = function() { db.collection('subrecipes').onSnapshot(snap => { SUB_RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderSubRecipesList(); window.renderRecipesList(); }); };
+    window.loadRecipes = function() { db.collection('recipes').onSnapshot(snap => { RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderRecipesList(); }); };
+    window.loadFixedData = function() { 
+        db.collection('config').doc('gerencia').onSnapshot(doc => {
+            if(doc.exists) FIXED_DATA = doc.data();
+            if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
+            if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
+            $('#confPy').value = FIXED_DATA.config?.pyPercent||30; $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
+            $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0;
+            window.renderFixedTables();
+        });
     };
 
-    // 4. FUNCIONES LÓGICAS (CON SOPORTE NORMALIZED)
+    // 3. FUNCIONES LÓGICAS (DEFINIDAS EN WINDOW PARA EVITAR ERRORES)
     window.calculateOrderBagCost = function(items) {
         const bagItem = INVENTORY.find(i => { const n=i.name.toLowerCase(); return n.includes('bolsa')||n.includes('kit')||n.includes('empaque')||n.includes('packaging'); });
         if (!bagItem) return 0;
@@ -332,7 +317,7 @@
 
     // --- RENDERIZADO Y CALCULOS PRINCIPALES ---
     window.calculateAll = function() {
-        if(typeof Chart === 'undefined') return;
+        if(typeof Chart === 'undefined') return; // Seguridad si Chart.js no cargo
 
         let gross=0, comms=0, taxes=0, theoCMV=0;
         const { pyPercent:pctPy, taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config;
@@ -340,16 +325,13 @@
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0); gross += sale;
             const src = (o.source||'').toLowerCase(), pay = (o.pago||o.paymentMethod||'').toLowerCase();
-            // Logica impuestos (Misma de siempre)
             if(src==='pedidosya') comms += (sale*(pctPy/100));
             else if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) taxes += (sale*(pctQR/100));
             else if(pay.includes('transfer')) taxes += (sale*(pctTransf/100));
             else if(pay.includes('debito')||pay.includes('tarjeta')) taxes += (sale*(pctDebit/100));
 
-            // AQUI USAMOS EL NORMALIZADOR
-            let items = window.normalizeItems(o);
-            items.forEach(item => { theoCMV += (window.getUnitCost(item.name) * Number(item.qty||1)); });
-            theoCMV += window.calculateOrderBagCost(items);
+            (o.items||[]).forEach(item => { theoCMV += (window.getUnitCost(item.name) * Number(item.qty||1)); });
+            theoCMV += window.calculateOrderBagCost(o.items||[]);
         });
 
         const totalFixed = (FIXED_DATA.fixed||[]).reduce((s,i)=>s+Number(i.cost),0); 
@@ -387,11 +369,8 @@
             else if(rawPay.includes('transfer')) { deduction=total*(pctTransf/100); payText='TRANSF.'; payBadge='bdg-digital'; }
             else if(rawPay.includes('debito')||rawPay.includes('tarjeta')) { deduction=total*(pctDebit/100); payText='TARJETA'; payBadge='bdg-digital'; }
 
-            // USAR NORMALIZADOR
-            let items = window.normalizeItems(o);
-            let orderCost = window.calculateOrderBagCost(items);
-            
-            let itemsHtml = items.map(item => {
+            let orderCost = window.calculateOrderBagCost(o.items||[]);
+            let itemsHtml = (o.items||[]).map(item => {
                 orderCost += (window.getUnitCost(item.name) * Number(item.qty||1));
                 return `<div style="margin-bottom:6px"><div><strong>${item.qty}x</strong> ${item.name}</div></div>`;
             }).join('');
@@ -498,7 +477,7 @@
     window.saveConfig = window.saveFixedData;
     window.showTab = function(id) { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); };
 
-    // RENDERIZADO TABLAS
+    // RENDERIZADO TABLAS (CORREGIDO EVENTO ONCLICK)
     window.renderStockTable = function() { $('#stockTableBody').innerHTML = INVENTORY.map(p=>`<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td><td>${formatQty(p.qty)} ${p.unit}</td><td>${p.min}</td><td>${p.qty<=p.min?'🔴':'🟢'}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); };
     window.renderCostTables = function() { 
         const rr=(a,t)=>{ $(t).innerHTML=a.map(p=>`<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); }; 
@@ -521,13 +500,12 @@
         db.collection('purchases').where('date','>=',start.toISOString()).where('date','<=',end.toISOString()).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); window.calculateAll(); });
     };
 
-    // INICIAR
+    // INICIAR (AL FINAL)
     window.addEventListener('load', () => {
         const now = new Date();
         $('#monthPicker').value = now.toISOString().slice(0,7);
         $('#monthPicker').addEventListener('change', window.loadDashboardData);
         
-        // CARGA SECUENCIAL PARA EVITAR ERRORES
         window.loadInventory();
         window.loadSubRecipes();
         window.loadRecipes();
