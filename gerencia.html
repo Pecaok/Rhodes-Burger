@@ -9,12 +9,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
-    /* --- ESTILOS VISUALES --- */
-    :root { 
-        --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; 
-        --border: #e2e8f0; --green: #10b981; --red: #ef4444; 
-        --blue: #3b82f6; --purple: #8b5cf6; --orange: #f97316; 
-    }
+    /* ESTILOS BASE */
+    :root { --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --border: #e2e8f0; --green: #10b981; --red: #ef4444; --blue: #3b82f6; --purple: #8b5cf6; --orange: #f97316; }
     * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
     body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
 
@@ -76,7 +72,6 @@
 
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(2px); }
     .modal { background: #fff; width: 500px; padding: 25px; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-height:90vh; overflow-y:auto; }
-    
     .text-red { color: var(--red); } .text-green { color: var(--green); }
     .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
     .st-ok { background: var(--green); } .st-crit { background: var(--red); } .st-warn { background: var(--orange); }
@@ -250,7 +245,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
-    // 1. CONFIG FIREBASE
+    // 1. CONFIGURACIÓN Y ESTADO
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
     try { firebase.initializeApp(firebaseConfig); } catch(e) {}
     const db = firebase.firestore();
@@ -258,148 +253,140 @@
     const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency", currency:"ARS", maximumFractionDigits:2});
     const formatQty = (n) => { let num = Number(n); if(isNaN(num)) return '0'; return parseFloat(num.toFixed(3)); };
 
-    // 2. ESTADO GLOBAL
     let INVENTORY=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
     let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30, taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
-    let currentRecipeId = null, currentSubRecipeId = null, chartInstance = null;
-    let tempAliasList = [];
+    let currentRecipeId = null, currentSubRecipeId = null, chartInstance = null, tempAliasList = [];
 
-    // 3. INICIO
-    window.addEventListener('DOMContentLoaded', () => {
-        const now = new Date();
-        $('#monthPicker').value = now.toISOString().slice(0,7);
-        $('#purDate').valueAsDate = now;
-        
-        // Listener critico para recargar datos al cambiar de mes
-        $('#monthPicker').addEventListener('change', () => {
-            console.log("Cambiando mes a:", $('#monthPicker').value);
-            loadDashboardData();
-        });
-
-        // Autocalculo modal producto
-        ['mpPurchCost', 'mpYield'].forEach(id => {
-            document.getElementById(id).addEventListener('input', () => {
-                const c = Number($('#mpPurchCost').value), y = Number($('#mpYield').value);
-                $('#calcUnitCost').innerText = money(y > 0 ? c/y : 0);
-            });
-        });
-        
-        loadInventory(); loadSubRecipes(); loadRecipes(); loadFixedData(); loadDashboardData();
-    });
-
-    // 4. CARGA DE DATOS
-    function loadInventory() { db.collection('inventory').orderBy('name').onSnapshot(snap => { INVENTORY=snap.docs.map(d=>({id:d.id,...d.data()})); renderStockTable(); renderCostTables(); renderRecipesList(); renderSubRecipesList(); }); }
-    function loadSubRecipes() { db.collection('subrecipes').onSnapshot(snap => { SUB_RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); renderSubRecipesList(); renderRecipesList(); }); }
-    function loadRecipes() { db.collection('recipes').onSnapshot(snap => { RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); renderRecipesList(); }); }
-    function loadFixedData() { 
-        db.collection('config').doc('gerencia').onSnapshot(doc => {
-            if(doc.exists) FIXED_DATA = doc.data();
-            if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
-            if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
-            $('#confPy').value = FIXED_DATA.config?.pyPercent||30; $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
-            $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0;
-            renderFixedTables();
-        });
-    }
+    // --- DEFINICIONES GLOBALES (CRUCIAL PARA QUE LOS BOTONES FUNCIONEN) ---
     
-    // --- FUNCIÓN CLAVE: CARGA DE DATOS POR MES ---
-    function loadDashboardData() {
-        const ym = $('#monthPicker').value; 
-        if(!ym) return;
-        
-        // Actualizar título visualmente
-        $('#ordersTitle').innerText = '🧾 Pedidos de ' + ym;
-
-        const [y,m] = ym.split('-').map(Number);
-        // Crear fechas de inicio y fin para el query
-        const start = new Date(y, m-1, 1).toISOString();
-        // Truco para último día del mes: día 0 del mes siguiente
-        const endObj = new Date(y, m, 0, 23, 59, 59);
-        const end = endObj.toISOString();
-
-        console.log("Querying from", start, "to", end);
-
-        db.collection('orders').where('createdAt','>=',start).where('createdAt','<=',end).orderBy('createdAt','desc').get().then(snap=>{ 
-            ORDERS = snap.docs.map(d=>d.data()).filter(o=>o.status!=='cancelled'); 
-            calculateAll(); 
-            renderOrdersTab(); 
-        });
-        
-        db.collection('purchases').where('date','>=',start).where('date','<=',end).get().then(snap=>{ 
-            PURCHASES = snap.docs.map(d=>d.data()); 
-            calculateAll(); 
-        });
-    }
-
-    // 5. DEFINICIONES GLOBALES PARA EVITAR ReferenceError
-    // Estas funciones ahora están en window, accesibles desde el HTML seguro.
-
-    window.openAliasModal = () => {
-        $('#modalAlias').style.display = 'flex';
-        renderAliasList();
-        tempAliasList = []; renderTempAlias(); 
-        const sel = $('#aliasInt'); sel.innerHTML = '';
-        RECIPES.forEach(r => sel.innerHTML += `<option value="${r.id}">${r.id}</option>`);
-    };
-    
-    window.addItemToAlias = () => {
-        const id = $('#aliasInt').value, qty = Number($('#aliasQty').value);
-        if(!id || qty<=0) return;
-        tempAliasList.push({id, qty});
-        renderTempAlias();
+    // 2. CALCULO DE COSTOS
+    window.calculateOrderBagCost = (items) => {
+        const bagItem = INVENTORY.find(i => { const n=i.name.toLowerCase(); return n.includes('bolsa')||n.includes('kit')||n.includes('empaque')||n.includes('packaging'); });
+        if (!bagItem) return 0;
+        let burgerCount = 0;
+        items.forEach(i => { const name = i.name.toLowerCase(); if(name.includes('hamb')||name.includes('doble')||name.includes('simple')||name.includes('cuarto')||name.includes('royal')||name.includes('cheese')||name.includes('burger')) { burgerCount += Number(i.qty || 1); } });
+        return Math.ceil(burgerCount / 2) * bagItem.cost;
     };
 
-    window.saveAlias = () => {
-        const ext = $('#aliasExt').value.trim();
-        if(!ext || tempAliasList.length === 0) return alert("Falta nombre o ítems");
-        if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
-        const existingIdx = FIXED_DATA.aliases.findIndex(a => a.external === ext);
-        if(existingIdx >= 0) FIXED_DATA.aliases.splice(existingIdx, 1);
-        FIXED_DATA.aliases.push({ external: ext, items: [...tempAliasList] });
-        $('#aliasExt').value = ''; tempAliasList = []; renderTempAlias();
-        window.saveFixedData(); 
-        renderAliasList();
+    window.calculateRecipeTotal = (recipe) => {
+        return (recipe.ingredients || []).reduce((sum, ing) => {
+            const sub = SUB_RECIPES.find(s => s.id === ing.id);
+            if(sub) return sum + (ing.qty * window.calculateSubRecipeCost(sub));
+            const item = INVENTORY.find(i => i.id === ing.id);
+            if(item) return sum + (ing.qty * item.cost);
+            return sum;
+        }, 0);
     };
 
-    window.deleteAlias = (i) => { FIXED_DATA.aliases.splice(i,1); window.saveFixedData(); renderAliasList(); };
-
-    window.updateUnitSelect = (m) => { const s=m==='sub'?$('#newSubUnit'):$('#newRecUnit'); s.innerHTML='<option value="1">Unidad Base</option><option value="0.001">Gramos / ml</option>'; };
-    
-    window.addIngToRecipe = async () => { const id=$('#newRecIng').value, q=Number($('#newRecQty').value), m=Number($('#newRecUnit').value); if(!id||q<=0)return; const r=RECIPES.find(x=>x.id===currentRecipeId); await db.collection('recipes').doc(currentRecipeId).update({ingredients:[...(r.ingredients||[]),{id,qty:q*m}]}); $('#newRecQty').value=''; };
-    
-    window.removeRecIng = async (rId, i) => { const r=RECIPES.find(x=>x.id===rId), n=[...r.ingredients]; n.splice(i,1); await db.collection('recipes').doc(rId).update({ingredients:n}); };
-    
-    window.delRecipe = async (e,id) => { e.stopPropagation(); if(confirm("Borrar?")){ await db.collection('recipes').doc(id).delete(); $('#recipeEditor').style.display='none'; }};
-    
-    window.addFixedRow = () => { FIXED_DATA.fixed.push({name:'',cost:0}); renderFixedTables(); };
-    window.addProdRow = () => { FIXED_DATA.prod.push({name:'',cost:0}); renderFixedTables(); };
-    window.updFix = (arr, i, k, v) => { FIXED_DATA[arr][i][k] = k==='cost'?Number(v):v; };
-    window.delFix = (arr, i) => { FIXED_DATA[arr].splice(i,1); renderFixedTables(); };
-    
-    window.saveFixedData = () => { 
-        if(!FIXED_DATA.aliases) FIXED_DATA.aliases=[]; 
-        FIXED_DATA.config={pyPercent:Number($('#confPy').value), taxDebit:Number($('#confDebit').value), taxTransf:Number($('#confTransf').value), taxQR:Number($('#confQR').value)}; 
-        db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado")); 
-        calculateAll(); 
-        renderOrdersTab(); 
+    window.calculateSubRecipeCost = (sub) => {
+        return (sub.ingredients || []).reduce((sum, ing) => {
+            const item = INVENTORY.find(i => i.id === ing.id);
+            return sum + (ing.qty * (item ? item.cost : 0));
+        }, 0);
     };
-    
-    window.showTab = (id) => { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); };
 
-    // --- MODALES (CORREGIDO ERROR REFERENCE) ---
+    window.getUnitCost = (name) => {
+        if(!name) return 0;
+        const cleanName = name.toLowerCase().trim();
+        const alias = (FIXED_DATA.aliases||[]).find(a => a.external.toLowerCase().trim() === cleanName);
+        if(alias) {
+            if(alias.items) { return alias.items.reduce((sum, item) => { const r = RECIPES.find(x => x.id === item.id); return sum + (r ? (window.calculateRecipeTotal(r) * item.qty) : 0); }, 0); } 
+            else if (alias.internal) { const r = RECIPES.find(x => x.id === alias.internal); return r ? window.calculateRecipeTotal(r) : 0; }
+        }
+        let r = RECIPES.find(x => x.id.toLowerCase() === cleanName);
+        if(!r) r = RECIPES.find(x => cleanName.includes(x.id.toLowerCase())); 
+        if(r) return window.calculateRecipeTotal(r);
+        return 0;
+    };
+
+    // 3. RENDERIZADO Y CALCULOS
+    window.calculateAll = () => {
+        let gross=0, comms=0, taxes=0, theoCMV=0;
+        const { pyPercent:pctPy, taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config;
+
+        ORDERS.forEach(o => {
+            const sale = Number(o.total || 0); gross += sale;
+            const src = (o.source||'').toLowerCase(), pay = (o.pago||o.paymentMethod||'').toLowerCase();
+            if(src==='pedidosya') comms += (sale*(pctPy/100));
+            else if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) taxes += (sale*(pctQR/100));
+            else if(pay.includes('transfer')) taxes += (sale*(pctTransf/100));
+            else if(pay.includes('debito')||pay.includes('tarjeta')) taxes += (sale*(pctDebit/100));
+
+            (o.items||[]).forEach(item => { theoCMV += (window.getUnitCost(item.name) * Number(item.qty||1)); });
+            theoCMV += window.calculateOrderBagCost(o.items||[]);
+        });
+
+        const totalFixed = FIXED_DATA.fixed.reduce((s,i)=>s+i.cost,0); 
+        const totalSalaries = FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
+        const variableCosts = comms + taxes;
+        const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
+        const totalExp = realPurchases + totalFixed + totalSalaries + variableCosts;
+        const profitReal = gross - totalExp;
+
+        $('#kpiSales').innerText = money(gross); $('#kpiTheoCMV').innerText = '-' + money(theoCMV);
+        $('#kpiTotalExpenses').innerText = '-' + money(totalExp);
+        const kn = $('#kpiNet'); kn.innerText = money(profitReal);
+        if(profitReal>=0) { kn.className='kpi-val text-green'; $('#kpiNetContainer').style.backgroundColor='#f0fdf4'; }
+        else { kn.className='kpi-val text-red'; $('#kpiNetContainer').style.backgroundColor='#fef2f2'; }
+
+        if(chartInstance) chartInstance.destroy();
+        chartInstance = new Chart($('#mainChart').getContext('2d'), {
+            type:'bar', data:{ labels:['+ Ventas','- Mercadería','- Fijos','- Sueldos','- Var (Py/Imp)','= Balance'], datasets:[{data:[gross,realPurchases,totalFixed,totalSalaries,variableCosts,profitReal], backgroundColor:['#64748b','#f97316','#a855f7','#3b82f6','#eab308',profitReal>=0?'#10b981':'#ef4444'], borderRadius:6}] },
+            options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}}} }
+        });
+        $('#lastPurchasesList').innerHTML = PURCHASES.slice(0,5).map(p=>`<div style="display:flex;justify-content:space-between;border-bottom:1px dashed #eee;padding:5px 0"><span>${p.prodName||'Compra'}</span><b class="text-red">-${money(p.total)}</b></div>`).join('');
+    };
+
+    window.renderOrdersTab = () => {
+        const tbody = $('#ordersTableBody'); tbody.innerHTML = '';
+        const { pyPercent:pctPy, taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config;
+
+        ORDERS.forEach((o, index) => {
+            const total = Number(o.total || 0);
+            let originText=(o.source||'web').toUpperCase(), originBadge=originText.includes('PEDIDOSYA')?'bdg-py':'bdg-web';
+            let rawPay=(o.pago||o.paymentMethod||'efectivo').toLowerCase(), payText='EFECTIVO', payBadge='bdg-cash', deduction=0;
+
+            if(originText.includes('PEDIDOS YA')) deduction=total*(pctPy/100);
+            else if(rawPay.includes('mercado')||rawPay.includes('mp')||rawPay.includes('qr')) { deduction=total*(pctQR/100); payText='MERCADOPAGO'; payBadge='bdg-digital'; }
+            else if(rawPay.includes('transfer')) { deduction=total*(pctTransf/100); payText='TRANSF.'; payBadge='bdg-digital'; }
+            else if(rawPay.includes('debito')||rawPay.includes('tarjeta')) { deduction=total*(pctDebit/100); payText='TARJETA'; payBadge='bdg-digital'; }
+
+            let orderCost = window.calculateOrderBagCost(o.items||[]);
+            let itemsHtml = (o.items||[]).map(item => {
+                orderCost += (window.getUnitCost(item.name) * Number(item.qty||1));
+                return `<div style="margin-bottom:6px"><div><strong>${item.qty}x</strong> ${item.name}</div></div>`;
+            }).join('');
+
+            let profit = total - deduction - orderCost;
+            const dStr = new Date(o.createdAt).toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+            
+            tbody.innerHTML += `<tr class="order-row" onclick="document.getElementById('detail-${index}').classList.toggle('open')">
+                <td>${dStr}</td><td>${o.nombre||'Cliente'}</td><td><span class="badge ${originBadge}">${originText}</span></td>
+                <td><span class="badge ${payBadge}">${payText}</span></td><td style="font-weight:700">${money(total)}</td>
+                <td style="font-weight:700; color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</td><td>▼</td></tr>
+                <tr class="order-details" id="detail-${index}"><td colspan="7" style="padding:0"><div class="detail-grid">
+                <div><strong style="color:#666;font-size:11px">Detalle:</strong><div style="margin-top:5px;font-size:13px">${itemsHtml}</div></div>
+                <div style="background:#fff;border:1px solid #eee;padding:10px;border-radius:8px">
+                    <div style="display:flex;justify-content:space-between;font-size:13px;color:#ef4444"><span>- Imp/Comis:</span><b>${money(deduction)}</b></div>
+                    <div style="display:flex;justify-content:space-between;font-size:13px;color:#ef4444"><span>- Costo (CMV):</span><b>${money(orderCost)}</b></div>
+                    <div style="display:flex;justify-content:space-between;margin-top:10px;border-top:1px dashed #ccc;font-size:14px"><span style="font-weight:700">Ganancia:</span><b style="color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</b></div>
+                </div></div></td></tr>`;
+        });
+    };
+
+    // 4. FUNCIONES UI (BOTONES)
     window.openProductModal = (id, catPreset) => {
         $('#modalProduct').style.display = 'flex';
-        if(id && typeof id === 'string') { // Edición
+        if(id && typeof id === 'string') { 
             const p = INVENTORY.find(i => i.id === id);
             if(p) {
                 $('#mpTitle').innerText = 'Editar Insumo'; $('#mpId').value = id; $('#mpName').value = p.name; $('#mpCat').value = p.category; $('#mpQty').value = p.qty; $('#mpUnit').value = p.unit; 
                 $('#mpPurchCost').value = p.purchCost || p.cost; $('#mpFormat').value = p.format || ''; $('#mpYield').value = p.yield || 1; $('#mpMin').value = p.min || 5; $('#calcUnitCost').innerText = money(p.cost);
             }
-        } else { // Nuevo
+        } else { 
             $('#mpTitle').innerText = 'Nuevo Insumo'; $('#mpId').value = ''; $('#mpName').value = ''; $('#mpQty').value = 0; 
             $('#mpPurchCost').value = 0; $('#mpFormat').value = ''; $('#mpYield').value = 1; $('#mpMin').value = 5;
-            if(typeof id === 'object' && catPreset) $('#mpCat').value = catPreset; // Si viene del boton categoria
-            else if(catPreset) $('#mpCat').value = catPreset;
+            if(catPreset && typeof catPreset === 'string') $('#mpCat').value = catPreset;
         }
     };
 
@@ -408,101 +395,87 @@
         const purchCost = Number($('#mpPurchCost').value);
         const yieldVal = Number($('#mpYield').value);
         const unitCost = (yieldVal > 0) ? (purchCost / yieldVal) : 0;
-        const data = { 
-            name: $('#mpName').value, category: $('#mpCat').value, qty: Number($('#mpQty').value), unit: $('#mpUnit').value,
-            purchCost: purchCost, format: $('#mpFormat').value, yield: yieldVal, min: Number($('#mpMin').value), cost: unitCost 
-        };
+        const data = { name: $('#mpName').value, category: $('#mpCat').value, qty: Number($('#mpQty').value), unit: $('#mpUnit').value, purchCost: purchCost, format: $('#mpFormat').value, yield: yieldVal, min: Number($('#mpMin').value), cost: unitCost };
         if(!data.name) return alert("Falta nombre");
         id ? await db.collection('inventory').doc(id).update(data) : await db.collection('inventory').add(data);
         $('#modalProduct').style.display = 'none';
     };
 
-    window.openPurchaseModal = () => {
-        $('#modalPurchase').style.display = 'flex';
-        const sel = $('#purProd'); sel.innerHTML = '';
-        INVENTORY.forEach(p => sel.innerHTML += `<option value="${p.id}">${p.name} (Stock: ${formatQty(p.qty)})</option>`);
-        $('#purQty').value = ''; $('#purTotal').value = '';
-    };
+    window.openPurchaseModal = () => { $('#modalPurchase').style.display = 'flex'; const sel = $('#purProd'); sel.innerHTML = ''; INVENTORY.forEach(p => sel.innerHTML += `<option value="${p.id}">${p.name} (Stock: ${formatQty(p.qty)})</option>`); $('#purQty').value = ''; $('#purTotal').value = ''; };
+    window.confirmPurchase = async () => { const prodId = $('#purProd').value, qty = Number($('#purQty').value), total = Number($('#purTotal').value), date = $('#purDate').value; if(!prodId || qty <= 0) return; await db.collection('purchases').add({ prodId, qty, total, date, prodName: INVENTORY.find(i=>i.id===prodId)?.name }); const prod = INVENTORY.find(i => i.id === prodId); if(prod) await db.collection('inventory').doc(prodId).update({ qty: Number(prod.qty) + qty }); alert("Compra registrada!"); $('#modalPurchase').style.display = 'none'; window.loadDashboardData(); };
 
-    window.confirmPurchase = async () => {
-        const prodId = $('#purProd').value, qty = Number($('#purQty').value), total = Number($('#purTotal').value), date = $('#purDate').value;
-        if(!prodId || qty <= 0 || total <= 0) return alert("Datos inválidos");
-        await db.collection('purchases').add({ prodId, qty, total, date, prodName: INVENTORY.find(i=>i.id===prodId)?.name });
-        const prod = INVENTORY.find(i => i.id === prodId);
-        if(prod) await db.collection('inventory').doc(prodId).update({ qty: Number(prod.qty) + qty }); 
-        alert("Compra registrada!"); $('#modalPurchase').style.display = 'none'; loadDashboardData();
-    };
-
-    window.addNewSubRecipe = async () => { const name = prompt("Nombre del Item Compuesto:"); if(name) await db.collection('subrecipes').add({ name, ingredients: [] }); };
-    window.openSubRecipeEditor = (id) => {
-        const sub = SUB_RECIPES.find(s=>s.id===id); if(!sub)return;
-        currentSubRecipeId = sub.id; $('#subRecipeEditor').style.display = 'block'; $('#subEditorTitle').innerText = sub.name;
-        const sel = $('#newSubIng'); sel.innerHTML = '<option value="">Seleccionar Insumo...</option>';
-        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}" data-unit="${i.unit}">${i.name} ($${Math.round(i.cost)}/${i.unit})</option>`);
-        const tbody = $('#subRecipeIngBody'); tbody.innerHTML = '';
-        (sub.ingredients || []).forEach((ing, idx) => {
-            const item = INVENTORY.find(i => i.id === ing.id); const cost = item ? item.cost : 0;
-            tbody.innerHTML += `<tr><td>${item ? item.name : '???'}</td><td>${formatQty(ing.qty)}</td><td>${money(cost * ing.qty)}</td><td><button class="btn-icon" onclick="removeSubIng('${sub.id}', ${idx})">🗑️</button></td></tr>`;
-        });
-        $('#subEditorTotalCost').innerText = money(calculateSubRecipeCost(sub));
-    };
-    window.addIngToSubRecipe = async () => { const id=$('#newSubIng').value, q=Number($('#newSubQty').value), m=Number($('#newSubUnit').value); if(!id||q<=0)return; const s=SUB_RECIPES.find(x=>x.id===currentSubRecipeId); await db.collection('subrecipes').doc(currentSubRecipeId).update({ingredients:[...(s.ingredients||[]),{id,qty:q*m}]}); $('#newSubQty').value=''; };
-    window.removeSubIng = async (sId, i) => { const s=SUB_RECIPES.find(x=>x.id===sId), n=[...s.ingredients]; n.splice(i,1); await db.collection('subrecipes').doc(sId).update({ingredients:n}); };
-    window.addNewRecipe = async () => { const name = prompt("Nombre del producto final (Igual que en Pedidos):"); if(name) await db.collection('recipes').doc(name).set({ingredients: []}); };
+    // ... Funciones Recetas ...
+    window.addNewRecipe = async () => { const name = prompt("Nombre:"); if(name) await db.collection('recipes').doc(name).set({ingredients: []}); };
     window.openRecipeEditor = (el) => { 
         if(el.tagName==='TR') currentRecipeId = el.getAttribute('data-id'); else currentRecipeId=el.id; 
         const r = RECIPES.find(x=>x.id===currentRecipeId); if(!r) return;
         $('#recipeEditor').style.display='block'; $('#editorTitle').innerText=r.id;
         const sel=$('#newRecIng'); sel.innerHTML='<option value="">Agregar...</option>';
-        sel.innerHTML+=`<optgroup label="🧩 Items Compuestos">${SUB_RECIPES.map(s=>`<option value="${s.id}">🧩 ${s.name}</option>`).join('')}</optgroup>`;
-        sel.innerHTML+=`<optgroup label="📦 Insumos">${INVENTORY.map(i=>`<option value="${i.id}">${i.name}</option>`).join('')}</optgroup>`;
-        $('#recipeIngBody').innerHTML=(r.ingredients||[]).map((ing,i)=>{ const s=SUB_RECIPES.find(x=>x.id===ing.id), it=INVENTORY.find(x=>x.id===ing.id); return `<tr><td>${s?'🧩 '+s.name:(it?it.name:'???')}</td><td>${formatQty(ing.qty)}</td><td>${money((s?calculateSubRecipeCost(s):it?it.cost:0)*ing.qty)}</td><td><button class="btn-icon" onclick="removeRecIng('${r.id}',${i})">🗑️</button></td></tr>`; }).join('');
-        $('#editorTotalCost').innerText=money(calculateRecipeTotal(r));
+        sel.innerHTML+=`<optgroup label="Items">${SUB_RECIPES.map(s=>`<option value="${s.id}">🧩 ${s.name}</option>`).join('')}</optgroup>`;
+        sel.innerHTML+=`<optgroup label="Insumos">${INVENTORY.map(i=>`<option value="${i.id}">${i.name}</option>`).join('')}</optgroup>`;
+        $('#recipeIngBody').innerHTML=(r.ingredients||[]).map((ing,i)=>{ const s=SUB_RECIPES.find(x=>x.id===ing.id), it=INVENTORY.find(x=>x.id===ing.id); return `<tr><td>${s?'🧩 '+s.name:(it?it.name:'???')}</td><td>${formatQty(ing.qty)}</td><td>${money((s?window.calculateSubRecipeCost(s):it?it.cost:0)*ing.qty)}</td><td><button class="btn-icon" onclick="removeRecIng('${r.id}',${i})">🗑️</button></td></tr>`; }).join('');
+        $('#editorTotalCost').innerText=money(window.calculateRecipeTotal(r));
     };
+    window.addIngToRecipe = async () => { const id=$('#newRecIng').value, q=Number($('#newRecQty').value), m=Number($('#newRecUnit').value); if(!id)return; const r=RECIPES.find(x=>x.id===currentRecipeId); await db.collection('recipes').doc(currentRecipeId).update({ingredients:[...(r.ingredients||[]),{id,qty:q*m}]}); };
+    window.removeRecIng = async (rId, i) => { const r=RECIPES.find(x=>x.id===rId), n=[...r.ingredients]; n.splice(i,1); await db.collection('recipes').doc(rId).update({ingredients:n}); };
+    window.updateUnitSelect = (m) => { $('#newRecUnit').innerHTML='<option value="1">Unidad</option><option value="0.001">G/ML</option>'; };
+
+    // ... Funciones SubRecetas ...
+    window.addNewSubRecipe = async () => { const name = prompt("Nombre:"); if(name) await db.collection('subrecipes').add({ name, ingredients: [] }); };
+    window.openSubRecipeEditor = (id) => { currentSubRecipeId = id; $('#subRecipeEditor').style.display = 'block'; const s=SUB_RECIPES.find(x=>x.id===id); $('#subEditorTitle').innerText=s.name; const sel=$('#newSubIng'); sel.innerHTML=''; INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}">${i.name}</option>`); $('#subRecipeIngBody').innerHTML=(s.ingredients||[]).map((ing,i)=>{ const it=INVENTORY.find(x=>x.id===ing.id); return `<tr><td>${it?it.name:'?'}</td><td>${ing.qty}</td><td>${money((it?it.cost:0)*ing.qty)}</td><td><button class="btn-icon" onclick="removeSubIng('${id}',${i})">🗑️</button></td></tr>`; }).join(''); $('#subEditorTotalCost').innerText = money(window.calculateSubRecipeCost(s)); };
+    window.addIngToSubRecipe = async () => { const id=$('#newSubIng').value, q=Number($('#newSubQty').value), m=Number($('#newSubUnit').value); if(!id)return; const s=SUB_RECIPES.find(x=>x.id===currentSubRecipeId); await db.collection('subrecipes').doc(currentSubRecipeId).update({ingredients:[...(s.ingredients||[]),{id,qty:q*m}]}); };
+    window.removeSubIng = async (sId, i) => { const s=SUB_RECIPES.find(x=>x.id===sId), n=[...s.ingredients]; n.splice(i,1); await db.collection('subrecipes').doc(sId).update({ingredients:n}); };
+
+    // ... Funciones Alias ...
+    window.openAliasModal = () => { $('#modalAlias').style.display='flex'; window.renderAliasList(); const sel=$('#aliasInt'); sel.innerHTML=''; RECIPES.forEach(r => sel.innerHTML += `<option value="${r.id}">${r.id}</option>`); tempAliasList=[]; window.renderTempAlias(); };
+    window.addItemToAlias = () => { const id=$('#aliasInt').value, qty=Number($('#aliasQty').value); if(id){ tempAliasList.push({id,qty}); window.renderTempAlias(); } };
+    window.renderTempAlias = () => { $('#tempAliasItems').innerHTML = tempAliasList.map((x,i)=>`<div><b>${x.qty}x</b> ${x.id} <span style="color:red;cursor:pointer" onclick="tempAliasList.splice(${i},1);window.renderTempAlias()">[x]</span></div>`).join(''); };
+    window.saveAlias = () => { const ext=$('#aliasExt').value; if(ext && tempAliasList.length){ if(!FIXED_DATA.aliases) FIXED_DATA.aliases=[]; const idx=FIXED_DATA.aliases.findIndex(a=>a.external===ext); if(idx>=0) FIXED_DATA.aliases.splice(idx,1); FIXED_DATA.aliases.push({external:ext, items:tempAliasList}); window.saveFixedData(); $('#modalAlias').style.display='none'; } };
+    window.renderAliasList = () => { $('#aliasListBody').innerHTML=(FIXED_DATA.aliases||[]).map((a,i)=>`<tr><td>${a.external}</td><td>${a.items?a.items.length+' items':'Legacy'}</td><td><button class="btn-icon" onclick="deleteAlias(${i})">🗑️</button></td></tr>`).join(''); };
+    window.deleteAlias = (i) => { FIXED_DATA.aliases.splice(i,1); window.saveFixedData(); };
+
+    // ... Funciones Config/Sueldos ...
+    window.addFixedRow = () => { FIXED_DATA.fixed.push({name:'',cost:0}); window.renderFixedTables(); };
+    window.addProdRow = () => { FIXED_DATA.prod.push({name:'',cost:0}); window.renderFixedTables(); };
+    window.updFix = (arr, i, k, v) => { FIXED_DATA[arr][i][k] = k==='cost'?Number(v):v; };
+    window.delFix = (arr, i) => { FIXED_DATA[arr].splice(i,1); window.renderFixedTables(); };
+    window.renderFixedTables = () => { 
+        $('#tableFixed').querySelector('tbody').innerHTML = FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join('');
+        $('#tableProd').querySelector('tbody').innerHTML = FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join('');
+    };
+    window.saveConfig = window.saveFixedData; // Alias para el boton del header
+
+    window.saveFixedData = () => { 
+        if(!FIXED_DATA.aliases) FIXED_DATA.aliases=[]; 
+        FIXED_DATA.config={pyPercent:Number($('#confPy').value), taxDebit:Number($('#confDebit').value), taxTransf:Number($('#confTransf').value), taxQR:Number($('#confQR').value)}; 
+        db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado")); 
+        window.calculateAll(); window.renderOrdersTab(); 
+    };
+
     window.deleteItem = async (c,id) => { if(confirm('¿Borrar?')){ await db.collection(c).doc(id).delete(); if(c==='recipes') $('#recipeEditor').style.display='none'; if(c==='subrecipes') $('#subRecipeEditor').style.display='none'; } };
+    window.showTab = (id) => { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); };
 
-    // --- HELPERS INTERNOS ---
-    function renderTempAlias() {
-        const c = $('#tempAliasItems');
-        if(tempAliasList.length === 0) { c.innerHTML = '<div style="font-size:11px; color:#999; font-style:italic">Agrega ítems abajo...</div>'; return; }
-        c.innerHTML = tempAliasList.map((x,i) => `<div class="alias-list-item"><span><b>${x.qty}x</b> ${x.id}</span> <span onclick="tempAliasList.splice(${i},1);renderTempAlias()" style="cursor:pointer;color:red">🗑️</span></div>`).join('');
-    }
-    function renderAliasList() {
-        const tbody = $('#aliasListBody'); tbody.innerHTML = '';
-        (FIXED_DATA.aliases || []).forEach((a, i) => {
-            const desc = a.items ? a.items.map(x=>`${x.qty}x ${x.id}`).join(', ') : (a.internal ? `1x ${a.internal}` : '???');
-            tbody.innerHTML += `<tr><td>${a.external}</td><td><small>${desc}</small></td><td><button class="btn-icon" onclick="deleteAlias(${i})">🗑️</button></td></tr>`;
-        });
-    }
-    function renderFixedTables() {
-        const t1=$('#tableFixed tbody'), t2=$('#tableProd tbody'); t1.innerHTML=''; t2.innerHTML='';
-        FIXED_DATA.fixed.forEach((r,i) => t1.innerHTML += `<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`);
-        FIXED_DATA.prod.forEach((r,i) => t2.innerHTML += `<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`);
-    }
-    function renderStockTable() { const t=$('#searchStock').value.toLowerCase(), cat=$('#filterCat').value, tb=$('#stockTableBody'); tb.innerHTML=''; INVENTORY.filter(p=>p.name.toLowerCase().includes(t)&&(cat==='all'||p.category===cat)).forEach(p=>{ const m=p.min||5; let st='<span class="status-dot st-ok"></span>OK'; if(p.qty<=m) st='<span class="status-dot st-crit"></span>CRIT'; else if(p.qty<=m*1.5) st='<span class="status-dot st-warn"></span>BAJO'; tb.innerHTML+=`<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td><td>${formatQty(p.qty)} ${p.unit}</td><td>${m}</td><td>${st}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`; }); }
-    function renderCostTables() { const rr=(a,t)=>{ $(t).innerHTML=a.map(p=>`<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); }; rr(INVENTORY.filter(p=>p.category!=='packaging'),'#costMateriaBody'); rr(INVENTORY.filter(p=>p.category==='packaging'),'#costPackBody'); }
-    function renderRecipesList() { $('#recipesListBody').innerHTML=RECIPES.map(r=>`<tr onclick="openRecipeEditor(this)" data-id="${r.id}"><td>${r.id}</td><td style="text-align:right"><b>${money(calculateRecipeTotal(r))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="deleteItem('recipes','${r.id}')">🗑️</button></td></tr>`).join(''); }
-    function renderSubRecipesList() { const tbody = $('#subRecipesListBody'); tbody.innerHTML = ''; SUB_RECIPES.forEach(sub => { const cost = calculateSubRecipeCost(sub); tbody.innerHTML += `<tr onclick="openSubRecipeEditor('${sub.id}')"><td>${sub.name}</td><td style="text-align:right"><b>${money(cost)}</b></td><td style="text-align:right"><button class="btn-icon" onclick="deleteItem('subrecipes', '${sub.id}')">🗑️</button></td></tr>`; }); }
+    // --- RENDERIZADORES DE TABLAS ---
+    window.renderStockTable = () => { $('#stockTableBody').innerHTML = INVENTORY.map(p=>`<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td><td>${formatQty(p.qty)} ${p.unit}</td><td>${p.min}</td><td>${p.qty<=p.min?'🔴':'🟢'}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); };
+    window.renderCostTables = () => { 
+        const rr=(a,t)=>{ $(t).innerHTML=a.map(p=>`<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); }; 
+        rr(INVENTORY.filter(p=>p.category!=='packaging'),'#costMateriaBody'); rr(INVENTORY.filter(p=>p.category==='packaging'),'#costPackBody'); 
+    };
+    window.renderRecipesList = () => { $('#recipesListBody').innerHTML=RECIPES.map(r=>`<tr onclick="openRecipeEditor(this)" data-id="${r.id}"><td>${r.id}</td><td style="text-align:right"><b>${money(window.calculateRecipeTotal(r))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="deleteItem('recipes','${r.id}')">🗑️</button></td></tr>`).join(''); };
+    window.renderSubRecipesList = () => { $('#subRecipesListBody').innerHTML = SUB_RECIPES.map(sub => `<tr onclick="openSubRecipeEditor('${sub.id}')"><td>${sub.name}</td><td style="text-align:right"><b>${money(window.calculateSubRecipeCost(sub))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="deleteItem('subrecipes', '${sub.id}')">🗑️</button></td></tr>`).join(''); };
 
-    // --- LOGICA MATEMATICA ---
-    function calculateOrderBagCost(items) {
-        const bagItem = INVENTORY.find(i => { const n=i.name.toLowerCase(); return n.includes('bolsa')||n.includes('kit')||n.includes('empaque')||n.includes('packaging'); });
-        if (!bagItem) return 0;
-        let burgerCount = 0;
-        items.forEach(i => { const name = i.name.toLowerCase(); if(name.includes('hamb')||name.includes('doble')||name.includes('simple')||name.includes('cuarto')||name.includes('royal')||name.includes('cheese')||name.includes('burger')) { burgerCount += Number(i.qty || 1); } });
-        return Math.ceil(burgerCount / 2) * bagItem.cost;
-    }
-    function getUnitCost(name) {
-        if(!name) return 0; const cleanName = name.toLowerCase().trim();
-        const alias = (FIXED_DATA.aliases||[]).find(a => a.external.toLowerCase().trim() === cleanName);
-        if(alias) { if(alias.items) { return alias.items.reduce((sum, item) => { const r = RECIPES.find(x => x.id === item.id); return sum + (r ? (calculateRecipeTotal(r) * item.qty) : 0); }, 0); } else if (alias.internal) { const r = RECIPES.find(x => x.id === alias.internal); return r ? calculateRecipeTotal(r) : 0; } }
-        let r = RECIPES.find(x => x.id.toLowerCase() === cleanName);
-        if(!r) r = RECIPES.find(x => cleanName.includes(x.id.toLowerCase())); 
-        if(r) return calculateRecipeTotal(r);
-        return 0;
-    }
-    function calculateRecipeTotal(recipe) { return (recipe.ingredients || []).reduce((sum, ing) => { const sub = SUB_RECIPES.find(s => s.id === ing.id); if(sub) return sum + (ing.qty * calculateSubRecipeCost(sub)); const item = INVENTORY.find(i => i.id === ing.id); if(item) return sum + (ing.qty * item.cost); return sum; }, 0); }
-    function calculateSubRecipeCost(sub) { return (sub.ingredients || []).reduce((sum, ing) => { const item = INVENTORY.find(i => i.id === ing.id); return sum + (ing.qty * (item ? item.cost : 0)); }, 0); }
+    // --- CARGA DE DATOS ---
+    window.loadDashboardData = () => {
+        const ym=$('#monthPicker').value; if(!ym)return; 
+        $('#ordersTitle').innerText = '🧾 Pedidos de ' + ym;
+        const [y,m]=ym.split('-').map(Number);
+        const start=new Date(y,m-1,1).toISOString(), end=new Date(y,m,1).toISOString(); // Fix date range for full month handling in query if needed, currently 1st to 1st next month is standard safe.
+        // Actually, to be safe for last day:
+        const startObj = new Date(y, m-1, 1); const endObj = new Date(y, m, 0, 23, 59, 59);
+        
+        db.collection('orders').where('createdAt','>=',startObj.toISOString()).where('createdAt','<=',endObj.toISOString()).orderBy('createdAt','desc').get().then(snap=>{ ORDERS=snap.docs.map(d=>d.data()).filter(o=>o.status!=='cancelled'); window.calculateAll(); window.renderOrdersTab(); });
+        db.collection('purchases').where('date','>=',startObj.toISOString()).where('date','<=',endObj.toISOString()).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); window.calculateAll(); });
+    };
 
 </script>
 </body>
