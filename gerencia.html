@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
-    :root { --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --border: #e2e8f0; --green: #10b981; --red: #ef4444; --blue: #3b82f6; --purple: #8b5cf6; --orange: #f59e0b; }
+    :root { --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --border: #e2e8f0; --green: #10b981; --red: #ef4444; --blue: #3b82f6; --purple: #8b5cf6; --orange: #f97316; }
     * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
     body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
 
@@ -116,19 +116,20 @@
             <div class="kpi-val text-red" id="kpiTheoCMV">$ 0</div>
         </div>
         <div class="kpi">
-            <div class="kpi-lbl">Fijos + Comisiones</div>
-            <div class="kpi-val text-red" id="kpiFixedTotal">$ 0</div>
+            <div class="kpi-lbl">Total Gastos Reales</div>
+            <div class="kpi-val text-red" id="kpiTotalExpenses">$ 0</div>
+            <div style="font-size:10px;color:#666;margin-top:2px">(Compras + Fijos + Sueldos + Comis.)</div>
         </div>
         <div class="kpi" style="background: #f0fdf4; border-color: #bbf7d0;">
-            <div class="kpi-lbl text-green">Ganancia Neta</div>
+            <div class="kpi-lbl text-green">Ganancia Neta (Caja)</div>
             <div class="kpi-val text-green" id="kpiNet">$ 0</div>
         </div>
       </div>
 
       <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px">
         <div class="card">
-            <h2>Rentabilidad Real</h2>
-            <canvas id="mainChart" height="220"></canvas>
+            <h2>Desglose de Gastos y Ganancia</h2>
+            <canvas id="mainChart" height="250"></canvas>
         </div>
         <div class="card">
             <h2>Últimas Compras Stock</h2>
@@ -338,7 +339,7 @@
                         <option value="lt">Litro (lt)</option>
                         <option value="ml">Mililitro (ml)</option>
                         <option value="u">Unidad (u)</option>
-                        <option value="pq">Paquete</option>
+                        <option value="paq">Paquete</option>
                     </select>
                 </div>
             </div>
@@ -498,7 +499,7 @@
         const tbody = $('#stockTableBody');
         tbody.innerHTML = '';
         INVENTORY.filter(p => p.name.toLowerCase().includes(t) && (cat === 'all' || p.category === cat)).forEach(p => {
-            const min = p.min || 5; // Default 5
+            const min = p.min || 5; 
             let stHtml = `<span class="status-dot st-ok"></span>OK`;
             if(p.qty <= min) stHtml = `<span class="status-dot st-crit"></span>CRIT`;
             else if(p.qty <= (min*1.5)) stHtml = `<span class="status-dot st-warn"></span>BAJO`;
@@ -616,7 +617,7 @@
         currentSubRecipeId = sub.id;
         $('#subRecipeEditor').style.display = 'block'; $('#subEditorTitle').innerText = sub.name;
         const sel = $('#newSubIng'); sel.innerHTML = '<option value="">Seleccionar Insumo...</option>';
-        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}">${i.name} ($${Math.round(i.cost)}/${i.unit})</option>`);
+        INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}" data-unit="${i.unit}">${i.name} ($${Math.round(i.cost)}/${i.unit})</option>`);
         const tbody = $('#subRecipeIngBody'); tbody.innerHTML = '';
         (sub.ingredients || []).forEach((ing, idx) => {
             const item = INVENTORY.find(i => i.id === ing.id);
@@ -683,7 +684,7 @@
         $('#recipeEditor').style.display = 'block'; $('#editorTitle').innerText = r.id;
         const sel = $('#newRecIng'); sel.innerHTML = '<option value="">Agregar...</option>';
         sel.innerHTML += `<optgroup label="🧩 Items Compuestos">`;
-        SUB_RECIPES.forEach(s => sel.innerHTML += `<option value="${s.id}">🧩 ${s.name} ($${Math.round(calculateSubRecipeCost(s))})</option>`);
+        SUB_RECIPES.forEach(s => sel.innerHTML += `<option value="${s.id}" data-unit="u">🧩 ${s.name} ($${Math.round(calculateSubRecipeCost(s))})</option>`);
         sel.innerHTML += `</optgroup><optgroup label="📦 Insumos Sueltos">`;
         INVENTORY.forEach(i => sel.innerHTML += `<option value="${i.id}">${i.name} ($${Math.round(i.cost)})</option>`);
         sel.innerHTML += `</optgroup>`;
@@ -752,19 +753,31 @@
             });
         });
 
-        const totalFixed = FIXED_DATA.fixed.reduce((s,i)=>s+i.cost,0) + FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
+        const totalFixed = FIXED_DATA.fixed.reduce((s,i)=>s+i.cost,0); 
+        const totalSalaries = FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
         const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
-        const profitReal = gross - (totalFixed + comms + realPurchases);
+        
+        // TOTAL EXPENSES FOR KPI
+        const totalExp = realPurchases + totalFixed + totalSalaries + comms;
+        const profitReal = gross - totalExp;
         
         $('#kpiSales').innerText = money(gross);
         $('#kpiTheoCMV').innerText = '-' + money(theoCMV);
-        $('#kpiFixedTotal').innerText = '-' + money(totalFixed + comms);
+        $('#kpiFixedTotal').innerText = '-' + money(totalFixed + comms + totalSalaries);
+        $('#kpiTotalExpenses').innerText = '-' + money(totalExp);
         $('#kpiNet').innerText = money(profitReal);
 
         if(chartInstance) chartInstance.destroy();
         chartInstance = new Chart($('#mainChart').getContext('2d'), {
             type: 'bar',
-            data: { labels: ['Ingresos', 'Gastos Reales', 'Ganancia Neta'], datasets: [{ data: [gross, (totalFixed + comms + realPurchases), profitReal], backgroundColor: ['#94a3b8', '#ef4444', '#10b981'], borderRadius:5 }] },
+            data: { 
+                labels: ['Ventas', 'Mercadería (Stock)', 'Fijos', 'Sueldos', 'Comisiones', 'Ganancia Neta'], 
+                datasets: [{ 
+                    data: [gross, realPurchases, totalFixed, totalSalaries, comms, profitReal], 
+                    backgroundColor: ['#94a3b8', '#f97316', '#a855f7', '#3b82f6', '#eab308', '#10b981'], 
+                    borderRadius:5 
+                }] 
+            },
             options: { plugins: { legend: {display:false} } }
         });
         
