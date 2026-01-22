@@ -196,7 +196,7 @@
                             <th width="100">Origen</th>
                             <th width="120">Pago</th>
                             <th width="100">Total</th>
-                            <th width="100">Neto</th>
+                            <th width="100">Ganancia Real</th>
                             <th width="30"></th>
                         </tr>
                     </thead>
@@ -845,9 +845,41 @@
                 if(rawPay !== 'efectivo') payText = rawPay.toUpperCase();
             }
             
-            let net = total - deduction;
+            // 3. CALCULO DE COSTO DE PRODUCCION
+            let orderCost = 0;
+            let itemsHtml = (o.items || []).map(item => {
+                let extrasHtml = '';
+                const extras = item.extras || item.mods || [];
+                if(extras && extras.length > 0) {
+                    extrasHtml = `<div style="font-size:11px; color:#64748b; padding-left:14px; margin-top:2px">
+                        ${extras.map(e => `+ ${typeof e === 'string' ? e : (e.name||'?')}`).join('<br>')}
+                    </div>`;
+                }
 
-            // 4. Nombre Cliente
+                // Logica de Costeo (Igual a calculateAll)
+                const name = (item.name || '').toLowerCase().trim();
+                let r = RECIPES.find(x => x.id.toLowerCase() === name); // Match exacto
+                if(!r) r = RECIPES.find(x => name.includes(x.id.toLowerCase())); // Match parcial
+                if(!r) {
+                    if(name.includes('doble')) r = RECIPES.find(x => x.id.toLowerCase().includes('doble'));
+                    else if(name.includes('simple')) r = RECIPES.find(x => x.id.toLowerCase().includes('simple'));
+                }
+                
+                if(r) {
+                    const unitCost = calculateRecipeTotal(r);
+                    orderCost += (unitCost * Number(item.qty || 1));
+                }
+
+                return `<div style="margin-bottom:6px">
+                    <div><strong>${item.qty}x</strong> ${item.name}</div>
+                    ${extrasHtml}
+                </div>`;
+            }).join('');
+
+            // 4. NETO FINAL (Venta - Impuestos - Costo)
+            let finalProfit = total - deduction - orderCost;
+
+            // 5. Nombre Cliente
             const clientName = o.nombre || o.clientName || o.name || 'Cliente';
             const dateStr = new Date(o.createdAt).toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
             
@@ -861,7 +893,7 @@
                 <td><span class="badge ${originBadge}">${originText}</span></td>
                 <td><span class="badge ${payBadge}">${payText}</span></td>
                 <td style="font-weight:700">${money(total)}</td>
-                <td style="font-weight:700; color:${deduction>0 ? 'var(--primary)' : 'var(--green)'}">${money(net)}</td>
+                <td style="font-weight:700; color:${finalProfit>=0 ? 'var(--green)' : 'var(--red)'}">${money(finalProfit)}</td>
                 <td><span style="font-size:10px">▼</span></td>
             `;
 
@@ -869,20 +901,6 @@
             const trDet = document.createElement('tr');
             trDet.className = 'order-details';
             trDet.id = 'detail-'+index;
-            
-            let itemsHtml = (o.items || []).map(i => {
-                let extrasHtml = '';
-                const extras = i.extras || i.mods || [];
-                if(extras && extras.length > 0) {
-                    extrasHtml = `<div style="font-size:11px; color:#64748b; padding-left:14px; margin-top:2px">
-                        ${extras.map(e => `+ ${typeof e === 'string' ? e : (e.name||'?')}`).join('<br>')}
-                    </div>`;
-                }
-                return `<div style="margin-bottom:6px">
-                    <div><strong>${i.qty}x</strong> ${i.name}</div>
-                    ${extrasHtml}
-                </div>`;
-            }).join('');
             
             trDet.innerHTML = `
                 <td colspan="7" style="padding:0">
@@ -902,9 +920,13 @@
                                 <span>- ${deductionReason}:</span>
                                 <b>${money(deduction)}</b>
                             </div>
+                            <div style="display:flex; justify-content:space-between; margin-top:5px; font-size:13px; color:#ef4444">
+                                <span>- Costo Mercadería (CMV):</span>
+                                <b>${money(orderCost)}</b>
+                            </div>
                             <div style="display:flex; justify-content:space-between; margin-top:10px; padding-top:10px; border-top:1px dashed #ccc; font-size:14px">
-                                <span style="color:var(--primary); font-weight:700">Neto al Negocio:</span>
-                                <b style="color:var(--green)">${money(net)}</b>
+                                <span style="color:var(--primary); font-weight:700">Ganancia Real:</span>
+                                <b style="color:${finalProfit>=0 ? 'var(--green)' : 'var(--red)'}">${money(finalProfit)}</b>
                             </div>
                         </div>
                     </div>
@@ -957,6 +979,7 @@
         const totalSalaries = FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
         const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
         
+        // Sumamos comisiones Py + Impuestos de facturacion
         const variableCosts = comms + taxes;
         const totalExp = realPurchases + totalFixed + totalSalaries + variableCosts;
         const profitReal = gross - totalExp;
