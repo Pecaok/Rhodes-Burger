@@ -275,7 +275,7 @@
         });
     };
 
-    // 3. FUNCIONES LÓGICAS (DEFINIDAS EN WINDOW PARA EVITAR ERRORES)
+    // 3. FUNCIONES LÓGICAS
     window.calculateOrderBagCost = function(items) {
         const bagItem = INVENTORY.find(i => { const n=i.name.toLowerCase(); return n.includes('bolsa')||n.includes('kit')||n.includes('empaque')||n.includes('packaging'); });
         if (!bagItem) return 0;
@@ -317,15 +317,26 @@
 
     // --- RENDERIZADO Y CALCULOS PRINCIPALES ---
     window.calculateAll = function() {
-        if(typeof Chart === 'undefined') return; // Seguridad si Chart.js no cargo
+        if(typeof Chart === 'undefined') return;
 
         let gross=0, comms=0, taxes=0, theoCMV=0;
         const { pyPercent:pctPy, taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config;
 
         ORDERS.forEach(o => {
-            const sale = Number(o.total || 0); gross += sale;
+            const sale = Number(o.total || 0); 
+            gross += sale;
             const src = (o.source||'').toLowerCase(), pay = (o.pago||o.paymentMethod||'').toLowerCase();
-            if(src==='pedidosya') comms += (sale*(pctPy/100));
+            
+            // 🔥 LÓGICA DE PEDIDOSYA ACTUALIZADA
+            if(src === 'pedidosya') {
+                 if(o.neto_excel && Number(o.neto_excel) > 0) {
+                     // Si tenemos el neto real del Excel, el costo es la diferencia
+                     comms += (sale - Number(o.neto_excel));
+                 } else {
+                     // Si no, estimamos con el % configurado
+                     comms += (sale * (pctPy/100));
+                 }
+            }
             else if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) taxes += (sale*(pctQR/100));
             else if(pay.includes('transfer')) taxes += (sale*(pctTransf/100));
             else if(pay.includes('debito')||pay.includes('tarjeta')) taxes += (sale*(pctDebit/100));
@@ -364,7 +375,14 @@
             let originText=(o.source||'web').toUpperCase(), originBadge=originText.includes('PEDIDOSYA')?'bdg-py':'bdg-web';
             let rawPay=(o.pago||o.paymentMethod||'efectivo').toLowerCase(), payText='EFECTIVO', payBadge='bdg-cash', deduction=0;
 
-            if(originText.includes('PEDIDOS YA')) deduction=total*(pctPy/100);
+            // 🔥 LOGICA TABLA
+            if(originText.includes('PEDIDOS YA')) {
+                if(o.neto_excel && Number(o.neto_excel) > 0) {
+                    deduction = total - Number(o.neto_excel);
+                } else {
+                    deduction = total * (pctPy/100);
+                }
+            }
             else if(rawPay.includes('mercado')||rawPay.includes('mp')||rawPay.includes('qr')) { deduction=total*(pctQR/100); payText='MERCADOPAGO'; payBadge='bdg-digital'; }
             else if(rawPay.includes('transfer')) { deduction=total*(pctTransf/100); payText='TRANSF.'; payBadge='bdg-digital'; }
             else if(rawPay.includes('debito')||rawPay.includes('tarjeta')) { deduction=total*(pctDebit/100); payText='TARJETA'; payBadge='bdg-digital'; }
