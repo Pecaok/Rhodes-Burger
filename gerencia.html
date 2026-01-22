@@ -319,7 +319,10 @@
         <div class="card">
             <h2>
                 <span>🍔 Recetas Finales</span>
-                <button class="btn btn-primary" onclick="addNewRecipe()">+ Nueva Receta</button>
+                <div>
+                    <button class="btn btn-blue" onclick="openAliasModal()">🔗 Diccionario Promos</button>
+                    <button class="btn btn-primary" onclick="addNewRecipe()">+ Nueva Receta</button>
+                </div>
             </h2>
             <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:20px">
                 <div>
@@ -362,6 +365,29 @@
     </div>
 
   </main>
+</div>
+
+<div class="modal-overlay" id="modalAlias">
+    <div class="modal">
+        <h3>🔗 Diccionario de Promos</h3>
+        <p style="font-size:12px; color:#666">Asocia nombres externos (ej: "Promo Mundial") a tus recetas internas.</p>
+        
+        <div style="display:flex; gap:5px; margin-bottom:15px; padding:10px; background:#f0f9ff; border-radius:8px">
+            <input type="text" id="aliasExt" placeholder="Nombre en PedidosYa..." style="flex:1">
+            <span style="align-self:center">➡️</span>
+            <select id="aliasInt" style="flex:1"></select>
+            <button class="btn btn-primary" onclick="addAlias()">+</button>
+        </div>
+
+        <table style="width:100%">
+            <thead><tr><th>Nombre Externo</th><th>Receta Interna</th><th></th></tr></thead>
+            <tbody id="aliasListBody"></tbody>
+        </table>
+
+        <div style="margin-top:15px; text-align:right">
+            <button class="btn" onclick="$('#modalAlias').style.display='none'">Cerrar</button>
+        </div>
+    </div>
 </div>
 
 <div class="modal-overlay" id="modalProduct">
@@ -480,8 +506,8 @@
     let RECIPES = [];
     let PURCHASES = [];
     let ORDERS = [];
-    // Configuración expandida
-    let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30, taxDebit:0, taxTransf:0, taxQR:0} };
+    // Configuración expandida + ALIAS
+    let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30, taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
     let currentRecipeId = null;
     let currentSubRecipeId = null;
     let chartInstance = null;
@@ -536,6 +562,7 @@
             if(doc.exists) FIXED_DATA = doc.data();
             if(!FIXED_DATA.fixed) FIXED_DATA.fixed = [];
             if(!FIXED_DATA.prod) FIXED_DATA.prod = [];
+            if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
             
             // Cargar valores a los 4 inputs
             $('#confPy').value = FIXED_DATA.config?.pyPercent || 30;
@@ -571,6 +598,62 @@
             if(collection === 'recipes') $('#recipeEditor').style.display = 'none';
             if(collection === 'subrecipes') $('#subRecipeEditor').style.display = 'none';
         }
+    }
+
+    // --- ALIAS SYSTEM ---
+    window.openAliasModal = () => {
+        $('#modalAlias').style.display = 'flex';
+        renderAliasList();
+        // Cargar Recetas internas en el Select
+        const sel = $('#aliasInt'); sel.innerHTML = '';
+        RECIPES.forEach(r => {
+            sel.innerHTML += `<option value="${r.id}">${r.id}</option>`;
+        });
+    };
+    function renderAliasList() {
+        const tbody = $('#aliasListBody'); tbody.innerHTML = '';
+        (FIXED_DATA.aliases || []).forEach((a, i) => {
+            tbody.innerHTML += `<tr><td>${a.external}</td><td>➡️ ${a.internal}</td><td><button class="btn-icon" onclick="deleteAlias(${i})">🗑️</button></td></tr>`;
+        });
+    }
+    window.addAlias = () => {
+        const ext = $('#aliasExt').value.trim();
+        const int = $('#aliasInt').value;
+        if(!ext || !int) return;
+        if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
+        FIXED_DATA.aliases.push({ external: ext, internal: int });
+        $('#aliasExt').value = '';
+        saveFixedData(); // Guarda en DB
+        renderAliasList();
+    };
+    window.deleteAlias = (idx) => {
+        FIXED_DATA.aliases.splice(idx, 1);
+        saveFixedData();
+        renderAliasList();
+    };
+
+    // --- HELPER DE BUSQUEDA INTELIGENTE DE RECETAS ---
+    function findRecipe(rawName) {
+        if(!rawName) return null;
+        const cleanName = rawName.toLowerCase().trim();
+        
+        // 1. Busqueda en Alias
+        const alias = (FIXED_DATA.aliases || []).find(a => a.external.toLowerCase().trim() === cleanName);
+        if(alias) {
+            // Si hay alias, buscamos la receta interna
+            return RECIPES.find(r => r.id === alias.internal);
+        }
+
+        // 2. Busqueda Normal
+        let r = RECIPES.find(x => x.id.toLowerCase() === cleanName);
+        if(!r) r = RECIPES.find(x => cleanName.includes(x.id.toLowerCase()));
+        
+        // 3. Fallbacks viejos
+        if(!r) {
+             if(cleanName.includes('doble')) r = RECIPES.find(x => x.id.toLowerCase().includes('doble'));
+             else if(cleanName.includes('simple')) r = RECIPES.find(x => x.id.toLowerCase().includes('simple'));
+        }
+        return r;
     }
 
     // --- STOCK & TABLES RENDER ---
@@ -789,6 +872,7 @@
     
     // GUARDAR CONFIG (Ahora guarda 4 impuestos)
     window.saveFixedData = () => { 
+        if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
         FIXED_DATA.config = {
             pyPercent: Number($('#confPy').value),
             taxDebit: Number($('#confDebit').value),
@@ -831,7 +915,6 @@
             let deduction = 0;
             let deductionReason = 'Sin deducción';
 
-            // Detectamos tipo y asignamos impuesto especifico
             if (originText === 'PEDIDOS YA') {
                 deduction = total * (pctPy / 100);
                 deductionReason = `Comisión Py (${pctPy}%)`;
@@ -862,14 +945,9 @@
                     </div>`;
                 }
 
-                // Logica de Costeo (Igual a calculateAll)
+                // Logica de Costeo (Usando findRecipe para ALIAS)
                 const name = (item.name || '').toLowerCase().trim();
-                let r = RECIPES.find(x => x.id.toLowerCase() === name); // Match exacto
-                if(!r) r = RECIPES.find(x => name.includes(x.id.toLowerCase())); // Match parcial
-                if(!r) {
-                    if(name.includes('doble')) r = RECIPES.find(x => x.id.toLowerCase().includes('doble'));
-                    else if(name.includes('simple')) r = RECIPES.find(x => x.id.toLowerCase().includes('simple'));
-                }
+                let r = findRecipe(name);
                 
                 if(r) {
                     const unitCost = calculateRecipeTotal(r);
@@ -885,11 +963,9 @@
             // 4. NETO FINAL (Venta - Impuestos - Costo)
             let finalProfit = total - deduction - orderCost;
 
-            // 5. Nombre Cliente
             const clientName = o.nombre || o.clientName || o.name || 'Cliente';
             const dateStr = new Date(o.createdAt).toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
             
-            // Fila Principal
             const trMain = document.createElement('tr');
             trMain.className = 'order-row';
             trMain.onclick = () => { document.getElementById('detail-'+index).classList.toggle('open'); };
@@ -903,7 +979,6 @@
                 <td><span style="font-size:10px">▼</span></td>
             `;
 
-            // Fila Detalle
             const trDet = document.createElement('tr');
             trDet.className = 'order-details';
             trDet.id = 'detail-'+index;
@@ -956,7 +1031,6 @@
             const sale = Number(o.total || 0);
             gross += sale;
             
-            // Logica Costos Variables Centralizada
             const source = (o.source || '').toLowerCase();
             let rawPay = (o.pago || o.paymentMethod || '').toLowerCase();
             
@@ -972,11 +1046,7 @@
 
             (o.items || []).forEach(item => {
                 const name = (item.name || '').toLowerCase().trim();
-                let r = RECIPES.find(x => name.includes(x.id.toLowerCase()));
-                if(!r) {
-                    if(name.includes('doble')) r = RECIPES.find(x => x.id.toLowerCase().includes('doble'));
-                    else if(name.includes('simple')) r = RECIPES.find(x => x.id.toLowerCase().includes('simple'));
-                }
+                let r = findRecipe(name);
                 if(r) theoCMV += (calculateRecipeTotal(r) * Number(item.qty || 1));
             });
         });
@@ -985,7 +1055,6 @@
         const totalSalaries = FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
         const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
         
-        // Sumamos comisiones Py + Impuestos de facturacion
         const variableCosts = comms + taxes;
         const totalExp = realPurchases + totalFixed + totalSalaries + variableCosts;
         const profitReal = gross - totalExp;
