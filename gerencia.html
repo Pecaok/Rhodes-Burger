@@ -50,11 +50,20 @@
     .kpi-lbl { font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
     .kpi-val { font-size: 26px; font-weight: 800; color: #0f172a; margin-top: 5px; }
     
-    /* MODAL */
+    /* ORDERS ACCORDION */
+    .order-row { cursor: pointer; transition: background 0.2s; }
+    .order-row:hover { background: #f8fafc; }
+    .order-details { display: none; background: #fcfcfc; border-bottom: 1px solid var(--border); }
+    .order-details.open { display: table-row; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 15px; }
+    .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .bdg-py { background: #fee2e2; color: #ef4444; } /* PedidosYa */
+    .bdg-card { background: #e0f2fe; color: #0284c7; } /* Tarjeta/Digital */
+    .bdg-cash { background: #dcfce7; color: #166534; } /* Efectivo */
+
+    /* MODAL & UTIL */
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(2px); }
     .modal { background: #fff; width: 500px; padding: 25px; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-height:90vh; overflow-y:auto; }
-    
-    /* UTIL */
     .text-red { color: var(--red); } .text-green { color: var(--green); }
     .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
     .st-ok { background: var(--green); } .st-crit { background: var(--red); } .st-warn { background: var(--orange); }
@@ -86,6 +95,9 @@
     <div class="tab-btn" onclick="showTab('cost_pack')">🥡 Costos Packaging</div>
     <div class="tab-btn" onclick="showTab('fixed')">💡 Gastos Fijos</div>
     <div class="tab-btn" onclick="showTab('production')">👨‍🍳 Sueldos</div>
+
+    <div class="section-title">Historial</div>
+    <div class="tab-btn" onclick="showTab('orders')">🧾 Lista de Pedidos</div>
   </aside>
 
   <main class="content">
@@ -96,10 +108,15 @@
         <div style="display:flex; gap:10px; align-items:center">
             
             <div style="background:#fff7ed; padding:5px 10px; border-radius:6px; border:1px solid #fed7aa; display:flex; align-items:center; gap:5px">
-                <span style="font-size:12px; font-weight:700; color:#c2410c;">Comisión Py:</span>
-                <input type="number" id="confPy" value="30" style="width:50px; border:1px solid #fdba74; background:#fff; font-weight:700; text-align:center; padding:4px; border-radius:4px;">
-                <span style="font-size:12px; font-weight:700; color:#c2410c;">%</span>
-                <button class="btn-sm btn-primary" onclick="saveConfig()" style="margin-left:5px">Guardar</button>
+                <div style="display:flex; flex-direction:column; align-items:flex-end">
+                  <div style="font-size:10px; color:#c2410c; margin-bottom:2px">Comisión Py (%)</div>
+                  <input type="number" id="confPy" value="30" style="width:50px; border:1px solid #fdba74; background:#fff; font-weight:700; text-align:center; padding:2px; border-radius:4px;">
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; border-left:1px solid #fed7aa; padding-left:5px">
+                  <div style="font-size:10px; color:#c2410c; margin-bottom:2px">Imp. Facturación (%)</div>
+                  <input type="number" id="confTax" value="5" style="width:50px; border:1px solid #fdba74; background:#fff; font-weight:700; text-align:center; padding:2px; border-radius:4px;">
+                </div>
+                <button class="btn-sm btn-primary" onclick="saveConfig()" style="margin-left:5px; height:100%">Guardar</button>
             </div>
 
             <input type="month" id="monthPicker">
@@ -116,9 +133,9 @@
             <div class="kpi-val text-red" id="kpiTheoCMV">$ 0</div>
         </div>
         <div class="kpi">
-            <div class="kpi-lbl">Total Gastos Reales</div>
+            <div class="kpi-lbl">Gastos (Incl. Comisiones)</div>
             <div class="kpi-val text-red" id="kpiTotalExpenses">$ 0</div>
-            <div style="font-size:10px; color:#64748b; margin-top:2px">Compras + Fijos + Sueldos + Comisiones</div>
+            <div style="font-size:10px; color:#64748b; margin-top:2px">Mercadería + Fijos + Sueldos + Comisiones</div>
         </div>
         <div class="kpi" id="kpiNetContainer" style="background: #f0fdf4; border-color: #bbf7d0;">
             <div class="kpi-lbl">Ganancia Neta (Caja)</div>
@@ -138,6 +155,27 @@
             <div id="lastPurchasesList" style="font-size:13px; color:#555"></div>
         </div>
       </div>
+    </div>
+
+    <div id="tab-orders" style="display:none">
+        <div class="card">
+            <h2><span>🧾 Historial de Pedidos</span> <small style="font-size:12px; color:#777; font-weight:400">Clic en el pedido para ver desglose</small></h2>
+            <div style="overflow-x:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fecha/Hora</th>
+                            <th>Cliente</th>
+                            <th>Origen/Pago</th>
+                            <th>Total Pedido</th>
+                            <th>Neto Negocio</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ordersTableBody"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <div id="tab-stock" style="display:none">
@@ -408,7 +446,8 @@
     let RECIPES = [];
     let PURCHASES = [];
     let ORDERS = [];
-    let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30} };
+    // Agregamos config de impuestos (taxPercent)
+    let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30, taxPercent:5} };
     let currentRecipeId = null;
     let currentSubRecipeId = null;
     let chartInstance = null;
@@ -463,7 +502,11 @@
             if(doc.exists) FIXED_DATA = doc.data();
             if(!FIXED_DATA.fixed) FIXED_DATA.fixed = [];
             if(!FIXED_DATA.prod) FIXED_DATA.prod = [];
+            
+            // Cargar valores al input
             $('#confPy').value = FIXED_DATA.config?.pyPercent || 30;
+            $('#confTax').value = FIXED_DATA.config?.taxPercent || 0;
+            
             renderFixedTables();
         });
     }
@@ -474,9 +517,10 @@
         const start = new Date(y, m-1, 1).toISOString();
         const end = new Date(y, m, 1).toISOString();
 
-        db.collection('orders').where('createdAt', '>=', start).where('createdAt', '<', end).get().then(snap => {
+        db.collection('orders').where('createdAt', '>=', start).where('createdAt', '<', end).orderBy('createdAt', 'desc').get().then(snap => {
             ORDERS = snap.docs.map(d => d.data()).filter(o => o.status !== 'cancelled');
             calculateAll();
+            renderOrdersTab(); // Renderizamos la nueva tabla de pedidos
         });
         db.collection('purchases').where('date', '>=', start).where('date', '<', end).get().then(snap => {
             PURCHASES = snap.docs.map(d => d.data());
@@ -707,20 +751,121 @@
     window.updFix = (arr, i, k, v) => { FIXED_DATA[arr][i][k] = k==='cost'?Number(v):v; };
     window.delFix = (arr, i) => { FIXED_DATA[arr].splice(i,1); renderFixedTables(); };
     
+    // GUARDAR CONFIG (Ahora guarda Py y Tax)
     window.saveFixedData = () => { 
-        FIXED_DATA.config = {pyPercent:Number($('#confPy').value)}; 
+        FIXED_DATA.config = {
+            pyPercent: Number($('#confPy').value),
+            taxPercent: Number($('#confTax').value)
+        }; 
         db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Configuración Guardada")); 
+        calculateAll(); // Recalcular al guardar
+        renderOrdersTab();
     };
     window.saveConfig = saveFixedData;
 
+    // --- NUEVA FUNCION: LISTA DE PEDIDOS ---
+    function renderOrdersTab() {
+        const tbody = $('#ordersTableBody');
+        tbody.innerHTML = '';
+        const pyPct = FIXED_DATA.config.pyPercent || 30;
+        const taxPct = FIXED_DATA.config.taxPercent || 0;
+
+        ORDERS.forEach((o, index) => {
+            const total = Number(o.total || 0);
+            const method = (o.paymentMethod || o.source || 'efectivo').toLowerCase();
+            let net = total;
+            let deduction = 0;
+            let deductionReason = 'Sin deducción';
+            let badgeClass = 'bdg-cash';
+            let sourceDisplay = 'Efectivo';
+
+            // Lógica de Deducción
+            if (o.source === 'pedidosya' || method.includes('pedidosya')) {
+                deduction = total * (pyPct / 100);
+                deductionReason = `Comisión Py (${pyPct}%)`;
+                net = total - deduction;
+                badgeClass = 'bdg-py';
+                sourceDisplay = 'PedidosYa';
+            } else if (['debito', 'transferencia', 'qr', 'tarjeta'].some(m => method.includes(m))) {
+                deduction = total * (taxPct / 100);
+                deductionReason = `Impuestos/Fact. (${taxPct}%)`;
+                net = total - deduction;
+                badgeClass = 'bdg-card';
+                sourceDisplay = method.charAt(0).toUpperCase() + method.slice(1);
+            }
+
+            const dateStr = new Date(o.createdAt).toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+            
+            // Fila Principal
+            const trMain = document.createElement('tr');
+            trMain.className = 'order-row';
+            trMain.onclick = () => { document.getElementById('detail-'+index).classList.toggle('open'); };
+            trMain.innerHTML = `
+                <td>${dateStr}</td>
+                <td>${o.clientName || 'Cliente'}</td>
+                <td><span class="badge ${badgeClass}">${sourceDisplay}</span></td>
+                <td style="font-weight:700">${money(total)}</td>
+                <td style="font-weight:700; color:${deduction>0 ? 'var(--primary)' : 'var(--green)'}">${money(net)}</td>
+                <td><span style="font-size:10px">▼</span></td>
+            `;
+
+            // Fila Detalle (Desplegable)
+            const trDet = document.createElement('tr');
+            trDet.className = 'order-details';
+            trDet.id = 'detail-'+index;
+            
+            let itemsHtml = (o.items || []).map(i => `<div>${i.qty}x ${i.name}</div>`).join('');
+            
+            trDet.innerHTML = `
+                <td colspan="6" style="padding:0">
+                    <div class="detail-grid">
+                        <div>
+                            <strong style="color:#666; font-size:11px; text-transform:uppercase">Detalle del Pedido:</strong>
+                            <div style="margin-top:5px; font-size:13px; color:#334155">${itemsHtml}</div>
+                            <div style="margin-top:10px; font-size:12px; color:#94a3b8">ID: ${o.id || '-'}</div>
+                        </div>
+                        <div style="background:#fff; border:1px solid #eee; padding:10px; border-radius:8px">
+                            <strong style="color:#666; font-size:11px; text-transform:uppercase">Balance de la Operación</strong>
+                            <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:13px">
+                                <span>Total Cobrado:</span>
+                                <b>${money(total)}</b>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; margin-top:5px; font-size:13px; color:#ef4444">
+                                <span>- ${deductionReason}:</span>
+                                <b>${money(deduction)}</b>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; margin-top:10px; padding-top:10px; border-top:1px dashed #ccc; font-size:14px">
+                                <span style="color:var(--primary); font-weight:700">Neto al Negocio:</span>
+                                <b style="color:var(--green)">${money(net)}</b>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            `;
+
+            tbody.appendChild(trMain);
+            tbody.appendChild(trDet);
+        });
+    }
+
     // --- CALCULATIONS & CHART ---
     function calculateAll() {
-        let gross = 0, comms = 0, theoCMV = 0;
-        
+        let gross = 0, comms = 0, taxes = 0, theoCMV = 0;
+        const pyPct = FIXED_DATA.config.pyPercent || 30;
+        const taxPct = FIXED_DATA.config.taxPercent || 0;
+
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0);
             gross += sale;
-            if(o.source === 'pedidosya') comms += (sale * (FIXED_DATA.config.pyPercent/100));
+            
+            // Logica de costo variable (Comision o Impuesto)
+            const method = (o.paymentMethod || o.source || '').toLowerCase();
+            if(o.source === 'pedidosya' || method.includes('pedidosya')) {
+                comms += (sale * (pyPct/100));
+            } else if (['debito', 'transferencia', 'qr', 'tarjeta'].some(m => method.includes(m))) {
+                taxes += (sale * (taxPct/100));
+            }
+
             (o.items || []).forEach(item => {
                 const name = (item.name || '').toLowerCase().trim();
                 let r = RECIPES.find(x => name.includes(x.id.toLowerCase()));
@@ -736,8 +881,10 @@
         const totalSalaries = FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
         const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
         
-        const totalExp = realPurchases + totalFixed + totalSalaries + comms;
-        const profitReal = gross - totalExp; // Balance Final
+        // Sumamos comisiones Py + Impuestos de facturacion
+        const variableCosts = comms + taxes;
+        const totalExp = realPurchases + totalFixed + totalSalaries + variableCosts;
+        const profitReal = gross - totalExp;
         
         $('#kpiSales').innerText = money(gross);
         $('#kpiTheoCMV').innerText = '-' + money(theoCMV);
@@ -765,9 +912,9 @@
         chartInstance = new Chart($('#mainChart').getContext('2d'), {
             type: 'bar',
             data: { 
-                labels: ['+ Ventas', '- Mercadería', '- Fijos', '- Sueldos', '- Comisiones', '= Balance'], 
+                labels: ['+ Ventas', '- Mercadería', '- Fijos', '- Sueldos', '- Var (Py/Imp)', '= Balance'], 
                 datasets: [{ 
-                    data: [gross, realPurchases, totalFixed, totalSalaries, comms, profitReal], 
+                    data: [gross, realPurchases, totalFixed, totalSalaries, variableCosts, profitReal], 
                     backgroundColor: [
                         '#64748b', '#f97316', '#a855f7', '#3b82f6', '#eab308', balanceColor
                     ], 
