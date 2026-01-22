@@ -9,12 +9,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
-    /* --- ESTILOS VISUALES --- */
-    :root { 
-        --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; 
-        --border: #e2e8f0; --green: #10b981; --red: #ef4444; 
-        --blue: #3b82f6; --purple: #8b5cf6; --orange: #f97316; 
-    }
+    /* ESTILOS BASE */
+    :root { --primary: #625A45; --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --border: #e2e8f0; --green: #10b981; --red: #ef4444; --blue: #3b82f6; --purple: #8b5cf6; --orange: #f97316; }
     * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
     body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
 
@@ -142,9 +138,7 @@
       <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px">
         <div class="card">
             <h2>Desglose de Gastos y Ganancia</h2>
-            <div style="position: relative; height: 250px; width: 100%;">
-                <canvas id="mainChart"></canvas>
-            </div>
+            <div style="position: relative; height: 250px; width: 100%;"><canvas id="mainChart"></canvas></div>
         </div>
         <div class="card">
             <h2>Últimas Compras Stock</h2>
@@ -265,6 +259,21 @@
     let INVENTORY=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
     let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30, taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
     let currentRecipeId = null, currentSubRecipeId = null, chartInstance = null, tempAliasList = [];
+
+    // --- CARGADORES DE DATOS ---
+    window.loadInventory = function() { db.collection('inventory').orderBy('name').onSnapshot(snap => { INVENTORY=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderStockTable(); window.renderCostTables(); window.renderRecipesList(); window.renderSubRecipesList(); }); };
+    window.loadSubRecipes = function() { db.collection('subrecipes').onSnapshot(snap => { SUB_RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderSubRecipesList(); window.renderRecipesList(); }); };
+    window.loadRecipes = function() { db.collection('recipes').onSnapshot(snap => { RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderRecipesList(); }); };
+    window.loadFixedData = function() { 
+        db.collection('config').doc('gerencia').onSnapshot(doc => {
+            if(doc.exists) FIXED_DATA = doc.data();
+            if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
+            if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
+            $('#confPy').value = FIXED_DATA.config?.pyPercent||30; $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
+            $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0;
+            window.renderFixedTables();
+        });
+    };
 
     // 3. FUNCIONES LÓGICAS (DEFINIDAS EN WINDOW PARA EVITAR ERRORES)
     window.calculateOrderBagCost = function(items) {
@@ -439,6 +448,7 @@
     window.addIngToRecipe = async function() { const id=$('#newRecIng').value, q=Number($('#newRecQty').value), m=Number($('#newRecUnit').value); if(!id)return; const r=RECIPES.find(x=>x.id===currentRecipeId); await db.collection('recipes').doc(currentRecipeId).update({ingredients:[...(r.ingredients||[]),{id,qty:q*m}]}); };
     window.removeRecIng = async function(rId, i) { const r=RECIPES.find(x=>x.id===rId), n=[...r.ingredients]; n.splice(i,1); await db.collection('recipes').doc(rId).update({ingredients:n}); };
     window.deleteItem = async function(c,id) { if(confirm('¿Borrar?')){ await db.collection(c).doc(id).delete(); if(c==='recipes') $('#recipeEditor').style.display='none'; if(c==='subrecipes') $('#subRecipeEditor').style.display='none'; } };
+    window.updateUnitSelect = function(m) { const s=m==='sub'?$('#newSubUnit'):$('#newRecUnit'); s.innerHTML='<option value="1">Unidad</option><option value="0.001">G/ML</option>'; };
 
     // ALIAS SYSTEM
     window.openAliasModal = function() { $('#modalAlias').style.display='flex'; window.renderAliasList(); const sel=$('#aliasInt'); sel.innerHTML=''; RECIPES.forEach(r => sel.innerHTML += `<option value="${r.id}">${r.id}</option>`); tempAliasList=[]; window.renderTempAlias(); };
@@ -465,6 +475,7 @@
         window.calculateAll(); window.renderOrdersTab(); 
     };
     window.saveConfig = window.saveFixedData;
+    window.showTab = function(id) { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); };
 
     // RENDERIZADO TABLAS (CORREGIDO EVENTO ONCLICK)
     window.renderStockTable = function() { $('#stockTableBody').innerHTML = INVENTORY.map(p=>`<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td><td>${formatQty(p.qty)} ${p.unit}</td><td>${p.min}</td><td>${p.qty<=p.min?'🔴':'🟢'}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); };
@@ -474,7 +485,6 @@
     };
     window.renderRecipesList = function() { $('#recipesListBody').innerHTML=RECIPES.map(r=>`<tr onclick="openRecipeEditor(this)" data-id="${r.id}"><td>${r.id}</td><td style="text-align:right"><b>${money(window.calculateRecipeTotal(r))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="deleteItem('recipes','${r.id}')">🗑️</button></td></tr>`).join(''); };
     window.renderSubRecipesList = function() { $('#subRecipesListBody').innerHTML = SUB_RECIPES.map(sub => `<tr onclick="openSubRecipeEditor('${sub.id}')"><td>${sub.name}</td><td style="text-align:right"><b>${money(window.calculateSubRecipeCost(sub))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="deleteItem('subrecipes', '${sub.id}')">🗑️</button></td></tr>`).join(''); };
-    window.showTab = function(id) { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); };
 
     // --- CARGA DE DATOS ---
     window.loadDashboardData = function() {
@@ -489,6 +499,19 @@
         db.collection('orders').where('createdAt','>=',start.toISOString()).where('createdAt','<=',end.toISOString()).orderBy('createdAt','desc').get().then(snap=>{ ORDERS=snap.docs.map(d=>d.data()).filter(o=>o.status!=='cancelled'); window.calculateAll(); window.renderOrdersTab(); });
         db.collection('purchases').where('date','>=',start.toISOString()).where('date','<=',end.toISOString()).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); window.calculateAll(); });
     };
+
+    // INICIAR (AL FINAL)
+    window.addEventListener('load', () => {
+        const now = new Date();
+        $('#monthPicker').value = now.toISOString().slice(0,7);
+        $('#monthPicker').addEventListener('change', window.loadDashboardData);
+        
+        window.loadInventory();
+        window.loadSubRecipes();
+        window.loadRecipes();
+        window.loadFixedData();
+        window.loadDashboardData();
+    });
 
 </script>
 </body>
