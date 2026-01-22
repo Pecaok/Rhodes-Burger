@@ -781,7 +781,7 @@
         ORDERS.forEach((o, index) => {
             const total = Number(o.total || 0);
             
-            // 1. Origen (Web, Local, Py)
+            // 1. ORIGEN (Normalizado)
             let originBadge = '';
             let originText = (o.source || 'web').toUpperCase();
             if(originText.includes('PEDIDOSYA')) { 
@@ -792,20 +792,29 @@
                 originBadge = 'bdg-web'; originText='WEB'; 
             }
 
-            // 2. Pago (Efectivo, Digital, Tarjeta)
-            let payBadge = '';
-            let payText = (o.paymentMethod || 'EFECTIVO').toUpperCase();
-            // Lógica para detectar si es digital (cobrar impuesto) o efectivo
-            let isDigital = ['TRANSFERENCIA', 'MERCADOPAGO', 'QR', 'DEBITO', 'CREDITO', 'TARJETA'].some(m => payText.includes(m));
-            
-            if(isDigital) {
+            // 2. PAGO (Leyendo el campo 'pago' y normalizando)
+            // IMPORTANTE: Leemos o.pago, si no existe o.paymentMethod, si no 'efectivo'
+            let rawPay = (o.pago || o.paymentMethod || 'efectivo').toLowerCase();
+            let payBadge = 'bdg-cash';
+            let payText = 'EFECTIVO';
+            let isDigital = false;
+
+            if(rawPay.includes('mercado') || rawPay.includes('mp') || rawPay.includes('qr')) {
                 payBadge = 'bdg-digital'; 
-                // Limpiar texto largo
-                if(payText.includes('TRANSFERENCIA')) payText = 'TRANSF.';
-                else if(payText.includes('MERCADOPAGO')) payText = 'MP';
+                payText = 'MERCADOPAGO';
+                isDigital = true;
+            } else if(rawPay.includes('transfer')) {
+                payBadge = 'bdg-digital'; 
+                payText = 'TRANSF.';
+                isDigital = true;
+            } else if(rawPay.includes('debito') || rawPay.includes('tarjeta') || rawPay.includes('credito')) {
+                payBadge = 'bdg-digital'; 
+                payText = 'TARJETA';
+                isDigital = true;
             } else {
-                payBadge = 'bdg-cash';
-                payText = 'EFECTIVO';
+                // Si es algo raro pero no digital, lo dejamos como efectivo visualmente
+                // o podes poner rawPay.toUpperCase() si querés ver que viene
+                if(rawPay !== 'efectivo') payText = rawPay.toUpperCase();
             }
             
             // 3. Cálculo de Deducciones
@@ -823,8 +832,8 @@
                 net = total - deduction;
             }
 
-            // 4. Nombre Cliente (Búsqueda exhaustiva)
-            const clientName = o.clientName || o.nombre || o.name || (o.client && o.client.name) || 'Cliente';
+            // 4. Nombre Cliente (Campo 'nombre')
+            const clientName = o.nombre || o.clientName || o.name || 'Cliente';
 
             const dateStr = new Date(o.createdAt).toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
             
@@ -903,13 +912,13 @@
             const sale = Number(o.total || 0);
             gross += sale;
             
-            // Logica Centralizada de Costos Variables
-            let method = (o.paymentMethod || '').toLowerCase();
+            // Logica Costos Variables (Igual que en la tabla)
             const source = (o.source || '').toLowerCase();
+            let rawPay = (o.pago || o.paymentMethod || '').toLowerCase();
             
-            // Determinamos si es Py o si es Digital
             const isPy = source === 'pedidosya';
-            const isDigital = ['transferencia', 'mercadopago', 'qr', 'debito', 'credito', 'tarjeta'].some(m => method.includes(m));
+            // Detectamos pago digital
+            const isDigital = ['transferencia', 'mercadopago', 'qr', 'debito', 'credito', 'tarjeta', 'mp'].some(m => rawPay.includes(m));
 
             if(isPy) {
                 comms += (sale * (pyPct/100));
