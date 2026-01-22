@@ -56,7 +56,7 @@
     .order-details { display: none; background: #fcfcfc; border-bottom: 1px solid var(--border); }
     .order-details.open { display: table-row; }
     .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 15px; }
-    .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; display:inline-block; }
     .bdg-py { background: #fee2e2; color: #ef4444; } /* PedidosYa */
     .bdg-card { background: #e0f2fe; color: #0284c7; } /* Tarjeta/Digital */
     .bdg-cash { background: #dcfce7; color: #166534; } /* Efectivo */
@@ -772,26 +772,48 @@
 
         ORDERS.forEach((o, index) => {
             const total = Number(o.total || 0);
-            const method = (o.paymentMethod || o.source || 'efectivo').toLowerCase();
+            
+            // Lógica Mejorada de Detección de Pago
+            let method = (o.paymentMethod || '').toLowerCase();
+            const source = (o.source || '').toLowerCase();
+            
+            // Si el método está vacío, intentamos deducirlo del source, o sino efectivo
+            if(!method && source !== 'pedidosya') method = source || 'efectivo';
+            
             let net = total;
             let deduction = 0;
             let deductionReason = 'Sin deducción';
             let badgeClass = 'bdg-cash';
             let sourceDisplay = 'Efectivo';
 
-            // Lógica de Deducción
-            if (o.source === 'pedidosya' || method.includes('pedidosya')) {
+            // 1. Prioridad: PedidosYa (Siempre cobra comisión)
+            if (source === 'pedidosya') {
                 deduction = total * (pyPct / 100);
                 deductionReason = `Comisión Py (${pyPct}%)`;
                 net = total - deduction;
                 badgeClass = 'bdg-py';
                 sourceDisplay = 'PedidosYa';
-            } else if (['debito', 'transferencia', 'qr', 'tarjeta'].some(m => method.includes(m))) {
+            
+            // 2. Transferencias / Digitales (Cobran Impuestos)
+            } else if (['transferencia', 'mercadopago', 'qr', 'cuenta dni', 'banco'].some(m => method.includes(m))) {
+                deduction = total * (taxPct / 100);
+                deductionReason = `Impuestos/Fact. (${taxPct}%)`;
+                net = total - deduction;
+                badgeClass = 'bdg-card'; // Azul
+                sourceDisplay = method.charAt(0).toUpperCase() + method.slice(1);
+
+            // 3. Tarjetas
+            } else if (['debito', 'credito', 'tarjeta'].some(m => method.includes(m))) {
                 deduction = total * (taxPct / 100);
                 deductionReason = `Impuestos/Fact. (${taxPct}%)`;
                 net = total - deduction;
                 badgeClass = 'bdg-card';
-                sourceDisplay = method.charAt(0).toUpperCase() + method.slice(1);
+                sourceDisplay = 'Tarjeta';
+
+            // 4. Efectivo (Default)
+            } else {
+                sourceDisplay = 'Efectivo'; // O el texto que venga si es algo raro
+                if(method && method !== 'efectivo' && method !== 'local') sourceDisplay = method; 
             }
 
             const dateStr = new Date(o.createdAt).toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
@@ -814,7 +836,22 @@
             trDet.className = 'order-details';
             trDet.id = 'detail-'+index;
             
-            let itemsHtml = (o.items || []).map(i => `<div>${i.qty}x ${i.name}</div>`).join('');
+            // Renderizado de Items con Extras
+            let itemsHtml = (o.items || []).map(i => {
+                let extrasHtml = '';
+                // Buscamos si hay extras (cheddar, medallones, etc)
+                // Asumimos que pueden venir en un array 'extras' o 'mods'
+                const extras = i.extras || i.mods || [];
+                if(extras && extras.length > 0) {
+                    extrasHtml = `<div style="font-size:11px; color:#64748b; padding-left:14px; margin-top:2px">
+                        ${extras.map(e => `+ ${typeof e === 'string' ? e : (e.name||'?')}`).join('<br>')}
+                    </div>`;
+                }
+                return `<div style="margin-bottom:6px">
+                    <div><strong>${i.qty}x</strong> ${i.name}</div>
+                    ${extrasHtml}
+                </div>`;
+            }).join('');
             
             trDet.innerHTML = `
                 <td colspan="6" style="padding:0">
@@ -858,11 +895,14 @@
             const sale = Number(o.total || 0);
             gross += sale;
             
-            // Logica de costo variable (Comision o Impuesto)
-            const method = (o.paymentMethod || o.source || '').toLowerCase();
-            if(o.source === 'pedidosya' || method.includes('pedidosya')) {
+            // Logica Centralizada de Costos Variables
+            let method = (o.paymentMethod || '').toLowerCase();
+            const source = (o.source || '').toLowerCase();
+            if(!method && source !== 'pedidosya') method = source;
+
+            if(source === 'pedidosya') {
                 comms += (sale * (pyPct/100));
-            } else if (['debito', 'transferencia', 'qr', 'tarjeta'].some(m => method.includes(m))) {
+            } else if (['transferencia', 'mercadopago', 'qr', 'debito', 'credito', 'tarjeta'].some(m => method.includes(m))) {
                 taxes += (sale * (taxPct/100));
             }
 
