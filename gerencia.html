@@ -129,7 +129,9 @@
       <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px">
         <div class="card">
             <h2>Desglose de Gastos y Ganancia</h2>
-            <canvas id="mainChart" height="250"></canvas>
+            <div style="position: relative; height: 250px; width: 100%;">
+                <canvas id="mainChart"></canvas>
+            </div>
         </div>
         <div class="card">
             <h2>Últimas Compras Stock</h2>
@@ -397,7 +399,7 @@
     const formatQty = (n) => {
         let num = Number(n);
         if(isNaN(num)) return '0';
-        return parseFloat(num.toFixed(3)); // Removes trailing zeros: 5.000 -> 5
+        return parseFloat(num.toFixed(3)); 
     };
 
     // STATE
@@ -417,7 +419,6 @@
         $('#purDate').valueAsDate = now;
         $('#monthPicker').addEventListener('change', loadDashboardData);
         
-        // Auto calc cost modal
         ['mpPurchCost', 'mpYield'].forEach(id => {
             document.getElementById(id).addEventListener('input', () => {
                 const cost = Number($('#mpPurchCost').value);
@@ -440,7 +441,7 @@
             INVENTORY = snap.docs.map(d => ({id: d.id, ...d.data()}));
             renderStockTable();
             renderCostTables(); 
-            renderRecipesList(); // Update costs
+            renderRecipesList();
             renderSubRecipesList();
         });
     }
@@ -492,7 +493,7 @@
         }
     }
 
-    // --- 1. STOCK ---
+    // --- STOCK & TABLES RENDER ---
     function renderStockTable() {
         const t = $('#searchStock').value.toLowerCase();
         const cat = $('#filterCat').value;
@@ -509,7 +510,6 @@
         });
     }
 
-    // --- COST TABLES ---
     function renderCostTables() {
         const renderRows = (arr, targetId) => {
             const tbody = $(targetId); tbody.innerHTML = '';
@@ -533,19 +533,17 @@
         renderRows(INVENTORY.filter(p => p.category === 'packaging'), '#costPackBody');
     }
 
-    // --- PRODUCT MODAL LOGIC ---
+    // --- MODALS ---
     window.openProductModal = (id, catPreset) => {
         $('#modalProduct').style.display = 'flex';
         if(id) {
             const p = INVENTORY.find(i => i.id === id);
             $('#mpTitle').innerText = 'Editar Insumo'; $('#mpId').value = id; $('#mpName').value = p.name; $('#mpCat').value = p.category; $('#mpQty').value = p.qty; $('#mpUnit').value = p.unit; 
-            
             $('#mpPurchCost').value = p.purchCost || p.cost;
             $('#mpFormat').value = p.format || '';
             $('#mpYield').value = p.yield || 1;
             $('#mpMin').value = p.min || 5;
             $('#calcUnitCost').innerText = money(p.cost);
-
         } else {
             $('#mpTitle').innerText = 'Nuevo Insumo'; $('#mpId').value = ''; $('#mpName').value = ''; $('#mpQty').value = 0; 
             $('#mpPurchCost').value = 0; $('#mpFormat').value = ''; $('#mpYield').value = 1; $('#mpMin').value = 5;
@@ -558,25 +556,15 @@
         const purchCost = Number($('#mpPurchCost').value);
         const yieldVal = Number($('#mpYield').value);
         const unitCost = (yieldVal > 0) ? (purchCost / yieldVal) : 0;
-
         const data = { 
-            name: $('#mpName').value, 
-            category: $('#mpCat').value, 
-            qty: Number($('#mpQty').value), 
-            unit: $('#mpUnit').value,
-            purchCost: purchCost,
-            format: $('#mpFormat').value,
-            yield: yieldVal,
-            min: Number($('#mpMin').value),
-            cost: unitCost 
+            name: $('#mpName').value, category: $('#mpCat').value, qty: Number($('#mpQty').value), unit: $('#mpUnit').value,
+            purchCost: purchCost, format: $('#mpFormat').value, yield: yieldVal, min: Number($('#mpMin').value), cost: unitCost 
         };
-
         if(!data.name) return alert("Falta nombre");
         id ? await db.collection('inventory').doc(id).update(data) : await db.collection('inventory').add(data);
         $('#modalProduct').style.display = 'none';
     };
 
-    // --- PURCHASE ---
     window.openPurchaseModal = () => {
         $('#modalPurchase').style.display = 'flex';
         const sel = $('#purProd'); sel.innerHTML = '';
@@ -592,7 +580,7 @@
         alert("Compra registrada!"); $('#modalPurchase').style.display = 'none'; loadDashboardData();
     };
 
-    // --- SUB-RECETAS ---
+    // --- RECIPES LOGIC ---
     function calculateSubRecipeCost(sub) {
         return (sub.ingredients || []).reduce((sum, ing) => {
             const item = INVENTORY.find(i => i.id === ing.id);
@@ -622,26 +610,19 @@
         (sub.ingredients || []).forEach((ing, idx) => {
             const item = INVENTORY.find(i => i.id === ing.id);
             const cost = item ? item.cost : 0;
-            const unitDisplay = item ? item.unit : ''; 
-            tbody.innerHTML += `<tr><td>${item ? item.name : '???'}</td><td>${formatQty(ing.qty)} <small>${unitDisplay}</small></td><td>${money(cost * ing.qty)}</td><td><button class="btn-icon" onclick="removeSubIng('${sub.id}', ${idx})">🗑️</button></td></tr>`;
+            tbody.innerHTML += `<tr><td>${item ? item.name : '???'}</td><td>${formatQty(ing.qty)}</td><td>${money(cost * ing.qty)}</td><td><button class="btn-icon" onclick="removeSubIng('${sub.id}', ${idx})">🗑️</button></td></tr>`;
         });
         $('#subEditorTotalCost').innerText = money(calculateSubRecipeCost(sub));
     };
     window.updateUnitSelect = (mode) => {
-        const sel = mode==='sub'?$('#newSubIng'):$('#newRecIng');
         const unitSel = mode==='sub'?$('#newSubUnit'):$('#newRecUnit');
-        const opt = sel.options[sel.selectedIndex];
-        
-        // Default
         unitSel.innerHTML = `<option value="1">Unidad Base</option><option value="0.001">Gramos / ml</option>`;
     };
     window.addIngToSubRecipe = async () => {
         const id = $('#newSubIng').value;
         const rawQty = Number($('#newSubQty').value);
         const multiplier = Number($('#newSubUnit').value); 
-        
         if(!id || rawQty <= 0) return;
-        
         const finalQty = rawQty * multiplier;
         const s = SUB_RECIPES.find(x => x.id === currentSubRecipeId);
         const newIngs = [...(s.ingredients || []), {id, qty: finalQty}];
@@ -655,7 +636,6 @@
     };
     window.delSubRecipe = async (e, id) => { e.stopPropagation(); if(confirm("Borrar?")) { await db.collection('subrecipes').doc(id).delete(); $('#subRecipeEditor').style.display='none'; } };
 
-    // --- RECETAS FINALES ---
     function calculateRecipeTotal(recipe) {
         return (recipe.ingredients || []).reduce((sum, ing) => {
             const sub = SUB_RECIPES.find(s => s.id === ing.id);
@@ -703,7 +683,6 @@
     window.addIngToRecipe = async () => {
         const id = $('#newRecIng').value, rawQty = Number($('#newRecQty').value), multiplier = Number($('#newRecUnit').value);
         if(!id || rawQty <= 0) return;
-        
         const finalQty = rawQty * multiplier;
         const r = RECIPES.find(x => x.id === currentRecipeId);
         const newIngs = [...(r.ingredients || []), {id, qty: finalQty}];
@@ -728,24 +707,20 @@
     window.updFix = (arr, i, k, v) => { FIXED_DATA[arr][i][k] = k==='cost'?Number(v):v; };
     window.delFix = (arr, i) => { FIXED_DATA[arr].splice(i,1); renderFixedTables(); };
     
-    // --- GUARDAR CONFIG & FIJOS ---
     window.saveFixedData = () => { 
         FIXED_DATA.config = {pyPercent:Number($('#confPy').value)}; 
         db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Configuración Guardada")); 
     };
     window.saveConfig = saveFixedData;
 
-    // --- 5. CALCULATIONS (UPDATED FOR DYNAMIC CHART & BALANCE) ---
+    // --- CALCULATIONS & CHART ---
     function calculateAll() {
         let gross = 0, comms = 0, theoCMV = 0;
         
-        // 1. Sumar Ventas y calcular Comisiones
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0);
             gross += sale;
             if(o.source === 'pedidosya') comms += (sale * (FIXED_DATA.config.pyPercent/100));
-            
-            // Calcular CMV Teórico
             (o.items || []).forEach(item => {
                 const name = (item.name || '').toLowerCase().trim();
                 let r = RECIPES.find(x => name.includes(x.id.toLowerCase()));
@@ -757,44 +732,34 @@
             });
         });
 
-        // 2. Sumar Gastos
         const totalFixed = FIXED_DATA.fixed.reduce((s,i)=>s+i.cost,0); 
         const totalSalaries = FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
         const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
         
-        // 3. Totales y Balance
         const totalExp = realPurchases + totalFixed + totalSalaries + comms;
         const profitReal = gross - totalExp; // Balance Final
         
-        // 4. Actualizar KPIs (Texto)
         $('#kpiSales').innerText = money(gross);
         $('#kpiTheoCMV').innerText = '-' + money(theoCMV);
         $('#kpiTotalExpenses').innerText = '-' + money(totalExp);
         
-        // Visual Ganancia/Pérdida en el cuadro de KPI
         const kpiNetElem = $('#kpiNet');
-        const kpiNetContainer = $('#kpiNetContainer'); // Contenedor del KPI
+        const kpiNetContainer = $('#kpiNetContainer');
         
         kpiNetElem.innerText = money(profitReal);
-        
         if(profitReal >= 0) {
-            // Estilo Ganancia
             kpiNetElem.className = 'kpi-val text-green';
             kpiNetContainer.style.backgroundColor = '#f0fdf4';
             kpiNetContainer.style.borderColor = '#bbf7d0';
             kpiNetContainer.querySelector('.kpi-lbl').className = 'kpi-lbl text-green';
         } else {
-            // Estilo Pérdida
             kpiNetElem.className = 'kpi-val text-red';
             kpiNetContainer.style.backgroundColor = '#fef2f2';
             kpiNetContainer.style.borderColor = '#fecaca';
             kpiNetContainer.querySelector('.kpi-lbl').className = 'kpi-lbl text-red';
         }
 
-        // 5. GRÁFICO MEJORADO (Chart.js)
         if(chartInstance) chartInstance.destroy();
-
-        // Color dinámico para la barra de balance
         const balanceColor = profitReal >= 0 ? '#10b981' : '#ef4444';
 
         chartInstance = new Chart($('#mainChart').getContext('2d'), {
@@ -804,12 +769,7 @@
                 datasets: [{ 
                     data: [gross, realPurchases, totalFixed, totalSalaries, comms, profitReal], 
                     backgroundColor: [
-                        '#64748b', // Ventas (Gris)
-                        '#f97316', // Mercadería (Naranja)
-                        '#a855f7', // Fijos (Violeta)
-                        '#3b82f6', // Sueldos (Azul)
-                        '#eab308', // Comisiones (Amarillo)
-                        balanceColor // Balance (Verde/Rojo)
+                        '#64748b', '#f97316', '#a855f7', '#3b82f6', '#eab308', balanceColor
                     ], 
                     borderRadius: 6,
                     borderWidth: 1
@@ -818,29 +778,14 @@
             options: { 
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { 
-                    legend: {display:false},
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return money(context.raw);
-                            }
-                        }
-                    }
-                },
+                plugins: { legend: {display:false}, tooltip: {callbacks: {label: function(context) {return money(context.raw);}}} },
                 scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: '#f1f5f9' }
-                    },
-                    x: {
-                        grid: { display: false }
-                    }
+                    y: { beginAtZero: true, grid: { color: '#f1f5f9' } },
+                    x: { grid: { display: false } }
                 }
             }
         });
         
-        // Lista de últimas compras
         $('#lastPurchasesList').innerHTML = PURCHASES.slice(0,5).map(p=>`<div style="display:flex;justify-content:space-between;border-bottom:1px dashed #eee;padding:5px 0"><span>${p.prodName||'Compra'}</span><b class="text-red">-${money(p.total)}</b></div>`).join('');
     }
 
