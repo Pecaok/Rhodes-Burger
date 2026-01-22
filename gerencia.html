@@ -75,6 +75,11 @@
     .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
     .st-ok { background: var(--green); } .st-crit { background: var(--red); } .st-warn { background: var(--orange); }
 
+    /* INPUTS CONFIG */
+    .conf-input-group { display:flex; flex-direction:column; align-items:center; }
+    .conf-lbl { font-size:9px; color:#c2410c; margin-bottom:2px; font-weight:700; text-transform:uppercase; }
+    .conf-inp { width:45px; border:1px solid #fdba74; background:#fff; font-weight:700; text-align:center; padding:2px; border-radius:4px; font-size:12px; }
+
   </style>
 </head>
 <body>
@@ -110,20 +115,35 @@
   <main class="content">
 
     <div id="tab-dashboard">
-      <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
         <div><h2 style="margin:0; border:0">Tablero de Comando</h2></div>
-        <div style="display:flex; gap:10px; align-items:center">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             
-            <div style="background:#fff7ed; padding:5px 10px; border-radius:6px; border:1px solid #fed7aa; display:flex; align-items:center; gap:5px">
-                <div style="display:flex; flex-direction:column; align-items:flex-end">
-                  <div style="font-size:10px; color:#c2410c; margin-bottom:2px">Comisión Py (%)</div>
-                  <input type="number" id="confPy" value="30" style="width:50px; border:1px solid #fdba74; background:#fff; font-weight:700; text-align:center; padding:2px; border-radius:4px;">
+            <div style="background:#fff7ed; padding:6px 12px; border-radius:8px; border:1px solid #fed7aa; display:flex; align-items:center; gap:8px">
+                
+                <div class="conf-input-group">
+                  <div class="conf-lbl">Py (%)</div>
+                  <input type="number" id="confPy" value="30" class="conf-inp">
                 </div>
-                <div style="display:flex; flex-direction:column; align-items:flex-end; border-left:1px solid #fed7aa; padding-left:5px">
-                  <div style="font-size:10px; color:#c2410c; margin-bottom:2px">Imp. Facturación (%)</div>
-                  <input type="number" id="confTax" value="5" style="width:50px; border:1px solid #fdba74; background:#fff; font-weight:700; text-align:center; padding:2px; border-radius:4px;">
+                
+                <div style="width:1px; height:20px; background:#fed7aa"></div>
+
+                <div class="conf-input-group">
+                  <div class="conf-lbl">Débito</div>
+                  <input type="number" id="confDebit" value="0" class="conf-inp">
                 </div>
-                <button class="btn-sm btn-primary" onclick="saveConfig()" style="margin-left:5px; height:100%">Guardar</button>
+
+                <div class="conf-input-group">
+                  <div class="conf-lbl">Transf</div>
+                  <input type="number" id="confTransf" value="0" class="conf-inp">
+                </div>
+
+                <div class="conf-input-group">
+                  <div class="conf-lbl">QR/MP</div>
+                  <input type="number" id="confQR" value="0" class="conf-inp">
+                </div>
+
+                <button class="btn-sm btn-primary" onclick="saveConfig()" style="height:32px; margin-left:5px">💾</button>
             </div>
 
             <input type="month" id="monthPicker">
@@ -454,8 +474,8 @@
     let RECIPES = [];
     let PURCHASES = [];
     let ORDERS = [];
-    // Agregamos config de impuestos (taxPercent)
-    let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30, taxPercent:5} };
+    // Configuración expandida
+    let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30, taxDebit:0, taxTransf:0, taxQR:0} };
     let currentRecipeId = null;
     let currentSubRecipeId = null;
     let chartInstance = null;
@@ -511,9 +531,11 @@
             if(!FIXED_DATA.fixed) FIXED_DATA.fixed = [];
             if(!FIXED_DATA.prod) FIXED_DATA.prod = [];
             
-            // Cargar valores al input
+            // Cargar valores a los 4 inputs
             $('#confPy').value = FIXED_DATA.config?.pyPercent || 30;
-            $('#confTax').value = FIXED_DATA.config?.taxPercent || 0;
+            $('#confDebit').value = FIXED_DATA.config?.taxDebit || 0;
+            $('#confTransf').value = FIXED_DATA.config?.taxTransf || 0;
+            $('#confQR').value = FIXED_DATA.config?.taxQR || 0;
             
             renderFixedTables();
         });
@@ -759,11 +781,13 @@
     window.updFix = (arr, i, k, v) => { FIXED_DATA[arr][i][k] = k==='cost'?Number(v):v; };
     window.delFix = (arr, i) => { FIXED_DATA[arr].splice(i,1); renderFixedTables(); };
     
-    // GUARDAR CONFIG (Ahora guarda Py y Tax)
+    // GUARDAR CONFIG (Ahora guarda 4 impuestos)
     window.saveFixedData = () => { 
         FIXED_DATA.config = {
             pyPercent: Number($('#confPy').value),
-            taxPercent: Number($('#confTax').value)
+            taxDebit: Number($('#confDebit').value),
+            taxTransf: Number($('#confTransf').value),
+            taxQR: Number($('#confQR').value)
         }; 
         db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Configuración Guardada")); 
         calculateAll(); // Recalcular al guardar
@@ -771,17 +795,19 @@
     };
     window.saveConfig = saveFixedData;
 
-    // --- NUEVA FUNCION: LISTA DE PEDIDOS ---
+    // --- LISTA DE PEDIDOS ---
     function renderOrdersTab() {
         const tbody = $('#ordersTableBody');
         tbody.innerHTML = '';
-        const pyPct = FIXED_DATA.config.pyPercent || 30;
-        const taxPct = FIXED_DATA.config.taxPercent || 0;
+        const pctPy = FIXED_DATA.config.pyPercent || 30;
+        const pctDebit = FIXED_DATA.config.taxDebit || 0;
+        const pctTransf = FIXED_DATA.config.taxTransf || 0;
+        const pctQR = FIXED_DATA.config.taxQR || 0;
 
         ORDERS.forEach((o, index) => {
             const total = Number(o.total || 0);
             
-            // 1. ORIGEN (Normalizado)
+            // 1. ORIGEN
             let originBadge = '';
             let originText = (o.source || 'web').toUpperCase();
             if(originText.includes('PEDIDOSYA')) { 
@@ -792,49 +818,37 @@
                 originBadge = 'bdg-web'; originText='WEB'; 
             }
 
-            // 2. PAGO (Leyendo el campo 'pago' y normalizando)
-            // IMPORTANTE: Leemos o.pago, si no existe o.paymentMethod, si no 'efectivo'
+            // 2. PAGO
             let rawPay = (o.pago || o.paymentMethod || 'efectivo').toLowerCase();
             let payBadge = 'bdg-cash';
             let payText = 'EFECTIVO';
-            let isDigital = false;
-
-            if(rawPay.includes('mercado') || rawPay.includes('mp') || rawPay.includes('qr')) {
-                payBadge = 'bdg-digital'; 
-                payText = 'MERCADOPAGO';
-                isDigital = true;
-            } else if(rawPay.includes('transfer')) {
-                payBadge = 'bdg-digital'; 
-                payText = 'TRANSF.';
-                isDigital = true;
-            } else if(rawPay.includes('debito') || rawPay.includes('tarjeta') || rawPay.includes('credito')) {
-                payBadge = 'bdg-digital'; 
-                payText = 'TARJETA';
-                isDigital = true;
-            } else {
-                // Si es algo raro pero no digital, lo dejamos como efectivo visualmente
-                // o podes poner rawPay.toUpperCase() si querés ver que viene
-                if(rawPay !== 'efectivo') payText = rawPay.toUpperCase();
-            }
-            
-            // 3. Cálculo de Deducciones
-            let net = total;
             let deduction = 0;
             let deductionReason = 'Sin deducción';
 
+            // Detectamos tipo y asignamos impuesto especifico
             if (originText === 'PEDIDOS YA') {
-                deduction = total * (pyPct / 100);
-                deductionReason = `Comisión Py (${pyPct}%)`;
-                net = total - deduction;
-            } else if (isDigital) {
-                deduction = total * (taxPct / 100);
-                deductionReason = `Impuestos/Fact. (${taxPct}%)`;
-                net = total - deduction;
+                deduction = total * (pctPy / 100);
+                deductionReason = `Comisión Py (${pctPy}%)`;
+            } else if(rawPay.includes('mercado') || rawPay.includes('mp') || rawPay.includes('qr')) {
+                payBadge = 'bdg-digital'; payText = 'MERCADOPAGO';
+                deduction = total * (pctQR / 100);
+                deductionReason = `Comisión MP/QR (${pctQR}%)`;
+            } else if(rawPay.includes('transfer')) {
+                payBadge = 'bdg-digital'; payText = 'TRANSF.';
+                deduction = total * (pctTransf / 100);
+                deductionReason = `Impuesto Transf. (${pctTransf}%)`;
+            } else if(rawPay.includes('debito') || rawPay.includes('tarjeta') || rawPay.includes('credito')) {
+                payBadge = 'bdg-digital'; payText = 'TARJETA';
+                deduction = total * (pctDebit / 100);
+                deductionReason = `Impuesto Tarjeta (${pctDebit}%)`;
+            } else {
+                if(rawPay !== 'efectivo') payText = rawPay.toUpperCase();
             }
+            
+            let net = total - deduction;
 
-            // 4. Nombre Cliente (Campo 'nombre')
+            // 4. Nombre Cliente
             const clientName = o.nombre || o.clientName || o.name || 'Cliente';
-
             const dateStr = new Date(o.createdAt).toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
             
             // Fila Principal
@@ -851,7 +865,7 @@
                 <td><span style="font-size:10px">▼</span></td>
             `;
 
-            // Fila Detalle (Desplegable)
+            // Fila Detalle
             const trDet = document.createElement('tr');
             trDet.className = 'order-details';
             trDet.id = 'detail-'+index;
@@ -905,25 +919,27 @@
     // --- CALCULATIONS & CHART ---
     function calculateAll() {
         let gross = 0, comms = 0, taxes = 0, theoCMV = 0;
-        const pyPct = FIXED_DATA.config.pyPercent || 30;
-        const taxPct = FIXED_DATA.config.taxPercent || 0;
+        const pctPy = FIXED_DATA.config.pyPercent || 30;
+        const pctDebit = FIXED_DATA.config.taxDebit || 0;
+        const pctTransf = FIXED_DATA.config.taxTransf || 0;
+        const pctQR = FIXED_DATA.config.taxQR || 0;
 
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0);
             gross += sale;
             
-            // Logica Costos Variables (Igual que en la tabla)
+            // Logica Costos Variables Centralizada
             const source = (o.source || '').toLowerCase();
             let rawPay = (o.pago || o.paymentMethod || '').toLowerCase();
             
-            const isPy = source === 'pedidosya';
-            // Detectamos pago digital
-            const isDigital = ['transferencia', 'mercadopago', 'qr', 'debito', 'credito', 'tarjeta', 'mp'].some(m => rawPay.includes(m));
-
-            if(isPy) {
-                comms += (sale * (pyPct/100));
-            } else if (isDigital) {
-                taxes += (sale * (taxPct/100));
+            if(source === 'pedidosya') {
+                comms += (sale * (pctPy/100));
+            } else if(rawPay.includes('mercado') || rawPay.includes('mp') || rawPay.includes('qr')) {
+                taxes += (sale * (pctQR/100));
+            } else if(rawPay.includes('transfer')) {
+                taxes += (sale * (pctTransf/100));
+            } else if(rawPay.includes('debito') || rawPay.includes('tarjeta') || rawPay.includes('credito')) {
+                taxes += (sale * (pctDebit/100));
             }
 
             (o.items || []).forEach(item => {
@@ -941,7 +957,6 @@
         const totalSalaries = FIXED_DATA.prod.reduce((s,i)=>s+i.cost,0);
         const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
         
-        // Sumamos comisiones Py + Impuestos de facturacion
         const variableCosts = comms + taxes;
         const totalExp = realPurchases + totalFixed + totalSalaries + variableCosts;
         const profitReal = gross - totalExp;
