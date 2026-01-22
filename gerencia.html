@@ -50,16 +50,23 @@
     .kpi-lbl { font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
     .kpi-val { font-size: 26px; font-weight: 800; color: #0f172a; margin-top: 5px; }
     
-    /* ORDERS ACCORDION */
+    /* ORDERS ACCORDION & BADGES */
     .order-row { cursor: pointer; transition: background 0.2s; }
     .order-row:hover { background: #f8fafc; }
     .order-details { display: none; background: #fcfcfc; border-bottom: 1px solid var(--border); }
     .order-details.open { display: table-row; }
     .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 15px; }
-    .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; display:inline-block; }
-    .bdg-py { background: #fee2e2; color: #ef4444; } /* PedidosYa */
-    .bdg-card { background: #e0f2fe; color: #0284c7; } /* Tarjeta/Digital */
-    .bdg-cash { background: #dcfce7; color: #166534; } /* Efectivo */
+    
+    .badge { padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; display:inline-block; letter-spacing:0.5px; }
+    
+    /* Origin Badges */
+    .bdg-web { background: #e0f2fe; color: #0284c7; }   /* Web (Azul) */
+    .bdg-local { background: #f1f5f9; color: #475569; } /* Mostrador (Gris) */
+    .bdg-py { background: #fee2e2; color: #ef4444; }    /* PedidosYa (Rojo) */
+
+    /* Payment Badges */
+    .bdg-cash { background: #dcfce7; color: #166534; }  /* Efectivo (Verde) */
+    .bdg-digital { background: #f3e8ff; color: #7e22ce; } /* MP/Transferencia (Violeta) */
 
     /* MODAL & UTIL */
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(2px); }
@@ -161,15 +168,16 @@
         <div class="card">
             <h2><span>🧾 Historial de Pedidos</span> <small style="font-size:12px; color:#777; font-weight:400">Clic en el pedido para ver desglose</small></h2>
             <div style="overflow-x:auto">
-                <table>
+                <table style="width:100%">
                     <thead>
                         <tr>
-                            <th>Fecha/Hora</th>
+                            <th width="120">Fecha</th>
                             <th>Cliente</th>
-                            <th>Origen/Pago</th>
-                            <th>Total Pedido</th>
-                            <th>Neto Negocio</th>
-                            <th></th>
+                            <th width="100">Origen</th>
+                            <th width="120">Pago</th>
+                            <th width="100">Total</th>
+                            <th width="100">Neto</th>
+                            <th width="30"></th>
                         </tr>
                     </thead>
                     <tbody id="ordersTableBody"></tbody>
@@ -520,7 +528,7 @@
         db.collection('orders').where('createdAt', '>=', start).where('createdAt', '<', end).orderBy('createdAt', 'desc').get().then(snap => {
             ORDERS = snap.docs.map(d => d.data()).filter(o => o.status !== 'cancelled');
             calculateAll();
-            renderOrdersTab(); // Renderizamos la nueva tabla de pedidos
+            renderOrdersTab(); 
         });
         db.collection('purchases').where('date', '>=', start).where('date', '<', end).get().then(snap => {
             PURCHASES = snap.docs.map(d => d.data());
@@ -773,48 +781,50 @@
         ORDERS.forEach((o, index) => {
             const total = Number(o.total || 0);
             
-            // Lógica Mejorada de Detección de Pago
-            let method = (o.paymentMethod || '').toLowerCase();
-            const source = (o.source || '').toLowerCase();
+            // 1. Origen (Web, Local, Py)
+            let originBadge = '';
+            let originText = (o.source || 'web').toUpperCase();
+            if(originText.includes('PEDIDOSYA')) { 
+                originBadge = 'bdg-py'; originText='PEDIDOS YA'; 
+            } else if(originText.includes('MOSTRADOR') || originText.includes('LOCAL')) { 
+                originBadge = 'bdg-local'; originText='LOCAL'; 
+            } else { 
+                originBadge = 'bdg-web'; originText='WEB'; 
+            }
+
+            // 2. Pago (Efectivo, Digital, Tarjeta)
+            let payBadge = '';
+            let payText = (o.paymentMethod || 'EFECTIVO').toUpperCase();
+            // Lógica para detectar si es digital (cobrar impuesto) o efectivo
+            let isDigital = ['TRANSFERENCIA', 'MERCADOPAGO', 'QR', 'DEBITO', 'CREDITO', 'TARJETA'].some(m => payText.includes(m));
             
-            // Si el método está vacío, intentamos deducirlo del source, o sino efectivo
-            if(!method && source !== 'pedidosya') method = source || 'efectivo';
+            if(isDigital) {
+                payBadge = 'bdg-digital'; 
+                // Limpiar texto largo
+                if(payText.includes('TRANSFERENCIA')) payText = 'TRANSF.';
+                else if(payText.includes('MERCADOPAGO')) payText = 'MP';
+            } else {
+                payBadge = 'bdg-cash';
+                payText = 'EFECTIVO';
+            }
             
+            // 3. Cálculo de Deducciones
             let net = total;
             let deduction = 0;
             let deductionReason = 'Sin deducción';
-            let badgeClass = 'bdg-cash';
-            let sourceDisplay = 'Efectivo';
 
-            // 1. Prioridad: PedidosYa (Siempre cobra comisión)
-            if (source === 'pedidosya') {
+            if (originText === 'PEDIDOS YA') {
                 deduction = total * (pyPct / 100);
                 deductionReason = `Comisión Py (${pyPct}%)`;
                 net = total - deduction;
-                badgeClass = 'bdg-py';
-                sourceDisplay = 'PedidosYa';
-            
-            // 2. Transferencias / Digitales (Cobran Impuestos)
-            } else if (['transferencia', 'mercadopago', 'qr', 'cuenta dni', 'banco'].some(m => method.includes(m))) {
+            } else if (isDigital) {
                 deduction = total * (taxPct / 100);
                 deductionReason = `Impuestos/Fact. (${taxPct}%)`;
                 net = total - deduction;
-                badgeClass = 'bdg-card'; // Azul
-                sourceDisplay = method.charAt(0).toUpperCase() + method.slice(1);
-
-            // 3. Tarjetas
-            } else if (['debito', 'credito', 'tarjeta'].some(m => method.includes(m))) {
-                deduction = total * (taxPct / 100);
-                deductionReason = `Impuestos/Fact. (${taxPct}%)`;
-                net = total - deduction;
-                badgeClass = 'bdg-card';
-                sourceDisplay = 'Tarjeta';
-
-            // 4. Efectivo (Default)
-            } else {
-                sourceDisplay = 'Efectivo'; // O el texto que venga si es algo raro
-                if(method && method !== 'efectivo' && method !== 'local') sourceDisplay = method; 
             }
+
+            // 4. Nombre Cliente (Búsqueda exhaustiva)
+            const clientName = o.clientName || o.nombre || o.name || (o.client && o.client.name) || 'Cliente';
 
             const dateStr = new Date(o.createdAt).toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
             
@@ -824,8 +834,9 @@
             trMain.onclick = () => { document.getElementById('detail-'+index).classList.toggle('open'); };
             trMain.innerHTML = `
                 <td>${dateStr}</td>
-                <td>${o.clientName || 'Cliente'}</td>
-                <td><span class="badge ${badgeClass}">${sourceDisplay}</span></td>
+                <td>${clientName}</td>
+                <td><span class="badge ${originBadge}">${originText}</span></td>
+                <td><span class="badge ${payBadge}">${payText}</span></td>
                 <td style="font-weight:700">${money(total)}</td>
                 <td style="font-weight:700; color:${deduction>0 ? 'var(--primary)' : 'var(--green)'}">${money(net)}</td>
                 <td><span style="font-size:10px">▼</span></td>
@@ -836,11 +847,8 @@
             trDet.className = 'order-details';
             trDet.id = 'detail-'+index;
             
-            // Renderizado de Items con Extras
             let itemsHtml = (o.items || []).map(i => {
                 let extrasHtml = '';
-                // Buscamos si hay extras (cheddar, medallones, etc)
-                // Asumimos que pueden venir en un array 'extras' o 'mods'
                 const extras = i.extras || i.mods || [];
                 if(extras && extras.length > 0) {
                     extrasHtml = `<div style="font-size:11px; color:#64748b; padding-left:14px; margin-top:2px">
@@ -854,7 +862,7 @@
             }).join('');
             
             trDet.innerHTML = `
-                <td colspan="6" style="padding:0">
+                <td colspan="7" style="padding:0">
                     <div class="detail-grid">
                         <div>
                             <strong style="color:#666; font-size:11px; text-transform:uppercase">Detalle del Pedido:</strong>
@@ -898,11 +906,14 @@
             // Logica Centralizada de Costos Variables
             let method = (o.paymentMethod || '').toLowerCase();
             const source = (o.source || '').toLowerCase();
-            if(!method && source !== 'pedidosya') method = source;
+            
+            // Determinamos si es Py o si es Digital
+            const isPy = source === 'pedidosya';
+            const isDigital = ['transferencia', 'mercadopago', 'qr', 'debito', 'credito', 'tarjeta'].some(m => method.includes(m));
 
-            if(source === 'pedidosya') {
+            if(isPy) {
                 comms += (sale * (pyPct/100));
-            } else if (['transferencia', 'mercadopago', 'qr', 'debito', 'credito', 'tarjeta'].some(m => method.includes(m))) {
+            } else if (isDigital) {
                 taxes += (sale * (taxPct/100));
             }
 
