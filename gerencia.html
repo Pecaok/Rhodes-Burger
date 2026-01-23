@@ -116,7 +116,7 @@
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             
             <div style="background:#fff7ed; padding:6px 12px; border-radius:8px; border:1px solid #fed7aa; display:flex; align-items:center; gap:8px">
-                <div class="conf-input-group"><div class="conf-lbl">Py (%)</div><input type="number" id="confPy" value="30" class="conf-inp"></div>
+                <div class="conf-input-group"><div class="conf-lbl" title="Solo se usa si NO hay datos de Excel">Py Est.(%)</div><input type="number" id="confPy" value="30" class="conf-inp"></div>
                 <div style="width:1px; height:20px; background:#fed7aa"></div>
                 <div class="conf-input-group"><div class="conf-lbl">Débito</div><input type="number" id="confDebit" value="0" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">Transf</div><input type="number" id="confTransf" value="0" class="conf-inp"></div>
@@ -328,15 +328,17 @@
             const src = (o.source||'').toLowerCase(), pay = (o.pago||o.paymentMethod||'').toLowerCase();
             
             // 🔥 LÓGICA DE PEDIDOSYA ACTUALIZADA
-            if(src === 'pedidosya') {
+            if(src.includes('pedidosya')) {
                  if(o.neto_excel && Number(o.neto_excel) > 0) {
-                     // Si tenemos el neto real del Excel, el costo es la diferencia
-                     comms += (sale - Number(o.neto_excel));
+                     // EXACTO: Lo que dice el Excel
+                     let realIncome = Number(o.neto_excel);
+                     comms += (sale - realIncome); // La diferencia es la comisión/impuesto
                  } else {
-                     // Si no, estimamos con el % configurado
+                     // ESTIMADO: Si aún no cargaste el Excel (pedidos en vivo)
                      comms += (sale * (pctPy/100));
                  }
             }
+            // OTROS MEDIOS DE PAGO
             else if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) taxes += (sale*(pctQR/100));
             else if(pay.includes('transfer')) taxes += (sale*(pctTransf/100));
             else if(pay.includes('debito')||pay.includes('tarjeta')) taxes += (sale*(pctDebit/100));
@@ -375,8 +377,8 @@
             let originText=(o.source||'web').toUpperCase(), originBadge=originText.includes('PEDIDOSYA')?'bdg-py':'bdg-web';
             let rawPay=(o.pago||o.paymentMethod||'efectivo').toLowerCase(), payText='EFECTIVO', payBadge='bdg-cash', deduction=0;
 
-            // 🔥 LOGICA TABLA
-            if(originText.includes('PEDIDOS YA')) {
+            // 🔥 LOGICA TABLA: USA EL NETO REAL SI EXISTE
+            if(originText.includes('PEDIDOSYA')) {
                 if(o.neto_excel && Number(o.neto_excel) > 0) {
                     deduction = total - Number(o.neto_excel);
                 } else {
@@ -393,6 +395,7 @@
                 return `<div style="margin-bottom:6px"><div><strong>${item.qty}x</strong> ${item.name}</div></div>`;
             }).join('');
 
+            // La ganancia aquí será exacta: Neto Excel - Costo Comida
             let profit = total - deduction - orderCost;
             let dStr = '-';
             if(o.createdAt) {
