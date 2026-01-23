@@ -228,7 +228,7 @@
                         <div style="margin-top:20px; background:#f8fafc; padding:15px; border-radius:8px; border:1px dashed #cbd5e1; display:flex; gap:10px; align-items:center;">
                             <div style="flex:2;">
                                 <label style="font-size:10px; font-weight:700; color:#64748b; margin-bottom:4px; display:block;">AGREGAR INSUMO</label>
-                                <select id="newSubIng" onchange="updateUnitSelect('sub')" style="background:#fff;"></select>
+                                <select id="newSubIng" style="background:#fff;"></select>
                             </div>
                             <div style="flex:1;">
                                 <label style="font-size:10px; font-weight:700; color:#64748b; margin-bottom:4px; display:block;">CANTIDAD</label>
@@ -408,15 +408,12 @@
             // 🔥 LÓGICA DE PEDIDOSYA DEFINITIVA
             if(src.includes('pedidosya')) {
                  if(o.neto_excel && Number(o.neto_excel) > 0) {
-                     // EXACTO: Si existe el dato del Excel, usamos la diferencia como costo (comisión)
                      let realIncome = Number(o.neto_excel);
                      comms += (sale - realIncome); 
                  } else {
-                     // ESTIMADO: Si NO hay dato del Excel, usamos el % configurado
                      comms += (sale * (pctPy/100));
                  }
             }
-            // OTROS MEDIOS DE PAGO
             else if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) taxes += (sale*(pctQR/100));
             else if(pay.includes('transfer')) taxes += (sale*(pctTransf/100));
             else if(pay.includes('debito')||pay.includes('tarjeta')) taxes += (sale*(pctDebit/100));
@@ -455,7 +452,6 @@
             let originText=(o.source||'web').toUpperCase(), originBadge=originText.includes('PEDIDOSYA')?'bdg-py':'bdg-web';
             let rawPay=(o.pago||o.paymentMethod||'efectivo').toLowerCase(), payText='EFECTIVO', payBadge='bdg-cash', deduction=0;
 
-            // 🔥 LOGICA TABLA: Muestra el costo real si existe Neto Excel
             if(originText.includes('PEDIDOSYA')) {
                 if(o.neto_excel && Number(o.neto_excel) > 0) {
                     deduction = total - Number(o.neto_excel);
@@ -523,7 +519,6 @@
         $('#subRecipeEditor').style.display = 'flex'; 
         $('#subRecipeEmpty').style.display = 'none';
         
-        // Refrescar lista izquierda para marcar activo
         window.renderSubRecipesList();
 
         const s = SUB_RECIPES.find(x => x.id === id);
@@ -531,18 +526,15 @@
 
         $('#subEditorTitle').innerText = s.name;
         
-        // Llenar Select de Ingredientes
         const sel = $('#newSubIng'); 
         sel.innerHTML = ''; 
-        // Ordenar insumos alfabéticamente
         const sortedInv = [...INVENTORY].sort((a,b) => a.name.localeCompare(b.name));
         
         sortedInv.forEach(i => {
             sel.innerHTML += `<option value="${i.id}">${i.name} ($${parseFloat(i.cost).toFixed(2)}/${i.unit})</option>`;
         });
-        updateUnitSelect('sub'); // Resetear unidad
+        updateUnitSelect('sub'); 
 
-        // Renderizar Tabla de Ingredientes con Costos
         let totalCost = 0;
         const tbody = $('#subRecipeIngBody');
         tbody.innerHTML = (s.ingredients || []).map((ing, i) => { 
@@ -574,6 +566,29 @@
         }).join('');
 
         $('#subEditorTotalCost').innerText = money(totalCost); 
+    };
+
+    window.addIngToSubRecipe = async function() { 
+        const id = $('#newSubIng').value;
+        const q = Number($('#newSubQty').value);
+        const m = Number($('#newSubUnit').value); 
+        if(!id) return alert("Seleccioná un insumo");
+        if(q <= 0) return alert("Cantidad inválida");
+
+        const s = SUB_RECIPES.find(x => x.id === currentSubRecipeId);
+        // Multiplicamos por la unidad seleccionada (si eligen 500 GR, es 500 * 0.001 = 0.5 Kg)
+        const finalQty = q * m;
+        const newIngs = [...(s.ingredients||[]), {id, qty: finalQty}];
+        
+        await db.collection('subrecipes').doc(currentSubRecipeId).update({ingredients: newIngs});
+    };
+
+    window.removeSubIng = async function(sId, i) { 
+        const s = SUB_RECIPES.find(x => x.id === sId);
+        if(!s) return;
+        const n = [...s.ingredients]; 
+        n.splice(i,1); 
+        await db.collection('subrecipes').doc(sId).update({ingredients:n}); 
     };
 
     // --- INTERACCION Y BOTONES (GLOBALES) ---
@@ -608,10 +623,6 @@
 
     window.addNewSubRecipe = async function() { const name = prompt("Nombre:"); if(name) await db.collection('subrecipes').add({ name, ingredients: [] }); };
     
-    // (Funciones openSubRecipeEditor y renderSubRecipesList movidas arriba)
-    
-    window.addIngToSubRecipe = async function() { const id=$('#newSubIng').value, q=Number($('#newSubQty').value), m=Number($('#newSubUnit').value); if(!id)return; const s=SUB_RECIPES.find(x=>x.id===currentSubRecipeId); await db.collection('subrecipes').doc(currentSubRecipeId).update({ingredients:[...(s.ingredients||[]),{id,qty:q*m}]}); };
-    window.removeSubIng = async function(sId, i) { const s=SUB_RECIPES.find(x=>x.id===sId), n=[...s.ingredients]; n.splice(i,1); await db.collection('subrecipes').doc(sId).update({ingredients:n}); };
     window.addNewRecipe = async function() { const name = prompt("Nombre:"); if(name) await db.collection('recipes').doc(name).set({ingredients: []}); };
     
     window.openRecipeEditor = function(el) { 
@@ -628,7 +639,20 @@
     window.addIngToRecipe = async function() { const id=$('#newRecIng').value, q=Number($('#newRecQty').value), m=Number($('#newRecUnit').value); if(!id)return; const r=RECIPES.find(x=>x.id===currentRecipeId); await db.collection('recipes').doc(currentRecipeId).update({ingredients:[...(r.ingredients||[]),{id,qty:q*m}]}); };
     window.removeRecIng = async function(rId, i) { const r=RECIPES.find(x=>x.id===rId), n=[...r.ingredients]; n.splice(i,1); await db.collection('recipes').doc(rId).update({ingredients:n}); };
     window.deleteItem = async function(c,id) { if(confirm('¿Borrar?')){ await db.collection(c).doc(id).delete(); if(c==='recipes') $('#recipeEditor').style.display='none'; if(c==='subrecipes') $('#subRecipeEditor').style.display='none'; } };
-    window.updateUnitSelect = function(m) { const s=m==='sub'?$('#newSubUnit'):$('#newRecUnit'); s.innerHTML='<option value="1">Unidad</option><option value="0.001">G/ML</option>'; };
+    
+    // 🔥 UNIDADES COMPLETAS
+    window.updateUnitSelect = function(m) { 
+        const s = m === 'sub' ? $('#newSubUnit') : $('#newRecUnit');
+        if(!s) return;
+        s.innerHTML = `
+            <option value="1">Unidad (1)</option>
+            <option value="1">Kg (1)</option>
+            <option value="0.001">Gr (0.001)</option>
+            <option value="1">Lt (1)</option>
+            <option value="0.001">Ml (0.001)</option>
+            <option value="1">Paquete (1)</option>
+        `;
+    };
 
     // ALIAS SYSTEM
     window.openAliasModal = function() { $('#modalAlias').style.display='flex'; window.renderAliasList(); const sel=$('#aliasInt'); sel.innerHTML=''; RECIPES.forEach(r => sel.innerHTML += `<option value="${r.id}">${r.id}</option>`); tempAliasList=[]; window.renderTempAlias(); };
