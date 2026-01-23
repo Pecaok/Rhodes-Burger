@@ -226,7 +226,7 @@
                         <div style="margin-top:20px; background:#f8fafc; padding:15px; border-radius:8px; border:1px dashed #cbd5e1; display:flex; gap:10px; align-items:center;">
                             <div style="flex:2;">
                                 <label style="font-size:10px; font-weight:700; color:#64748b; margin-bottom:4px; display:block;">AGREGAR INSUMO</label>
-                                <select id="newSubIng" style="background:#fff;"></select>
+                                <select id="newSubIng" onchange="updateUnitSelect('sub')" style="background:#fff;"></select>
                             </div>
                             <div style="flex:1;">
                                 <label style="font-size:10px; font-weight:700; color:#64748b; margin-bottom:4px; display:block;">CANTIDAD</label>
@@ -634,18 +634,33 @@
     window.removeRecIng = async function(rId, i) { const r=RECIPES.find(x=>x.id===rId), n=[...r.ingredients]; n.splice(i,1); await db.collection('recipes').doc(rId).update({ingredients:n}); };
     window.deleteItem = async function(c,id) { if(confirm('¿Borrar?')){ await db.collection(c).doc(id).delete(); if(c==='recipes') $('#recipeEditor').style.display='none'; if(c==='subrecipes') $('#subRecipeEditor').style.display='none'; } };
     
-    // 🔥 UNIDADES COMPLETAS
-    window.updateUnitSelect = function(m) { 
-        const s = m === 'sub' ? $('#newSubUnit') : $('#newRecUnit');
-        if(!s) return;
-        s.innerHTML = `
-            <option value="1">Unidad (1)</option>
-            <option value="1">Kg (1)</option>
-            <option value="0.001">Gr (0.001)</option>
-            <option value="1">Lt (1)</option>
-            <option value="0.001">Ml (0.001)</option>
-            <option value="1">Paquete (1)</option>
-        `;
+    // 🔥 UNIDADES INTELIGENTES
+    window.updateUnitSelect = function(mode) {
+        const productSelect = mode === 'sub' ? $('#newSubIng') : $('#newRecIng');
+        const unitSelect = mode === 'sub' ? $('#newSubUnit') : $('#newRecUnit');
+        if(!productSelect || !unitSelect) return;
+
+        const prodId = productSelect.value;
+        const product = INVENTORY.find(i => i.id === prodId);
+        
+        let options = '';
+        if (!product) {
+            options = '<option value="1">Unidad (x1)</option>';
+        } else {
+            const u = (product.unit || '').toLowerCase();
+            if (u === 'kg' || u === 'kilo' || u === 'kgs') {
+                options = `<option value="1">Kg (x1)</option><option value="0.001">Gramos (x0.001)</option>`;
+            } else if (u === 'gr' || u === 'gramos' || u === 'g') {
+                options = `<option value="1">Gramos (x1)</option><option value="1000">Kg (x1000)</option>`;
+            } else if (u === 'lt' || u === 'litro' || u === 'l') {
+                options = `<option value="1">Litros (x1)</option><option value="0.001">Ml (x0.001)</option>`;
+            } else if (u === 'ml' || u === 'cc') {
+                options = `<option value="1">Ml (x1)</option><option value="1000">Litros (x1000)</option>`;
+            } else {
+                options = `<option value="1">${product.unit} (x1)</option>`;
+            }
+        }
+        unitSelect.innerHTML = options;
     };
 
     // ALIAS SYSTEM
