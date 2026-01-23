@@ -116,8 +116,6 @@
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             
             <div style="background:#fff7ed; padding:6px 12px; border-radius:8px; border:1px solid #fed7aa; display:flex; align-items:center; gap:8px">
-                <div class="conf-input-group"><div class="conf-lbl" title="Solo se usa si NO hay datos de Excel">Py Est.(%)</div><input type="number" id="confPy" value="30" class="conf-inp"></div>
-                <div style="width:1px; height:20px; background:#fed7aa"></div>
                 <div class="conf-input-group"><div class="conf-lbl">Débito</div><input type="number" id="confDebit" value="0" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">Transf</div><input type="number" id="confTransf" value="0" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">QR/MP</div><input type="number" id="confQR" value="0" class="conf-inp"></div>
@@ -335,7 +333,7 @@
 
     // 2. VARIABLES GLOBALES
     let INVENTORY=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
-    let FIXED_DATA = { fixed:[], prod:[], config:{pyPercent:30, taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
+    let FIXED_DATA = { fixed:[], prod:[], config:{taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
     let currentRecipeId = null, currentSubRecipeId = null, chartInstance = null, tempAliasList = [];
 
     // --- CARGADORES DE DATOS ---
@@ -347,7 +345,7 @@
             if(doc.exists) FIXED_DATA = doc.data();
             if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
             if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
-            $('#confPy').value = FIXED_DATA.config?.pyPercent||30; $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
+            $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
             $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0;
             window.renderFixedTables();
         });
@@ -398,7 +396,7 @@
         if(typeof Chart === 'undefined') return;
 
         let gross=0, comms=0, taxes=0, theoCMV=0;
-        const { pyPercent:pctPy, taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config;
+        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config;
 
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0); 
@@ -410,9 +408,8 @@
                  if(o.neto_excel && Number(o.neto_excel) > 0) {
                      let realIncome = Number(o.neto_excel);
                      comms += (sale - realIncome); 
-                 } else {
-                     comms += (sale * (pctPy/100));
                  }
+                 // Si NO hay neto_excel, comisión es 0 (temporalmente)
             }
             else if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) taxes += (sale*(pctQR/100));
             else if(pay.includes('transfer')) taxes += (sale*(pctTransf/100));
@@ -445,7 +442,7 @@
 
     window.renderOrdersTab = function() {
         const tbody = $('#ordersTableBody'); tbody.innerHTML = '';
-        const { pyPercent:pctPy, taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config;
+        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config;
 
         ORDERS.forEach((o, index) => {
             const total = Number(o.total || 0);
@@ -455,8 +452,6 @@
             if(originText.includes('PEDIDOSYA')) {
                 if(o.neto_excel && Number(o.neto_excel) > 0) {
                     deduction = total - Number(o.neto_excel);
-                } else {
-                    deduction = total * (pctPy/100);
                 }
             }
             else if(rawPay.includes('mercado')||rawPay.includes('mp')||rawPay.includes('qr')) { deduction=total*(pctQR/100); payText='MERCADOPAGO'; payBadge='bdg-digital'; }
@@ -576,7 +571,6 @@
         if(q <= 0) return alert("Cantidad inválida");
 
         const s = SUB_RECIPES.find(x => x.id === currentSubRecipeId);
-        // Multiplicamos por la unidad seleccionada (si eligen 500 GR, es 500 * 0.001 = 0.5 Kg)
         const finalQty = q * m;
         const newIngs = [...(s.ingredients||[]), {id, qty: finalQty}];
         
@@ -674,7 +668,7 @@
 
     window.saveFixedData = function() { 
         if(!FIXED_DATA.aliases) FIXED_DATA.aliases=[]; 
-        FIXED_DATA.config={pyPercent:Number($('#confPy').value), taxDebit:Number($('#confDebit').value), taxTransf:Number($('#confTransf').value), taxQR:Number($('#confQR').value)}; 
+        FIXED_DATA.config={taxDebit:Number($('#confDebit').value), taxTransf:Number($('#confTransf').value), taxQR:Number($('#confQR').value)}; 
         db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado")); 
         window.calculateAll(); window.renderOrdersTab(); 
     };
