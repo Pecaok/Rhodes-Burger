@@ -880,32 +880,66 @@
     };
     window.renderRecipesList = function() { $('#recipesListBody').innerHTML=RECIPES.map(r=>`<tr onclick="openRecipeEditor(this)" data-id="${r.id}"><td>${r.id}</td><td style="text-align:right"><b>${money(window.calculateRecipeTotal(r))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="deleteItem('recipes','${r.id}')">🗑️</button></td></tr>`).join(''); };
 
-    // --- CARGA DE DATOS ---
+    // --- CARGA DE DATOS ROBUSTA (Solución al problema de fechas) ---
     window.loadDashboardData = function() {
-        const ym=$('#monthPicker').value; if(!ym)return; 
-        $('#ordersTitle').innerText = '🧾 Pedidos de ' + ym;
-        const [y,m]=ym.split('-').map(Number);
+        const ym = $('#monthPicker').value; 
+        if(!ym) return; 
         
-        // RANGO MENSUAL EXACTO (CORREGIDO PARA FIREBASE TIMESTAMP)
-        const start = new Date(y, m-1, 1);
+        $('#ordersTitle').innerText = '🧾 Pedidos de ' + ym;
+        const [y, m] = ym.split('-').map(Number);
+        
+        // Fechas de inicio y fin del mes seleccionado
+        const start = new Date(y, m - 1, 1);
         const end = new Date(y, m, 0, 23, 59, 59);
 
-        // Usamos Objetos DATE, no Strings. Esto arregla el problema de los pedidos vacíos.
+        console.log("📅 Buscando pedidos para:", ym);
+
+        // ESTRATEGIA NUEVA: Traemos los últimos 200 pedidos ordenados por fecha
+        // y filtramos "a mano" en el navegador. Esto evita errores de tipos de datos.
         db.collection('orders')
-          .where('createdAt','>=',start)
-          .where('createdAt','<=',end)
-          .orderBy('createdAt','desc')
+          .orderBy('createdAt', 'desc') 
+          .limit(200) 
           .get()
           .then(snap => { 
-              ORDERS = snap.docs.map(d => ({id:d.id, ...d.data()})).filter(o => o.status !== 'cancelled'); 
-              console.log("Pedidos cargados:", ORDERS.length); // Debug en consola
+              const allOrders = snap.docs.map(d => ({id:d.id, ...d.data()}));
+              
+              // Filtramos aquí para aceptar TANTO Strings COMO Timestamps
+              ORDERS = allOrders.filter(o => {
+                  if(o.status === 'cancelled') return false;
+
+                  let d = null;
+                  // Intento 1: Es un Timestamp de Firebase?
+                  if(o.createdAt && typeof o.createdAt.toDate === 'function') {
+                      d = o.createdAt.toDate();
+                  } 
+                  // Intento 2: Es un Texto o Fecha normal?
+                  else if(o.createdAt) {
+                      d = new Date(o.createdAt);
+                  }
+
+                  // Si la fecha no es válida, descartamos
+                  if(!d || isNaN(d.getTime())) return false;
+
+                  // Verificamos si cae dentro del mes seleccionado
+                  return d >= start && d <= end;
+              });
+
+              console.log(`✅ Total encontrados: ${allOrders.length} | Filtrados mes actual: ${ORDERS.length}`);
+              
               window.calculateAll(); 
               window.renderOrdersTab(); 
           })
-          .catch(err => console.error("Error cargando pedidos:", err));
+          .catch(err => {
+              console.error("❌ Error cargando pedidos:", err);
+              // Si falla el índice, intentamos sin ordenar (fallback de emergencia)
+              if(String(err).includes("index")) {
+                  alert("Falta un índice en Firebase. Abre la consola (F12) y sigue el enlace de error.");
+              }
+          });
 
+        // Carga de Compras (Mantenemos igual si funcionaba, o ajustamos fechas)
         db.collection('purchases')
-          .where('date','>=',start.toISOString().split('T')[0]) // Las compras suelen ser strings YYYY-MM-DD
+          .where('date','>=',start.toISOString().split('T')[0])
           .where('date','<=',end.toISOString().split('T')[0])
           .get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); window.calculateAll(); });
     };
