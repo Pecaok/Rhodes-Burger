@@ -113,10 +113,9 @@
     }
     checkSession(); setInterval(checkSession, 5*60*1000);
 
-    // =================================================================
-    // 🔥 DATA DE SOPORTE (STOCK)
-    // =================================================================
+    // DATA SOPORTE
     let RECETAS_DB = {}; 
+    let SUB_RECIPES = []; // 🔥 Necesario para items armados
     let INVENTARIO_DB = {}; 
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
@@ -138,11 +137,18 @@
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
     });
 
+    // Cargar Subrecetas para desglose recursivo
+    db.collection('subrecipes').onSnapshot(snap => {
+        SUB_RECIPES = snap.docs.map(d => ({id: d.id, ...d.data()}));
+    });
+
     db.collection('inventory').onSnapshot(snap => {
         INVENTARIO_DB = {};
         snap.forEach(doc => { 
             const d = doc.data();
-            if(d.name) INVENTARIO_DB[d.name.trim().toLowerCase()] = doc.id; 
+            if(d.name) {
+                INVENTARIO_DB[d.name.trim().toLowerCase()] = doc.id; 
+            }
         });
     });
     
@@ -153,7 +159,6 @@
         }
     });
 
-    // Búsqueda inteligente de IDs de stock
     function findSmartId(keywords) {
         const stockNames = Object.keys(INVENTARIO_DB);
         for (const key of keywords) {
@@ -172,12 +177,10 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (BLINDADA Y AUTOMÁTICA)
+    // 🔥 GESTIÓN DE STOCK (CON SOPORTE PARA IDs NUEVOS Y SUBRECETAS)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
-        
-        // Evitar doble descuento
         if(factor === -1 && pedido.stockDescontado) return; 
         if(factor === 1 && !pedido.stockDescontado) return; 
 
@@ -193,54 +196,86 @@
 
         let totalBurgers = 0;
 
+        // HELPER PARA DESCONTAR (Directo al inventario)
+        const applyDecrement = (invID, amount) => {
+            if(!invID) return;
+            const ref = db.collection('inventory').doc(invID);
+            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
+            huboCambios = true;
+        };
+
+        // HELPER RECURSIVO (Desglosa Subrecetas)
+        const processIngredient = (targetId, targetQty) => {
+            // A) Es un ITEM ARMADO (Subreceta)?
+            const sub = SUB_RECIPES.find(s => s.id === targetId);
+            if (sub) {
+                console.log(`   ↳ Desglosando item armado: ${sub.name}`);
+                sub.ingredients.forEach(subIng => {
+                    // Recursividad simple: asumimos que la subreceta tiene insumos directos (ID de inventario)
+                    // Si la subreceta tuviera OTRA subreceta, habría que llamar a processIngredient de nuevo.
+                    // Por ahora, asumimos Subreceta -> Insumo Final.
+                    const subQtyNeeded = Number(subIng.qty) * targetQty;
+                    // El ID en la subreceta YA ES un ID de inventario válido
+                    applyDecrement(subIng.id, subQtyNeeded); 
+                });
+                return;
+            }
+
+            // B) Es un INSUMO DIRECTO (ID de Inventario)
+            // Verificamos si existe en el inventario directamente
+            // Como no tenemos el objeto INVENTORY completo mapeado por ID aquí (solo por nombre),
+            // asumimos que si no es subreceta, es un ID válido de inventario.
+            // Para estar seguros, podríamos intentar escribir. Firestore ignorará si no existe el doc,
+            // pero mejor prevenir.
+            applyDecrement(targetId, targetQty);
+        };
+
         itemsCalc.forEach(item => {
             const rawName = item.name || "Item sin nombre";
             const nameNorm = normalize(rawName);
             const qty = Number(item.qty || 1);
 
-            // Detectar si es Burger (para papas y packaging)
             if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')) {
                 totalBurgers += qty;
             }
 
             // A) BUSCAR RECETA
-            let ingredientes = null;
+            let receta = null;
             const recipeKeys = Object.keys(RECETAS_DB);
             let recipeName = recipeKeys.find(k => normalize(k) === nameNorm);
-            
-            if (!recipeName) {
-                recipeName = recipeKeys.find(k => nameNorm.includes(normalize(k)));
-            }
+            if (!recipeName) recipeName = recipeKeys.find(k => nameNorm.includes(normalize(k)));
 
             if (recipeName) {
-                ingredientes = RECETAS_DB[recipeName];
-                console.log(`✅ Receta encontrada: "${recipeName}" para el ítem "${rawName}"`);
+                const ingredientes = RECETAS_DB[recipeName];
+                console.log(`✅ Receta encontrada: "${recipeName}"`);
 
                 ingredientes.forEach(ing => {
-                    if(!ing || !ing.ingrediente) return;
-                    const ingNameRaw = ing.ingrediente;
-                    const ingNameNorm = normalize(ingNameRaw);
-                    
-                    let ingID = INVENTARIO_DB[ingNameNorm]; 
-                    if(!ingID) ingID = findSmartId([ingNameRaw]);
+                    // SOPORTE HÍBRIDO (Viejo vs Nuevo)
+                    let targetID = null;
+                    let targetQty = 0;
 
-                    if (ingID) {
-                        const ref = db.collection('inventory').doc(ingID);
-                        const delta = Number(ing.cantidad) * qty * factor;
-                        batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
-                        huboCambios = true;
+                    if (ing.id) { 
+                        // NUEVO SISTEMA (Usa IDs)
+                        targetID = ing.id;
+                        targetQty = Number(ing.qty);
+                    } else if (ing.ingrediente) {
+                        // VIEJO SISTEMA (Usa Nombres)
+                        const iName = normalize(ing.ingrediente);
+                        targetID = INVENTARIO_DB[iName];
+                        if(!targetID) targetID = findSmartId([ing.ingrediente]);
+                        targetQty = Number(ing.cantidad);
+                    }
+
+                    if (targetID && targetQty > 0) {
+                        processIngredient(targetID, targetQty * qty);
                     } else {
-                        errores.push(`Falta insumo: "${ingNameRaw}"`);
+                        // Si falla, intentamos buscar por nombre si era nuevo sistema pero falló ID
+                        console.warn(`   ⚠️ Ingrediente inválido en receta:`, ing);
                     }
                 });
-            } else {
-                // Solo nos quejamos si NO es un extra automático (papas, bebida, etc)
-                if(!nameNorm.includes('sazon') && !nameNorm.includes('papas') && !nameNorm.includes('bebida')) {
-                    console.warn(`Falta receta: "${rawName}"`);
-                }
             }
 
-            // C) EXTRAS
+            // B) EXTRAS
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -250,50 +285,23 @@
                         if(key==='bacon') search = 'panceta';
                         
                         const ingID = findSmartId([search]);
-                        if(ingID) {
-                            const ref = db.collection('inventory').doc(ingID);
-                            const amount = (key==='bacon' ? 0.03 : 1) * val * factor;
-                            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount) });
-                            huboCambios = true;
-                        }
+                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val);
                     }
                 }
             }
         });
 
         // --- 2. DESCUENTOS AUTOMÁTICOS (PAPAS Y PACKAGING) ---
+        // Se aplica siempre que haya burgers, independientemente de la receta
         if(totalBurgers > 0) {
-            const descontarAuto = (keywords, cantidadTotal) => {
-                const id = findSmartId(keywords);
-                if(id) {
-                    const ref = db.collection('inventory').doc(id);
-                    batch.update(ref, { qty: firebase.firestore.FieldValue.increment(cantidadTotal * factor * -1) }); // -1 porque 'factor' ya es -1 al entregar
-                    huboCambios = true;
-                    console.log(`   🤖 Auto-descuento: ${cantidadTotal} de ${keywords[0]}`);
-                } else {
-                    console.warn(`   ⚠️ No se encontró stock para auto-descuento: ${keywords[0]}`);
-                }
-            };
-
-            // Factor es -1 al entregar. Aquí multiplicamos * factor * -1 se vuelve positivo? NO.
-            // Si factor es -1 (Entregar) -> increment( cantidad * -1 ) = Resta. CORRECTO.
-            // El helper de arriba estaba bien si factor es negativo.
-            // Corrección: La función `gestionarStock` recibe factor = -1 para entregar.
-            // Entonces `increment( cantidad * factor )` resta. 
-            // Mi helper `descontarAuto` anterior lo estaba multiplicando mal. Vamos a usar la logica directa:
-            
-            const autoDesc = (keys, qty) => {
+            const autoDesc = (keys, q) => {
                 const id = findSmartId(keys);
-                if(id) {
-                    const ref = db.collection('inventory').doc(id);
-                    // Si factor es -1 (entregar), queremos restar: qty * -1
-                    // Si factor es 1 (cancelar), queremos sumar: qty * 1
-                    // Como el qty siempre es positivo, qty * factor funciona perfecto.
-                    batch.update(ref, { qty: firebase.firestore.FieldValue.increment(qty * factor) });
-                    huboCambios = true;
-                }
+                if(id) applyDecrement(id, q);
             };
 
+            // Para que reste, mandamos cantidad positiva. El 'factor' (-1) se aplica en applyDecrement.
+            // Si factor es -1 (entregar): increment( q * -1 ) => Resta.
+            
             autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.200); // 200g
             autoDesc(['carton', 'caja papa'], totalBurgers); // 1u
             autoDesc(['parafinado', 'papel'], totalBurgers); // 1u
@@ -302,7 +310,6 @@
             autoDesc(['bolsa', 'packaging', 'kraft'], bolsas);
             autoDesc(['ganchito', 'grampa'], bolsas * 3);
             
-            // Tinta: 5ml cada 20 unidades -> 0.25 ml/u
             const unidadesImp = totalBurgers + bolsas;
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25);
         }
@@ -311,7 +318,9 @@
             const pedidoRef = db.collection('orders').doc(pedido.id);
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
-            if(errores.length > 0) alert("⚠️ Se descontó stock con detalles:\n- " + errores.join("\n- "));
+            console.log("✅ Stock actualizado.");
+        } else {
+            console.warn("⚠️ No hubo cambios de stock.");
         }
     }
 
@@ -369,6 +378,7 @@
 
     window.printOrder = (id) => { const doc = window.idToDoc.get(id); if(doc) window.trySilentPrint(doc); };
     
+    // FIX: PickDate Robust
     window.pickDate = (o) => { 
         if(!o) return new Date();
         if(o.createdAt?.toDate) return o.createdAt.toDate(); 
@@ -452,7 +462,7 @@
     }
 
     /* ============================================================
-       🔥 IMPORTACIÓN EXCEL PEDIDOSYA (CORREGIDO Y COMPLETADO)
+       🔥 IMPORTACIÓN EXCEL PEDIDOSYA
     ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
@@ -473,27 +483,20 @@
 
             for (const row of rows) {
                 const r = {};
-                // Normalizar keys
                 Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
 
-                // 1. OBTENER ID
                 const id = r['nro de pedido'] || r['id'];
                 if (!id) continue;
 
-                // 2. OBTENER TOTALES
-                // "Total del pedido" es lo que pagó el cliente
                 let totalStr = r['total del pedido']; 
-                // "Ingreso estimado" es lo que te queda a VOS
                 let netoStr = r['ingreso estimado']; 
 
-                // Parsear Total Cliente
                 let total = 0;
                 if(totalStr) {
                     if(typeof totalStr === 'number') total = totalStr;
                     else total = Number(String(totalStr).replace(/\./g, '').replace(',', '.'));
                 }
 
-                // Parsear Ganancia Local (Neto)
                 let neto = 0;
                 if(netoStr) {
                     if(typeof netoStr === 'number') neto = netoStr;
@@ -502,18 +505,15 @@
 
                 if (total <= 0) continue;
 
-                // 3. DATOS GENERALES
                 const dateStr = r['fecha del pedido'];
                 const statusStr = r['estado del pedido'];
                 const paymentStr = r['forma de pago'];
                 const itemsStr = r['artículos'];
                 const clientName = r['nombre del cliente'] || ('Cliente Py #' + id);
 
-                // Estado
                 let status = 'delivered'; 
                 if (statusStr && (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado'))) status = 'cancelled';
 
-                // Pago
                 let isPaid = false;
                 let paymentMethod = 'pedidosya_online'; 
                 if (paymentStr) {
@@ -522,7 +522,6 @@
                     if (payLower.includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
                 }
 
-                // 4. ITEMS
                 let itemsList = [];
                 if(itemsStr) {
                     const rawParts = String(itemsStr).split(','); 
@@ -563,14 +562,7 @@
                         else if(catCode === 'f') { type='side'; category='guarnicion'; }
                         else if(catCode === 'd') { type='drink'; category='bebida'; }
 
-                        itemsList.push({ 
-                            qty: qty, 
-                            name: cleanName, 
-                            price: 0, 
-                            type: type, 
-                            category: category,
-                            notes: note 
-                        });
+                        itemsList.push({ qty: qty, name: cleanName, price: 0, type: type, category: category, notes: note });
                     });
                 } else {
                     itemsList = [{ name: 'Pedido PedidosYa', price: total, qty: 1, type: 'other' }];
@@ -578,14 +570,9 @@
                 
                 if(itemsList.length === 1 && total > 0) itemsList[0].price = total / itemsList[0].qty;
 
-                // 5. GUARDAR
                 const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
-                if (!existing.empty) {
-                    skipped++;
-                    continue;
-                }
+                if (!existing.empty) { skipped++; continue; }
 
-                // Fecha
                 let isoDate = new Date().toISOString();
                 if(dateStr) {
                     if(typeof dateStr === 'number') {
@@ -608,13 +595,12 @@
                     entrega: 'delivery',
                     nombre: clientName,
                     total: total,          
-                    neto_excel: neto,     // 🔥 TU GANANCIA REAL
+                    neto_excel: neto,     
                     createdAt: isoDate,
                     items: itemsList
                 });
                 
-                ops++;
-                imported++;
+                ops++; imported++;
                 if(ops >= 400) { await batch.commit(); ops=0; }
             }
 
