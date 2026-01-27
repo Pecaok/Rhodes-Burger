@@ -143,7 +143,7 @@
     checkSession(); setInterval(checkSession, 5*60*1000);
 
     // =================================================================
-    // 🔥 DATA DE SOPORTE (STOCK)
+    // 🔥 DATA DE SOPORTE (STOCK) - PROTEGIDA CONTRA ERRORES
     // =================================================================
     let RECETAS_DB = {}; 
     let INVENTARIO_DB = {}; 
@@ -155,9 +155,11 @@
         PRODUCT_CATALOG = {};
         snap.forEach(doc => { 
             const d = doc.data();
-            const cat = (d.category || "").toLowerCase().trim();
+            // FIX: Validar que exista category y name
+            const cat = String(d.category || "").toLowerCase().trim();
+            const name = String(d.name || "").trim().toLowerCase();
             PRODUCT_CATALOG[doc.id] = cat;
-            PRODUCT_CATALOG[d.name.trim().toLowerCase()] = cat;
+            if(name) PRODUCT_CATALOG[name] = cat;
         });
         if(window.lastSnap) renderList(window.lastSnap); 
     });
@@ -167,10 +169,15 @@
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
     });
 
+    // FIX: Carga de Inventario Segura
     db.collection('inventory').onSnapshot(snap => {
         INVENTARIO_DB = {};
         snap.forEach(doc => { 
-            INVENTARIO_DB[doc.data().name.trim().toLowerCase()] = doc.id; 
+            const d = doc.data();
+            // Si falta el nombre, no lo agregamos para evitar crashes
+            if(d.name) {
+                INVENTARIO_DB[d.name.trim().toLowerCase()] = doc.id; 
+            }
         });
     });
     
@@ -219,6 +226,9 @@
 
             if (ingredientes) {
                 ingredientes.forEach(ing => {
+                    // 🔥 FIX CRÍTICO: Si el ingrediente está vacío o no tiene nombre, SALTARLO.
+                    if(!ing || !ing.ingrediente) return;
+                    
                     let ingID = INVENTARIO_DB[ing.ingrediente.trim().toLowerCase()];
                     if(!ingID) ingID = findSmartId([ing.ingrediente]);
 
@@ -302,7 +312,10 @@
             else if(next === 'cancelled'){ await gestionarStock(pedidoData, 1); }
 
             await db.collection("orders").doc(id).update({status:next}); 
-        }catch(e){console.error(e);}
+        }catch(e){
+            console.error(e);
+            alert("Error al actualizar estado: " + e.message);
+        }
     };
 
     window.deleteOrder = async (id) => {
@@ -338,7 +351,15 @@
     };
 
     window.printOrder = (id) => { const doc = window.idToDoc.get(id); if(doc) window.trySilentPrint(doc); };
-    window.pickDate = (o) => { if(o.createdAt?.toDate) return o.createdAt.toDate(); if(typeof o.createdAt==='string') return new Date(o.createdAt); return new Date(); };
+    
+    // FIX: PickDate Robust
+    window.pickDate = (o) => { 
+        if(!o) return new Date();
+        if(o.createdAt?.toDate) return o.createdAt.toDate(); 
+        if(typeof o.createdAt==='string') return new Date(o.createdAt); 
+        return new Date(); 
+    };
+    
     window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con Sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
     
     // CATEGORIZACIÓN
@@ -570,7 +591,7 @@
                     pago: paymentMethod,
                     entrega: 'delivery',
                     nombre: clientName,
-                    total: total,         
+                    total: total,          
                     neto_excel: neto,     // 🔥 TU GANANCIA REAL
                     createdAt: isoDate,
                     items: itemsList
