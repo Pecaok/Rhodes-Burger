@@ -201,10 +201,15 @@
         return null;
     }
 
+    // =================================================================
+    // 🔥 GESTIÓN DE STOCK (MODO FLEXIBLE & DEBUG)
+    // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
         if(factor === -1 && pedido.stockDescontado) return;
         if(factor === 1 && !pedido.stockDescontado) return;
+
+        console.log(`🔍 Iniciando gestión de stock para Pedido #${pedido.orderNumber} (Factor: ${factor})`);
 
         const batch = db.batch();
         let huboCambios = false;
@@ -214,33 +219,53 @@
         if(Array.isArray(pedido.drinks)) itemsCalc = itemsCalc.concat(pedido.drinks);
 
         itemsCalc.forEach(item => {
-            const prodName = String(item.name||"").trim(); 
-            const prodNameLower = prodName.toLowerCase();
+            const rawName = String(item.name||"").trim(); 
+            const prodNameLower = rawName.toLowerCase();
             const qtyPedida = Number(item.qty || 1);
 
-            let ingredientes = RECETAS_DB[prodName];
-            if (!ingredientes) {
-                const key = Object.keys(RECETAS_DB).find(k => prodName.includes(k));
-                if(key) ingredientes = RECETAS_DB[key];
+            console.log(`   📦 Procesando ítem: "${rawName}"`);
+
+            // 1. BUSCAR RECETA (INTELIGENTE)
+            let ingredientes = null;
+            const recipeKeys = Object.keys(RECETAS_DB);
+            
+            // A) Exacto
+            const exactKey = recipeKeys.find(k => k.toLowerCase() === prodNameLower);
+            if (exactKey) {
+                ingredientes = RECETAS_DB[exactKey];
+                console.log(`      ✅ Receta encontrada (Exacta): "${exactKey}"`);
+            } else {
+                // B) Parcial
+                const partialKey = recipeKeys.find(k => prodNameLower.includes(k.toLowerCase()) || k.toLowerCase().includes(prodNameLower));
+                if (partialKey) {
+                    ingredientes = RECETAS_DB[partialKey];
+                    console.log(`      ✅ Receta encontrada (Parcial): "${partialKey}"`);
+                }
             }
 
             if (ingredientes) {
                 ingredientes.forEach(ing => {
-                    // 🔥 FIX CRÍTICO: Si el ingrediente está vacío o no tiene nombre, SALTARLO.
                     if(!ing || !ing.ingrediente) return;
+                    const ingNombre = ing.ingrediente.trim();
                     
-                    let ingID = INVENTARIO_DB[ing.ingrediente.trim().toLowerCase()];
-                    if(!ingID) ingID = findSmartId([ing.ingrediente]);
+                    let ingID = INVENTARIO_DB[ingNombre.toLowerCase()];
+                    if(!ingID) ingID = findSmartId([ingNombre]);
 
                     if (ingID) {
                         const ref = db.collection('inventory').doc(ingID);
                         const delta = Number(ing.cantidad) * qtyPedida * factor;
                         batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
                         huboCambios = true;
+                        console.log(`         🔻 Descontando ${delta} de "${ingNombre}"`);
+                    } else {
+                        console.warn(`         ⚠️ Insumo no encontrado: "${ingNombre}"`);
                     }
                 });
+            } else {
+                console.warn(`      ❌ NO HAY RECETA para "${rawName}"`);
             }
 
+            // 2. EXTRAS
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -271,6 +296,7 @@
                 }
             }
 
+            // 3. DESCUENTO AUTOMÁTICO DE PAPAS
             let catDB = PRODUCT_CATALOG[prodNameLower] || PRODUCT_CATALOG[item.id];
             let esBurger = false;
             
@@ -287,6 +313,7 @@
                     const deltaPapas = 0.2 * qtyPedida * factor;
                     batch.update(ref, { qty: firebase.firestore.FieldValue.increment(deltaPapas) });
                     huboCambios = true;
+                    console.log(`         🍟 Descontando ${deltaPapas}kg papas (Auto)`);
                 }
             }
         });
@@ -295,6 +322,9 @@
             const pedidoRef = db.collection('orders').doc(pedido.id);
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
+            console.log("✅ Stock actualizado en DB.");
+        } else {
+            console.log("⚠️ No hubo cambios de stock.");
         }
     }
 
