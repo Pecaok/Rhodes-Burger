@@ -113,13 +113,15 @@
     }
     checkSession(); setInterval(checkSession, 5*60*1000);
 
-    // DATA SOPORTE
+    // =================================================================
+    // 🔥 DATA DE SOPORTE (STOCK)
+    // =================================================================
     let RECETAS_DB = {}; 
-    let SUB_RECIPES = []; // 🔥 Necesario para items armados
     let INVENTARIO_DB = {}; 
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
 
+    // Cargar Catálogo
     db.collection('products').onSnapshot(snap => {
         PRODUCT_CATALOG = {};
         snap.forEach(doc => { 
@@ -137,11 +139,7 @@
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
     });
 
-    // Cargar Subrecetas para desglose recursivo
-    db.collection('subrecipes').onSnapshot(snap => {
-        SUB_RECIPES = snap.docs.map(d => ({id: d.id, ...d.data()}));
-    });
-
+    // FIX: Carga de Inventario Segura
     db.collection('inventory').onSnapshot(snap => {
         INVENTARIO_DB = {};
         snap.forEach(doc => { 
@@ -177,14 +175,12 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CON SOPORTE PARA IDs NUEVOS Y SUBRECETAS)
+    // 🔥 GESTIÓN DE STOCK (BLINDADA Y AUTOMÁTICA)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
-        if(factor === -1 && pedido.stockDescontado) return; 
-        if(factor === 1 && !pedido.stockDescontado) return; 
-
-        console.log(`🔍 Gestionando Stock Pedido #${pedido.orderNumber} (Factor: ${factor})`);
+        if(factor === -1 && pedido.stockDescontado) return;
+        if(factor === 1 && !pedido.stockDescontado) return;
 
         const batch = db.batch();
         let huboCambios = false;
@@ -196,40 +192,6 @@
 
         let totalBurgers = 0;
 
-        // HELPER PARA DESCONTAR (Directo al inventario)
-        const applyDecrement = (invID, amount) => {
-            if(!invID) return;
-            const ref = db.collection('inventory').doc(invID);
-            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
-            huboCambios = true;
-        };
-
-        // HELPER RECURSIVO (Desglosa Subrecetas)
-        const processIngredient = (targetId, targetQty) => {
-            // A) Es un ITEM ARMADO (Subreceta)?
-            const sub = SUB_RECIPES.find(s => s.id === targetId);
-            if (sub) {
-                console.log(`   ↳ Desglosando item armado: ${sub.name}`);
-                sub.ingredients.forEach(subIng => {
-                    // Recursividad simple: asumimos que la subreceta tiene insumos directos (ID de inventario)
-                    // Si la subreceta tuviera OTRA subreceta, habría que llamar a processIngredient de nuevo.
-                    // Por ahora, asumimos Subreceta -> Insumo Final.
-                    const subQtyNeeded = Number(subIng.qty) * targetQty;
-                    // El ID en la subreceta YA ES un ID de inventario válido
-                    applyDecrement(subIng.id, subQtyNeeded); 
-                });
-                return;
-            }
-
-            // B) Es un INSUMO DIRECTO (ID de Inventario)
-            // Verificamos si existe en el inventario directamente
-            // Como no tenemos el objeto INVENTORY completo mapeado por ID aquí (solo por nombre),
-            // asumimos que si no es subreceta, es un ID válido de inventario.
-            // Para estar seguros, podríamos intentar escribir. Firestore ignorará si no existe el doc,
-            // pero mejor prevenir.
-            applyDecrement(targetId, targetQty);
-        };
-
         itemsCalc.forEach(item => {
             const rawName = item.name || "Item sin nombre";
             const nameNorm = normalize(rawName);
@@ -240,42 +202,39 @@
             }
 
             // A) BUSCAR RECETA
-            let receta = null;
+            let ingredientes = null;
             const recipeKeys = Object.keys(RECETAS_DB);
             let recipeName = recipeKeys.find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = recipeKeys.find(k => nameNorm.includes(normalize(k)));
 
             if (recipeName) {
-                const ingredientes = RECETAS_DB[recipeName];
+                ingredientes = RECETAS_DB[recipeName];
                 console.log(`✅ Receta encontrada: "${recipeName}"`);
 
                 ingredientes.forEach(ing => {
-                    // SOPORTE HÍBRIDO (Viejo vs Nuevo)
                     let targetID = null;
                     let targetQty = 0;
 
+                    // SOPORTE HÍBRIDO (Viejo vs Nuevo)
                     if (ing.id) { 
-                        // NUEVO SISTEMA (Usa IDs)
-                        targetID = ing.id;
-                        targetQty = Number(ing.qty);
+                        targetID = ing.id; targetQty = Number(ing.qty);
                     } else if (ing.ingrediente) {
-                        // VIEJO SISTEMA (Usa Nombres)
                         const iName = normalize(ing.ingrediente);
                         targetID = INVENTARIO_DB[iName];
                         if(!targetID) targetID = findSmartId([ing.ingrediente]);
                         targetQty = Number(ing.cantidad);
                     }
 
-                    if (targetID && targetQty > 0) {
-                        processIngredient(targetID, targetQty * qty);
-                    } else {
-                        // Si falla, intentamos buscar por nombre si era nuevo sistema pero falló ID
-                        console.warn(`   ⚠️ Ingrediente inválido en receta:`, ing);
+                    if (targetID) {
+                        const ref = db.collection('inventory').doc(targetID);
+                        const delta = targetQty * qty * factor;
+                        batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
+                        huboCambios = true;
                     }
                 });
             }
 
-            // B) EXTRAS
+            // C) EXTRAS
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -285,23 +244,29 @@
                         if(key==='bacon') search = 'panceta';
                         
                         const ingID = findSmartId([search]);
-                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val);
+                        if(ingID) {
+                            const ref = db.collection('inventory').doc(ingID);
+                            const amount = (key==='bacon' ? 0.03 : 1) * val * factor;
+                            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount) });
+                            huboCambios = true;
+                        }
                     }
                 }
             }
         });
 
-        // --- 2. DESCUENTOS AUTOMÁTICOS (PAPAS Y PACKAGING) ---
-        // Se aplica siempre que haya burgers, independientemente de la receta
+        // --- 2. DESCUENTOS AUTOMÁTICOS ---
         if(totalBurgers > 0) {
-            const autoDesc = (keys, q) => {
+            const autoDesc = (keys, qty) => {
                 const id = findSmartId(keys);
-                if(id) applyDecrement(id, q);
+                if(id) {
+                    const ref = db.collection('inventory').doc(id);
+                    // factor ya es -1 al entregar, así que sumamos (cantidad * -1) para restar
+                    batch.update(ref, { qty: firebase.firestore.FieldValue.increment(qty * factor) });
+                    huboCambios = true;
+                }
             };
 
-            // Para que reste, mandamos cantidad positiva. El 'factor' (-1) se aplica en applyDecrement.
-            // Si factor es -1 (entregar): increment( q * -1 ) => Resta.
-            
             autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.200); // 200g
             autoDesc(['carton', 'caja papa'], totalBurgers); // 1u
             autoDesc(['parafinado', 'papel'], totalBurgers); // 1u
@@ -319,8 +284,6 @@
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
             console.log("✅ Stock actualizado.");
-        } else {
-            console.warn("⚠️ No hubo cambios de stock.");
         }
     }
 
@@ -378,7 +341,6 @@
 
     window.printOrder = (id) => { const doc = window.idToDoc.get(id); if(doc) window.trySilentPrint(doc); };
     
-    // FIX: PickDate Robust
     window.pickDate = (o) => { 
         if(!o) return new Date();
         if(o.createdAt?.toDate) return o.createdAt.toDate(); 
@@ -462,7 +424,7 @@
     }
 
     /* ============================================================
-       🔥 IMPORTACIÓN EXCEL PEDIDOSYA
+       🔥 IMPORTACIÓN PEDIDOS YA (CORREGIDA PARA TU EXCEL)
     ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
@@ -474,7 +436,9 @@
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(firstSheet, {defval:""});
+            
+            // 🔥 CLAVE: "range: 1" salta la primera fila (Metadata) y usa la fila 2 como títulos
+            const rows = XLSX.utils.sheet_to_json(firstSheet, {range: 1, defval:""});
 
             let imported = 0;
             let skipped = 0;
@@ -485,94 +449,86 @@
                 const r = {};
                 Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
 
-                const id = r['nro de pedido'] || r['id'];
+                // 1. ID
+                const id = r['nro de pedido']; 
                 if (!id) continue;
 
-                let totalStr = r['total del pedido']; 
-                let netoStr = r['ingreso estimado']; 
+                // 2. TOTALES
+                let total = r['total del pedido'];   
+                let neto = r['ingreso estimado'];    
 
-                let total = 0;
-                if(totalStr) {
-                    if(typeof totalStr === 'number') total = totalStr;
-                    else total = Number(String(totalStr).replace(/\./g, '').replace(',', '.'));
-                }
+                if(typeof total !== 'number') total = Number(String(total).replace(/\./g, '').replace(',', '.'));
+                if(typeof neto !== 'number') neto = Number(String(neto).replace(/\./g, '').replace(',', '.'));
 
-                let neto = 0;
-                if(netoStr) {
-                    if(typeof netoStr === 'number') neto = netoStr;
-                    else neto = Number(String(netoStr).replace(/\./g, '').replace(',', '.'));
-                }
+                if (!total || total <= 0) continue;
 
-                if (total <= 0) continue;
-
+                // 3. DATOS
                 const dateStr = r['fecha del pedido'];
-                const statusStr = r['estado del pedido'];
-                const paymentStr = r['forma de pago'];
-                const itemsStr = r['artículos'];
-                const clientName = r['nombre del cliente'] || ('Cliente Py #' + id);
+                const statusStr = r['estado del pedido'] || "";
+                const paymentStr = r['forma de pago'] || "";
+                const itemsStr = r['artículos'] || "";
+                
+                let clientName = "Cliente Py"; 
+                if(r['nombre del cliente']) clientName = r['nombre del cliente'];
 
+                // 4. ESTADO
                 let status = 'delivered'; 
-                if (statusStr && (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado'))) status = 'cancelled';
+                if (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado')) status = 'cancelled';
 
+                // 5. PAGO
                 let isPaid = false;
                 let paymentMethod = 'pedidosya_online'; 
-                if (paymentStr) {
-                    const payLower = paymentStr.toLowerCase();
-                    if (payLower.includes('online')) isPaid = true;
-                    if (payLower.includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
-                }
+                if (paymentStr.toLowerCase().includes('online')) isPaid = true;
+                if (paymentStr.toLowerCase().includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
 
+                // 6. ÍTEMS
                 let itemsList = [];
                 if(itemsStr) {
-                    const rawParts = String(itemsStr).split(','); 
-                    const mergedParts = [];
-                    let buffer = "";
-                    rawParts.forEach(p => {
-                        if (buffer) {
-                            buffer += "," + p;
-                            if (buffer.includes(']')) { mergedParts.push(buffer); buffer = ""; }
-                        } else {
-                            if (p.includes('[') && !p.includes(']')) { buffer = p; }
-                            else { mergedParts.push(p); }
+                    let rawItems = String(itemsStr).split(/,|\n|\+/); 
+                    
+                    rawItems.forEach(line => {
+                        line = line.trim();
+                        if(!line) return;
+                        
+                        let qty = 1;
+                        let name = line;
+                        const match = line.match(/^(\d+)\s*[xX]?\s*(.*)$/);
+                        if(match) {
+                            qty = Number(match[1]);
+                            name = match[2];
                         }
-                    });
-                    if(buffer) mergedParts.push(buffer);
-
-                    mergedParts.forEach(p => {
-                        p = p.trim();
+                        
                         let note = "";
-                        let cleanName = p;
-                        if(cleanName.includes('[')) {
-                            const noteMatch = cleanName.match(/\[(.*?)\]/);
-                            if(noteMatch) {
-                                note = noteMatch[1];
-                                cleanName = cleanName.replace(/\[.*?\]/, "").trim();
+                        if(name.includes('[')) {
+                            const nMatch = name.match(/\[(.*?)\]/);
+                            if(nMatch) {
+                                note = nMatch[1];
+                                name = name.replace(/\[.*?\]/, "").trim();
                             }
                         }
-                        let qty = 1;
-                        const qtyMatch = cleanName.match(/^(\d+)\s+(.*)$/);
-                        if(qtyMatch) {
-                            qty = Number(qtyMatch[1]);
-                            cleanName = qtyMatch[2];
-                        }
-                        const catCode = window.getCat({name: cleanName});
-                        let type = 'other';
-                        let category = 'other';
-                        if(catCode === 'b') { type='burger'; category='hamburguesas'; }
-                        else if(catCode === 'f') { type='side'; category='guarnicion'; }
-                        else if(catCode === 'd') { type='drink'; category='bebida'; }
 
-                        itemsList.push({ qty: qty, name: cleanName, price: 0, type: type, category: category, notes: note });
+                        const catCode = window.getCat({name: name});
+                        let type = 'other';
+                        if(catCode === 'b') type='burger';
+                        else if(catCode === 'f') type='side';
+                        else if(catCode === 'd') type='drink';
+
+                        itemsList.push({ qty, name, price: 0, type, notes: note });
                     });
                 } else {
-                    itemsList = [{ name: 'Pedido PedidosYa', price: total, qty: 1, type: 'other' }];
+                    itemsList = [{ name: 'Pedido Importado', qty: 1, price: total }];
                 }
-                
-                if(itemsList.length === 1 && total > 0) itemsList[0].price = total / itemsList[0].qty;
 
+                if(itemsList.length === 1) itemsList[0].price = total;
+
+                // 7. DUPLICADOS
                 const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
-                if (!existing.empty) { skipped++; continue; }
+                if (!existing.empty) {
+                    skipped++;
+                    continue;
+                }
 
+                // 8. FECHA
                 let isoDate = new Date().toISOString();
                 if(dateStr) {
                     if(typeof dateStr === 'number') {
@@ -583,6 +539,7 @@
                     }
                 }
 
+                // 9. GUARDAR
                 const ref = db.collection('orders').doc();
                 batch.set(ref, {
                     orderNumber: String(id),
@@ -600,13 +557,15 @@
                     items: itemsList
                 });
                 
-                ops++; imported++;
+                ops++;
+                imported++;
                 if(ops >= 400) { await batch.commit(); ops=0; }
             }
 
             if(ops > 0) await batch.commit();
-            alert(`Importación completada:\n✅ ${imported} nuevos\n⏭️ ${skipped} ya existían.`);
+            alert(`Importación completada:\n✅ ${imported} pedidos nuevos cargados.\n⏭️ ${skipped} ya estaban en el sistema.`);
             input.value = ""; 
+            location.reload();
         };
         reader.readAsArrayBuffer(file);
     }
