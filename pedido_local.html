@@ -113,41 +113,54 @@
     }
     checkSession(); setInterval(checkSession, 5*60*1000);
 
+    // DATOS EN MEMORIA
     let RECETAS_DB = {}; 
-    let SUB_RECIPES = []; 
-    let INVENTARIO_DB = {}; 
+    let SUB_RECIPES_DB = {}; // Mapeo ID -> Data Subreceta
+    let INVENTARIO_DB = {}; // Mapeo NombreNormalizado -> ID
+    let ID_TO_COLLECTION = {}; // Mapeo ID -> Nombre de Coleccion ('inventory' o 'subrecipes')
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
 
-    // Cargas
+    function normalize(str) {
+        return String(str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    }
+
+    // 1. Cargar Productos (Categorías)
     db.collection('products').onSnapshot(snap => {
         PRODUCT_CATALOG = {};
         snap.forEach(doc => { 
             const d = doc.data();
-            const cat = String(d.category || "").toLowerCase().trim();
-            const name = String(d.name || "").trim().toLowerCase();
+            const cat = normalize(d.category);
+            const name = normalize(d.name);
             PRODUCT_CATALOG[doc.id] = cat;
             if(name) PRODUCT_CATALOG[name] = cat;
         });
         if(window.lastSnap) renderList(window.lastSnap); 
     });
 
+    // 2. Cargar Recetas Finales
     db.collection('recipes').onSnapshot(snap => {
         RECETAS_DB = {};
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
     });
 
+    // 3. Cargar Items Armados (Subrecetas) y mapearlos
     db.collection('subrecipes').onSnapshot(snap => {
-        SUB_RECIPES = snap.docs.map(d => ({id: d.id, ...d.data()}));
+        SUB_RECIPES_DB = {};
+        snap.forEach(doc => {
+            const d = doc.data();
+            SUB_RECIPES_DB[doc.id] = d;
+            ID_TO_COLLECTION[doc.id] = 'subrecipes'; // Guardamos que este ID es de subrecipes
+            if(d.name) INVENTARIO_DB[normalize(d.name)] = doc.id; // También permitimos buscar por nombre
+        });
     });
 
+    // 4. Cargar Inventario (Materia Prima)
     db.collection('inventory').onSnapshot(snap => {
-        INVENTARIO_DB = {};
         snap.forEach(doc => { 
             const d = doc.data();
-            if(d.name) {
-                INVENTARIO_DB[d.name.trim().toLowerCase()] = doc.id; 
-            }
+            ID_TO_COLLECTION[doc.id] = 'inventory'; // Guardamos que este ID es de inventory
+            if(d.name) INVENTARIO_DB[normalize(d.name)] = doc.id; 
         });
     });
     
@@ -158,25 +171,26 @@
         }
     });
 
-    function findSmartId(keywords) {
-        const stockNames = Object.keys(INVENTARIO_DB);
+    // Búsqueda inteligente de ID (busca en ambos diccionarios)
+    function findStockId(keywords) {
+        // Buscar en diccionario de nombres normalizados
         for (const key of keywords) {
-            if (INVENTARIO_DB[key.toLowerCase()]) return INVENTARIO_DB[key.toLowerCase()];
+            const norm = normalize(key);
+            if (INVENTARIO_DB[norm]) return INVENTARIO_DB[norm];
         }
-        for (const stockName of stockNames) {
+        // Búsqueda parcial si falla la exacta
+        const allNames = Object.keys(INVENTARIO_DB);
+        for (const stockName of allNames) {
             for (const key of keywords) {
-                if (stockName.includes(key.toLowerCase()) || key.toLowerCase().includes(stockName)) return INVENTARIO_DB[stockName];
+                const normKey = normalize(key);
+                if (stockName.includes(normKey) || normKey.includes(stockName)) return INVENTARIO_DB[stockName];
             }
         }
         return null;
     }
 
-    function normalize(str) {
-        return String(str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-    }
-
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CON REPORTE DE ERRORES VISUAL)
+    // 🔥 GESTIÓN DE STOCK (AHORA SÍ, COMPLETA Y ROBUSTA)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -187,7 +201,7 @@
 
         const batch = db.batch();
         let huboCambios = false;
-        let logs = []; // Para el reporte visual
+        let logs = []; 
 
         let itemsCalc = Array.isArray(pedido.items) ? [...pedido.items] : [];
         if(Array.isArray(pedido.bebidas)) itemsCalc = itemsCalc.concat(pedido.bebidas);
@@ -195,28 +209,25 @@
 
         let totalBurgers = 0;
 
-        // Helper para restar
-        const applyDecrement = (invID, amount, reason) => {
-            if(!invID) return false;
-            const ref = db.collection('inventory').doc(invID);
+        // HELPER: Aplicar decremento a la colección correcta
+        const applyDecrement = (targetID, amount, logName) => {
+            if(!targetID) return false;
+            
+            // Determinar colección (inventory o subrecipes)
+            let collectionName = ID_TO_COLLECTION[targetID];
+            
+            // Si no tenemos el mapeo directo, intentamos adivinar por existencia en diccionarios
+            if(!collectionName) {
+                if(SUB_RECIPES_DB[targetID]) collectionName = 'subrecipes';
+                else collectionName = 'inventory'; // Default a inventario
+            }
+
+            const ref = db.collection(collectionName).doc(targetID);
+            // Multiplicamos por -1 al entregar (factor=-1) para restar
             batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor * -1) });
             huboCambios = true;
+            if(logName) logs.push(`   - ${logName}: ${amount} (en ${collectionName})`);
             return true;
-        };
-
-        const processIngredient = (targetId, targetQty) => {
-            // A) Es Subreceta?
-            const sub = SUB_RECIPES.find(s => s.id === targetId);
-            if (sub) {
-                logs.push(`   ↳ Desglosando Subreceta: ${sub.name}`);
-                sub.ingredients.forEach(subIng => {
-                    const subQtyNeeded = Number(subIng.qty) * targetQty;
-                    applyDecrement(subIng.id, subQtyNeeded); 
-                });
-                return true;
-            }
-            // B) Es Insumo directo
-            return applyDecrement(targetId, targetQty);
         };
 
         itemsCalc.forEach(item => {
@@ -227,13 +238,14 @@
             const fullText = nameNorm + " " + notesNorm; 
             const qty = Math.ceil(Number(item.qty || 1));
 
-            logs.push(`📦 Procesando: "${rawName}" (x${qty})`);
+            logs.push(`📦 ${rawName} (x${qty})`);
 
+            // Detectar si es Burger (para automáticos)
             if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big')) {
                 totalBurgers += qty;
             }
 
-            // 1. BUSCAR RECETA
+            // --- 1. INTENTAR USAR RECETA CONFIGURADA ---
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
@@ -241,84 +253,91 @@
 
             if (recipeName) {
                 const ingredientes = RECETAS_DB[recipeName];
-                logs.push(`   ✅ Receta encontrada: "${recipeName}"`);
+                logs.push(`   ✅ Receta: "${recipeName}"`);
                 recipeFound = true;
 
                 ingredientes.forEach(ing => {
-                    let targetID = ing.id;
+                    let targetID = ing.id; // Nuevo sistema usa ID directo
                     let targetQty = Number(ing.qty);
                     
-                    // Fallback sistema viejo
+                    // Fallback sistema viejo (por nombre)
                     if (!targetID && ing.ingrediente) {
-                        const iName = normalize(ing.ingrediente);
-                        targetID = INVENTARIO_DB[iName];
-                        if(!targetID) targetID = findSmartId([ing.ingrediente]);
+                        targetID = findStockId([ing.ingrediente]);
                         targetQty = Number(ing.cantidad);
                     }
 
                     if (targetID) {
-                        const ok = processIngredient(targetID, targetQty * qty);
-                        if(!ok) logs.push(`   ❌ Error: Ingrediente ID ${targetID} no encontrado en stock.`);
+                        applyDecrement(targetID, targetQty * qty, "Ingrediente receta");
                     } else {
-                        logs.push(`   ❌ Error: Ingrediente sin ID válido en receta.`);
+                        logs.push(`   ⚠️ Ingrediente no encontrado en stock: ${ing.ingrediente || 'ID desconocido'}`);
                     }
                 });
-            } else {
-                logs.push(`   ⚠️ Sin receta asociada.`);
-            }
-
-            // 2. EXTRAS Y FALLBACKS
-            // Si es Burger y NO hubo receta, descontar carne a la fuerza
+            } 
+            
+            // --- 2. FALLBACK: SI NO HAY RECETA, INTENTAR DEDUCIR MEDALLONES ---
             if (!recipeFound && totalBurgers > 0 && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
                 if(nameNorm.includes('triple')) patties = 3;
-                
-                const id = findSmartId(['medallon', 'patty', 'carne']);
-                if(id) {
-                    applyDecrement(id, patties * qty);
-                    logs.push(`   🤖 Auto-descuento: ${patties} Medallones (Fallback)`);
+                if(nameNorm.includes('cuadruple')) patties = 4;
+
+                const pattyId = findStockId(['medallon', 'carne', 'patty']);
+                if(pattyId) {
+                    applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
                 } else {
-                    logs.push(`   ❌ CRÍTICO: No se encontró 'Medallón' en stock para descuento automático.`);
+                    logs.push(`   ❌ ALERTA: No encontré 'Medallón' en stock para descontar.`);
                 }
             }
 
-            // Extras de Texto
-            if (fullText.includes('extra carne') || fullText.includes('doble carne') || fullText.includes('triple')) {
-                const id = findSmartId(['medallon', 'patty']);
-                if(id) applyDecrement(id, 1 * qty);
+            // --- 3. EXTRAS (TEXT MINING) ---
+            if (fullText.includes('extra carne') || fullText.includes('adicional carne') || fullText.includes('doble carne')) {
+                const id = findStockId(['medallon', 'patty']);
+                if(id) applyDecrement(id, 1 * qty, "Extra Carne");
             }
-            if (fullText.includes('extra cheddar')) {
-                const id = findSmartId(['cheddar', 'queso']);
-                if(id) applyDecrement(id, 1 * qty);
+            if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar')) {
+                const id = findStockId(['cheddar', 'queso']);
+                if(id) applyDecrement(id, 1 * qty, "Extra Cheddar");
             }
             if (fullText.includes('extra bacon') || fullText.includes('panceta')) {
-                const id = findSmartId(['bacon', 'panceta']);
-                if(id) applyDecrement(id, 0.03 * qty); 
+                const id = findStockId(['bacon', 'panceta']);
+                if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
+            }
+
+            // Extras del objeto (importador)
+            if(item.extras){
+                for (const [key, valRaw] of Object.entries(item.extras)) {
+                    const val = Number(valRaw);
+                    if (val > 0) {
+                        let search = key;
+                        if(key==='patty') search = 'medallon';
+                        if(key==='bacon') search = 'panceta';
+                        const ingID = findStockId([search]);
+                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val, `Extra ${key}`);
+                    }
+                }
             }
         });
 
-        // --- 3. CONSUMIBLES AUTOMÁTICOS ---
+        // --- 4. CONSUMIBLES AUTOMÁTICOS ---
         if(totalBurgers > 0) {
-            logs.push(`🤖 Aplicando automáticos para ${totalBurgers} burgers:`);
+            logs.push(`🤖 Automáticos (${totalBurgers} burgers):`);
             
             const autoDesc = (keys, qtyToDeduct, name) => {
-                const id = findSmartId(keys);
+                const id = findStockId(keys);
                 if(id) {
-                    applyDecrement(id, qtyToDeduct);
-                    logs.push(`   - ${name}: OK`);
+                    applyDecrement(id, qtyToDeduct, name);
                 } else {
-                    logs.push(`   - ${name}: NO ENCONTRADO EN STOCK`);
+                    logs.push(`   ⚠️ Falta stock: ${name}`);
                 }
             };
 
-            autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.2, "Papas (0.2kg)"); 
+            autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.200, "Papas (0.2kg)"); 
             autoDesc(['carton', 'caja papa'], totalBurgers, "Cartón Papa"); 
             autoDesc(['parafinado', 'papel'], totalBurgers, "Papel"); 
             
             const bolsas = Math.ceil(totalBurgers / 2);
-            autoDesc(['bolsa', 'packaging', 'kraft'], bolsas, `Bolsas (${bolsas})`);
-            autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3, `Ganchitos (${bolsas*3})`);
+            autoDesc(['bolsa', 'packaging', 'kraft'], bolsas, "Bolsas");
+            autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3, "Ganchitos");
             
             const unidadesImp = totalBurgers + bolsas;
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25, "Tinta");
@@ -333,9 +352,9 @@
             const pedidoRef = db.collection('orders').doc(pedido.id);
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
-            alert("✅ Stock Actualizado con Éxito.\n\nReporte:\n" + logs.join("\n"));
+            alert("✅ STOCK ACTUALIZADO\n\n" + logs.join("\n"));
         } else {
-            alert("⚠️ No se descontó nada.\n\nReporte:\n" + logs.join("\n"));
+            alert("⚠️ NO SE DESCONTÓ NADA\nRevisa si los nombres de insumos coinciden.\n\nLog:\n" + logs.join("\n"));
         }
     }
 
@@ -355,7 +374,7 @@
             await db.collection("orders").doc(id).update({status:next}); 
         }catch(e){
             console.error(e);
-            alert("Error: " + e.message);
+            alert("Error al actualizar estado: " + e.message);
         }
     };
 
