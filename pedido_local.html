@@ -118,7 +118,7 @@
     let SUB_RECIPES_DB = {}; 
     let INVENTARIO_DB = {}; 
     let ID_TO_COLLECTION = {}; 
-    let STOCK_NAME_TO_ID = {}; // Bolsa Global de Nombres (Insumos + Subrecetas)
+    let STOCK_NAME_TO_ID = {}; // Bolsa Global
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
 
@@ -126,7 +126,7 @@
         return String(str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     }
 
-    // 1. Cargar Productos
+    // CARGAS
     db.collection('products').onSnapshot(snap => {
         PRODUCT_CATALOG = {};
         snap.forEach(doc => { 
@@ -139,13 +139,11 @@
         if(window.lastSnap) renderList(window.lastSnap); 
     });
 
-    // 2. Cargar Recetas
     db.collection('recipes').onSnapshot(snap => {
         RECETAS_DB = {};
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
     });
 
-    // 3. Cargar Items Armados -> A Bolsa Global
     db.collection('subrecipes').onSnapshot(snap => {
         snap.forEach(doc => {
             const d = doc.data();
@@ -155,11 +153,10 @@
         });
     });
 
-    // 4. Cargar Inventario -> A Bolsa Global
     db.collection('inventory').onSnapshot(snap => {
         snap.forEach(doc => { 
             const d = doc.data();
-            INVENTARIO_DB[normalize(d.name)] = doc.id; // Legacy
+            INVENTARIO_DB[normalize(d.name)] = doc.id; 
             ID_TO_COLLECTION[doc.id] = 'inventory'; 
             if(d.name) STOCK_NAME_TO_ID[normalize(d.name)] = doc.id;
         });
@@ -169,7 +166,7 @@
         if(doc.exists) { PRICES_DB = doc.data(); if(window.lastSnap) renderList(window.lastSnap); }
     });
 
-    // Búsqueda inteligente (busca en la bolsa global)
+    // BUSQUEDA INTELIGENTE
     function findSmartId(keywords) {
         for (const key of keywords) {
             const norm = normalize(key);
@@ -186,7 +183,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CORREGIDA: ENTEROS, AUTOMÁTICOS Y SIGNOS)
+    // 🔥 GESTIÓN DE STOCK (CORREGIDA PARA PAPAS Y CARTONES)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -203,12 +200,10 @@
 
         let totalBurgers = 0;
 
-        // HELPER: Decrementar
         const applyDecrement = (targetID, amount, logName) => {
             if(!targetID) return false;
             let collectionName = ID_TO_COLLECTION[targetID] || 'inventory'; 
             const ref = db.collection(collectionName).doc(targetID);
-            // IMPORTANTE: factor -1 (entregar) * cantidad = resta.
             batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
             huboCambios = true;
             logs.push(`   - ${logName || 'Item'}: ${amount} (en ${collectionName})`);
@@ -227,7 +222,7 @@
                 totalBurgers += qty;
             }
 
-            // 1. BUSCAR RECETA
+            // 1. RECETA
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
@@ -255,7 +250,7 @@
                 });
             } 
             
-            // 2. FALLBACK CARNE (Solo si no hay receta)
+            // 2. FALLBACK CARNE
             if (!recipeFound && totalBurgers > 0 && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
@@ -271,11 +266,11 @@
             }
 
             // 3. EXTRAS
-            if (fullText.includes('extra carne') || fullText.includes('doble carne') || fullText.includes('triple')) {
+            if (fullText.includes('extra carne') || fullText.includes('doble carne')) {
                 const id = findSmartId(['medallon', 'patty']);
                 if(id) applyDecrement(id, 1 * qty, "Extra Carne");
             }
-            if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar')) {
+            if (fullText.includes('extra cheddar')) {
                 const id = findSmartId(['cheddar', 'queso']);
                 if(id) applyDecrement(id, 1 * qty, "Extra Cheddar");
             }
@@ -298,17 +293,17 @@
             }
         });
 
-        // 4. AUTOMÁTICOS
+        // 4. AUTOMÁTICOS (CORREGIDOS)
         if(totalBurgers > 0) {
             logs.push(`🤖 Automáticos (${totalBurgers} burgers):`);
             const autoDesc = (keys, qtyToDeduct, name) => {
                 const id = findSmartId(keys);
                 if(id) applyDecrement(id, qtyToDeduct, name);
-                else logs.push(`   ⚠️ Falta stock: ${name} (Buscado como: ${keys.join(',')})`);
+                else logs.push(`   ⚠️ Falta stock: ${name}`);
             };
 
-            // Papas 200g (0.2)
-            autoDesc(['papas', 'bastones', 'congelada', 'fritas'], totalBurgers * 0.200, "Papas (0.2kg)"); 
+            // Papas 200g - Búsqueda ampliada
+            autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones', 'congelada', 'fritas'], totalBurgers * 0.200, "Papas (0.2kg)"); 
             
             // Cartones (Enteros)
             autoDesc(['carton', 'caja papa', 'caja', 'cajita'], Math.ceil(totalBurgers), "Cartón Papa"); 
@@ -320,14 +315,13 @@
             const bolsas = Math.ceil(totalBurgers / 2);
             autoDesc(['bolsa', 'packaging', 'kraft'], bolsas, "Bolsas");
             
-            // Ganchitos
+            // Ganchitos (Exacto: 3 por bolsa)
             autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3, "Ganchitos");
             
             // Tinta
             const unidadesImp = totalBurgers + bolsas;
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25, "Tinta");
 
-            // Sazonador Doritos
             const hasDoritos = itemsCalc.some(i => (i.name||"").toLowerCase().includes("dorito"));
             if(hasDoritos) {
                 autoDesc(['dorito', 'polvo', 'sazonador'], totalBurgers * 0.005, "Sazonador Doritos");
@@ -340,7 +334,7 @@
             await batch.commit();
             alert("✅ STOCK ACTUALIZADO\n\n" + logs.join("\n"));
         } else {
-            alert("⚠️ NO SE DESCONTÓ NADA\nRevisa los nombres de stock.\n\nLog:\n" + logs.join("\n"));
+            alert("⚠️ NO SE DESCONTÓ NADA\n\nLog:\n" + logs.join("\n"));
         }
     }
 
