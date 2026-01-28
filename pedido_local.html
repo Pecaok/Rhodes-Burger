@@ -175,7 +175,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CON LECTURA DE TEXTO DE PEDIDOS)
+    // 🔥 GESTIÓN DE STOCK (AHORA SÍ, COMPLETA Y ROBUSTA)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -194,23 +194,27 @@
 
         let totalBurgers = 0;
 
-        // Helper para restar
+        // HELPER: Aplicar decremento a Inventario
         const applyDecrement = (invID, amount) => {
             if(!invID) return;
             const ref = db.collection('inventory').doc(invID);
-            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
+            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor * -1) }); // -1 para que "entregar" reste
             huboCambios = true;
         };
 
+        // HELPER: Procesar Ingrediente (Recursivo para Subrecetas)
         const processIngredient = (targetId, targetQty) => {
             const sub = SUB_RECIPES.find(s => s.id === targetId);
             if (sub) {
+                console.log(`   ↳ Desglosando subreceta: ${sub.name}`);
                 sub.ingredients.forEach(subIng => {
                     const subQtyNeeded = Number(subIng.qty) * targetQty;
+                    // Sub-ingredientes ya tienen ID de inventario
                     applyDecrement(subIng.id, subQtyNeeded); 
                 });
                 return;
             }
+            // Si no es subreceta, es insumo directo
             applyDecrement(targetId, targetQty);
         };
 
@@ -219,26 +223,30 @@
             const rawNotes = item.notes || "";
             const nameNorm = normalize(rawName);
             const notesNorm = normalize(rawNotes);
-            const fullText = nameNorm + " " + notesNorm; // Para buscar "Extra" en todo el texto
-            const qty = Math.ceil(Number(item.qty || 1)); // Siempre entero hacia arriba
+            const fullText = nameNorm + " " + notesNorm; 
+            const qty = Math.ceil(Number(item.qty || 1));
 
-            if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')) {
+            // Detectar si es Burger (para automáticos)
+            if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big')) {
                 totalBurgers += qty;
             }
 
-            // 1. BUSCAR RECETA
+            // --- 1. INTENTAR USAR RECETA CONFIGURADA ---
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
+
+            let recipeFound = false;
 
             if (recipeName) {
                 const ingredientes = RECETAS_DB[recipeName];
                 console.log(`✅ Receta encontrada: "${recipeName}"`);
+                recipeFound = true;
 
                 ingredientes.forEach(ing => {
                     let targetID = ing.id;
                     let targetQty = Number(ing.qty);
                     
-                    // Fallback sistema viejo
+                    // Fallback sistema viejo (por nombre)
                     if (!targetID && ing.ingrediente) {
                         const iName = normalize(ing.ingrediente);
                         targetID = INVENTARIO_DB[iName];
@@ -248,33 +256,42 @@
 
                     if (targetID) processIngredient(targetID, targetQty * qty);
                 });
-            }
-
-            // 2. LECTURA INTELIGENTE DE EXTRAS (TEXT MINING)
-            // Busca palabras clave en el nombre y notas
+            } 
             
-            // Extra Carne / Doble / Triple
-            if (fullText.includes('extra carne') || fullText.includes('adicional carne') || fullText.includes('doble') || fullText.includes('triple')) {
-                const id = findSmartId(['medallon', 'patty', 'carne']);
-                if(id) applyDecrement(id, 1 * qty);
-                console.log("   🥩 Extra Carne detectado");
+            // --- 2. FALLBACK: SI NO HAY RECETA, INTENTAR DEDUCIR BURGERS ---
+            // Si el item es una hamburguesa y NO tenía receta, descontamos carne "a ojo" por el nombre
+            if (!recipeFound && totalBurgers > 0) {
+                // Cuantos medallones lleva?
+                let pattiesCount = 1; // Simple por defecto
+                if(nameNorm.includes('doble')) pattiesCount = 2;
+                if(nameNorm.includes('triple')) pattiesCount = 3;
+                if(nameNorm.includes('cuadruple')) pattiesCount = 4;
+
+                const pattyId = findSmartId(['medallon', 'carne', 'patty']);
+                if(pattyId) {
+                    applyDecrement(pattyId, pattiesCount * qty);
+                    console.log(`   🤖 Auto-descuento carne (${pattiesCount} x ${qty}) para "${rawName}"`);
+                }
             }
 
+            // --- 3. EXTRAS (TEXT MINING) ---
+            // Extra Carne
+            if (fullText.includes('extra carne') || fullText.includes('adicional carne') || fullText.includes('doble carne')) {
+                const id = findSmartId(['medallon', 'patty']);
+                if(id) applyDecrement(id, 1 * qty);
+            }
             // Extra Cheddar
-            if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar') || fullText.includes('extra queso')) {
+            if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar')) {
                 const id = findSmartId(['cheddar', 'queso']);
                 if(id) applyDecrement(id, 1 * qty);
-                console.log("   🧀 Extra Cheddar detectado");
             }
-
             // Extra Bacon
             if (fullText.includes('extra bacon') || fullText.includes('adicional bacon') || fullText.includes('panceta')) {
                 const id = findSmartId(['bacon', 'panceta']);
-                if(id) applyDecrement(id, 0.03 * qty); // 30g bacon
-                console.log("   🥓 Extra Bacon detectado");
+                if(id) applyDecrement(id, 0.03 * qty); 
             }
 
-            // Extras explícitos en objeto (si vienen del importador)
+            // Extras del objeto (importador)
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -289,41 +306,36 @@
             }
         });
 
-        // --- 3. DESCUENTOS AUTOMÁTICOS ---
+        // --- 4. CONSUMIBLES AUTOMÁTICOS (PAPAS, PACKAGING, ETC) ---
         if(totalBurgers > 0) {
-            const autoDesc = (keys, qtyToDeduct) => {
+            
+            // Función helper local
+            const autoDesc = (keys, amount) => {
                 const id = findSmartId(keys);
-                if(id) {
-                    // Para descontar (entregar), 'factor' es -1. 
-                    // increment(cantidadPositiva * -1) resta. Correcto.
-                    const ref = db.collection('inventory').doc(id);
-                    batch.update(ref, { qty: firebase.firestore.FieldValue.increment(qtyToDeduct * factor) });
-                    huboCambios = true;
-                }
+                if(id) applyDecrement(id, amount);
             };
 
-            // Papas: 0.2 KG por burger (Fijo)
-            autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.2); 
+            // Papas: 0.2 KG por burger
+            autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.200); 
 
-            // Cartones: Enteros (Math.ceil ya aplicado a totalBurgers)
+            // Cartones: 1 por burger (Entero)
             autoDesc(['carton', 'caja papa'], totalBurgers); 
 
             // Papel
             autoDesc(['parafinado', 'papel'], totalBurgers); 
             
-            // Bolsas: 1 cada 2, redondeo hacia arriba
+            // Bolsas: 1 cada 2 burgers (Redondeo arriba)
             const bolsas = Math.ceil(totalBurgers / 2);
             autoDesc(['bolsa', 'packaging', 'kraft'], bolsas);
             
             // Ganchitos: 3 por bolsa
             autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3);
             
-            // Tinta: 0.25 ml por unidad (burger+bolsa)
+            // Tinta: 0.25 ml por unidad (burger + bolsa)
             const unidadesImp = totalBurgers + bolsas;
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25);
 
-            // Sazonador Doritos (Búsqueda específica)
-            // Buscamos si ALGUNA burger del pedido tiene "dorito" en el nombre
+            // Sazonador Doritos: Si alguna burger dice "Dorito"
             const hasDoritos = itemsCalc.some(i => (i.name||"").toLowerCase().includes("dorito"));
             if(hasDoritos) {
                 // Asumimos 5g por burger si lleva doritos
@@ -335,7 +347,9 @@
             const pedidoRef = db.collection('orders').doc(pedido.id);
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
-            console.log("✅ Stock actualizado.");
+            console.log("✅ Stock actualizado correctamente.");
+        } else {
+            console.log("⚠️ No hubo cambios de stock.");
         }
     }
 
@@ -551,11 +565,10 @@
                         }
                         
                         let note = "";
-                        // Detectar aclaraciones entre corchetes
                         if(name.includes('[')) {
                             const nMatch = name.match(/\[(.*?)\]/);
                             if(nMatch) {
-                                note = nMatch[1]; // Guardamos la nota para el text mining después
+                                note = nMatch[1];
                                 name = name.replace(/\[.*?\]/, "").trim();
                             }
                         }
