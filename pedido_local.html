@@ -119,6 +119,7 @@
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
 
+    // Cargas
     db.collection('products').onSnapshot(snap => {
         PRODUCT_CATALOG = {};
         snap.forEach(doc => { 
@@ -175,7 +176,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (AHORA SÍ, COMPLETA Y ROBUSTA)
+    // 🔥 GESTIÓN DE STOCK (CON REPORTE DE ERRORES VISUAL)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -186,7 +187,7 @@
 
         const batch = db.batch();
         let huboCambios = false;
-        let errores = []; 
+        let logs = []; // Para el reporte visual
 
         let itemsCalc = Array.isArray(pedido.items) ? [...pedido.items] : [];
         if(Array.isArray(pedido.bebidas)) itemsCalc = itemsCalc.concat(pedido.bebidas);
@@ -194,28 +195,28 @@
 
         let totalBurgers = 0;
 
-        // HELPER: Aplicar decremento a Inventario
-        const applyDecrement = (invID, amount) => {
-            if(!invID) return;
+        // Helper para restar
+        const applyDecrement = (invID, amount, reason) => {
+            if(!invID) return false;
             const ref = db.collection('inventory').doc(invID);
-            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor * -1) }); // -1 para que "entregar" reste
+            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor * -1) });
             huboCambios = true;
+            return true;
         };
 
-        // HELPER: Procesar Ingrediente (Recursivo para Subrecetas)
         const processIngredient = (targetId, targetQty) => {
+            // A) Es Subreceta?
             const sub = SUB_RECIPES.find(s => s.id === targetId);
             if (sub) {
-                console.log(`   ↳ Desglosando subreceta: ${sub.name}`);
+                logs.push(`   ↳ Desglosando Subreceta: ${sub.name}`);
                 sub.ingredients.forEach(subIng => {
                     const subQtyNeeded = Number(subIng.qty) * targetQty;
-                    // Sub-ingredientes ya tienen ID de inventario
                     applyDecrement(subIng.id, subQtyNeeded); 
                 });
-                return;
+                return true;
             }
-            // Si no es subreceta, es insumo directo
-            applyDecrement(targetId, targetQty);
+            // B) Es Insumo directo
+            return applyDecrement(targetId, targetQty);
         };
 
         itemsCalc.forEach(item => {
@@ -226,12 +227,13 @@
             const fullText = nameNorm + " " + notesNorm; 
             const qty = Math.ceil(Number(item.qty || 1));
 
-            // Detectar si es Burger (para automáticos)
+            logs.push(`📦 Procesando: "${rawName}" (x${qty})`);
+
             if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big')) {
                 totalBurgers += qty;
             }
 
-            // --- 1. INTENTAR USAR RECETA CONFIGURADA ---
+            // 1. BUSCAR RECETA
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
@@ -239,14 +241,14 @@
 
             if (recipeName) {
                 const ingredientes = RECETAS_DB[recipeName];
-                console.log(`✅ Receta encontrada: "${recipeName}"`);
+                logs.push(`   ✅ Receta encontrada: "${recipeName}"`);
                 recipeFound = true;
 
                 ingredientes.forEach(ing => {
                     let targetID = ing.id;
                     let targetQty = Number(ing.qty);
                     
-                    // Fallback sistema viejo (por nombre)
+                    // Fallback sistema viejo
                     if (!targetID && ing.ingrediente) {
                         const iName = normalize(ing.ingrediente);
                         targetID = INVENTARIO_DB[iName];
@@ -254,92 +256,76 @@
                         targetQty = Number(ing.cantidad);
                     }
 
-                    if (targetID) processIngredient(targetID, targetQty * qty);
+                    if (targetID) {
+                        const ok = processIngredient(targetID, targetQty * qty);
+                        if(!ok) logs.push(`   ❌ Error: Ingrediente ID ${targetID} no encontrado en stock.`);
+                    } else {
+                        logs.push(`   ❌ Error: Ingrediente sin ID válido en receta.`);
+                    }
                 });
-            } 
-            
-            // --- 2. FALLBACK: SI NO HAY RECETA, INTENTAR DEDUCIR BURGERS ---
-            // Si el item es una hamburguesa y NO tenía receta, descontamos carne "a ojo" por el nombre
-            if (!recipeFound && totalBurgers > 0) {
-                // Cuantos medallones lleva?
-                let pattiesCount = 1; // Simple por defecto
-                if(nameNorm.includes('doble')) pattiesCount = 2;
-                if(nameNorm.includes('triple')) pattiesCount = 3;
-                if(nameNorm.includes('cuadruple')) pattiesCount = 4;
+            } else {
+                logs.push(`   ⚠️ Sin receta asociada.`);
+            }
 
-                const pattyId = findSmartId(['medallon', 'carne', 'patty']);
-                if(pattyId) {
-                    applyDecrement(pattyId, pattiesCount * qty);
-                    console.log(`   🤖 Auto-descuento carne (${pattiesCount} x ${qty}) para "${rawName}"`);
+            // 2. EXTRAS Y FALLBACKS
+            // Si es Burger y NO hubo receta, descontar carne a la fuerza
+            if (!recipeFound && totalBurgers > 0 && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
+                let patties = 1;
+                if(nameNorm.includes('doble')) patties = 2;
+                if(nameNorm.includes('triple')) patties = 3;
+                
+                const id = findSmartId(['medallon', 'patty', 'carne']);
+                if(id) {
+                    applyDecrement(id, patties * qty);
+                    logs.push(`   🤖 Auto-descuento: ${patties} Medallones (Fallback)`);
+                } else {
+                    logs.push(`   ❌ CRÍTICO: No se encontró 'Medallón' en stock para descuento automático.`);
                 }
             }
 
-            // --- 3. EXTRAS (TEXT MINING) ---
-            // Extra Carne
-            if (fullText.includes('extra carne') || fullText.includes('adicional carne') || fullText.includes('doble carne')) {
+            // Extras de Texto
+            if (fullText.includes('extra carne') || fullText.includes('doble carne') || fullText.includes('triple')) {
                 const id = findSmartId(['medallon', 'patty']);
                 if(id) applyDecrement(id, 1 * qty);
             }
-            // Extra Cheddar
-            if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar')) {
+            if (fullText.includes('extra cheddar')) {
                 const id = findSmartId(['cheddar', 'queso']);
                 if(id) applyDecrement(id, 1 * qty);
             }
-            // Extra Bacon
-            if (fullText.includes('extra bacon') || fullText.includes('adicional bacon') || fullText.includes('panceta')) {
+            if (fullText.includes('extra bacon') || fullText.includes('panceta')) {
                 const id = findSmartId(['bacon', 'panceta']);
                 if(id) applyDecrement(id, 0.03 * qty); 
             }
-
-            // Extras del objeto (importador)
-            if(item.extras){
-                for (const [key, valRaw] of Object.entries(item.extras)) {
-                    const val = Number(valRaw);
-                    if (val > 0) {
-                        let search = key;
-                        if(key==='patty') search = 'medallon';
-                        if(key==='bacon') search = 'panceta';
-                        const ingID = findSmartId([search]);
-                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val);
-                    }
-                }
-            }
         });
 
-        // --- 4. CONSUMIBLES AUTOMÁTICOS (PAPAS, PACKAGING, ETC) ---
+        // --- 3. CONSUMIBLES AUTOMÁTICOS ---
         if(totalBurgers > 0) {
+            logs.push(`🤖 Aplicando automáticos para ${totalBurgers} burgers:`);
             
-            // Función helper local
-            const autoDesc = (keys, amount) => {
+            const autoDesc = (keys, qtyToDeduct, name) => {
                 const id = findSmartId(keys);
-                if(id) applyDecrement(id, amount);
+                if(id) {
+                    applyDecrement(id, qtyToDeduct);
+                    logs.push(`   - ${name}: OK`);
+                } else {
+                    logs.push(`   - ${name}: NO ENCONTRADO EN STOCK`);
+                }
             };
 
-            // Papas: 0.2 KG por burger
-            autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.200); 
-
-            // Cartones: 1 por burger (Entero)
-            autoDesc(['carton', 'caja papa'], totalBurgers); 
-
-            // Papel
-            autoDesc(['parafinado', 'papel'], totalBurgers); 
+            autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.2, "Papas (0.2kg)"); 
+            autoDesc(['carton', 'caja papa'], totalBurgers, "Cartón Papa"); 
+            autoDesc(['parafinado', 'papel'], totalBurgers, "Papel"); 
             
-            // Bolsas: 1 cada 2 burgers (Redondeo arriba)
             const bolsas = Math.ceil(totalBurgers / 2);
-            autoDesc(['bolsa', 'packaging', 'kraft'], bolsas);
+            autoDesc(['bolsa', 'packaging', 'kraft'], bolsas, `Bolsas (${bolsas})`);
+            autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3, `Ganchitos (${bolsas*3})`);
             
-            // Ganchitos: 3 por bolsa
-            autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3);
-            
-            // Tinta: 0.25 ml por unidad (burger + bolsa)
             const unidadesImp = totalBurgers + bolsas;
-            autoDesc(['tinta', 'sello'], unidadesImp * 0.25);
+            autoDesc(['tinta', 'sello'], unidadesImp * 0.25, "Tinta");
 
-            // Sazonador Doritos: Si alguna burger dice "Dorito"
             const hasDoritos = itemsCalc.some(i => (i.name||"").toLowerCase().includes("dorito"));
             if(hasDoritos) {
-                // Asumimos 5g por burger si lleva doritos
-                autoDesc(['dorito', 'polvo', 'sazonador'], totalBurgers * 0.005);
+                autoDesc(['dorito', 'polvo', 'sazonador'], totalBurgers * 0.005, "Sazonador Doritos");
             }
         }
 
@@ -347,9 +333,9 @@
             const pedidoRef = db.collection('orders').doc(pedido.id);
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
-            console.log("✅ Stock actualizado correctamente.");
+            alert("✅ Stock Actualizado con Éxito.\n\nReporte:\n" + logs.join("\n"));
         } else {
-            console.log("⚠️ No hubo cambios de stock.");
+            alert("⚠️ No se descontó nada.\n\nReporte:\n" + logs.join("\n"));
         }
     }
 
