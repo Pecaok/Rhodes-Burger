@@ -115,7 +115,6 @@
 
     // DATOS EN MEMORIA
     let RECETAS_DB = {}; 
-    let SUB_RECIPES_DB = {}; // Mapeo ID -> Data Subreceta
     let INVENTARIO_DB = {}; // Mapeo NombreNormalizado -> ID
     let ID_TO_COLLECTION = {}; // Mapeo ID -> Nombre de Coleccion ('inventory' o 'subrecipes')
     let PRODUCT_CATALOG = {}; 
@@ -144,14 +143,12 @@
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
     });
 
-    // 3. Cargar Items Armados (Subrecetas) y mapearlos
+    // 3. Cargar Items Armados (Subrecetas) - AHORA SOLO MAPEO ID
     db.collection('subrecipes').onSnapshot(snap => {
-        SUB_RECIPES_DB = {};
         snap.forEach(doc => {
             const d = doc.data();
-            SUB_RECIPES_DB[doc.id] = d;
-            ID_TO_COLLECTION[doc.id] = 'subrecipes'; // Guardamos que este ID es de subrecipes
-            if(d.name) INVENTARIO_DB[normalize(d.name)] = doc.id; // También permitimos buscar por nombre
+            ID_TO_COLLECTION[doc.id] = 'subrecipes'; // Importante: Saber que está en subrecipes
+            if(d.name) INVENTARIO_DB[normalize(d.name)] = doc.id; 
         });
     });
 
@@ -159,7 +156,7 @@
     db.collection('inventory').onSnapshot(snap => {
         snap.forEach(doc => { 
             const d = doc.data();
-            ID_TO_COLLECTION[doc.id] = 'inventory'; // Guardamos que este ID es de inventory
+            ID_TO_COLLECTION[doc.id] = 'inventory'; // Importante: Saber que está en inventory
             if(d.name) INVENTARIO_DB[normalize(d.name)] = doc.id; 
         });
     });
@@ -171,14 +168,14 @@
         }
     });
 
-    // Búsqueda inteligente de ID (busca en ambos diccionarios)
+    // Búsqueda inteligente de ID en TODO el stock (unificado)
     function findStockId(keywords) {
-        // Buscar en diccionario de nombres normalizados
+        // Buscar en diccionario
         for (const key of keywords) {
             const norm = normalize(key);
             if (INVENTARIO_DB[norm]) return INVENTARIO_DB[norm];
         }
-        // Búsqueda parcial si falla la exacta
+        // Búsqueda parcial
         const allNames = Object.keys(INVENTARIO_DB);
         for (const stockName of allNames) {
             for (const key of keywords) {
@@ -190,7 +187,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CORREGIDA: SIGNO MATEMÁTICO ARREGLADO)
+    // 🔥 GESTIÓN DE STOCK (SIN DESGLOSE RECURSIVO)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -209,26 +206,15 @@
 
         let totalBurgers = 0;
 
-        // HELPER: Aplicar cambio a la colección correcta
+        // HELPER: Aplicar decremento (Sabe a qué colección ir)
         const applyDecrement = (targetID, amount, logName) => {
             if(!targetID) return false;
             
-            // Determinar colección (inventory o subrecipes)
-            let collectionName = ID_TO_COLLECTION[targetID];
-            
-            // Si no tenemos el mapeo directo, intentamos adivinar
-            if(!collectionName) {
-                if(SUB_RECIPES_DB[targetID]) collectionName = 'subrecipes';
-                else collectionName = 'inventory'; 
-            }
+            // Determinar colección (si no la tenemos mapeada, asumimos inventario por defecto)
+            let collectionName = ID_TO_COLLECTION[targetID] || 'inventory'; 
 
             const ref = db.collection(collectionName).doc(targetID);
-            
-            // 🔥 CORRECCIÓN CRÍTICA:
-            // Si factor es -1 (Entregar) -> Queremos RESTAR. increment(cantidad * -1).
-            // Si factor es 1 (Cancelar) -> Queremos SUMAR. increment(cantidad * 1).
-            // La fórmula correcta es: amount * factor.
-            
+            // Resta: amount * factor (donde factor es -1)
             batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
             
             huboCambios = true;
@@ -246,12 +232,12 @@
 
             logs.push(`📦 ${rawName} (x${qty})`);
 
-            // Detectar si es Burger (para automáticos)
+            // Detectar Burger
             if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big')) {
                 totalBurgers += qty;
             }
 
-            // --- 1. INTENTAR USAR RECETA CONFIGURADA ---
+            // 1. BUSCAR RECETA
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
@@ -263,36 +249,25 @@
                 recipeFound = true;
 
                 ingredientes.forEach(ing => {
-                    let targetID = ing.id; // Nuevo sistema usa ID directo
+                    let targetID = ing.id;
                     let targetQty = Number(ing.qty);
                     
-                    // Fallback sistema viejo (por nombre)
+                    // Fallback para recetas viejas (por nombre)
                     if (!targetID && ing.ingrediente) {
                         targetID = findStockId([ing.ingrediente]);
                         targetQty = Number(ing.cantidad);
                     }
 
                     if (targetID) {
-                        // Verificamos si este ingrediente es una SUB-RECETA (Item Armado)
-                        const sub = SUB_RECIPES_DB[targetID];
-                        if (sub) {
-                            // Si es subreceta, descontamos recursivamente sus ingredientes
-                            logs.push(`   ↳ Desglosando Subreceta: ${sub.name}`);
-                            sub.ingredients.forEach(subIng => {
-                                const subQtyNeeded = Number(subIng.qty) * targetQty * qty;
-                                applyDecrement(subIng.id, subQtyNeeded, subIng.id); // Usamos ID directo
-                            });
-                        } else {
-                            // Es insumo directo
-                            applyDecrement(targetID, targetQty * qty, "Ingrediente receta");
-                        }
+                        // 🔥 CAMBIO: YA NO DESGLOSA SUBRECETAS. DESCUENTA DIRECTO.
+                        applyDecrement(targetID, targetQty * qty, "Item Receta");
                     } else {
-                        logs.push(`   ⚠️ Ingrediente no encontrado en stock: ${ing.ingrediente || 'ID desconocido'}`);
+                        logs.push(`   ⚠️ Item no encontrado: ${ing.ingrediente || 'ID desconocido'}`);
                     }
                 });
             } 
             
-            // --- 2. FALLBACK: SI NO HAY RECETA, INTENTAR DEDUCIR MEDALLONES ---
+            // 2. FALLBACK CARNE (Si no hay receta)
             if (!recipeFound && totalBurgers > 0 && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
@@ -303,12 +278,12 @@
                 if(pattyId) {
                     applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
                 } else {
-                    logs.push(`   ❌ ALERTA: No encontré 'Medallón' en stock para descuento automático.`);
+                    logs.push(`   ❌ ALERTA: No encontré 'Medallón' para descontar.`);
                 }
             }
 
-            // --- 3. EXTRAS (TEXT MINING) ---
-            if (fullText.includes('extra carne') || fullText.includes('adicional carne') || fullText.includes('doble carne')) {
+            // 3. EXTRAS
+            if (fullText.includes('extra carne') || fullText.includes('doble carne') || fullText.includes('triple')) {
                 const id = findStockId(['medallon', 'patty']);
                 if(id) applyDecrement(id, 1 * qty, "Extra Carne");
             }
@@ -321,7 +296,7 @@
                 if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
             }
 
-            // Extras del objeto (importador)
+            // Extras objeto
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -336,7 +311,7 @@
             }
         });
 
-        // --- 4. CONSUMIBLES AUTOMÁTICOS ---
+        // 4. AUTOMÁTICOS
         if(totalBurgers > 0) {
             logs.push(`🤖 Automáticos (${totalBurgers} burgers):`);
             
