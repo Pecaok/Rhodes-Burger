@@ -113,15 +113,12 @@
     }
     checkSession(); setInterval(checkSession, 5*60*1000);
 
-    // =================================================================
-    // 🔥 DATA DE SOPORTE (STOCK)
-    // =================================================================
     let RECETAS_DB = {}; 
+    let SUB_RECIPES = []; 
     let INVENTARIO_DB = {}; 
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
 
-    // Cargar Catálogo
     db.collection('products').onSnapshot(snap => {
         PRODUCT_CATALOG = {};
         snap.forEach(doc => { 
@@ -139,7 +136,10 @@
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
     });
 
-    // FIX: Carga de Inventario Segura
+    db.collection('subrecipes').onSnapshot(snap => {
+        SUB_RECIPES = snap.docs.map(d => ({id: d.id, ...d.data()}));
+    });
+
     db.collection('inventory').onSnapshot(snap => {
         INVENTARIO_DB = {};
         snap.forEach(doc => { 
@@ -175,12 +175,14 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (BLINDADA Y AUTOMÁTICA)
+    // 🔥 GESTIÓN DE STOCK (CON LECTURA DE TEXTO DE PEDIDOS)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
-        if(factor === -1 && pedido.stockDescontado) return;
-        if(factor === 1 && !pedido.stockDescontado) return;
+        if(factor === -1 && pedido.stockDescontado) return; 
+        if(factor === 1 && !pedido.stockDescontado) return; 
+
+        console.log(`🔍 Gestionando Stock Pedido #${pedido.orderNumber} (Factor: ${factor})`);
 
         const batch = db.batch();
         let huboCambios = false;
@@ -192,49 +194,87 @@
 
         let totalBurgers = 0;
 
+        // Helper para restar
+        const applyDecrement = (invID, amount) => {
+            if(!invID) return;
+            const ref = db.collection('inventory').doc(invID);
+            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
+            huboCambios = true;
+        };
+
+        const processIngredient = (targetId, targetQty) => {
+            const sub = SUB_RECIPES.find(s => s.id === targetId);
+            if (sub) {
+                sub.ingredients.forEach(subIng => {
+                    const subQtyNeeded = Number(subIng.qty) * targetQty;
+                    applyDecrement(subIng.id, subQtyNeeded); 
+                });
+                return;
+            }
+            applyDecrement(targetId, targetQty);
+        };
+
         itemsCalc.forEach(item => {
             const rawName = item.name || "Item sin nombre";
+            const rawNotes = item.notes || "";
             const nameNorm = normalize(rawName);
-            const qty = Number(item.qty || 1);
+            const notesNorm = normalize(rawNotes);
+            const fullText = nameNorm + " " + notesNorm; // Para buscar "Extra" en todo el texto
+            const qty = Math.ceil(Number(item.qty || 1)); // Siempre entero hacia arriba
 
             if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')) {
                 totalBurgers += qty;
             }
 
-            // A) BUSCAR RECETA
-            let ingredientes = null;
-            const recipeKeys = Object.keys(RECETAS_DB);
-            let recipeName = recipeKeys.find(k => normalize(k) === nameNorm);
-            if (!recipeName) recipeName = recipeKeys.find(k => nameNorm.includes(normalize(k)));
+            // 1. BUSCAR RECETA
+            let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
+            if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
             if (recipeName) {
-                ingredientes = RECETAS_DB[recipeName];
+                const ingredientes = RECETAS_DB[recipeName];
                 console.log(`✅ Receta encontrada: "${recipeName}"`);
 
                 ingredientes.forEach(ing => {
-                    let targetID = null;
-                    let targetQty = 0;
-
-                    // SOPORTE HÍBRIDO (Viejo vs Nuevo)
-                    if (ing.id) { 
-                        targetID = ing.id; targetQty = Number(ing.qty);
-                    } else if (ing.ingrediente) {
+                    let targetID = ing.id;
+                    let targetQty = Number(ing.qty);
+                    
+                    // Fallback sistema viejo
+                    if (!targetID && ing.ingrediente) {
                         const iName = normalize(ing.ingrediente);
                         targetID = INVENTARIO_DB[iName];
                         if(!targetID) targetID = findSmartId([ing.ingrediente]);
                         targetQty = Number(ing.cantidad);
                     }
 
-                    if (targetID) {
-                        const ref = db.collection('inventory').doc(targetID);
-                        const delta = targetQty * qty * factor;
-                        batch.update(ref, { qty: firebase.firestore.FieldValue.increment(delta) });
-                        huboCambios = true;
-                    }
+                    if (targetID) processIngredient(targetID, targetQty * qty);
                 });
             }
 
-            // C) EXTRAS
+            // 2. LECTURA INTELIGENTE DE EXTRAS (TEXT MINING)
+            // Busca palabras clave en el nombre y notas
+            
+            // Extra Carne / Doble / Triple
+            if (fullText.includes('extra carne') || fullText.includes('adicional carne') || fullText.includes('doble') || fullText.includes('triple')) {
+                const id = findSmartId(['medallon', 'patty', 'carne']);
+                if(id) applyDecrement(id, 1 * qty);
+                console.log("   🥩 Extra Carne detectado");
+            }
+
+            // Extra Cheddar
+            if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar') || fullText.includes('extra queso')) {
+                const id = findSmartId(['cheddar', 'queso']);
+                if(id) applyDecrement(id, 1 * qty);
+                console.log("   🧀 Extra Cheddar detectado");
+            }
+
+            // Extra Bacon
+            if (fullText.includes('extra bacon') || fullText.includes('adicional bacon') || fullText.includes('panceta')) {
+                const id = findSmartId(['bacon', 'panceta']);
+                if(id) applyDecrement(id, 0.03 * qty); // 30g bacon
+                console.log("   🥓 Extra Bacon detectado");
+            }
+
+            // Extras explícitos en objeto (si vienen del importador)
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -242,41 +282,53 @@
                         let search = key;
                         if(key==='patty') search = 'medallon';
                         if(key==='bacon') search = 'panceta';
-                        
                         const ingID = findSmartId([search]);
-                        if(ingID) {
-                            const ref = db.collection('inventory').doc(ingID);
-                            const amount = (key==='bacon' ? 0.03 : 1) * val * factor;
-                            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount) });
-                            huboCambios = true;
-                        }
+                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val);
                     }
                 }
             }
         });
 
-        // --- 2. DESCUENTOS AUTOMÁTICOS ---
+        // --- 3. DESCUENTOS AUTOMÁTICOS ---
         if(totalBurgers > 0) {
-            const autoDesc = (keys, qty) => {
+            const autoDesc = (keys, qtyToDeduct) => {
                 const id = findSmartId(keys);
                 if(id) {
+                    // Para descontar (entregar), 'factor' es -1. 
+                    // increment(cantidadPositiva * -1) resta. Correcto.
                     const ref = db.collection('inventory').doc(id);
-                    // factor ya es -1 al entregar, así que sumamos (cantidad * -1) para restar
-                    batch.update(ref, { qty: firebase.firestore.FieldValue.increment(qty * factor) });
+                    batch.update(ref, { qty: firebase.firestore.FieldValue.increment(qtyToDeduct * factor) });
                     huboCambios = true;
                 }
             };
 
-            autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.200); // 200g
-            autoDesc(['carton', 'caja papa'], totalBurgers); // 1u
-            autoDesc(['parafinado', 'papel'], totalBurgers); // 1u
+            // Papas: 0.2 KG por burger (Fijo)
+            autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.2); 
+
+            // Cartones: Enteros (Math.ceil ya aplicado a totalBurgers)
+            autoDesc(['carton', 'caja papa'], totalBurgers); 
+
+            // Papel
+            autoDesc(['parafinado', 'papel'], totalBurgers); 
             
+            // Bolsas: 1 cada 2, redondeo hacia arriba
             const bolsas = Math.ceil(totalBurgers / 2);
             autoDesc(['bolsa', 'packaging', 'kraft'], bolsas);
-            autoDesc(['ganchito', 'grampa'], bolsas * 3);
             
+            // Ganchitos: 3 por bolsa
+            autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3);
+            
+            // Tinta: 0.25 ml por unidad (burger+bolsa)
             const unidadesImp = totalBurgers + bolsas;
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25);
+
+            // Sazonador Doritos (Búsqueda específica)
+            // Buscamos si ALGUNA burger del pedido tiene "dorito" en el nombre
+            const hasDoritos = itemsCalc.some(i => (i.name||"").toLowerCase().includes("dorito"));
+            if(hasDoritos) {
+                // Asumimos 5g por burger si lleva doritos
+                autoDesc(['dorito', 'polvo', 'sazonador'], totalBurgers * 0.005);
+            }
         }
 
         if (huboCambios) {
@@ -499,10 +551,11 @@
                         }
                         
                         let note = "";
+                        // Detectar aclaraciones entre corchetes
                         if(name.includes('[')) {
                             const nMatch = name.match(/\[(.*?)\]/);
                             if(nMatch) {
-                                note = nMatch[1];
+                                note = nMatch[1]; // Guardamos la nota para el text mining después
                                 name = name.replace(/\[.*?\]/, "").trim();
                             }
                         }
