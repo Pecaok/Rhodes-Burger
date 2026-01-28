@@ -196,6 +196,7 @@
                         <option value="verdularia">Verdura</option>
                         <option value="bebidas">Bebidas</option>
                         <option value="packaging">Packaging</option>
+                        <option value="🧩 Armado">🧩 Items Armados</option>
                     </select>
                 </div>
             </div>
@@ -326,7 +327,7 @@
         return isNaN(d.getTime()) ? null : d;
     };
 
-    let INVENTORY=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
+    let INVENTORY=[], RAW_STOCK=[], PREMADE_STOCK=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
     let FIXED_DATA = { fixed:[], prod:[], config:{taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
     let currentRecipeId = null, currentSubRecipeId = null;
     let chartMain=null, chartDaily=null, chartProds=null, chartPayment=null;
@@ -338,9 +339,40 @@
         if(el) el.innerHTML = `<div style="padding:10px; color:${isError?'red':'#666'}; font-weight:600">${msg}</div>`;
     }
 
-    // LOADERS
-    window.loadInventory = function() { db.collection('inventory').orderBy('name').onSnapshot(snap => { INVENTORY=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderStockTable(); window.renderCostTables(); window.renderRecipesList(); window.renderSubRecipesList(); }); };
-    window.loadSubRecipes = function() { db.collection('subrecipes').onSnapshot(snap => { SUB_RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderSubRecipesList(); }); };
+    // --- CARGADORES UNIFICADOS ---
+    window.loadInventory = function() {
+        // 1. Cargar Insumos Puros
+        db.collection('inventory').orderBy('name').onSnapshot(snap => {
+            RAW_STOCK = snap.docs.map(d => ({id:d.id, ...d.data(), isSub: false}));
+            window.combineAndRender();
+        });
+
+        // 2. Cargar Items de Armado (Subrecetas) y transformarlos para que parezcan insumos
+        db.collection('subrecipes').onSnapshot(snap => {
+            SUB_RECIPES = snap.docs.map(d => ({id:d.id, ...d.data()})); // Guardamos original para costos
+            PREMADE_STOCK = snap.docs.map(d => ({
+                id: d.id,
+                ...d.data(),
+                category: '🧩 Armado', // Forzar categoría visual
+                isSub: true,
+                unit: 'u', // Por defecto unidad
+                qty: d.data().qty || 0, // Asegurar que tenga campo qty
+                min: d.data().min || 0
+            }));
+            window.combineAndRender();
+        });
+    };
+
+    window.combineAndRender = function() {
+        // Fusionamos ambas listas en la variable global INVENTORY
+        INVENTORY = [...RAW_STOCK, ...PREMADE_STOCK];
+        // Renderizamos tablas y listas
+        window.renderStockTable();
+        window.renderCostTables();
+        window.renderRecipesList(); 
+        window.renderSubRecipesList();
+    };
+
     window.loadRecipes = function() { db.collection('recipes').onSnapshot(snap => { RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderRecipesList(); }); };
     window.loadFixedData = function() { 
         db.collection('config').doc('gerencia').onSnapshot(doc => {
@@ -353,46 +385,68 @@
         });
     };
 
-    // RENDER STOCK (NUEVO DISEÑO)
+    // RENDER STOCK (UNIFICADO)
     window.renderStockTable = function() {
         const t=$('#searchStock').value.toLowerCase();
         const c=$('#filterCat').value;
         const b=$('#stockTableBody'); b.innerHTML='';
+        
         INVENTORY.filter(p=>(p.name||"").toLowerCase().includes(t) && (c==='all'||p.category===c)).forEach(p=>{
             let stHtml = `<span class="status-dot st-ok"></span>OK`;
             if(p.qty<=p.min) stHtml=`<span class="status-dot st-danger"></span>CRIT`; 
             else if(p.qty<=p.min*1.5) stHtml=`<span class="status-dot st-warn"></span>BAJO`;
+            
+            // Botones de acción diferentes si es Subreceta
+            let actions = `<button class="btn-icon" onclick="openProductModal('${p.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button>`;
+            if(p.isSub) {
+                // Si es subreceta, el lápiz lleva al editor de armado, y borrar borra la subreceta
+                actions = `<button class="btn-icon" onclick="openSubRecipeEditor('${p.id}')">🧩</button><button class="btn-icon" onclick="deleteItem('subrecipes','${p.id}')">🗑️</button>`;
+            }
+
             b.insertAdjacentHTML('beforeend', `<tr>
-                <td><b>${p.name}</b></td><td><small>${p.category}</small></td>
-                <td><div class="qty-control"><button class="qty-btn" onclick="updStock('${p.id}',-1)">-</button><b>${formatQty(p.qty)}</b><button class="qty-btn" onclick="updStock('${p.id}',1)">+</button><small style="margin-left:5px">${p.unit}</small></div></td>
-                <td>${p.min}</td><td>${stHtml}</td>
-                <td><button class="btn-icon" onclick="openProductModal('${p.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td>
+                <td><b>${p.name}</b></td>
+                <td><small>${p.category}</small></td>
+                <td>
+                    <div class="qty-control">
+                        <button class="qty-btn" onclick="updStock('${p.id}',-1)">-</button>
+                        <b>${formatQty(p.qty)}</b>
+                        <button class="qty-btn" onclick="updStock('${p.id}',1)">+</button>
+                        <small style="margin-left:5px">${p.unit}</small>
+                    </div>
+                </td>
+                <td>${p.min}</td>
+                <td>${stHtml}</td>
+                <td>${actions}</td>
             </tr>`);
         });
     };
-    window.updStock = (id, v) => { const p=INVENTORY.find(i=>i.id===id); if(p) db.collection('inventory').doc(id).update({qty: Number(p.qty)+v}); };
 
-    // --- LOGICA DE RECETAS FINALES (CON MODAL Y SUBRECETAS) ---
+    // UPDATE STOCK INTELIGENTE (Sabe dónde guardar)
+    window.updStock = (id, v) => {
+        const item = INVENTORY.find(i => i.id === id);
+        if(!item) return;
+        const collection = item.isSub ? 'subrecipes' : 'inventory';
+        const newQty = Number(item.qty || 0) + v;
+        db.collection(collection).doc(id).update({ qty: newQty });
+    };
+
+    // --- LOGICA DE RECETAS FINALES ---
     window.openRecipeModal = function(id) {
         $('#modalRecipe').style.display = 'flex';
         $('#recName').value = '';
         $('#recIngQty').value = '';
         currentRecipeIngs = [];
         
-        // Cargar Selector Inteligente
         const s = $('#recIngSelect'); s.innerHTML = '<option value="">Seleccionar...</option>';
-        // 1. Items Armados
         if(SUB_RECIPES.length) {
             s.insertAdjacentHTML('beforeend', '<optgroup label="🧩 Armado de Items">');
             SUB_RECIPES.forEach(sub => s.insertAdjacentHTML('beforeend', `<option value="${sub.id}">🧩 ${sub.name}</option>`));
             s.insertAdjacentHTML('beforeend', '</optgroup>');
         }
-        // 2. Insumos
         s.insertAdjacentHTML('beforeend', '<optgroup label="📦 Insumos">');
-        INVENTORY.sort((a,b)=>a.name.localeCompare(b.name)).forEach(i => s.insertAdjacentHTML('beforeend', `<option value="${i.id}">${i.name} (${i.unit})</option>`));
+        RAW_STOCK.sort((a,b)=>a.name.localeCompare(b.name)).forEach(i => s.insertAdjacentHTML('beforeend', `<option value="${i.id}">${i.name} (${i.unit})</option>`));
         s.insertAdjacentHTML('beforeend', '</optgroup>');
 
-        // Si es editar
         if(id) {
             const r = RECIPES.find(x => x.id === id);
             if(r) {
@@ -408,12 +462,10 @@
         const qty = Number($('#recIngQty').value);
         if(!id || qty <= 0) return alert("Selecciona ítem y cantidad");
         
-        // Detectar si es sub o insumo para mostrar nombre
-        const sub = SUB_RECIPES.find(s => s.id === id);
-        const inv = INVENTORY.find(i => i.id === id);
-        const name = sub ? `🧩 ${sub.name}` : (inv ? inv.name : "???");
+        const item = INVENTORY.find(i => i.id === id); // Busca en la lista unificada
+        const name = item ? (item.isSub ? `🧩 ${item.name}` : item.name) : "???";
         
-        currentRecipeIngs.push({ id: id, qty: qty, _name: name }); // _name solo visual
+        currentRecipeIngs.push({ id: id, qty: qty, _name: name });
         window.renderCurrentRecipeList();
         $('#recIngQty').value = '';
     };
@@ -423,11 +475,9 @@
         if(!currentRecipeIngs.length) return c.innerHTML='<div style="text-align:center; color:#999; font-size:12px">Lista vacía</div>';
         
         currentRecipeIngs.forEach((item, idx) => {
-            // Recalcular nombre si viene de DB
             if(!item._name) {
-                const sub = SUB_RECIPES.find(s => s.id === item.id);
-                const inv = INVENTORY.find(i => i.id === item.id);
-                item._name = sub ? `🧩 ${sub.name}` : (inv ? inv.name : "???");
+                const i = INVENTORY.find(x => x.id === item.id);
+                item._name = i ? (i.isSub ? `🧩 ${i.name}` : i.name) : "???";
             }
             c.insertAdjacentHTML('beforeend', `<div class="ing-item"><span><b>${item.qty}</b> x ${item._name}</span> <button style="color:red;border:none;background:none;cursor:pointer" onclick="currentRecipeIngs.splice(${idx},1);window.renderCurrentRecipeList()">×</button></div>`);
         });
@@ -436,7 +486,6 @@
     window.saveRecipe = async function() {
         const name = $('#recName').value.trim();
         if(!name || !currentRecipeIngs.length) return alert("Falta nombre o ingredientes");
-        // Guardamos solo ID y Qty limpio
         const cleanIngs = currentRecipeIngs.map(i => ({ id: i.id, qty: i.qty }));
         await db.collection('recipes').doc(name).set({ ingredients: cleanIngs });
         alert("Receta guardada!");
@@ -594,7 +643,7 @@
     window.calculateSubRecipeCost = (sb) => (sb.ingredients||[]).reduce((s,i)=>{const it=INVENTORY.find(x=>x.id===i.id);return s+(i.qty*(it?it.cost:0))},0);
     
     // --- HELPER UI ---
-    window.renderCostTables = function() { const rr=(a,t)=>{ $(t).innerHTML=a.map(p=>`<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); }; rr(INVENTORY.filter(p=>p.category!=='packaging'),'#costMateriaBody'); rr(INVENTORY.filter(p=>p.category==='packaging'),'#costPackBody'); };
+    window.renderCostTables = function() { const rr=(a,t)=>{ $(t).innerHTML=a.map(p=>`<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); }; rr(INVENTORY.filter(p=>p.category!=='packaging' && !p.isSub),'#costMateriaBody'); rr(INVENTORY.filter(p=>p.category==='packaging'),'#costPackBody'); };
     window.renderSubRecipesList = function(f="") { const c=$('#subRecipesListBody'), cf=f.toLowerCase(); c.innerHTML=SUB_RECIPES.filter(s=>s.name.toLowerCase().includes(cf)).map(s=>`<div onclick="openSubRecipeEditor('${s.id}')" style="padding:15px;cursor:pointer;border-bottom:1px solid #f1f5f9;${s.id===currentSubRecipeId?'background:#f8fafc;border-left:3px solid var(--purple)':''}"><div style="font-weight:600;font-size:13px">${s.name}</div><div style="font-size:12px;color:var(--purple);font-weight:700">${money(window.calculateSubRecipeCost(s))}</div></div>`).join('')||'<div style="padding:20px;text-align:center;color:#ccc;font-size:12px">No hay items</div>'; };
     window.updateUnitSelect = function(m) { const s=m==='sub'?$('#newSubUnit'):$('#newRecUnit'), p=INVENTORY.find(i=>i.id===(m==='sub'?$('#newSubIng').value:$('#newRecIng').value)); if(!s)return; let h='<option value="1">Unidad</option>'; if(p){const u=(p.unit||'').toLowerCase(); if(u.includes('k')) h='<option value="1">Kg</option><option value="0.001">Gr</option>'; else if(u.includes('l')) h='<option value="1">Lt</option><option value="0.001">Ml</option>'; else if(u.includes('m')) h='<option value="1">Mts</option><option value="0.01">Cm</option>'; else if(u.includes('g')) h='<option value="1">Gr</option><option value="1000">Kg</option>';} s.innerHTML=h; };
     
@@ -602,10 +651,10 @@
     window.openProductModal = function(id, cat) { $('#modalProduct').style.display='flex'; if(id && typeof id==='string'){ const p=INVENTORY.find(i=>i.id===id); $('#mpTitle').innerText='Editar'; $('#mpId').value=id; $('#mpName').value=p.name; $('#mpCat').value=p.category; $('#mpQty').value=p.qty; $('#mpUnit').value=p.unit; $('#mpPurchCost').value=p.purchCost||p.cost; $('#mpFormat').value=p.format||''; $('#mpYield').value=p.yield||1; $('#mpMin').value=p.min||5; } else { $('#mpTitle').innerText='Nuevo'; $('#mpId').value=''; $('#mpName').value=''; $('#mpQty').value=0; $('#mpPurchCost').value=0; $('#mpYield').value=1; if(cat)$('#mpCat').value=cat; } };
     window.saveProduct = async function() { const id=$('#mpId').value, pc=Number($('#mpPurchCost').value), y=Number($('#mpYield').value); const d={name:$('#mpName').value, category:$('#mpCat').value, qty:Number($('#mpQty').value), unit:$('#mpUnit').value, purchCost:pc, format:$('#mpFormat').value, yield:y, min:Number($('#mpMin').value), cost:y>0?pc/y:0}; if(!d.name)return; id?await db.collection('inventory').doc(id).update(d):await db.collection('inventory').add(d); $('#modalProduct').style.display='none'; };
     window.openPurchaseModal = function() { $('#modalPurchase').style.display='flex'; $('#purProd').innerHTML=INVENTORY.map(p=>`<option value="${p.id}">${p.name} (${formatQty(p.qty)})</option>`).join(''); $('#purQty').value=''; $('#purTotal').value=''; };
-    window.confirmPurchase = async function() { const pid=$('#purProd').value, q=Number($('#purQty').value), t=Number($('#purTotal').value), d=$('#purDate').value; if(!pid||q<=0)return; await db.collection('purchases').add({prodId:pid, qty:q, total:t, date:d, prodName:INVENTORY.find(i=>i.id===pid)?.name}); const p=INVENTORY.find(i=>i.id===pid); if(p) await db.collection('inventory').doc(pid).update({qty:Number(p.qty)+q}); alert("Registrado"); $('#modalPurchase').style.display='none'; window.loadDashboardData(); };
-    window.addNewSubRecipe = async function() { const n=prompt("Nombre:"); if(n) await db.collection('subrecipes').add({name:n, ingredients:[]}); };
+    window.confirmPurchase = async function() { const pid=$('#purProd').value, q=Number($('#purQty').value), t=Number($('#purTotal').value), d=$('#purDate').value; if(!pid||q<=0)return; await db.collection('purchases').add({prodId:pid, qty:q, total:t, date:d, prodName:INVENTORY.find(i=>i.id===pid)?.name}); const p=INVENTORY.find(i=>i.id===pid); if(p) { const col=p.isSub?'subrecipes':'inventory'; await db.collection(col).doc(pid).update({qty:Number(p.qty)+q}); } alert("Registrado"); $('#modalPurchase').style.display='none'; window.loadDashboardData(); };
+    window.addNewSubRecipe = async function() { const n=prompt("Nombre:"); if(n) await db.collection('subrecipes').add({name:n, ingredients:[], qty:0}); };
     window.addNewRecipe = async function() { const n=prompt("Nombre:"); if(n) await db.collection('recipes').doc(n).set({ingredients:[]}); };
-    window.openSubRecipeEditor = function(id) { currentSubRecipeId=id; $('#subRecipeEditor').style.display='flex'; $('#subRecipeEmpty').style.display='none'; window.renderSubRecipesList(); const s=SUB_RECIPES.find(x=>x.id===id); $('#subEditorTitle').innerText=s.name; $('#newSubIng').innerHTML=INVENTORY.map(i=>`<option value="${i.id}">${i.name} ($${parseFloat(i.cost).toFixed(2)})</option>`).join(''); window.updateUnitSelect('sub'); let tc=0; $('#subRecipeIngBody').innerHTML=(s.ingredients||[]).map((ing,i)=>{ const it=INVENTORY.find(x=>x.id===ing.id), c=(it?Number(it.cost):0)*Number(ing.qty); tc+=c; return `<tr><td>${it?it.name:'?'}</td><td>${formatQty(ing.qty)}</td><td>${money(it?it.cost:0)}</td><td>${money(c)}</td><td><button class="btn-icon" onclick="removeSubIng('${id}',${i})">🗑️</button></td></tr>`; }).join(''); $('#subEditorTotalCost').innerText=money(tc); };
+    window.openSubRecipeEditor = function(id) { currentSubRecipeId=id; $('#subRecipeEditor').style.display='flex'; $('#subRecipeEmpty').style.display='none'; window.renderSubRecipesList(); const s=SUB_RECIPES.find(x=>x.id===id); $('#subEditorTitle').innerText=s.name; $('#newSubIng').innerHTML=INVENTORY.filter(i=>!i.isSub).map(i=>`<option value="${i.id}">${i.name} ($${parseFloat(i.cost).toFixed(2)})</option>`).join(''); window.updateUnitSelect('sub'); let tc=0; $('#subRecipeIngBody').innerHTML=(s.ingredients||[]).map((ing,i)=>{ const it=INVENTORY.find(x=>x.id===ing.id), c=(it?Number(it.cost):0)*Number(ing.qty); tc+=c; return `<tr><td>${it?it.name:'?'}</td><td>${formatQty(ing.qty)}</td><td>${money(it?it.cost:0)}</td><td>${money(c)}</td><td><button class="btn-icon" onclick="removeSubIng('${id}',${i})">🗑️</button></td></tr>`; }).join(''); $('#subEditorTotalCost').innerText=money(tc); };
     window.addIngToSubRecipe = async function() { const id=$('#newSubIng').value, q=Number($('#newSubQty').value), m=Number($('#newSubUnit').value); if(!id||q<=0)return; const s=SUB_RECIPES.find(x=>x.id===currentSubRecipeId), n=[...(s.ingredients||[]),{id,qty:q*m}]; await db.collection('subrecipes').doc(currentSubRecipeId).update({ingredients:n}); };
     window.removeSubIng = async function(sid,i) { const s=SUB_RECIPES.find(x=>x.id===sid), n=[...s.ingredients]; n.splice(i,1); await db.collection('subrecipes').doc(sid).update({ingredients:n}); };
     window.deleteItem = async function(c,id) { if(confirm('¿Borrar?')){ await db.collection(c).doc(id).delete(); if(c==='recipes') $('#recipeEditor').style.display='none'; if(c==='subrecipes') $('#subRecipeEditor').style.display='none'; } };
@@ -622,12 +671,11 @@
     window.saveConfig = window.saveFixedData;
     window.showTab = function(id) { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); };
 
-    // INICIAR
     window.addEventListener('load', () => {
         const now = new Date();
         $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
         $('#monthPicker').addEventListener('change', window.loadDashboardData);
-        window.loadInventory(); window.loadSubRecipes(); window.loadRecipes(); window.loadFixedData(); window.loadDashboardData();
+        window.loadInventory(); window.loadRecipes(); window.loadFixedData(); window.loadDashboardData();
     });
 </script>
 </body>
