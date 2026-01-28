@@ -190,7 +190,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (AHORA SÍ, COMPLETA Y ROBUSTA)
+    // 🔥 GESTIÓN DE STOCK (CORREGIDA: SIGNO MATEMÁTICO ARREGLADO)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -209,22 +209,28 @@
 
         let totalBurgers = 0;
 
-        // HELPER: Aplicar decremento a la colección correcta
+        // HELPER: Aplicar cambio a la colección correcta
         const applyDecrement = (targetID, amount, logName) => {
             if(!targetID) return false;
             
             // Determinar colección (inventory o subrecipes)
             let collectionName = ID_TO_COLLECTION[targetID];
             
-            // Si no tenemos el mapeo directo, intentamos adivinar por existencia en diccionarios
+            // Si no tenemos el mapeo directo, intentamos adivinar
             if(!collectionName) {
                 if(SUB_RECIPES_DB[targetID]) collectionName = 'subrecipes';
-                else collectionName = 'inventory'; // Default a inventario
+                else collectionName = 'inventory'; 
             }
 
             const ref = db.collection(collectionName).doc(targetID);
-            // Multiplicamos por -1 al entregar (factor=-1) para restar
-            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor * -1) });
+            
+            // 🔥 CORRECCIÓN CRÍTICA:
+            // Si factor es -1 (Entregar) -> Queremos RESTAR. increment(cantidad * -1).
+            // Si factor es 1 (Cancelar) -> Queremos SUMAR. increment(cantidad * 1).
+            // La fórmula correcta es: amount * factor.
+            
+            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
+            
             huboCambios = true;
             if(logName) logs.push(`   - ${logName}: ${amount} (en ${collectionName})`);
             return true;
@@ -267,7 +273,19 @@
                     }
 
                     if (targetID) {
-                        applyDecrement(targetID, targetQty * qty, "Ingrediente receta");
+                        // Verificamos si este ingrediente es una SUB-RECETA (Item Armado)
+                        const sub = SUB_RECIPES_DB[targetID];
+                        if (sub) {
+                            // Si es subreceta, descontamos recursivamente sus ingredientes
+                            logs.push(`   ↳ Desglosando Subreceta: ${sub.name}`);
+                            sub.ingredients.forEach(subIng => {
+                                const subQtyNeeded = Number(subIng.qty) * targetQty * qty;
+                                applyDecrement(subIng.id, subQtyNeeded, subIng.id); // Usamos ID directo
+                            });
+                        } else {
+                            // Es insumo directo
+                            applyDecrement(targetID, targetQty * qty, "Ingrediente receta");
+                        }
                     } else {
                         logs.push(`   ⚠️ Ingrediente no encontrado en stock: ${ing.ingrediente || 'ID desconocido'}`);
                     }
@@ -285,7 +303,7 @@
                 if(pattyId) {
                     applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
                 } else {
-                    logs.push(`   ❌ ALERTA: No encontré 'Medallón' en stock para descontar.`);
+                    logs.push(`   ❌ ALERTA: No encontré 'Medallón' en stock para descuento automático.`);
                 }
             }
 
