@@ -115,8 +115,8 @@
 
     // DATOS EN MEMORIA
     let RECETAS_DB = {}; 
-    let INVENTARIO_DB = {}; // Mapeo NombreNormalizado -> ID
-    let ID_TO_COLLECTION = {}; // Mapeo ID -> Nombre de Coleccion ('inventory' o 'subrecipes')
+    let GLOBAL_STOCK_DB = {}; // Mapeo ID -> {nombre, coleccion}
+    let STOCK_NAME_TO_ID = {}; // Mapeo Nombre -> ID
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
 
@@ -124,7 +124,7 @@
         return String(str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     }
 
-    // 1. Cargar Productos (Categorías)
+    // 1. Cargar Productos
     db.collection('products').onSnapshot(snap => {
         PRODUCT_CATALOG = {};
         snap.forEach(doc => { 
@@ -143,21 +143,21 @@
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
     });
 
-    // 3. Cargar Items Armados (Subrecetas) - AHORA SOLO MAPEO ID
+    // 3. Cargar Items Armados (Subrecetas) -> GUARDAR EN BOLSA GLOBAL
     db.collection('subrecipes').onSnapshot(snap => {
         snap.forEach(doc => {
             const d = doc.data();
-            ID_TO_COLLECTION[doc.id] = 'subrecipes'; // Importante: Saber que está en subrecipes
-            if(d.name) INVENTARIO_DB[normalize(d.name)] = doc.id; 
+            GLOBAL_STOCK_DB[doc.id] = { col: 'subrecipes', name: d.name };
+            if(d.name) STOCK_NAME_TO_ID[normalize(d.name)] = doc.id;
         });
     });
 
-    // 4. Cargar Inventario (Materia Prima)
+    // 4. Cargar Inventario (Materia Prima) -> GUARDAR EN BOLSA GLOBAL
     db.collection('inventory').onSnapshot(snap => {
         snap.forEach(doc => { 
             const d = doc.data();
-            ID_TO_COLLECTION[doc.id] = 'inventory'; // Importante: Saber que está en inventory
-            if(d.name) INVENTARIO_DB[normalize(d.name)] = doc.id; 
+            GLOBAL_STOCK_DB[doc.id] = { col: 'inventory', name: d.name };
+            if(d.name) STOCK_NAME_TO_ID[normalize(d.name)] = doc.id;
         });
     });
     
@@ -168,26 +168,26 @@
         }
     });
 
-    // Búsqueda inteligente de ID en TODO el stock (unificado)
-    function findStockId(keywords) {
-        // Buscar en diccionario
+    // Búsqueda inteligente
+    function findSmartId(keywords) {
+        // 1. Buscar Exacto en diccionario
         for (const key of keywords) {
             const norm = normalize(key);
-            if (INVENTARIO_DB[norm]) return INVENTARIO_DB[norm];
+            if (STOCK_NAME_TO_ID[norm]) return STOCK_NAME_TO_ID[norm];
         }
-        // Búsqueda parcial
-        const allNames = Object.keys(INVENTARIO_DB);
-        for (const stockName of allNames) {
+        // 2. Buscar Parcial en diccionario
+        const allNormNames = Object.keys(STOCK_NAME_TO_ID);
+        for (const dbName of allNormNames) {
             for (const key of keywords) {
                 const normKey = normalize(key);
-                if (stockName.includes(normKey) || normKey.includes(stockName)) return INVENTARIO_DB[stockName];
+                if (dbName.includes(normKey) || normKey.includes(dbName)) return STOCK_NAME_TO_ID[dbName];
             }
         }
         return null;
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (SIN DESGLOSE RECURSIVO)
+    // 🔥 GESTIÓN DE STOCK (UNIFICADA Y SIN RECURSIVIDAD COMPLEJA)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -206,28 +206,33 @@
 
         let totalBurgers = 0;
 
-        // HELPER: Aplicar decremento (Sabe a qué colección ir)
+        // HELPER: Decrementar
         const applyDecrement = (targetID, amount, logName) => {
             if(!targetID) return false;
             
-            // Determinar colección (si no la tenemos mapeada, asumimos inventario por defecto)
-            let collectionName = ID_TO_COLLECTION[targetID] || 'inventory'; 
+            // Buscar en la bolsa global
+            const info = GLOBAL_STOCK_DB[targetID];
+            let collectionName = 'inventory'; // Default
+            
+            if(info) collectionName = info.col;
+            else {
+                // Si no está en memoria (raro), intentamos adivinar o usamos inventory
+                console.warn("ID no encontrado en cache global:", targetID);
+            }
 
             const ref = db.collection(collectionName).doc(targetID);
-            // Resta: amount * factor (donde factor es -1)
+            // IMPORTANTE: factor -1 (entregar) * cantidad = resta.
             batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
             
             huboCambios = true;
-            if(logName) logs.push(`   - ${logName}: ${amount} (en ${collectionName})`);
+            logs.push(`   - ${logName || (info ? info.name : 'Unknown')}: ${amount} (en ${collectionName})`);
             return true;
         };
 
         itemsCalc.forEach(item => {
             const rawName = item.name || "Item sin nombre";
-            const rawNotes = item.notes || "";
             const nameNorm = normalize(rawName);
-            const notesNorm = normalize(rawNotes);
-            const fullText = nameNorm + " " + notesNorm; 
+            const fullText = nameNorm + " " + normalize(item.notes||""); 
             const qty = Math.ceil(Number(item.qty || 1));
 
             logs.push(`📦 ${rawName} (x${qty})`);
@@ -252,17 +257,16 @@
                     let targetID = ing.id;
                     let targetQty = Number(ing.qty);
                     
-                    // Fallback para recetas viejas (por nombre)
+                    // Fallback sistema viejo (por nombre)
                     if (!targetID && ing.ingrediente) {
-                        targetID = findStockId([ing.ingrediente]);
+                        targetID = findSmartId([ing.ingrediente]);
                         targetQty = Number(ing.cantidad);
                     }
 
                     if (targetID) {
-                        // 🔥 CAMBIO: YA NO DESGLOSA SUBRECETAS. DESCUENTA DIRECTO.
                         applyDecrement(targetID, targetQty * qty, "Item Receta");
                     } else {
-                        logs.push(`   ⚠️ Item no encontrado: ${ing.ingrediente || 'ID desconocido'}`);
+                        logs.push(`   ⚠️ Item no encontrado en stock: ${ing.ingrediente || targetID}`);
                     }
                 });
             } 
@@ -274,7 +278,7 @@
                 if(nameNorm.includes('triple')) patties = 3;
                 if(nameNorm.includes('cuadruple')) patties = 4;
 
-                const pattyId = findStockId(['medallon', 'carne', 'patty']);
+                const pattyId = findSmartId(['medallon', 'carne', 'patty']);
                 if(pattyId) {
                     applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
                 } else {
@@ -284,15 +288,15 @@
 
             // 3. EXTRAS
             if (fullText.includes('extra carne') || fullText.includes('doble carne') || fullText.includes('triple')) {
-                const id = findStockId(['medallon', 'patty']);
+                const id = findSmartId(['medallon', 'patty']);
                 if(id) applyDecrement(id, 1 * qty, "Extra Carne");
             }
             if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar')) {
-                const id = findStockId(['cheddar', 'queso']);
+                const id = findSmartId(['cheddar', 'queso']);
                 if(id) applyDecrement(id, 1 * qty, "Extra Cheddar");
             }
             if (fullText.includes('extra bacon') || fullText.includes('panceta')) {
-                const id = findStockId(['bacon', 'panceta']);
+                const id = findSmartId(['bacon', 'panceta']);
                 if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
             }
 
@@ -304,7 +308,7 @@
                         let search = key;
                         if(key==='patty') search = 'medallon';
                         if(key==='bacon') search = 'panceta';
-                        const ingID = findStockId([search]);
+                        const ingID = findSmartId([search]);
                         if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val, `Extra ${key}`);
                     }
                 }
@@ -314,14 +318,10 @@
         // 4. AUTOMÁTICOS
         if(totalBurgers > 0) {
             logs.push(`🤖 Automáticos (${totalBurgers} burgers):`);
-            
             const autoDesc = (keys, qtyToDeduct, name) => {
-                const id = findStockId(keys);
-                if(id) {
-                    applyDecrement(id, qtyToDeduct, name);
-                } else {
-                    logs.push(`   ⚠️ Falta stock: ${name}`);
-                }
+                const id = findSmartId(keys);
+                if(id) applyDecrement(id, qtyToDeduct, name);
+                else logs.push(`   ⚠️ Falta stock: ${name}`);
             };
 
             autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.200, "Papas (0.2kg)"); 
