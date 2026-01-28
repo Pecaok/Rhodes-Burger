@@ -115,8 +115,10 @@
 
     // DATOS EN MEMORIA
     let RECETAS_DB = {}; 
-    let GLOBAL_STOCK_DB = {}; // Mapeo ID -> {nombre, coleccion}
-    let STOCK_NAME_TO_ID = {}; // Mapeo Nombre -> ID
+    let SUB_RECIPES_DB = {}; 
+    let INVENTARIO_DB = {}; 
+    let ID_TO_COLLECTION = {}; 
+    let STOCK_NAME_TO_ID = {}; // Bolsa Global de Nombres (Insumos + Subrecetas)
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
 
@@ -137,45 +139,42 @@
         if(window.lastSnap) renderList(window.lastSnap); 
     });
 
-    // 2. Cargar Recetas Finales
+    // 2. Cargar Recetas
     db.collection('recipes').onSnapshot(snap => {
         RECETAS_DB = {};
         snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
     });
 
-    // 3. Cargar Items Armados (Subrecetas) -> GUARDAR EN BOLSA GLOBAL
+    // 3. Cargar Items Armados -> A Bolsa Global
     db.collection('subrecipes').onSnapshot(snap => {
         snap.forEach(doc => {
             const d = doc.data();
-            GLOBAL_STOCK_DB[doc.id] = { col: 'subrecipes', name: d.name };
+            SUB_RECIPES_DB[doc.id] = d;
+            ID_TO_COLLECTION[doc.id] = 'subrecipes'; 
             if(d.name) STOCK_NAME_TO_ID[normalize(d.name)] = doc.id;
         });
     });
 
-    // 4. Cargar Inventario (Materia Prima) -> GUARDAR EN BOLSA GLOBAL
+    // 4. Cargar Inventario -> A Bolsa Global
     db.collection('inventory').onSnapshot(snap => {
         snap.forEach(doc => { 
             const d = doc.data();
-            GLOBAL_STOCK_DB[doc.id] = { col: 'inventory', name: d.name };
+            INVENTARIO_DB[normalize(d.name)] = doc.id; // Legacy
+            ID_TO_COLLECTION[doc.id] = 'inventory'; 
             if(d.name) STOCK_NAME_TO_ID[normalize(d.name)] = doc.id;
         });
     });
     
     db.collection('config').doc('prices').onSnapshot(doc => {
-        if(doc.exists) {
-            PRICES_DB = doc.data();
-            if(window.lastSnap) renderList(window.lastSnap); 
-        }
+        if(doc.exists) { PRICES_DB = doc.data(); if(window.lastSnap) renderList(window.lastSnap); }
     });
 
-    // Búsqueda inteligente
+    // Búsqueda inteligente (busca en la bolsa global)
     function findSmartId(keywords) {
-        // 1. Buscar Exacto en diccionario
         for (const key of keywords) {
             const norm = normalize(key);
             if (STOCK_NAME_TO_ID[norm]) return STOCK_NAME_TO_ID[norm];
         }
-        // 2. Buscar Parcial en diccionario
         const allNormNames = Object.keys(STOCK_NAME_TO_ID);
         for (const dbName of allNormNames) {
             for (const key of keywords) {
@@ -187,14 +186,12 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (UNIFICADA Y SIN RECURSIVIDAD COMPLEJA)
+    // 🔥 GESTIÓN DE STOCK (CORREGIDA: ENTEROS, AUTOMÁTICOS Y SIGNOS)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
         if(factor === -1 && pedido.stockDescontado) return; 
         if(factor === 1 && !pedido.stockDescontado) return; 
-
-        console.log(`🔍 Gestionando Stock Pedido #${pedido.orderNumber} (Factor: ${factor})`);
 
         const batch = db.batch();
         let huboCambios = false;
@@ -209,23 +206,12 @@
         // HELPER: Decrementar
         const applyDecrement = (targetID, amount, logName) => {
             if(!targetID) return false;
-            
-            // Buscar en la bolsa global
-            const info = GLOBAL_STOCK_DB[targetID];
-            let collectionName = 'inventory'; // Default
-            
-            if(info) collectionName = info.col;
-            else {
-                // Si no está en memoria (raro), intentamos adivinar o usamos inventory
-                console.warn("ID no encontrado en cache global:", targetID);
-            }
-
+            let collectionName = ID_TO_COLLECTION[targetID] || 'inventory'; 
             const ref = db.collection(collectionName).doc(targetID);
             // IMPORTANTE: factor -1 (entregar) * cantidad = resta.
             batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
-            
             huboCambios = true;
-            logs.push(`   - ${logName || (info ? info.name : 'Unknown')}: ${amount} (en ${collectionName})`);
+            logs.push(`   - ${logName || 'Item'}: ${amount} (en ${collectionName})`);
             return true;
         };
 
@@ -237,7 +223,6 @@
 
             logs.push(`📦 ${rawName} (x${qty})`);
 
-            // Detectar Burger
             if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big')) {
                 totalBurgers += qty;
             }
@@ -257,7 +242,6 @@
                     let targetID = ing.id;
                     let targetQty = Number(ing.qty);
                     
-                    // Fallback sistema viejo (por nombre)
                     if (!targetID && ing.ingrediente) {
                         targetID = findSmartId([ing.ingrediente]);
                         targetQty = Number(ing.cantidad);
@@ -266,12 +250,12 @@
                     if (targetID) {
                         applyDecrement(targetID, targetQty * qty, "Item Receta");
                     } else {
-                        logs.push(`   ⚠️ Item no encontrado en stock: ${ing.ingrediente || targetID}`);
+                        logs.push(`   ⚠️ Item no encontrado: ${ing.ingrediente || targetID}`);
                     }
                 });
             } 
             
-            // 2. FALLBACK CARNE (Si no hay receta)
+            // 2. FALLBACK CARNE (Solo si no hay receta)
             if (!recipeFound && totalBurgers > 0 && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
@@ -300,7 +284,6 @@
                 if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
             }
 
-            // Extras objeto
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -321,20 +304,30 @@
             const autoDesc = (keys, qtyToDeduct, name) => {
                 const id = findSmartId(keys);
                 if(id) applyDecrement(id, qtyToDeduct, name);
-                else logs.push(`   ⚠️ Falta stock: ${name}`);
+                else logs.push(`   ⚠️ Falta stock: ${name} (Buscado como: ${keys.join(',')})`);
             };
 
-            autoDesc(['papas', 'bastones', 'congelada'], totalBurgers * 0.200, "Papas (0.2kg)"); 
-            autoDesc(['carton', 'caja papa'], totalBurgers, "Cartón Papa"); 
-            autoDesc(['parafinado', 'papel'], totalBurgers, "Papel"); 
+            // Papas 200g (0.2)
+            autoDesc(['papas', 'bastones', 'congelada', 'fritas'], totalBurgers * 0.200, "Papas (0.2kg)"); 
             
+            // Cartones (Enteros)
+            autoDesc(['carton', 'caja papa', 'caja', 'cajita'], Math.ceil(totalBurgers), "Cartón Papa"); 
+            
+            // Papel (Enteros)
+            autoDesc(['parafinado', 'papel'], Math.ceil(totalBurgers), "Papel"); 
+            
+            // Bolsas (Enteros)
             const bolsas = Math.ceil(totalBurgers / 2);
             autoDesc(['bolsa', 'packaging', 'kraft'], bolsas, "Bolsas");
+            
+            // Ganchitos
             autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3, "Ganchitos");
             
+            // Tinta
             const unidadesImp = totalBurgers + bolsas;
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25, "Tinta");
 
+            // Sazonador Doritos
             const hasDoritos = itemsCalc.some(i => (i.name||"").toLowerCase().includes("dorito"));
             if(hasDoritos) {
                 autoDesc(['dorito', 'polvo', 'sazonador'], totalBurgers * 0.005, "Sazonador Doritos");
@@ -347,7 +340,7 @@
             await batch.commit();
             alert("✅ STOCK ACTUALIZADO\n\n" + logs.join("\n"));
         } else {
-            alert("⚠️ NO SE DESCONTÓ NADA\nRevisa si los nombres de insumos coinciden.\n\nLog:\n" + logs.join("\n"));
+            alert("⚠️ NO SE DESCONTÓ NADA\nRevisa los nombres de stock.\n\nLog:\n" + logs.join("\n"));
         }
     }
 
