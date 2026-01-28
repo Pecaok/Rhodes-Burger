@@ -332,7 +332,7 @@
     let currentRecipeId = null, currentSubRecipeId = null;
     let chartMain=null, chartDaily=null, chartProds=null, chartPayment=null;
     let tempAliasList = [];
-    let currentRecipeIngs = []; // Para el modal de recetas finales
+    let currentRecipeIngs = []; 
 
     function logStatus(msg, isError=false) {
         const el = $('#lastPurchasesList');
@@ -349,14 +349,14 @@
 
         // 2. Cargar Items de Armado (Subrecetas) y transformarlos para que parezcan insumos
         db.collection('subrecipes').onSnapshot(snap => {
-            SUB_RECIPES = snap.docs.map(d => ({id:d.id, ...d.data()})); // Guardamos original para costos
+            SUB_RECIPES = snap.docs.map(d => ({id:d.id, ...d.data()})); 
             PREMADE_STOCK = snap.docs.map(d => ({
                 id: d.id,
                 ...d.data(),
-                category: '🧩 Armado', // Forzar categoría visual
+                category: '🧩 Armado', 
                 isSub: true,
-                unit: 'u', // Por defecto unidad
-                qty: d.data().qty || 0, // Asegurar que tenga campo qty
+                unit: 'u', 
+                qty: d.data().qty || 0,
                 min: d.data().min || 0
             }));
             window.combineAndRender();
@@ -366,7 +366,6 @@
     window.combineAndRender = function() {
         // Fusionamos ambas listas en la variable global INVENTORY
         INVENTORY = [...RAW_STOCK, ...PREMADE_STOCK];
-        // Renderizamos tablas y listas
         window.renderStockTable();
         window.renderCostTables();
         window.renderRecipesList(); 
@@ -396,10 +395,8 @@
             if(p.qty<=p.min) stHtml=`<span class="status-dot st-danger"></span>CRIT`; 
             else if(p.qty<=p.min*1.5) stHtml=`<span class="status-dot st-warn"></span>BAJO`;
             
-            // Botones de acción diferentes si es Subreceta
             let actions = `<button class="btn-icon" onclick="openProductModal('${p.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button>`;
             if(p.isSub) {
-                // Si es subreceta, el lápiz lleva al editor de armado, y borrar borra la subreceta
                 actions = `<button class="btn-icon" onclick="openSubRecipeEditor('${p.id}')">🧩</button><button class="btn-icon" onclick="deleteItem('subrecipes','${p.id}')">🗑️</button>`;
             }
 
@@ -525,7 +522,7 @@
         db.collection('purchases').limit(500).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); });
     };
 
-    // --- CALCULOS ---
+    // --- CALCULOS Y GRAFICOS ---
     window.calculateAll = function() {
         if(typeof Chart === 'undefined') return;
         let gross=0, comms=0, taxes=0, theoCMV=0;
@@ -606,19 +603,33 @@
         });
     };
     
-    // --- LÓGICA COSTOS ---
+    // --- LÓGICA COSTOS (Calculadora Blindada) ---
+    // Esta función calcula todo lo que NO está explícito en la receta (packaging, tinta)
+    // Y ahora también calcula la CARNE si la receta falla.
     window.calculateOrderConsumables = function(items) {
         let totalCost=0, burgerCount=0, countSazon=0, countSal=0;
+        
         items.forEach(i => {
-            const n=String(i.name||"").toLowerCase(), notes=String(i.notes||"").toLowerCase(), qty=Number(i.qty||1);
+            const n=String(i.name||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""), notes=String(i.notes||"").toLowerCase(), qty=Number(i.qty||1);
             if(n.includes('hamb')||n.includes('burger')||n.includes('doble')||n.includes('simple')||n.includes('royal')||n.includes('cheese')||n.includes('cuarto')) {
                 burgerCount+=qty;
                 if(n.includes('sazon')||notes.includes('sazon')) countSazon+=qty;
                 else if(n.includes('sin sal')||notes.includes('sin sal')) {} 
                 else countSal+=qty;
+
+                // 🔥 FALLBACK CARNE: Si la receta no existe o devuelve 0, sumamos la carne aquí
+                const unitCost = window.getUnitCost(i.name);
+                if (unitCost === 0) {
+                    let patties = 1;
+                    if(n.includes('doble')) patties = 2;
+                    if(n.includes('triple')) patties = 3;
+                    const pattyItem = INVENTORY.find(x => x.name.toLowerCase().includes('medallon') || x.name.toLowerCase().includes('carne') || x.name.toLowerCase().includes('patty'));
+                    if(pattyItem) totalCost += (pattyItem.cost * patties * qty);
+                }
             }
         });
         if(burgerCount===0) return 0;
+
         const find=(k)=>INVENTORY.find(x=>x.name.toLowerCase().includes(k));
         const iBolsa=find('bolsa')||find('packaging'), iCarton=find('carton')||find('caja papa'), iTinta=find('tinta'), iGancho=find('ganchito')||find('gancho');
         const iPapel=find('parafinado')||find('papel'), iTicket=find('rollo')||find('ticket'), iPapas=find('papas')||find('bastones');
@@ -638,9 +649,44 @@
         return totalCost;
     };
 
-    window.getUnitCost = function(n) { if(!n) return 0; const cn=n.toLowerCase().trim(), a=(FIXED_DATA.aliases||[]).find(x=>x.external.toLowerCase()===cn); if(a) return a.items?a.items.reduce((s,i)=>{const r=RECIPES.find(x=>x.id===i.id);return s+(r?window.calculateRecipeTotal(r)*i.qty:0)},0):(RECIPES.find(x=>x.id===a.internal)?window.calculateRecipeTotal(RECIPES.find(x=>x.id===a.internal)):0); let r=RECIPES.find(x=>x.id.toLowerCase()===cn)||RECIPES.find(x=>cn.includes(x.id.toLowerCase())); return r?window.calculateRecipeTotal(r):0; };
-    window.calculateRecipeTotal = (r) => (r.ingredients||[]).reduce((s,i)=>{const sb=SUB_RECIPES.find(x=>x.id===i.id),it=INVENTORY.find(x=>x.id===i.id);return s+(i.qty*(sb?window.calculateSubRecipeCost(sb):it?it.cost:0))},0);
-    window.calculateSubRecipeCost = (sb) => (sb.ingredients||[]).reduce((s,i)=>{const it=INVENTORY.find(x=>x.id===i.id);return s+(i.qty*(it?it.cost:0))},0);
+    window.getUnitCost = function(n) { 
+        if(!n) return 0; 
+        const cn = String(n).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+        
+        // 1. Alias
+        const a = (FIXED_DATA.aliases||[]).find(x=>x.external.toLowerCase()===cn); 
+        if(a) return a.items?a.items.reduce((s,i)=>{const r=RECIPES.find(x=>x.id===i.id);return s+(r?window.calculateRecipeTotal(r)*i.qty:0)},0):(RECIPES.find(x=>x.id===a.internal)?window.calculateRecipeTotal(RECIPES.find(x=>x.id===a.internal)):0);
+        
+        // 2. Receta Directa (Búsqueda Flexible)
+        let r = RECIPES.find(x => String(x.id).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === cn);
+        if (!r) r = RECIPES.find(x => cn.includes(String(x.id).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+        
+        return r ? window.calculateRecipeTotal(r) : 0; 
+    };
+
+    window.calculateRecipeTotal = (r) => (r.ingredients||[]).reduce((s,i)=>{
+        // Si tiene ID, busca en INVENTORY unificado (que tiene insumos y subrecetas)
+        if(i.id) {
+            const item = INVENTORY.find(x => x.id === i.id);
+            if(item) {
+                // Si es subreceta, recursividad. Si es insumo, costo directo.
+                // Nota: INVENTORY ya tiene items armados con su costo calculado? NO.
+                // Los items armados en INVENTORY tienen qty y min, pero el costo viene de SUB_RECIPES.
+                if(item.isSub) {
+                    const sub = SUB_RECIPES.find(x => x.id === i.id);
+                    return s + (i.qty * (sub ? window.calculateSubRecipeCost(sub) : 0));
+                } else {
+                    return s + (i.qty * item.cost);
+                }
+            }
+        }
+        return s;
+    },0);
+
+    window.calculateSubRecipeCost = (sb) => (sb.ingredients||[]).reduce((s,i)=>{
+        const it = INVENTORY.find(x => x.id === i.id); // Insumo base
+        return s + (i.qty * (it ? it.cost : 0));
+    },0);
     
     // --- HELPER UI ---
     window.renderCostTables = function() { const rr=(a,t)=>{ $(t).innerHTML=a.map(p=>`<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); }; rr(INVENTORY.filter(p=>p.category!=='packaging' && !p.isSub),'#costMateriaBody'); rr(INVENTORY.filter(p=>p.category==='packaging'),'#costPackBody'); };
