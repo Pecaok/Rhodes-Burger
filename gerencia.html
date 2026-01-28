@@ -607,7 +607,7 @@
     };
     
     // =================================================================
-    // 💰 CALCULADORA DE COSTOS AUTOMÁTICOS (Igual a Stock)
+    // 💰 CALCULADORA DE COSTOS (CORREGIDA: UNIDADES VS KILOS)
     // =================================================================
     window.calculateOrderConsumables = function(items) {
         let totalCost = 0;
@@ -622,13 +622,15 @@
                 burgerCount += qty;
                 if(n.includes('dorito')) countSazon += qty;
 
-                // 🔥 FALLBACK COSTO CARNE (Si no hay receta)
+                // 1. FALLBACK CARNE (Si no hay receta)
                 const unitCost = window.getUnitCost(i.name);
                 if (unitCost === 0) {
                     let patties = 1;
                     if(n.includes('doble')) patties = 2;
                     if(n.includes('triple')) patties = 3;
-                    const pattyItem = INVENTORY.find(x => x.name.toLowerCase().includes('medallon') || x.name.toLowerCase().includes('carne') || x.name.toLowerCase().includes('patty'));
+                    // Buscamos precio de la carne (asumiendo precio UNITARIO por medallón en stock)
+                    // Si tu carne en stock está por KG, avísame para dividir por peso.
+                    const pattyItem = INVENTORY.find(x => x.name.toLowerCase().includes('medallon') || x.name.toLowerCase().includes('patty'));
                     if(pattyItem) totalCost += (pattyItem.cost * patties * qty);
                 }
             }
@@ -636,7 +638,6 @@
 
         if(burgerCount === 0) return 0;
 
-        // Helper para costo
         const getCost = (keywords) => {
             const item = INVENTORY.find(p => {
                 const pName = String(p.name).toLowerCase();
@@ -645,11 +646,13 @@
             return item ? Number(item.cost || 0) : 0;
         };
 
-        // --- AUTOMÁTICOS ---
-        // Papas: 200g
-        totalCost += (burgerCount * 200) * getCost(['papas fritas', 'papa frita', 'papas', 'bastones', 'congelada']);
+        // --- AUTOMÁTICOS (CORREGIDOS DECIMALES) ---
+        
+        // 🍟 Papas: 200g = 0.2 Kg
+        // Multiplicamos por 0.2 asumiendo que el "Costo" en el inventario es por 1 KG o 1 Bolsa
+        totalCost += (burgerCount * 0.200) * getCost(['papas fritas', 'papa frita', 'papas', 'bastones', 'congelada']);
 
-        // Packaging
+        // 🥡 Packaging (Enteros)
         totalCost += burgerCount * getCost(['carton', 'caja papa', 'cajita']);
         totalCost += burgerCount * getCost(['parafinado', 'papel']);
 
@@ -660,7 +663,10 @@
         const unidadesImp = burgerCount + bolsas;
         totalCost += (unidadesImp * 0.25) * getCost(['tinta', 'sello']);
 
-        if(countSazon > 0) totalCost += (countSazon * 5) * getCost(['dorito', 'polvo', 'sazonador']);
+        // 🧀 Sazonador: 5g = 0.005 Kg
+        if(countSazon > 0) {
+            totalCost += (countSazon * 0.005) * getCost(['dorito', 'polvo', 'sazonador']);
+        }
 
         return totalCost;
     };
