@@ -183,7 +183,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CORREGIDA: PAPAS EN GRAMOS)
+    // 🔥 GESTIÓN DE STOCK (SAZONADOR ARREGLADO)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -199,7 +199,7 @@
         if(Array.isArray(pedido.drinks)) itemsCalc = itemsCalc.concat(pedido.drinks);
 
         let totalBurgers = 0;
-        let doritosCount = 0; // Contador específico para Sazonador
+        let doritosCount = 0; // Contador exclusivo Doritos
 
         const applyDecrement = (targetID, amount, logName) => {
             if(!targetID) return false;
@@ -212,6 +212,7 @@
             return true;
         };
 
+        // --- BUCLE PRINCIPAL DE ÍTEMS ---
         itemsCalc.forEach(item => {
             const rawName = item.name || "Item sin nombre";
             const nameNorm = normalize(rawName);
@@ -221,16 +222,18 @@
 
             logs.push(`📦 ${rawName} (x${qty})`);
 
+            // 1. Detectar Burger
             if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big')) {
                 totalBurgers += qty;
-                
-                // Detección Doritos por Item
-                if (nameNorm.includes("dorito") || nameNorm.includes("sazonada") || notesNorm.includes("sazonada")) {
-                    doritosCount += qty;
-                }
             }
 
-            // 1. RECETA
+            // 2. Detectar Doritos/Sazonador (INDEPENDIENTE DE SI ES BURGER O NO)
+            // Si el nombre o la nota dice "sazon" o "dorito", sumamos la cantidad.
+            if (nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon") || notesNorm.includes("dorito")) {
+                doritosCount += qty;
+            }
+
+            // 3. RECETA (Si existe)
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
@@ -258,8 +261,8 @@
                 });
             } 
             
-            // 2. FALLBACK CARNE
-            if (!recipeFound && totalBurgers > 0 && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
+            // 4. FALLBACK CARNE (Solo si es burger y NO hay receta)
+            if (!recipeFound && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
                 if(nameNorm.includes('triple')) patties = 3;
@@ -273,7 +276,7 @@
                 }
             }
 
-            // 3. EXTRAS
+            // 5. EXTRAS DE TEXTO
             if (fullText.includes('extra carne') || fullText.includes('doble carne')) {
                 const id = findSmartId(['medallon', 'patty']);
                 if(id) applyDecrement(id, 1 * qty, "Extra Carne");
@@ -287,6 +290,7 @@
                 if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
             }
 
+            // 6. EXTRAS DEL OBJETO
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -301,39 +305,31 @@
             }
         });
 
-        // 4. AUTOMÁTICOS (CORREGIDOS GRAMOS)
-        if(totalBurgers > 0) {
-            logs.push(`🤖 Automáticos (${totalBurgers} burgers):`);
-            const autoDesc = (keys, qtyToDeduct, name) => {
-                const id = findSmartId(keys);
-                if(id) applyDecrement(id, qtyToDeduct, name);
-                else logs.push(`   ⚠️ Falta stock: ${name}`);
-            };
+        // --- AUTOMÁTICOS GLOBALES ---
+        const autoDesc = (keys, qtyToDeduct, name) => {
+            const id = findSmartId(keys);
+            if(id) applyDecrement(id, qtyToDeduct, name);
+            else logs.push(`   ⚠️ Falta stock: ${name}`);
+        };
 
-            // Papas 200g (Entero)
+        // Si hay burgers, descontar packaging
+        if(totalBurgers > 0) {
             autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones', 'congelada', 'fritas'], totalBurgers * 200, "Papas (200g)"); 
-            
-            // Cartones (Enteros)
             autoDesc(['carton', 'caja papa', 'caja', 'cajita'], Math.ceil(totalBurgers), "Cartón Papa"); 
-            
-            // Papel (Enteros)
             autoDesc(['parafinado', 'papel'], Math.ceil(totalBurgers), "Papel"); 
             
-            // Bolsas (Enteros)
             const bolsas = Math.ceil(totalBurgers / 2);
             autoDesc(['bolsa', 'packaging', 'kraft'], bolsas, "Bolsas");
-            
-            // Ganchitos (Exacto: 3 por bolsa)
             autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3, "Ganchitos");
             
-            // Tinta
             const unidadesImp = totalBurgers + bolsas;
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25, "Tinta");
+        }
 
-            // Sazonador Doritos (5g por unidad contada)
-            if(doritosCount > 0) {
-                autoDesc(['dorito', 'polvo', 'sazonador'], doritosCount * 5, `Sazonador Doritos (${doritosCount*5}g)`);
-            }
+        // 🔥 SAZONADOR DORITOS (Fuera del bloque de burgers)
+        if(doritosCount > 0) {
+            // Busca 'sazonador doritos', 'doritos', 'dorito'
+            autoDesc(['sazonador doritos', 'doritos', 'dorito', 'sazonador'], doritosCount * 5, `Sazonador Doritos (${doritosCount*5}g)`);
         }
 
         if (huboCambios) {
