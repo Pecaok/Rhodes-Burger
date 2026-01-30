@@ -183,7 +183,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CORREGIDA: DETECCIÓN EXACTA)
+    // 🔥 GESTIÓN DE STOCK (CORREGIDA)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -219,36 +219,40 @@
             const notesNorm = normalize(item.notes||"");
             const fullText = nameNorm + " " + notesNorm; 
             const qty = Math.ceil(Number(item.qty || 1));
-            // Leemos la opción elegida por el cliente (con_sal, sin_sal, con_sazon)
+            
+            // Normalizamos la opción de papas para buscar coincidencias parciales
             const friesOpt = String(item.fries || "").toLowerCase(); 
 
             logs.push(`📦 ${rawName} (x${qty})`);
 
-            // 1. Detectar Burger
-            if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big')) {
+            // 1. Detectar si el ítem actual es Burger
+            const isBurger = nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big');
+            
+            if(isBurger) {
                 totalBurgers += qty;
             }
 
             // 2. Detectar Porción de Papas (350g)
+            // Solo si el nombre dice "porcion" y es papa
             if(nameNorm.includes("porcion") && (nameNorm.includes("papa") || nameNorm.includes("frita"))) {
                 portionsCount += qty;
             }
 
-            // 3. 🔥 DETECCIÓN SAZONADOR (5g)
-            // Si el cliente eligió 'con_sazon' O si el nombre del producto lo dice explícitamente.
-            if (friesOpt === 'con_sazon' || nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon")) {
+            // Variables de control para este ítem específico
+            // Usamos .includes() para ser más flexibles (ej: detecta "con_sazon", "sazonadas", "sazon")
+            const hasSazon = friesOpt.includes('sazon') || nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon");
+            const hasNoSalt = friesOpt.includes('sin') && (friesOpt.includes('sal') || friesOpt.includes('sodio')) || nameNorm.includes("sin sal") || notesNorm.includes("sin sal");
+
+            // 3. 🔥 CONTADOR SAZONADOR (5g)
+            if (hasSazon) {
                 doritosCount += qty;
             }
 
-            // 4. 🔥 DETECCIÓN SAL (2g)
-            // Si es un ítem de papa (burger o porción) Y eligió 'con_sal'.
-            // O si es papa, no eligió nada (null), y NO dice 'sin sal' ni es sazonada.
-            const isPotatoItem = nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones") || totalBurgers > 0;
-            const isExplicitSinSal = friesOpt === 'sin_sal' || nameNorm.includes("sin sal") || notesNorm.includes("sin sal");
-            const isSazonada = friesOpt === 'con_sazon' || nameNorm.includes("sazon");
+            // 4. 🔥 CONTADOR SAL (2g)
+            // Lógica: Es (Burger O Papa/Frita) Y NO tiene sazón Y NO pidió explícitamente sin sal
+            const isPotatoItem = isBurger || nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones");
 
-            if (isPotatoItem && !isExplicitSinSal && !isSazonada) {
-                // Si el usuario eligió 'con_sal' o no eligió nada (defecto), descontamos sal.
+            if (isPotatoItem && !hasNoSalt && !hasSazon) {
                 saltCount += qty;
             }
 
@@ -278,8 +282,8 @@
                 });
             } 
             
-            // 6. FALLBACK CARNE (Si no hay receta)
-            if (!recipeFound && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
+            // 6. FALLBACK CARNE (Si no hay receta y es burger)
+            if (!recipeFound && isBurger) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
                 if(nameNorm.includes('triple')) patties = 3;
