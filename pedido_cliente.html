@@ -309,7 +309,7 @@ const db=firebase.firestore();
 const CART_KEY="rhodes_cart_v3";
 const GRAMOS_POR_BLOQUE=1500;
 const G_POR_BURGER=200;
-const G_POR_SIDE=700;
+const G_POR_SIDE=350; // 🔥 Ajustado a 350g
 const SLOT_START="19:15"; const SLOT_END="23:45"; const SLOT_INTERVAL_MIN=15;
 const WHATSAPP_NUMBER = "5491170596483"; 
 
@@ -340,7 +340,35 @@ db.collection('config').doc('prices').onSnapshot(doc => {
 
 /* CARRITO */
 function loadCart(){ try{ return JSON.parse(localStorage.getItem(CART_KEY))||{burger:{},drink:{},side:{}}; }catch{ return {burger:{},drink:{},side:{}}; } }
-function gramosDelPedido(){ const c=loadCart(); let g=0; for(const k in c.burger) g+=(c.burger[k].qty||0)*G_POR_BURGER; for(const k in c.side) g+=(c.side[k].qty||0)*G_POR_SIDE; return g; }
+
+// 🔥 CÁLCULO DE GRAMOS INTELIGENTE
+function gramosDelPedido(){ 
+    const c = loadCart(); 
+    let g = 0; 
+    
+    // 1. Revisar bucket 'burger' (Hamburguesas y Guarniciones Personalizables)
+    for(const k in c.burger) {
+        const item = c.burger[k].item;
+        const qty = c.burger[k].qty || 0;
+        const name = (item.name || "").toLowerCase();
+
+        // Si es Porción de papas (350g)
+        if (name.includes("porcion") && (name.includes("papa") || name.includes("frita"))) {
+            g += qty * 350;
+        } 
+        // Si es Hamburguesa (200g)
+        else {
+            g += qty * 200;
+        }
+    }
+    
+    // 2. Revisar bucket 'side' (Si quedaron items viejos ahí)
+    for(const k in c.side) {
+        g += (c.side[k].qty||0) * 350; 
+    }
+    
+    return g; 
+}
 
 /* SLOTS */
 let slotObjects=[], visibles=[], listeners=[], currentIndex=0;
@@ -408,10 +436,14 @@ function renderResumen(){
     let extrasHtml = "";
     if(o.extras?.patty) extrasHtml += `<div class="muted">• Extra carne: +${o.extras.patty}</div>`;
     if(o.extras?.cheddar) extrasHtml += `<div class="muted">• Extra cheddar: +${o.extras.cheddar}</div>`;
+    
+    // Etiqueta adaptativa: Si es guarnición, no dice "Papas:" sino "Estilo:"
+    let labelPapas = "Papas: ";
+    if(o.item.category === 'guarniciones') labelPapas = "Estilo: ";
 
     box.innerHTML+=`<div style="margin-bottom:8px">
         <strong>${o.item.name} x${o.qty}</strong>
-        ${extrasHtml} <div class="muted">Papas: ${normalizeFriesLabel(o.fries)}</div>
+        ${extrasHtml} <div class="muted">${labelPapas}${normalizeFriesLabel(o.fries)}</div>
         <div class="muted">Subtotal: $${subt.toLocaleString("es-AR")}</div>
     </div>`;
   }
