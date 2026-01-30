@@ -183,7 +183,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (SAZONADOR ARREGLADO)
+    // 🔥 GESTIÓN DE STOCK (CORREGIDA: PORCIONES Y SAZONADOR)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -199,20 +199,20 @@
         if(Array.isArray(pedido.drinks)) itemsCalc = itemsCalc.concat(pedido.drinks);
 
         let totalBurgers = 0;
-        let doritosCount = 0; // Contador exclusivo Doritos
+        let doritosCount = 0; 
+        let portionsCount = 0; 
+        let saltCount = 0; // 🔥 Contador de SAL
 
         const applyDecrement = (targetID, amount, logName) => {
             if(!targetID) return false;
             let collectionName = ID_TO_COLLECTION[targetID] || 'inventory'; 
             const ref = db.collection(collectionName).doc(targetID);
-            // IMPORTANTE: factor -1 (entregar) * cantidad = resta.
             batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
             huboCambios = true;
             logs.push(`   - ${logName || 'Item'}: ${amount} (en ${collectionName})`);
             return true;
         };
 
-        // --- BUCLE PRINCIPAL DE ÍTEMS ---
         itemsCalc.forEach(item => {
             const rawName = item.name || "Item sin nombre";
             const nameNorm = normalize(rawName);
@@ -227,13 +227,23 @@
                 totalBurgers += qty;
             }
 
-            // 2. Detectar Doritos/Sazonador (INDEPENDIENTE DE SI ES BURGER O NO)
-            // Si el nombre o la nota dice "sazon" o "dorito", sumamos la cantidad.
+            // 2. 🔥 Detectar Porción de Papas
+            if(nameNorm.includes("porcion") && (nameNorm.includes("papa") || nameNorm.includes("frita"))) {
+                portionsCount += qty;
+            }
+
+            // 3. Detectar Doritos/Sazonador
             if (nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon") || notesNorm.includes("dorito")) {
                 doritosCount += qty;
             }
 
-            // 3. RECETA (Si existe)
+            // 4. 🔥 Detectar SAL (Si es papa y NO dice "sin sal")
+            const isPotatoItem = nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones");
+            if (isPotatoItem && !nameNorm.includes("sin sal") && !notesNorm.includes("sin sal")) {
+                saltCount += qty;
+            }
+
+            // 5. RECETA (Si existe)
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
@@ -261,7 +271,7 @@
                 });
             } 
             
-            // 4. FALLBACK CARNE (Solo si es burger y NO hay receta)
+            // 6. FALLBACK CARNE
             if (!recipeFound && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
@@ -271,12 +281,10 @@
                 const pattyId = findSmartId(['medallon', 'carne', 'patty']);
                 if(pattyId) {
                     applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
-                } else {
-                    logs.push(`   ❌ ALERTA: No encontré 'Medallón' para descontar.`);
                 }
             }
 
-            // 5. EXTRAS DE TEXTO
+            // 7. EXTRAS
             if (fullText.includes('extra carne') || fullText.includes('doble carne')) {
                 const id = findSmartId(['medallon', 'patty']);
                 if(id) applyDecrement(id, 1 * qty, "Extra Carne");
@@ -290,7 +298,6 @@
                 if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
             }
 
-            // 6. EXTRAS DEL OBJETO
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -312,7 +319,7 @@
             else logs.push(`   ⚠️ Falta stock: ${name}`);
         };
 
-        // Si hay burgers, descontar packaging
+        // BURGERS
         if(totalBurgers > 0) {
             autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones', 'congelada', 'fritas'], totalBurgers * 200, "Papas (200g)"); 
             autoDesc(['carton', 'caja papa', 'caja', 'cajita'], Math.ceil(totalBurgers), "Cartón Papa"); 
@@ -326,9 +333,18 @@
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25, "Tinta");
         }
 
-        // 🔥 SAZONADOR DORITOS (Fuera del bloque de burgers)
+        // 🔥 PORCIONES (350g Papas - SIN Packaging por ahora)
+        if(portionsCount > 0) {
+            autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones'], portionsCount * 350, "Papas Porción (350g)");
+        }
+
+        // 🔥 SAL (2g por unidad)
+        if(saltCount > 0) {
+            autoDesc(['sal', 'sal fina', 'sodio'], saltCount * 2, `Sal (${saltCount*2}g)`);
+        }
+
+        // 🔥 SAZONADOR (5g por unidad)
         if(doritosCount > 0) {
-            // Busca 'sazonador doritos', 'doritos', 'dorito'
             autoDesc(['sazonador doritos', 'doritos', 'dorito', 'sazonador'], doritosCount * 5, `Sazonador Doritos (${doritosCount*5}g)`);
         }
 
