@@ -183,7 +183,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CORREGIDA: DETECCIÓN POR ÍTEM INDIVIDUAL)
+    // 🔥 GESTIÓN DE STOCK (CORREGIDA: DETECCIÓN EXACTA)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -217,74 +217,103 @@
             const rawName = item.name || "Item sin nombre";
             const nameNorm = normalize(rawName);
             const notesNorm = normalize(item.notes||"");
+            const fullText = nameNorm + " " + notesNorm; 
             const qty = Math.ceil(Number(item.qty || 1));
-            
-            // Detectamos la opción de este ítem (fries o guarnicion)
-            let friesOpt = String(item.fries || "").toLowerCase().trim();
-            if(!friesOpt && item.extras?.fries) friesOpt = String(item.extras.fries).toLowerCase().trim();
-            if(!friesOpt && item.guarnicion) friesOpt = String(item.guarnicion).toLowerCase().trim();
+            // Leemos la opción elegida por el cliente (con_sal, sin_sal, con_sazon)
+            const friesOpt = String(item.fries || "").toLowerCase(); 
 
-            logs.push(`📦 ${rawName} (x${qty}) [Op: ${friesOpt || 'def'}]`);
+            logs.push(`📦 ${rawName} (x${qty})`);
 
             // 1. Detectar Burger
-            if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')) {
+            if(nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big')) {
                 totalBurgers += qty;
             }
 
-            // 2. Detectar Porción
+            // 2. Detectar Porción de Papas (350g)
             if(nameNorm.includes("porcion") && (nameNorm.includes("papa") || nameNorm.includes("frita"))) {
                 portionsCount += qty;
             }
 
-            // --- LÓGICA DE CONDIMENTOS POR ÍTEM ---
-            const esPapa = nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones") || totalBurgers > 0;
-
-            if (esPapa) {
-                if (friesOpt.includes('sazon') || nameNorm.includes("sazon") || notesNorm.includes("sazon")) {
-                    doritosCount += qty;
-                } 
-                else if (friesOpt === 'sin_sal' || nameNorm.includes("sin sal") || notesNorm.includes("sin sal")) {
-                    // No hace nada (Sin sal)
-                }
-                else {
-                    saltCount += qty; // Por defecto o 'con_sal'
-                }
+            // 3. 🔥 DETECCIÓN SAZONADOR (5g)
+            // Si el cliente eligió 'con_sazon' O si el nombre del producto lo dice explícitamente.
+            if (friesOpt === 'con_sazon' || nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon")) {
+                doritosCount += qty;
             }
 
-            // 3. RECETAS
+            // 4. 🔥 DETECCIÓN SAL (2g)
+            // Si es un ítem de papa (burger o porción) Y eligió 'con_sal'.
+            // O si es papa, no eligió nada (null), y NO dice 'sin sal' ni es sazonada.
+            const isPotatoItem = nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones") || totalBurgers > 0;
+            const isExplicitSinSal = friesOpt === 'sin_sal' || nameNorm.includes("sin sal") || notesNorm.includes("sin sal");
+            const isSazonada = friesOpt === 'con_sazon' || nameNorm.includes("sazon");
+
+            if (isPotatoItem && !isExplicitSinSal && !isSazonada) {
+                // Si el usuario eligió 'con_sal' o no eligió nada (defecto), descontamos sal.
+                saltCount += qty;
+            }
+
+            // 5. RECETA
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
             let recipeFound = false;
+
             if (recipeName) {
                 const ingredientes = RECETAS_DB[recipeName];
+                logs.push(`   ✅ Receta: "${recipeName}"`);
                 recipeFound = true;
+
                 ingredientes.forEach(ing => {
                     let targetID = ing.id;
                     let targetQty = Number(ing.qty);
+                    
                     if (!targetID && ing.ingrediente) {
                         targetID = findSmartId([ing.ingrediente]);
                         targetQty = Number(ing.cantidad);
                     }
-                    if (targetID) applyDecrement(targetID, targetQty * qty, "Receta");
+
+                    if (targetID) {
+                        applyDecrement(targetID, targetQty * qty, "Item Receta");
+                    }
                 });
             } 
-
-            // 4. FALLBACK CARNE
+            
+            // 6. FALLBACK CARNE (Si no hay receta)
             if (!recipeFound && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
-                let patties = nameNorm.includes('doble') ? 2 : (nameNorm.includes('triple') ? 3 : 1);
+                let patties = 1;
+                if(nameNorm.includes('doble')) patties = 2;
+                if(nameNorm.includes('triple')) patties = 3;
+                if(nameNorm.includes('cuadruple')) patties = 4;
+
                 const pattyId = findSmartId(['medallon', 'carne', 'patty']);
-                if(pattyId) applyDecrement(pattyId, patties * qty, `Auto-Patty (${patties})`);
+                if(pattyId) {
+                    applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
+                }
             }
 
-            // 5. EXTRAS
+            // 7. EXTRAS
+            if (fullText.includes('extra carne') || fullText.includes('doble carne')) {
+                const id = findSmartId(['medallon', 'patty']);
+                if(id) applyDecrement(id, 1 * qty, "Extra Carne");
+            }
+            if (fullText.includes('extra cheddar')) {
+                const id = findSmartId(['cheddar', 'queso']);
+                if(id) applyDecrement(id, 1 * qty, "Extra Cheddar");
+            }
+            if (fullText.includes('extra bacon') || fullText.includes('panceta')) {
+                const id = findSmartId(['bacon', 'panceta']);
+                if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
+            }
+
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
                     if (val > 0) {
-                        const search = key === 'patty' ? 'medallon' : (key === 'bacon' ? 'panceta' : key);
+                        let search = key;
+                        if(key==='patty') search = 'medallon';
+                        if(key==='bacon') search = 'panceta';
                         const ingID = findSmartId([search]);
-                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val * qty, `Extra ${key}`);
+                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val, `Extra ${key}`);
                     }
                 }
             }
@@ -294,22 +323,37 @@
         const autoDesc = (keys, qtyToDeduct, name) => {
             const id = findSmartId(keys);
             if(id) applyDecrement(id, qtyToDeduct, name);
+            else logs.push(`   ⚠️ Falta stock: ${name}`);
         };
 
+        // BURGERS (Packaging y papas guarnición)
         if(totalBurgers > 0) {
-            autoDesc(['papas fritas', 'bastones'], totalBurgers * 200, "Papas (200g)");
-            autoDesc(['carton', 'caja'], Math.ceil(totalBurgers), "Caja Papa");
-            autoDesc(['papel', 'parafinado'], Math.ceil(totalBurgers), "Papel");
+            autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones', 'congelada', 'fritas'], totalBurgers * 200, "Papas (200g)"); 
+            autoDesc(['carton', 'caja papa', 'caja', 'cajita'], Math.ceil(totalBurgers), "Cartón Papa"); 
+            autoDesc(['parafinado', 'papel'], Math.ceil(totalBurgers), "Papel"); 
+            
             const bolsas = Math.ceil(totalBurgers / 2);
-            autoDesc(['bolsa', 'kraft'], bolsas, "Bolsas");
+            autoDesc(['bolsa', 'packaging', 'kraft'], bolsas, "Bolsas");
+            autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3, "Ganchitos");
+            
+            const unidadesImp = totalBurgers + bolsas;
+            autoDesc(['tinta', 'sello'], unidadesImp * 0.25, "Tinta");
         }
 
+        // 🔥 PORCIONES (Solo papas 350g, sin packaging extra salvo que se pida)
         if(portionsCount > 0) {
-            autoDesc(['papas fritas', 'bastones'], portionsCount * 350, "Papas Porción (350g)");
+            autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones'], portionsCount * 350, "Papas Porción (350g)");
         }
 
-        if(saltCount > 0) autoDesc(['sal', 'sal fina'], saltCount * 2, `Sal (${saltCount*2}g)`);
-        if(doritosCount > 0) autoDesc(['sazonador doritos', 'dorito'], doritosCount * 5, `Sazonador (${doritosCount*5}g)`);
+        // 🔥 SAL (2g por unidad) - Solo si corresponde
+        if(saltCount > 0) {
+            autoDesc(['sal', 'sal fina', 'sodio'], saltCount * 2, `Sal (${saltCount*2}g)`);
+        }
+
+        // 🔥 SAZONADOR (5g por unidad) - Solo si corresponde
+        if(doritosCount > 0) {
+            autoDesc(['sazonador doritos', 'doritos', 'dorito', 'sazonador'], doritosCount * 5, `Sazonador Doritos (${doritosCount*5}g)`);
+        }
 
         if (huboCambios) {
             const pedidoRef = db.collection('orders').doc(pedido.id);
@@ -317,7 +361,7 @@
             await batch.commit();
             alert("✅ STOCK ACTUALIZADO\n\n" + logs.join("\n"));
         } else {
-            alert("⚠️ NO SE DESCONTÓ NADA");
+            alert("⚠️ NO SE DESCONTÓ NADA\n\nLog:\n" + logs.join("\n"));
         }
     }
 
@@ -330,20 +374,30 @@
             const docSnap = await db.collection('orders').doc(id).get();
             if(!docSnap.exists) return;
             const pedidoData = { id: docSnap.id, ...docSnap.data() };
+
             if(next === 'delivered'){ await gestionarStock(pedidoData, -1); } 
             else if(next === 'cancelled'){ await gestionarStock(pedidoData, 1); }
+
             await db.collection("orders").doc(id).update({status:next}); 
-        }catch(e){ alert("Error: " + e.message); }
+        }catch(e){
+            console.error(e);
+            alert("Error al actualizar estado: " + e.message);
+        }
     };
 
     window.deleteOrder = async (id) => {
-        if(!confirm("⚠️ ¿Eliminar permanentemente?")) return;
-        try { await db.collection("orders").doc(id).delete(); } catch(e) { alert("Error: " + e.message); }
+        if(!confirm("⚠️ ¿Estás seguro de eliminar este pedido permanentemente?\n\nEsta acción borrará el pedido de la base de datos y no se puede deshacer.")) return;
+        try {
+            await db.collection("orders").doc(id).delete();
+        } catch(e) {
+            console.error(e);
+            alert("Error al eliminar: " + e.message);
+        }
     };
 
     window.setPaymentStatus = async (id, currentPaid, currentMethod) => {
         if(!currentPaid && (!currentMethod || currentMethod === "")){ 
-            alert("⚠️ Seleccioná MÉTODO DE PAGO."); return; 
+            alert("⚠️ Seleccioná un MÉTODO DE PAGO primero."); return; 
         }
         try{ await db.collection("orders").doc(id).update({ paid: !currentPaid, payment_status: !currentPaid ? 'paid' : 'pending_payment' }); }catch(e){}
     };
@@ -351,7 +405,10 @@
     window.updatePago = async (id, val) => { 
         try { 
             const updateData = { pago: val };
-            if (val && val !== "") { updateData.paid = true; updateData.payment_status = 'paid'; }
+            if (val && val !== "") {
+                updateData.paid = true;
+                updateData.payment_status = 'paid';
+            }
             await db.collection("orders").doc(id).update(updateData); 
         } catch(e) { console.error(e); } 
     };
@@ -369,23 +426,44 @@
         return new Date(); 
     };
     
-    window.cleanFries = (raw) => { 
-        if(!raw) return ""; 
-        const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); 
-        if(s.includes('sazon')) return "Sazonadas"; 
-        if(s.includes('sin sal')) return "Sin sal"; 
-        if(s.includes('con sal')||s.includes('sal')) return "Con Sal"; 
-        return s.charAt(0).toUpperCase() + s.slice(1); 
-    };
+    window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con Sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
     
+    // CATEGORIZACIÓN
     window.getCat = (item) => {
         const n = String(item.name || "").trim().toLowerCase();
         const t = String(item.type || "").toLowerCase();
+        const id = item.id;
+
         if (t === 'drink' || t === 'bebida') return 'd';
         if (t === 'side' || t === 'guarnicion' || t === 'papa') return 'f';
         if (t === 'burger' || t === 'hamburguesa') return 'b';
-        if (n.includes('coca') || n.includes('agua') || n.includes('cerveza')) return 'd';
-        if (n.includes('papas') || n.includes('fritas')) return 'f';
+
+        let catDB = PRODUCT_CATALOG[id] || PRODUCT_CATALOG[n];
+        if (catDB) {
+            catDB = String(catDB).toLowerCase().trim();
+            if (catDB.includes('bebida') || catDB.includes('drink')) return 'd';
+            if (catDB.includes('guarnicion') || catDB.includes('papa') || catDB.includes('side')) return 'f';
+            if (catDB.includes('hamburguesa') || catDB.includes('burger')) return 'b';
+        }
+        
+        if (item.category) {
+            const catItem = String(item.category).toLowerCase();
+            if (catItem.includes('bebida')) return 'd';
+            if (catItem.includes('guarnicion')) return 'f';
+        }
+
+        const drinks = [
+            'coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 
+            'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 
+            'imperial', 'sprite', 'levite', 'paso de los toros', 'vino', 'fanta', 
+            'gaseosa', 'lata', 'botella', 'ml', '1.5', 'schweppes', 'mirinda', 
+            'jugo', 'baggio', 'monster', 'speed', 'red bull', 'energizante', 
+            'manaos', 'secuko', 'limonada', 'exprimido'
+        ];
+        if (drinks.some(k => n.includes(k))) return 'd';
+
+        if (n.includes('papas') || n.includes('fritas') || n.includes('aros') || n.includes('nugget')) return 'f';
+
         return 'b'; 
     };
 
@@ -393,58 +471,217 @@
         const map = new Map();
         list.forEach(it => {
             let exKey = "";
-            if(it.extras) exKey = Object.keys(it.extras).sort().map(k => `${k}:${it.extras[k]}`).join("-");
-            const key = `${it.name}_${exKey}_${(it.notes||'').toLowerCase().trim()}`;
-            if(map.has(key)){ map.get(key).qty += (Number(it.qty)||1); } 
-            else { map.set(key, { ...it, qty: (Number(it.qty)||1) }); }
+            if(it.extras) {
+                 const keys = Object.keys(it.extras).sort();
+                 exKey = keys.map(k => `${k}:${it.extras[k]}`).join("-");
+            }
+            const noteKey = String(it.notes || "").trim().toLowerCase();
+            const nameKey = String(it.name || "").trim();
+            const key = `${nameKey}_${exKey}_${noteKey}`;
+            
+            if(map.has(key)){
+                map.get(key).qty += (Number(it.qty)||1);
+            } else {
+                map.set(key, { ...it, qty: (Number(it.qty)||1) });
+            }
         });
         return Array.from(map.values());
     }
 
     function getCleanTime(o, defaultTime) {
-        if (o.pickup_slot && o.pickup_slot.includes(':')) return o.pickup_slot;
+        if (o.pickup_slot && typeof o.pickup_slot === 'string' && o.pickup_slot.includes(':')) return o.pickup_slot;
+        let raw = o.pickup_time_pretty || o.pickup_time;
+        if (raw && typeof raw === 'string') {
+            if (raw.includes('_')) {
+                const parts = raw.split('_'); const timePart = parts[parts.length - 1]; 
+                if (timePart.length === 4 && !isNaN(timePart)) return timePart.substring(0, 2) + ':' + timePart.substring(2, 4);
+            }
+            if (raw.includes(':') && raw.length <= 5) return raw;
+        }
         return defaultTime;
     }
 
+    /* ============================================================
+       🔥 IMPORTACIÓN PEDIDOS YA (CORREGIDA PARA TU EXCEL)
+    ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
         if (!input.files.length) return;
+        const file = input.files[0];
+
         const reader = new FileReader();
         reader.onload = async function(e) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
-            const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {range: 1, defval:""});
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            
+            // 🔥 CLAVE: "range: 1" salta la primera fila (Metadata) y usa la fila 2 como títulos
+            const rows = XLSX.utils.sheet_to_json(firstSheet, {range: 1, defval:""});
+
+            let imported = 0;
+            let skipped = 0;
             const batch = db.batch();
+            let ops = 0;
+
             for (const row of rows) {
-                const r = {}; Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
-                if (!r['nro de pedido']) continue;
+                const r = {};
+                Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
+
+                // 1. ID
+                const id = r['nro de pedido']; 
+                if (!id) continue;
+
+                // 2. TOTALES
+                let total = r['total del pedido'];   
+                let neto = r['ingreso estimado'];    
+
+                if(typeof total !== 'number') total = Number(String(total).replace(/\./g, '').replace(',', '.'));
+                if(typeof neto !== 'number') neto = Number(String(neto).replace(/\./g, '').replace(',', '.'));
+
+                if (!total || total <= 0) continue;
+
+                // 3. DATOS
+                const dateStr = r['fecha del pedido'];
+                const statusStr = r['estado del pedido'] || "";
+                const paymentStr = r['forma de pago'] || "";
+                const itemsStr = r['artículos'] || "";
+                
+                let clientName = "Cliente Py"; 
+                if(r['nombre del cliente']) clientName = r['nombre del cliente'];
+
+                // 4. ESTADO
+                let status = 'delivered'; 
+                if (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado')) status = 'cancelled';
+
+                // 5. PAGO
+                let isPaid = false;
+                let paymentMethod = 'pedidosya_online'; 
+                if (paymentStr.toLowerCase().includes('online')) isPaid = true;
+                if (paymentStr.toLowerCase().includes('efectivo')) { isPaid = false; paymentMethod = 'efectivo'; }
+
+                // 6. ÍTEMS
+                let itemsList = [];
+                if(itemsStr) {
+                    let rawItems = String(itemsStr).split(/,|\n|\+/); 
+                    
+                    rawItems.forEach(line => {
+                        line = line.trim();
+                        if(!line) return;
+                        
+                        let qty = 1;
+                        let name = line;
+                        const match = line.match(/^(\d+)\s*[xX]?\s*(.*)$/);
+                        if(match) {
+                            qty = Number(match[1]);
+                            name = match[2];
+                        }
+                        
+                        let note = "";
+                        if(name.includes('[')) {
+                            const nMatch = name.match(/\[(.*?)\]/);
+                            if(nMatch) {
+                                note = nMatch[1];
+                                name = name.replace(/\[.*?\]/, "").trim();
+                            }
+                        }
+
+                        const catCode = window.getCat({name: name});
+                        let type = 'other';
+                        if(catCode === 'b') type='burger';
+                        else if(catCode === 'f') type='side';
+                        else if(catCode === 'd') type='drink';
+
+                        itemsList.push({ qty, name, price: 0, type, notes: note });
+                    });
+                } else {
+                    itemsList = [{ name: 'Pedido Importado', qty: 1, price: total }];
+                }
+
+                if(itemsList.length === 1) itemsList[0].price = total;
+
+                // 7. DUPLICADOS
+                const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
+                if (!existing.empty) {
+                    skipped++;
+                    continue;
+                }
+
+                // 8. FECHA
+                let isoDate = new Date().toISOString();
+                if(dateStr) {
+                    if(typeof dateStr === 'number') {
+                        const excelEpoch = new Date(1899, 11, 30);
+                        isoDate = new Date(excelEpoch.getTime() + dateStr * 86400000).toISOString();
+                    } else {
+                        try { isoDate = new Date(dateStr).toISOString(); } catch(e){}
+                    }
+                }
+
+                // 9. GUARDAR
                 const ref = db.collection('orders').doc();
-                batch.set(ref, { orderNumber: String(r['nro de pedido']), source: 'pedidosya', status: 'delivered', paid: true, nombre: r['nombre del cliente'] || 'Cli', total: Number(r['total del pedido']) || 0, createdAt: new Date().toISOString(), items: [] });
+                batch.set(ref, {
+                    orderNumber: String(id),
+                    py_id: String(id),
+                    source: 'pedidosya',
+                    status: status,
+                    payment_status: isPaid ? 'paid' : 'pending_payment',
+                    paid: isPaid,
+                    pago: paymentMethod,
+                    entrega: 'delivery',
+                    nombre: clientName,
+                    total: total,          
+                    neto_excel: neto,     
+                    createdAt: isoDate,
+                    items: itemsList
+                });
+                
+                ops++;
+                imported++;
+                if(ops >= 400) { await batch.commit(); ops=0; }
             }
-            await batch.commit(); alert("Importado"); location.reload();
+
+            if(ops > 0) await batch.commit();
+            alert(`Importación completada:\n✅ ${imported} pedidos nuevos cargados.\n⏭️ ${skipped} ya estaban en el sistema.`);
+            input.value = ""; 
+            location.reload();
         };
-        reader.readAsArrayBuffer(input.files[0]);
+        reader.readAsArrayBuffer(file);
     }
   </script>
 </head>
 
 <body>
   <div id="pageLoader">
-    <video autoplay loop muted playsinline><source src="images/loader.mp4" type="video/mp4"></video>
+    <video autoplay loop muted playsinline>
+      <source src="images/loader.mp4" type="video/mp4">
+      <img src="images/logo.png" alt="Cargando..." style="width:100px;">
+    </video>
   </div>
 
-  <input type="file" id="excelInput" style="display:none" accept=".xlsx, .xls" onchange="importarPedidosYa()">
+  <input type="file" id="excelInput" style="display:none" accept=".xlsx, .xls, .csv" onchange="importarPedidosYa()">
 
   <header>
     <div class="topbar">
       <a class="brand" href="#"><img src="images/logo.png" alt=""><span>Pedidos</span></a>
       <div class="spacer"></div>
-      <button onclick="document.getElementById('excelInput').click()" class="nav-btn" style="background:#f97316; color:white;">📥 Importar</button>
+      
+      <button onclick="document.getElementById('excelInput').click()" class="nav-btn" style="background:#f97316; color:white; border:none; margin-right:8px;">
+        📥 Importar Excel
+      </button>
+
       <a href="pedido_local.html" class="nav-btn active">📦 Pedidos</a>
       <a href="finanzas.html" class="nav-btn">📈 Finanzas</a>
+      <div class="dropdown">
+            <button onclick="document.querySelector('.dropdown').classList.toggle('show')" class="nav-btn">📋 Stock ▾</button>
+            <div class="dropdown-content">
+                <a href="stock.html">📦 Stock</a>
+                <a href="ingresos.html">📥 Ingresos</a>
+            </div>
+      </div>
       <a href="mostrador.html" class="nav-btn">🧾 Mostrador</a>
-      <button id="btnBell" class="icon-btn">🔔</button>
-      <button id="btnAutoPrint" class="icon-btn">🖨️</button>
+      <a href="admin.html" class="nav-btn">⚙️ Admin</a>
+      <button id="btnBell" class="icon-btn" title="Sonido">🔔</button>
+      <button id="btnAutoPrint" class="icon-btn" title="Autoimprimir">🖨️</button>
       <button onclick="window.logout()" class="nav-btn btn-danger">Salir</button>
     </div>
   </header>
@@ -452,65 +689,399 @@
   <main class="container">
     <h1>Últimos pedidos</h1>
     <div class="tabs" id="tabs">
-      <button class="tab active" data-f="recibidos">Cocina</button>
+      <button class="tab active" data-f="recibidos">Cocina / Recibidos</button>
       <button class="tab" data-f="entregados">Entregados</button>
       <button class="tab" data-f="cancelled">Cancelados</button>
       <button class="tab" data-f="all">Todos</button>
     </div>
-    <div id="orders"></div>
+    <div id="orders"><div class="empty-state">Cargando...</div></div>
   </main>
 
  <script>
   window.addEventListener('DOMContentLoaded', () => {
     // AUDIO
     let audioCtx = null;
-    const initAudio = () => { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); };
-    const playBeep = () => { if(!JSON.parse(localStorage.getItem("rb_sound")||"true")) return; initAudio(); const osc = audioCtx.createOscillator(); osc.type='square'; osc.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime+0.15); };
+    const initAudio = () => {
+        if (!audioCtx) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContext();
+        }
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+    };
+    document.body.addEventListener('click', initAudio, { once: true });
+    document.body.addEventListener('touchstart', initAudio, { once: true });
 
-    db.collection("orders").orderBy("orderNumber", "desc").limit(100).onSnapshot(snap => {
-        window.lastSnap = snap;
-        const cont = document.getElementById("orders");
-        cont.innerHTML = snap.docs.map(doc => buildOrderHTML(doc)).join("");
-        document.getElementById('pageLoader').classList.add("hidden");
+    const playBeep = () => {
+        let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
+        if(!soundOn) return;
+        initAudio();
+        if (!audioCtx) return;
+        const now = audioCtx.currentTime;
+        const createBeep = (startTime) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'square'; osc.frequency.setValueAtTime(1000, startTime); 
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(startTime);
+            gain.gain.setValueAtTime(0.5, startTime); 
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15);
+            osc.stop(startTime + 0.15);
+        };
+        createBeep(now); createBeep(now + 0.25); createBeep(now + 0.50); createBeep(now + 0.75);
+    };
+
+    // INTERFAZ
+    const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+    let currentFilter = "recibidos"; let lastSnap = null;
+    
+    document.getElementById("tabs").addEventListener("click", (e)=>{
+        const btn = e.target.closest(".tab"); if(!btn) return;
+        document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active"));
+        btn.classList.add("active");
+        currentFilter = btn.dataset.f;
+        if(window.lastSnap) renderList(window.lastSnap);
     });
+
+    const btnBell = document.getElementById("btnBell");
+    let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
+    const updBell = ()=>{ btnBell.classList.toggle("active", soundOn); btnBell.innerText = soundOn ? '🔔' : '🔕'; }; 
+    updBell();
+    btnBell.onclick = ()=>{ initAudio(); soundOn = !soundOn; localStorage.setItem("rb_sound", soundOn); updBell(); if(soundOn) playBeep(); };
+
+    const btnAP = document.getElementById("btnAutoPrint");
+    let autoP = JSON.parse(localStorage.getItem("rb_autop")||"false");
+    const updAP = ()=>{ btnAP.classList.toggle("active", autoP); }; 
+    updAP();
+    btnAP.onclick = ()=>{ autoP = !autoP; localStorage.setItem("rb_autop", autoP); updAP(); };
+
+    // FIREBASE
+    let isInit=true; setTimeout(()=>isInit=false, 3000);
+    db.collection("orders").orderBy("orderNumber", "desc").limit(300).onSnapshot(snap => {
+        window.lastSnap = snap;
+        renderList(snap);
+        const loader = document.getElementById('pageLoader');
+        if(loader) loader.classList.add("hidden");
+
+        snap.docChanges().forEach(ch => {
+            if(ch.type === 'added' && !isInit){
+                const data = ch.doc.data();
+                const fechaPedido = window.pickDate(data);
+                const ahora = new Date();
+                const diferenciaMinutos = (ahora - fechaPedido) / 1000 / 60; 
+                if(diferenciaMinutos < 20) {
+                    if(navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); 
+                    playBeep(); 
+                    if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id));
+                }
+            }
+        });
+    }, err => {
+        document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
+        const loader = document.getElementById('pageLoader');
+        if(loader) loader.classList.add("hidden");
+    });
+
+    function renderList(snap){
+        let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
+        window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
+        docs.sort((a,b) => window.pickDate(b.data) - window.pickDate(a.data));
+
+        const filtered = docs.filter(o => {
+            const s = o.data.status || 'accepted';
+            if(currentFilter === 'recibidos') return ['accepted','in_prep','ready','pending_payment'].includes(s);
+            if(currentFilter === 'entregados') return s === 'delivered';
+            if(currentFilter === 'cancelled') return s === 'cancelled';
+            return true;
+        });
+
+        const cont = document.getElementById("orders");
+        if(filtered.length===0){ cont.innerHTML = '<div class="empty-state">No hay pedidos.</div>'; return; }
+        cont.innerHTML = filtered.map(x => buildOrderHTML(x.ref)).join("");
+    }
 
     function buildOrderHTML(doc){
         const o = doc.data();
-        const items = (o.items||[]).concat(o.bebidas||[]).concat(o.drinks||[]);
+        const dt = window.pickDate(o);
+        const dateStr = dt.toLocaleDateString("es-AR", {day:'2-digit', month:'2-digit'}); 
+        const timeStr = dt.toLocaleTimeString("es-AR", {hour:'2-digit', minute:'2-digit'});
+        const st = o.status || 'accepted';
+        const isPaid = (o.payment_status==='paid') || !!o.paid;
+        
+        const displayTime = getCleanTime(o, ""); 
+        
+        const LABELS = {accepted:'Recibido', in_prep:'Cocina', ready:'Listo', delivered:'Entregado'};
+        const btns = ['accepted','in_prep','ready','delivered'].map(k => {
+            const isOn = (k === st) ? 'on' : '';
+            const opacity = (k==='delivered' && !isPaid) ? 'opacity:0.5' : '';
+            return `<div class="state-btn ${isOn} state-${k}" style="${opacity}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})"><span>${LABELS[k]}</span></div>`;
+        }).join('');
+
+        let payVal = o.pago;
+        if(payVal === 'mostrador_sin_especificar') payVal = "";
+        let srcVal = o.source || 'web'; 
+
+        let items = Array.isArray(o.items) ? [...o.items] : [];
+        if(Array.isArray(o.bebidas)) items = items.concat(o.bebidas);
+        if(Array.isArray(o.drinks)) items = items.concat(o.drinks);
+
+        let cats = { b:[], f:[], d:[], o:[] };
+        items.forEach(it => {
+            const cat = window.getCat(it);
+            if(cat === 'b'){
+                cats.b.push(it);
+                let fName = it.fries;
+                if(!fName && it.extras?.fries) fName = it.extras.fries;
+                if(!fName && it.guarnicion) fName = it.guarnicion;
+                if(fName){
+                   const fClean = String(fName).toLowerCase();
+                   if(fClean !== 'sin_papas' && fClean !== 'ninguna') {
+                       cats.f.push({name: fName, qty: it.qty||1});
+                   }
+                }
+                let dName = it.bebida || it.drink; 
+                if(!dName && it.extras?.bebida) dName = it.extras.bebida;
+                if(!dName && it.extras?.drink) dName = it.extras.drink;
+                if(!dName && it.extras?.gaseosa) dName = it.extras.gaseosa;
+                if(dName) {
+                    const dClean = String(dName).toLowerCase();
+                    if(dClean !== 'sin_bebida' && dClean !== 'ninguna' && dClean !== '') {
+                        cats.d.push({name: dName, qty: it.qty||1});
+                    }
+                }
+            } else { cats[cat].push(it); }
+        });
+
+        cats.b = consolidateItems(cats.b);
+        cats.f = consolidateItems(cats.f);
+        cats.d = consolidateItems(cats.d);
+        cats.o = consolidateItems(cats.o);
+
+        const renderSec = (list, icon, title) => {
+            if(!list.length) return "";
+            const rows = list.map(it => {
+                let ex = [];
+                let basePrice = Number(it.price) || 0;
+                let extraPatty = (it.extras?.patty || 0) * (PRICES_DB.patty || 2500);
+                let extraCheddar = (it.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300);
+                let unitFinal = basePrice + extraPatty + extraCheddar;
+                let lineTotal = unitFinal * (it.qty || 1);
+
+                if(it.extras?.patty) ex.push(`+${it.extras.patty} carne`);
+                if(it.extras?.cheddar) ex.push(`+${it.extras.cheddar} cheddar`);
+                
+                let dName = esc(it.name);
+                if(title.includes("PAPAS")) dName = window.cleanFries(it.name);
+
+                const extrasHtml = ex.map(e => `<div class="it-sub" style="color:#d97706; font-weight:600">• ${e}</div>`).join('');
+                let displayPrice = money(lineTotal);
+                if(title.includes("PAPAS")) displayPrice = "";
+                
+                return `<div class="it-row">
+                   <div class="it-qty">${it.qty||1}</div>
+                   <div class="it-det">
+                      <div class="it-name">${dName}</div>
+                      ${extrasHtml}
+                      ${it.notes ? `<div class="it-note">${esc(it.notes)}</div>` : ''}
+                   </div>
+                   <div class="it-price">${displayPrice}</div>
+                </div>`;
+            }).join("");
+            return `<div class="cat-group"><div class="cat-title">${icon} ${title}</div>${rows}</div>`;
+        };
+
+        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
+        const itemsHTML = renderSec(cats.b,'🍔','HAMBURGUESAS') + renderSec(cats.f,'🍟','PAPAS') + renderSec(cats.d,'🥤','BEBIDAS') + renderSec(cats.o,'🔸','OTROS');
+        const total = o.total || items.reduce((a,i)=>a+((i.price||0)*(i.qty||1)),0);
+
+        let discountHTML = "";
+        if (o.discount > 0) {
+            discountHTML = `<div style="display:flex;justify-content:space-between;color:#16a34a;font-weight:700;padding:0 16px;margin-bottom:8px">
+                <span>🏷️ Descuento (${esc(o.coupon||'')}):</span>
+                <span>-${money(o.discount)}</span>
+            </div>`;
+        }
+
+        // 🔥 MOSTRAR EL NETO EN VERDE SI EXISTE
+        let netHtml = "";
+        if(o.neto_excel && o.neto_excel > 0) {
+            netHtml = `<div style="font-size:12px; color:#15803d; text-align:right; font-weight:700;">Neto: ${money(o.neto_excel)}</div>`;
+        }
+
+        const telHtml = o.telefono ? `<div style="margin-top:4px; font-size:13px; font-weight:600; color:#4b5563;">📞 <a href="https://wa.me/${o.telefono.replace(/\D/g,'')}" target="_blank" style="text-decoration:none; color:inherit;">${esc(o.telefono)}</a></div>` : '';
+
         return `
-        <div class="order">
+        <div class="order ${st==='cancelled'?'cancelled':''}">
            <div class="order-head">
-              <div class="order-title">#${o.orderNumber} - ${o.nombre}</div>
-              <div class="price-tag">$${o.total}</div>
+              <div>
+                 <div class="order-title">#${o.orderNumber||'--'} — ${o.source==='mostrador'?esc(o.nombre)+' (Local)':esc(o.nombre)}</div>
+                 ${telHtml}
+                 <div class="order-meta">
+                    <span>${dateStr} ${timeStr}</span> 
+                    <span class="chip ${srcVal}">${esc(srcVal)}</span> ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}
+                 </div>
+              </div>
+              <div style="text-align:right">
+                  <div class="price-tag">${money(total)}</div>
+                  ${netHtml}
+              </div>
            </div>
-           <div class="items">
-              ${items.map(it => `
-                <div class="it-row">
-                   <div class="it-qty">${it.qty}</div>
-                   <div class="it-det"><div class="it-name">${it.name} ${it.fries ? `<small>(${window.cleanFries(it.fries)})</small>`:''}</div></div>
-                </div>`).join("")}
-           </div>
+           
+           <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
+           ${discountHTML}
+
            <div class="actions-area">
               <div class="control-row">
-                 <button class="pay-btn ${o.paid?'paid':'pending'}" onclick="setPaymentStatus('${doc.id}', ${!!o.paid}, '${o.pago||''}')">${o.paid?'PAGADO':'COBRAR'}</button>
-                 <div class="icon-btn-lg" onclick="printOrder('${doc.id}')">🖨️</div>
+                 <select class="pay-select" onchange="updatePago('${doc.id}', this.value)">
+                    <option value="" ${!payVal?'selected':''}>Pago...</option>
+                    <option value="efectivo" ${payVal==='efectivo'?'selected':''}>Efectivo</option>
+                    <option value="mercado_pago" ${payVal==='mercado_pago'?'selected':''}>QR (MP)</option>
+                    <option value="debito" ${payVal==='debito'?'selected':''}>Débito</option>
+                    <option value="transferencia" ${payVal==='transferencia'?'selected':''}>Transferencia</option>
+                 </select>
+
+                 <select class="source-select" onchange="updateSource('${doc.id}', this.value)">
+                    <option value="web" ${srcVal==='web'?'selected':''}>Web</option>
+                    <option value="mostrador" ${srcVal==='mostrador'?'selected':''}>Local</option>
+                    <option value="pedidosya" ${srcVal==='pedidosya'?'selected':''}>PedidosYa</option>
+                    <option value="rappi" ${srcVal==='rappi'?'selected':''}>Rappi</option>
+                 </select>
               </div>
+
+              <div class="control-row">
+                 <button class="pay-btn ${isPaid?'paid':'pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal}')">
+                    ${isPaid ? 'PAGADO' : 'COBRAR'}
+                 </button>
+                 <div class="icon-btn-lg" onclick="printOrder('${doc.id}')">🖨️</div>
+                 <div class="icon-btn-lg" style="color:#d32f2f; border-color:#ffcdd2; background:#ffebee;" onclick="deleteOrder('${doc.id}')">🗑️</div>
+              </div>
+
               <div class="stateBtns">
-                 <button class="state-btn ${o.status==='in_prep'?'on':''}" onclick="setOrderStatus('${doc.id}','in_prep',${!!o.paid})">Cocina</button>
-                 <button class="state-btn ${o.status==='ready'?'on':''}" onclick="setOrderStatus('${doc.id}','ready',${!!o.paid})">Listo</button>
-                 <button class="state-btn ${o.status==='delivered'?'on':''}" onclick="setOrderStatus('${doc.id}','delivered',${!!o.paid})">Entregado</button>
+                 ${btns}
+                 <div class="state-btn cancelled" onclick="setOrderStatus('${doc.id}', 'cancelled', ${isPaid})">CANCELAR</div>
               </div>
            </div>
         </div>`;
     }
 
-    // IMPRESIÓN SILENCIOSA
-    window.trySilentPrint = (docSnap) => {
-        const o = docSnap.data();
-        const html = `<html><body onload="window.print()">Rhodes - #${o.orderNumber} - ${o.nombre}</body></html>`;
-        const f = document.createElement('iframe'); f.style.display='none'; document.body.append(f);
-        f.contentWindow.document.write(html); f.contentWindow.document.close();
-        setTimeout(()=>f.remove(), 5000);
+    // --- IMPRESIÓN ---
+    window.trySilentPrint = function(docSnap){
+       const o = docSnap.data();
+       const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
+       const m = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
+       
+       const dt = window.pickDate(o);
+       const dateStr = dt.toLocaleDateString("es-AR");
+       const timeStr = dt.toLocaleTimeString("es-AR",{hour12:false});
+
+       const horarioRetiro = getCleanTime(o, timeStr.substring(0, 5));
+
+       let payTxt = o.pago;
+       if(!payTxt || payTxt==='mostrador_sin_especificar' || payTxt==="") payTxt="A COBRAR EN CAJA";
+       else if(payTxt==='mercado_pago') payTxt="QR (MP)";
+       else payTxt = payTxt.toUpperCase();
+
+       const isPaid = (o.payment_status === 'paid') || o.paid;
+       const stPay = isPaid ? "PAGADO" : "PENDIENTE";
+       
+       let items = Array.isArray(o.items) ? [...o.items] : [];
+       if(Array.isArray(o.bebidas)) items = items.concat(o.bebidas);
+       if(Array.isArray(o.drinks)) items = items.concat(o.drinks);
+
+       let cats = { b:[], f:[], d:[], o:[] };
+       items.forEach(it => {
+          const cat = window.getCat(it);
+          if(cat==='b'){
+             cats.b.push(it);
+             let fName = it.fries;
+             if(!fName && it.extras?.fries) fName = it.extras.fries;
+             if(!fName && it.guarnicion) fName = it.guarnicion;
+             if(fName){
+                 const fClean = String(fName).toLowerCase();
+                 if(fClean !== 'sin_papas' && fClean !== 'ninguna') {
+                    cats.f.push({name: fName, qty: it.qty||1});
+                 }
+             }
+             let dName = it.bebida || it.drink; 
+             if(!dName && it.extras?.bebida) dName = it.extras.bebida;
+             if(!dName && it.extras?.drink) dName = it.extras.drink;
+             if(!dName && it.extras?.gaseosa) dName = it.extras.gaseosa;
+             if(dName) {
+                 const dClean = String(dName).toLowerCase();
+                 if(dClean !== 'sin_bebida' && dClean !== 'ninguna' && dClean !== '') {
+                      cats.d.push({name: dName, qty: it.qty||1});
+                 }
+             }
+          } else { cats[cat].push(it); }
+       });
+
+       cats.b = consolidateItems(cats.b);
+       cats.f = consolidateItems(cats.f);
+       cats.d = consolidateItems(cats.d);
+       cats.o = consolidateItems(cats.o);
+       
+       const rSec = (l, ti) => {
+         if(!l.length) return "";
+         const r = l.map(i => {
+            let dName = esc(i.name);
+            if(ti.includes("PAPA")) dName = window.cleanFries(i.name);
+            
+            let basePrice = Number(i.price) || 0;
+            let extraPatty = (i.extras?.patty || 0) * (PRICES_DB.patty || 2500);
+            let extraCheddar = (i.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300);
+            let unitFinal = basePrice + extraPatty + extraCheddar;
+            let lineTotal = unitFinal * (i.qty || 1);
+
+            let displayPrice = m(lineTotal);
+            if(ti.includes("PAPA")) displayPrice = "";
+            
+            let h = `<div class="row name"><div class="l">${i.qty||1} × ${dName}</div><div class="r">${displayPrice}</div></div>`;
+            
+            if(!ti.includes("PAPA")){
+               if(i.extras?.patty) h+=`<div class="sub">• +${i.extras.patty} carne</div>`;
+               if(i.extras?.cheddar) h+=`<div class="sub">• +${i.extras.cheddar} cheddar</div>`;
+            }
+            if(i.notes) h+=`<div class="sub">📝 ${esc(i.notes)}</div>`;
+            h+=`<div class="sep"></div>`;
+            return h;
+         }).join("");
+         return `<div class="blk"><div class="lbl" style="border-bottom:1px solid #000;display:inline-block;margin-top:6px">${ti}</div></div>${r}`;
+       };
+
+       const body = rSec(cats.b,'HAMBURGUESAS') + rSec(cats.f,'PAPAS') + rSec(cats.d,'BEBIDAS') + rSec(cats.o,'OTROS');
+       const total = o.total || items.reduce((a,i)=>a+((i.price||0)*(i.qty||1)),0);
+       const name = o.source==='mostrador' ? (o.nombre+' (Local)') : o.nombre;
+
+       let discountRow = "";
+       if (o.discount > 0) {
+           discountRow = `<div class="row"><div class="l">DESC. (${esc(o.coupon||'')})</div><div class="r">-${m(o.discount)}</div></div>`;
+       }
+
+       const html = `<!doctype html><html><head><style>
+       @page{size:58mm auto;margin:0} body{width:58mm;margin:0 auto;padding:5px;font-family:monospace;font-size:12px;font-weight:700;color:#000;line-height:1.2}
+       .c{text-align:center} .hr{border-top:1px dashed #000;margin:6px 0} .row{display:flex;justify-content:space-between}
+       .lbl{font-size:10px;text-transform:uppercase} .sub{font-size:11px;margin-left:5px;font-weight:400} .sep{border-top:1px dotted #999;margin:3px 0}
+       .r{text-align:right}
+       </style></head><body>
+         <div class="c" style="font-size:16px;margin-bottom:4px">Rhodes Burgers</div>
+         <div class="c" style="font-size:14px">#${o.orderNumber||'--'}</div>
+         <div class="c" style="font-size:18px;margin:5px 0">[ ${stPay} ]</div>
+         <div class="hr"></div>
+         <div><span class="lbl">CLIENTE:</span> ${esc(name)}</div>
+         <div class="c" style="font-size:16px;margin:6px 0;font-weight:900">Retira: ${esc(horarioRetiro)}</div>
+         <div><span class="lbl">PAGO:</span> ${payTxt}</div>
+         ${o.notes ? `<div class="hr"></div><div><span class="lbl">NOTA:</span> ${esc(o.notes)}</div>` : ''}
+         <div class="hr"></div>
+         ${body}
+         <div class="hr"></div>
+         ${discountRow}
+         <div class="row"><div class="l">TOTAL</div><div class="r">${m(total)}</div></div>
+         <div class="c" style="margin-top:10px;font-size:10px">${dateStr} ${timeStr}</div>
+         <script>window.onload=()=>{setTimeout(()=>{window.print()},200)}<\/script>
+       </body></html>`;
+       
+       const f = document.createElement('iframe'); f.style.cssText='position:fixed;left:0;top:0;width:0;height:0;border:0';
+       document.body.append(f); const d=f.contentWindow.document; d.open();d.write(html);d.close();
+       setTimeout(()=>f.remove(), 10000);
     };
   });
  </script>
