@@ -505,7 +505,7 @@
     }
 
    /* ============================================================
-       🔥 IMPORTACIÓN PEDIDOS YA (MEJORADA: EXTRAS + STOCK + PAGADOS)
+       🔥 IMPORTACIÓN PEDIDOS YA (CORREGIDA: DETECCIÓN FLEXIBLE)
     ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
@@ -518,29 +518,30 @@
             const workbook = XLSX.read(data, {type: 'array'});
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             
-            // Leemos el excel
+            // Leemos el excel saltando el encabezado (range:1)
             const rows = XLSX.utils.sheet_to_json(firstSheet, {range: 1, defval:""});
 
             let imported = 0;
             let skipped = 0;
             
-            // Mostramos un loader o aviso porque esto va a tardar un poquito más al descontar stock
+            // Mostramos loader
             const loader = document.getElementById('pageLoader');
             if(loader) { loader.classList.remove("hidden"); }
 
             for (const row of rows) {
                 const r = {};
+                // Normalizamos claves del objeto row a minúsculas para evitar errores
                 Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
 
                 // 1. ID
                 const id = r['nro de pedido']; 
                 if (!id) continue;
 
-                // Chequeo de duplicados ANTES de procesar para no perder tiempo
+                // Chequeo duplicados
                 const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
                 if (!existing.empty) {
                     skipped++;
-                    continue;
+                    continue; // Si ya existe, pasamos al siguiente
                 }
 
                 // 2. TOTALES
@@ -552,36 +553,34 @@
 
                 if (!total || total <= 0) continue;
 
-                // 3. DATOS BÁSICOS
+                // 3. DATOS
                 const dateStr = r['fecha del pedido'];
                 let clientName = r['nombre del cliente'] || "Cliente Py";
 
-                // 4. ESTADO Y PAGO (FORZADO A PAGADO Y ENTREGADO COMO PEDISTE)
-                // Si en el excel dice "cancelado", respetamos eso. Si no, es delivered.
+                // 4. ESTADO Y PAGO (TODO ENTREGADO Y PAGADO)
+                // Salvo que diga explícitamente "cancelado"
                 const statusStr = r['estado del pedido'] || "";
                 let status = 'delivered'; 
                 let isCancelled = false;
+                
                 if (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado')) {
                     status = 'cancelled';
                     isCancelled = true;
                 }
 
-                const isPaid = true; // Forzamos pagado
-                const paymentMethod = 'pedidosya_online'; // Asumimos online o caja cerrada
-
-                // 5. ÍTEMS Y EXTRAS (LÓGICA MEJORADA)
+                // 5. PROCESAMIENTO DE ÍTEMS
                 const itemsStr = r['artículos'] || "";
                 let itemsList = [];
 
                 if(itemsStr) {
-                    // Separamos por saltos de línea o signos +
+                    // Separamos por nuevas líneas, comas o signos +
                     let rawItems = String(itemsStr).split(/,|\n|\+/); 
                     
                     rawItems.forEach(line => {
                         line = line.trim();
                         if(!line) return;
                         
-                        // Detectar cantidad y nombre: "2x Hamburguesa"
+                        // Parsear cantidad: "2x Hamburguesa" o "1 Medallón extra"
                         let qty = 1;
                         let name = line;
                         const match = line.match(/^(\d+)\s*[xX]?\s*(.*)$/);
@@ -590,7 +589,7 @@
                             name = match[2];
                         }
                         
-                        // Limpieza de notas entre corchetes
+                        // Limpiar notas entre corchetes si las hubiera
                         let note = "";
                         if(name.includes('[')) {
                             const nMatch = name.match(/\[(.*?)\]/);
@@ -600,29 +599,32 @@
                             }
                         }
 
-                        // 🔥 DETECCIÓN INTELIGENTE DE EXTRAS 🔥
-                        // Buscamos palabras clave para saber si es un ítem nuevo o un agregado al anterior
-                        const nameLower = name.toLowerCase();
-                        const isExtraCarne = nameLower.includes('extra carne') || nameLower.includes('extra medallon') || nameLower.includes('adicional carne');
-                        const isExtraCheddar = nameLower.includes('extra cheddar') || nameLower.includes('adicional cheddar') || nameLower.includes('extra queso');
-                        const isExtraBacon = nameLower.includes('extra bacon') || nameLower.includes('extra panceta') || nameLower.includes('adicional bacon');
+                        // 🔥 DETECCIÓN FLEXIBLE DE EXTRAS 🔥
+                        // Usamos la función normalize() que ya tenés en tu código para ignorar mayúsculas y acentos
+                        const nameClean = normalize(name); 
+                        
+                        // Condiciones: Que tenga la palabra "extra" (o "adicional") Y la palabra clave
+                        const esAlgoExtra = nameClean.includes('extra') || nameClean.includes('adicional');
+                        
+                        const isExtraCarne = esAlgoExtra && (nameClean.includes('carne') || nameClean.includes('medallon') || nameClean.includes('patty'));
+                        const isExtraCheddar = esAlgoExtra && (nameClean.includes('cheddar') || nameClean.includes('queso'));
+                        const isExtraBacon = esAlgoExtra && (nameClean.includes('bacon') || nameClean.includes('panceta'));
 
-                        // Si es un extra y YA tenemos un ítem anterior (la hamburguesa), se lo sumamos
+                        // Si detectamos que es un extra Y ya tenemos un ítem principal cargado antes...
                         if ((isExtraCarne || isExtraCheddar || isExtraBacon) && itemsList.length > 0) {
                             let lastItem = itemsList[itemsList.length - 1];
                             
-                            // Nos aseguramos que tenga el objeto extras
                             if(!lastItem.extras) lastItem.extras = {};
 
                             if(isExtraCarne) lastItem.extras.patty = (lastItem.extras.patty || 0) + qty;
                             if(isExtraCheddar) lastItem.extras.cheddar = (lastItem.extras.cheddar || 0) + qty;
                             if(isExtraBacon) lastItem.extras.bacon = (lastItem.extras.bacon || 0) + qty;
 
-                            // No agregamos esto como ítem nuevo, ya se fusionó con el anterior
+                            // IMPORTANTE: Return para NO agregar esto como un ítem suelto a la lista visual
                             return; 
                         }
 
-                        // Si no es un extra (o es el primero), lo agregamos como ítem normal
+                        // Si no es extra, lo agregamos como producto normal
                         const catCode = window.getCat({name: name});
                         let type = 'other';
                         if(catCode === 'b') type='burger';
@@ -635,7 +637,7 @@
                             price: 0, 
                             type, 
                             notes: note,
-                            extras: {} // Inicializamos extras vacío por si viene uno después
+                            extras: {} 
                         });
                     });
                 } else {
@@ -644,7 +646,7 @@
 
                 if(itemsList.length === 1) itemsList[0].price = total;
 
-                // 6. FECHA
+                // 6. FECHA (Manejo de formato fecha Excel)
                 let isoDate = new Date().toISOString();
                 if(dateStr) {
                     if(typeof dateStr === 'number') {
@@ -655,50 +657,46 @@
                     }
                 }
 
-                // 7. GUARDAR EN DB
-                // No usamos batch global para poder descontar stock pedido por pedido
+                // 7. GUARDADO EN FIREBASE
                 try {
                     const orderRef = await db.collection('orders').add({
                         orderNumber: String(id),
                         py_id: String(id),
                         source: 'pedidosya',
                         status: status,
-                        payment_status: 'paid', // Todo pagado
-                        paid: true,             // Todo pagado
-                        pago: paymentMethod,
+                        payment_status: 'paid', // FORZADO A PAGADO
+                        paid: true,             // FORZADO A PAGADO
+                        pago: 'pedidosya_online',
                         entrega: 'delivery',
                         nombre: clientName,
                         total: total,           
                         neto_excel: neto,      
                         createdAt: isoDate,
                         items: itemsList,
-                        stockDescontado: false // Aún no descontamos
+                        stockDescontado: false // Flag en falso para que la función de abajo actúe
                     });
 
-                    // 8. 🔥 DESCONTAR STOCK AUTOMÁTICAMENTE 🔥
-                    // Solo si no está cancelado
+                    // 8. DESCUENTO DE STOCK AUTOMÁTICO
                     if (!isCancelled) {
-                        // Construimos el objeto pedido con el ID que acabamos de crear
                         const pedidoParaStock = {
                             id: orderRef.id,
                             items: itemsList,
                             stockDescontado: false
                         };
-                        
-                        console.log(`Descontando stock para pedido ${id}...`);
+                        // Llamamos a tu función gestionarStock para restar ingredientes
                         await gestionarStock(pedidoParaStock, -1);
                     }
 
                     imported++;
 
                 } catch (err) {
-                    console.error("Error importando pedido individual:", err);
+                    console.error("Error importando pedido:", err);
                 }
             }
 
             if(loader) loader.classList.add("hidden");
             
-            alert(`Importación completada:\n✅ ${imported} pedidos nuevos cargados y descontados del stock.\n⏭️ ${skipped} ya estaban en el sistema.`);
+            alert(`✅ PROCESO FINALIZADO\n\n- Se importaron ${imported} pedidos.\n- Se marcaron todos como PAGADOS y ENTREGADOS.\n- Se descontó el stock de cada uno (incluyendo extras).`);
             input.value = ""; 
             location.reload();
         };
