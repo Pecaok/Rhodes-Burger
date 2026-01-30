@@ -212,7 +212,7 @@
       <h3 id="modTitle">Personalizar</h3>
 
       <div class="field">
-        <label>Papas (obligatorio)</label>
+        <label id="lblFries">Papas (obligatorio)</label>
         <div style="display:flex;gap:12px;margin-top:6px;flex-wrap:wrap">
           <label class="chip"><input type="radio" name="fries" value="con_sazon"> Sazonadas</label>
           <label class="chip"><input type="radio" name="fries" value="con_sal"> Con sal</label>
@@ -403,6 +403,7 @@
 
     function cartCount(){
       let n=0;
+      // Ahora cart.burger guarda tanto Hamburguesas como Guarniciones personalizables
       Object.values(cart.burger).forEach(o=>n+=o.qty);
       Object.values(cart.drink ).forEach(o=>n+=o.qty);
       return n;
@@ -594,11 +595,15 @@
         if(obj.extras.patty > 0) detalleExtras += `<div class="muted">• Medallones extra (x${obj.extras.patty}): ${money(exP)}</div>`;
         if(obj.extras.cheddar > 0) detalleExtras += `<div class="muted">• Cheddar extra (x${obj.extras.cheddar}): ${money(exC)}</div>`;
 
+        // Pequeño cambio: si no es hamburguesa, "Papas" puede sonar raro, pero lo dejamos como indicador de sabor
+        let labelPapas = "Papas: ";
+        if(obj.item.category === 'guarniciones') labelPapas = "Estilo: ";
+
         cartItems.innerHTML += `
           <div class="item">
             <div>
               <strong>${obj.item.name}</strong><br>
-              <div class="muted">Papas: ${friesTxt}</div>
+              <div class="muted">${labelPapas}${friesTxt}</div>
               ${detalleExtras}
               <div class="muted" style="margin-top:4px;">Subtotal: <strong>${money(unit)}</strong></div>
               ${obj.notes ? `<div class="muted">Nota: ${obj.notes}</div>` : ""}
@@ -649,6 +654,7 @@
     }
     
     function addToCart(item, fries, extras, notes) {
+      // Usamos el bucket 'burger' para todo lo que sea personalizable (Hamburguesas y Guarniciones)
       const key = `${item.id}|${fries}|${extras.patty}|${extras.cheddar}|${notes}`;
       if (!cart.burger[key]) {
         cart.burger[key] = { id: item.id, item, qty: 1, fries, extras, notes };
@@ -708,8 +714,13 @@
         </div>`;
       
       const btn = card.querySelector("[data-add]");
-      if(type==="drink") btn.onclick = ()=> ok && orderable && addDrink(item);
-      else if(type==="burger") btn.onclick = ()=> ok && orderable && openCustomize(item);
+      
+      if(type==="drink") {
+        btn.onclick = ()=> ok && orderable && addDrink(item);
+      } else {
+        // Tanto 'burger' como 'side' abren el modal de personalización
+        btn.onclick = ()=> ok && orderable && openCustomize(item);
+      }
       
       return card;
     }
@@ -730,6 +741,14 @@
 
       document.getElementById("lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
       document.getElementById("lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
+      
+      // Cambio de texto dinámico para Guarniciones
+      const lblFries = document.getElementById("lblFries");
+      if(item.category === "guarniciones") {
+          lblFries.textContent = "Estilo / Condimento (obligatorio)";
+      } else {
+          lblFries.textContent = "Papas (obligatorio)";
+      }
 
       // PAPAS
       const radios = document.getElementsByName("fries");
@@ -760,7 +779,7 @@
     document.getElementById("btnAdd").onclick = () => {
       const friesInput = document.querySelector('input[name="fries"]:checked');
       if(!friesInput){
-          alert("⚠️ Por favor, seleccioná una opción de papas.");
+          alert("⚠️ Por favor, seleccioná una opción (con sal, sin sal o sazonadas).");
           return;
       }
       const fries = friesInput.value;
