@@ -183,7 +183,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (DETECCION EXACTA SAL/SAZONADOR)
+    // 🔥 GESTIÓN DE STOCK (CORREGIDA: DETECCIÓN EXACTA)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -219,6 +219,8 @@
             const notesNorm = normalize(item.notes||"");
             const fullText = nameNorm + " " + notesNorm; 
             const qty = Math.ceil(Number(item.qty || 1));
+            // Leemos la opción elegida por el cliente (con_sal, sin_sal, con_sazon)
+            const friesOpt = String(item.fries || "").toLowerCase(); 
 
             logs.push(`📦 ${rawName} (x${qty})`);
 
@@ -227,25 +229,30 @@
                 totalBurgers += qty;
             }
 
-            // 2. Detectar Porción de Papas
+            // 2. Detectar Porción de Papas (350g)
             if(nameNorm.includes("porcion") && (nameNorm.includes("papa") || nameNorm.includes("frita"))) {
                 portionsCount += qty;
             }
 
-            // 3. 🔥 Detectar Sazonador (Por Nombre o Nota)
-            if (nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon") || notesNorm.includes("dorito")) {
+            // 3. 🔥 DETECCIÓN SAZONADOR (5g)
+            // Si el cliente eligió 'con_sazon' O si el nombre del producto lo dice explícitamente.
+            if (friesOpt === 'con_sazon' || nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon")) {
                 doritosCount += qty;
             }
 
-            // 4. 🔥 Detectar Sal (Solo si NO dice "sin sal" y es papa)
-            const isPotatoItem = nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones");
-            const hasNoSalt = nameNorm.includes("sin sal") || notesNorm.includes("sin sal");
-            
-            if (isPotatoItem && !hasNoSalt) {
+            // 4. 🔥 DETECCIÓN SAL (2g)
+            // Si es un ítem de papa (burger o porción) Y eligió 'con_sal'.
+            // O si es papa, no eligió nada (null), y NO dice 'sin sal' ni es sazonada.
+            const isPotatoItem = nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones") || totalBurgers > 0;
+            const isExplicitSinSal = friesOpt === 'sin_sal' || nameNorm.includes("sin sal") || notesNorm.includes("sin sal");
+            const isSazonada = friesOpt === 'con_sazon' || nameNorm.includes("sazon");
+
+            if (isPotatoItem && !isExplicitSinSal && !isSazonada) {
+                // Si el usuario eligió 'con_sal' o no eligió nada (defecto), descontamos sal.
                 saltCount += qty;
             }
 
-            // 5. RECETA (Si existe)
+            // 5. RECETA
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
@@ -267,13 +274,11 @@
 
                     if (targetID) {
                         applyDecrement(targetID, targetQty * qty, "Item Receta");
-                    } else {
-                        logs.push(`   ⚠️ Item no encontrado: ${ing.ingrediente || targetID}`);
                     }
                 });
             } 
             
-            // 6. FALLBACK CARNE
+            // 6. FALLBACK CARNE (Si no hay receta)
             if (!recipeFound && (nameNorm.includes('hamb')||nameNorm.includes('burger'))) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
@@ -321,7 +326,7 @@
             else logs.push(`   ⚠️ Falta stock: ${name}`);
         };
 
-        // BURGERS
+        // BURGERS (Packaging y papas guarnición)
         if(totalBurgers > 0) {
             autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones', 'congelada', 'fritas'], totalBurgers * 200, "Papas (200g)"); 
             autoDesc(['carton', 'caja papa', 'caja', 'cajita'], Math.ceil(totalBurgers), "Cartón Papa"); 
@@ -335,17 +340,17 @@
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25, "Tinta");
         }
 
-        // 🔥 PORCIONES (Solo si no tenía receta)
+        // 🔥 PORCIONES (Solo papas 350g, sin packaging extra salvo que se pida)
         if(portionsCount > 0) {
             autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones'], portionsCount * 350, "Papas Porción (350g)");
         }
 
-        // 🔥 SAL (2g por unidad)
+        // 🔥 SAL (2g por unidad) - Solo si corresponde
         if(saltCount > 0) {
             autoDesc(['sal', 'sal fina', 'sodio'], saltCount * 2, `Sal (${saltCount*2}g)`);
         }
 
-        // 🔥 SAZONADOR (5g por unidad)
+        // 🔥 SAZONADOR (5g por unidad) - Solo si corresponde
         if(doritosCount > 0) {
             autoDesc(['sazonador doritos', 'doritos', 'dorito', 'sazonador'], doritosCount * 5, `Sazonador Doritos (${doritosCount*5}g)`);
         }
