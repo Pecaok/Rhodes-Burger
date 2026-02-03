@@ -182,11 +182,12 @@
         return null;
     }
 
-    // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CORREGIDA: EXTRAS ROBUSTOS)
+   // =================================================================
+    // 🔥 GESTIÓN DE STOCK (DEFINITIVA)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
+        // Evitamos descontar o reponer dos veces el mismo estado
         if(factor === -1 && pedido.stockDescontado) return; 
         if(factor === 1 && !pedido.stockDescontado) return; 
 
@@ -194,6 +195,7 @@
         let huboCambios = false;
         let logs = []; 
 
+        // Juntamos todos los items (comida y bebidas)
         let itemsCalc = Array.isArray(pedido.items) ? [...pedido.items] : [];
         if(Array.isArray(pedido.bebidas)) itemsCalc = itemsCalc.concat(pedido.bebidas);
         if(Array.isArray(pedido.drinks)) itemsCalc = itemsCalc.concat(pedido.drinks);
@@ -217,6 +219,7 @@
             const rawName = item.name || "Item sin nombre";
             const nameNorm = normalize(rawName);
             const notesNorm = normalize(item.notes||"");
+            // Unimos nombre y notas para buscar "Extra Medallón" en cualquier lado
             const fullText = nameNorm + " " + notesNorm; 
             const qty = Math.ceil(Number(item.qty || 1));
             const friesOpt = String(item.fries || "").toLowerCase(); 
@@ -242,7 +245,7 @@
             const isPotatoItem = isBurger || nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones");
             if (isPotatoItem && !hasNoSalt && !hasSazon) saltCount += qty;
 
-            // 5. RECETA
+            // 5. RECETA AUTOMÁTICA
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
@@ -263,7 +266,7 @@
                 });
             } 
             
-            // 6. FALLBACK CARNE (Si no hay receta)
+            // 6. FALLBACK CARNE (Si no hay receta y es burger)
             if (!recipeFound && isBurger) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
@@ -274,50 +277,60 @@
                 if(pattyId) applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
             }
 
-            // 7. EXTRAS DETECTADOS EN TEXTO
-            if (fullText.includes('extra carne') || fullText.includes('doble carne')) {
-                const id = findSmartId(['medallon', 'carne', 'patty']); // 🔥 Búsqueda amplia
-                if(id) applyDecrement(id, 1 * qty, "Extra Carne");
+            // 7. 🔥 EXTRAS DETECTADOS EN TEXTO (LÓGICA CORREGIDA) 🔥
+            // Aquí es donde estaba el fallo. Ahora busca "Medallón", "Carne" o "Patty" indistintamente.
+            
+            // CARNE / MEDALLÓN
+            if (fullText.includes('extra') || fullText.includes('adicional') || !isBurger) { 
+                // Solo buscamos si dice "Extra" O si NO es una burger (ej: ítem suelto "Medallón Extra")
+                if (fullText.includes('carne') || fullText.includes('medallon') || fullText.includes('patty')) {
+                     // Evitamos contar doble si la palabra es parte del nombre de la burger (ej: "Doble Carne")
+                     // Pero si dice explícitamente "Extra", entra sí o sí.
+                     if (fullText.includes('extra') || fullText.includes('adicional') || !isBurger) {
+                        const id = findSmartId(['medallon', 'carne', 'patty']);
+                        if(id) applyDecrement(id, 1 * qty, "Extra Medallón/Carne");
+                     }
+                }
             }
-            if (fullText.includes('extra cheddar')) {
+
+            // CHEDDAR
+            if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar') || fullText.includes('cheddar extra')) {
                 const id = findSmartId(['cheddar', 'queso']);
                 if(id) applyDecrement(id, 1 * qty, "Extra Cheddar");
             }
-            if (fullText.includes('extra bacon') || fullText.includes('panceta')) {
+
+            // PANCETA / BACON
+            if (fullText.includes('extra bacon') || fullText.includes('panceta') || fullText.includes('tocino')) {
                 const id = findSmartId(['bacon', 'panceta']);
                 if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
             }
 
-            // 🔥 8. EXTRAS DETECTADOS DEL EXCEL (ESTO ES LO QUE FALLABA)
+            // 8. EXTRAS DEL OBJETO (Lo que viene del Excel parseado)
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
                     if (val > 0) {
                         let searchKeys = [key];
-                        // ACÁ ESTABA EL ERROR: Antes solo buscaba 'medallon'. Ahora busca todo.
+                        // Mapeo inteligente
                         if(key==='patty') searchKeys = ['medallon', 'carne', 'patty'];
                         if(key==='bacon') searchKeys = ['panceta', 'bacon', 'tocino'];
                         if(key==='cheddar') searchKeys = ['cheddar', 'queso'];
 
                         const ingID = findSmartId(searchKeys);
-                        
-                        if(ingID) {
-                            applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val, `Extra ${key}`);
-                        } else {
-                            logs.push(`⚠️ NO SE ENCONTRÓ STOCK PARA EXTRA: ${key}`);
-                        }
+                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val, `Extra Estructurado (${key})`);
                     }
                 }
             }
         });
 
-        // --- AUTOMÁTICOS GLOBALES ---
+        // --- AUTOMÁTICOS GLOBALES (PACKAGING, ETC) ---
         const autoDesc = (keys, qtyToDeduct, name) => {
             const id = findSmartId(keys);
             if(id) applyDecrement(id, qtyToDeduct, name);
         };
 
         if(totalBurgers > 0) {
+            // Packaging Burgers
             autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones', 'congelada', 'fritas'], totalBurgers * 200, "Papas (200g)"); 
             autoDesc(['carton', 'caja papa', 'caja', 'cajita'], Math.ceil(totalBurgers), "Cartón Papa"); 
             autoDesc(['parafinado', 'papel'], Math.ceil(totalBurgers), "Papel"); 
