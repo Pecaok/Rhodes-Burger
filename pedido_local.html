@@ -183,7 +183,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (CORREGIDA)
+    // 🔥 GESTIÓN DE STOCK (CORREGIDA: EXTRAS ROBUSTOS)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -219,42 +219,28 @@
             const notesNorm = normalize(item.notes||"");
             const fullText = nameNorm + " " + notesNorm; 
             const qty = Math.ceil(Number(item.qty || 1));
-            
-            // Normalizamos la opción de papas para buscar coincidencias parciales
             const friesOpt = String(item.fries || "").toLowerCase(); 
 
             logs.push(`📦 ${rawName} (x${qty})`);
 
-            // 1. Detectar si el ítem actual es Burger
+            // 1. Detectar Burger
             const isBurger = nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big');
             
-            if(isBurger) {
-                totalBurgers += qty;
-            }
+            if(isBurger) totalBurgers += qty;
 
-            // 2. Detectar Porción de Papas (350g)
-            // Solo si el nombre dice "porcion" y es papa
+            // 2. Porción Papas
             if(nameNorm.includes("porcion") && (nameNorm.includes("papa") || nameNorm.includes("frita"))) {
                 portionsCount += qty;
             }
 
-            // Variables de control para este ítem específico
-            // Usamos .includes() para ser más flexibles (ej: detecta "con_sazon", "sazonadas", "sazon")
+            // 3. Sazonador
             const hasSazon = friesOpt.includes('sazon') || nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon");
+            if (hasSazon) doritosCount += qty;
+
+            // 4. Sal
             const hasNoSalt = friesOpt.includes('sin') && (friesOpt.includes('sal') || friesOpt.includes('sodio')) || nameNorm.includes("sin sal") || notesNorm.includes("sin sal");
-
-            // 3. 🔥 CONTADOR SAZONADOR (5g)
-            if (hasSazon) {
-                doritosCount += qty;
-            }
-
-            // 4. 🔥 CONTADOR SAL (2g)
-            // Lógica: Es (Burger O Papa/Frita) Y NO tiene sazón Y NO pidió explícitamente sin sal
             const isPotatoItem = isBurger || nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones");
-
-            if (isPotatoItem && !hasNoSalt && !hasSazon) {
-                saltCount += qty;
-            }
+            if (isPotatoItem && !hasNoSalt && !hasSazon) saltCount += qty;
 
             // 5. RECETA
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
@@ -266,23 +252,18 @@
                 const ingredientes = RECETAS_DB[recipeName];
                 logs.push(`   ✅ Receta: "${recipeName}"`);
                 recipeFound = true;
-
                 ingredientes.forEach(ing => {
                     let targetID = ing.id;
                     let targetQty = Number(ing.qty);
-                    
                     if (!targetID && ing.ingrediente) {
                         targetID = findSmartId([ing.ingrediente]);
                         targetQty = Number(ing.cantidad);
                     }
-
-                    if (targetID) {
-                        applyDecrement(targetID, targetQty * qty, "Item Receta");
-                    }
+                    if (targetID) applyDecrement(targetID, targetQty * qty, "Item Receta");
                 });
             } 
             
-            // 6. FALLBACK CARNE (Si no hay receta y es burger)
+            // 6. FALLBACK CARNE (Si no hay receta)
             if (!recipeFound && isBurger) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
@@ -290,14 +271,12 @@
                 if(nameNorm.includes('cuadruple')) patties = 4;
 
                 const pattyId = findSmartId(['medallon', 'carne', 'patty']);
-                if(pattyId) {
-                    applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
-                }
+                if(pattyId) applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
             }
 
-            // 7. EXTRAS
+            // 7. EXTRAS DETECTADOS EN TEXTO
             if (fullText.includes('extra carne') || fullText.includes('doble carne')) {
-                const id = findSmartId(['medallon', 'patty']);
+                const id = findSmartId(['medallon', 'carne', 'patty']); // 🔥 Búsqueda amplia
                 if(id) applyDecrement(id, 1 * qty, "Extra Carne");
             }
             if (fullText.includes('extra cheddar')) {
@@ -309,15 +288,24 @@
                 if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
             }
 
+            // 🔥 8. EXTRAS DETECTADOS DEL EXCEL (ESTO ES LO QUE FALLABA)
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
                     if (val > 0) {
-                        let search = key;
-                        if(key==='patty') search = 'medallon';
-                        if(key==='bacon') search = 'panceta';
-                        const ingID = findSmartId([search]);
-                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val, `Extra ${key}`);
+                        let searchKeys = [key];
+                        // ACÁ ESTABA EL ERROR: Antes solo buscaba 'medallon'. Ahora busca todo.
+                        if(key==='patty') searchKeys = ['medallon', 'carne', 'patty'];
+                        if(key==='bacon') searchKeys = ['panceta', 'bacon', 'tocino'];
+                        if(key==='cheddar') searchKeys = ['cheddar', 'queso'];
+
+                        const ingID = findSmartId(searchKeys);
+                        
+                        if(ingID) {
+                            applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val, `Extra ${key}`);
+                        } else {
+                            logs.push(`⚠️ NO SE ENCONTRÓ STOCK PARA EXTRA: ${key}`);
+                        }
                     }
                 }
             }
@@ -327,37 +315,22 @@
         const autoDesc = (keys, qtyToDeduct, name) => {
             const id = findSmartId(keys);
             if(id) applyDecrement(id, qtyToDeduct, name);
-            else logs.push(`   ⚠️ Falta stock: ${name}`);
         };
 
-        // BURGERS (Packaging y papas guarnición)
         if(totalBurgers > 0) {
             autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones', 'congelada', 'fritas'], totalBurgers * 200, "Papas (200g)"); 
             autoDesc(['carton', 'caja papa', 'caja', 'cajita'], Math.ceil(totalBurgers), "Cartón Papa"); 
             autoDesc(['parafinado', 'papel'], Math.ceil(totalBurgers), "Papel"); 
-            
             const bolsas = Math.ceil(totalBurgers / 2);
             autoDesc(['bolsa', 'packaging', 'kraft'], bolsas, "Bolsas");
             autoDesc(['ganchito', 'grampa', 'broche'], bolsas * 3, "Ganchitos");
-            
             const unidadesImp = totalBurgers + bolsas;
             autoDesc(['tinta', 'sello'], unidadesImp * 0.25, "Tinta");
         }
 
-        // 🔥 PORCIONES (Solo papas 350g, sin packaging extra salvo que se pida)
-        if(portionsCount > 0) {
-            autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones'], portionsCount * 350, "Papas Porción (350g)");
-        }
-
-        // 🔥 SAL (2g por unidad) - Solo si corresponde
-        if(saltCount > 0) {
-            autoDesc(['sal', 'sal fina', 'sodio'], saltCount * 2, `Sal (${saltCount*2}g)`);
-        }
-
-        // 🔥 SAZONADOR (5g por unidad) - Solo si corresponde
-        if(doritosCount > 0) {
-            autoDesc(['sazonador doritos', 'doritos', 'dorito', 'sazonador'], doritosCount * 5, `Sazonador Doritos (${doritosCount*5}g)`);
-        }
+        if(portionsCount > 0) autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones'], portionsCount * 350, "Papas Porción (350g)");
+        if(saltCount > 0) autoDesc(['sal', 'sal fina', 'sodio'], saltCount * 2, `Sal (${saltCount*2}g)`);
+        if(doritosCount > 0) autoDesc(['sazonador doritos', 'doritos', 'dorito', 'sazonador'], doritosCount * 5, `Sazonador Doritos (${doritosCount*5}g)`);
 
         if (huboCambios) {
             const pedidoRef = db.collection('orders').doc(pedido.id);
@@ -507,196 +480,131 @@
    /* ============================================================
        🔥 IMPORTACIÓN PEDIDOS YA (CORREGIDA: DETECCIÓN FLEXIBLE)
     ============================================================ */
-    async function importarPedidosYa() {
+   async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
         if (!input.files.length) return;
         const file = input.files[0];
-
         const reader = new FileReader();
+
         reader.onload = async function(e) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            
-            // Leemos el excel saltando el encabezado (range:1)
             const rows = XLSX.utils.sheet_to_json(firstSheet, {range: 1, defval:""});
 
             let imported = 0;
             let skipped = 0;
-            
-            // Mostramos loader
             const loader = document.getElementById('pageLoader');
-            if(loader) { loader.classList.remove("hidden"); }
+            if(loader) loader.classList.remove("hidden");
 
             for (const row of rows) {
                 const r = {};
-                // Normalizamos claves del objeto row a minúsculas para evitar errores
                 Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
 
-                // 1. ID
                 const id = r['nro de pedido']; 
                 if (!id) continue;
 
-                // Chequeo duplicados
                 const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
-                if (!existing.empty) {
-                    skipped++;
-                    continue; // Si ya existe, pasamos al siguiente
-                }
+                if (!existing.empty) { skipped++; continue; }
 
-                // 2. TOTALES
                 let total = r['total del pedido'];    
                 let neto = r['ingreso estimado'];      
-
                 if(typeof total !== 'number') total = Number(String(total).replace(/\./g, '').replace(',', '.'));
                 if(typeof neto !== 'number') neto = Number(String(neto).replace(/\./g, '').replace(',', '.'));
-
                 if (!total || total <= 0) continue;
 
-                // 3. DATOS
                 const dateStr = r['fecha del pedido'];
                 let clientName = r['nombre del cliente'] || "Cliente Py";
-
-                // 4. ESTADO Y PAGO (TODO ENTREGADO Y PAGADO)
-                // Salvo que diga explícitamente "cancelado"
+                
                 const statusStr = r['estado del pedido'] || "";
                 let status = 'delivered'; 
                 let isCancelled = false;
-                
                 if (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado')) {
-                    status = 'cancelled';
-                    isCancelled = true;
+                    status = 'cancelled'; isCancelled = true;
                 }
 
-                // 5. PROCESAMIENTO DE ÍTEMS
                 const itemsStr = r['artículos'] || "";
                 let itemsList = [];
 
                 if(itemsStr) {
-                    // Separamos por nuevas líneas, comas o signos +
                     let rawItems = String(itemsStr).split(/,|\n|\+/); 
                     
                     rawItems.forEach(line => {
                         line = line.trim();
                         if(!line) return;
-                        
-                        // Parsear cantidad: "2x Hamburguesa" o "1 Medallón extra"
                         let qty = 1;
                         let name = line;
                         const match = line.match(/^(\d+)\s*[xX]?\s*(.*)$/);
-                        if(match) {
-                            qty = Number(match[1]);
-                            name = match[2];
-                        }
+                        if(match) { qty = Number(match[1]); name = match[2]; }
                         
-                        // Limpiar notas entre corchetes si las hubiera
                         let note = "";
                         if(name.includes('[')) {
                             const nMatch = name.match(/\[(.*?)\]/);
-                            if(nMatch) {
-                                note = nMatch[1];
-                                name = name.replace(/\[.*?\]/, "").trim();
-                            }
+                            if(nMatch) { note = nMatch[1]; name = name.replace(/\[.*?\]/, "").trim(); }
                         }
 
-                        // 🔥 DETECCIÓN FLEXIBLE DE EXTRAS 🔥
-                        // Usamos la función normalize() que ya tenés en tu código para ignorar mayúsculas y acentos
                         const nameClean = normalize(name); 
                         
-                        // Condiciones: Que tenga la palabra "extra" (o "adicional") Y la palabra clave
-                        const esAlgoExtra = nameClean.includes('extra') || nameClean.includes('adicional');
+                        // 🔥 LÓGICA BLINDADA DE EXTRAS 🔥
+                        // 1. Tiene palabra "extra" o "adicional"
+                        const explicitExtra = nameClean.includes('extra') || nameClean.includes('adicional');
                         
-                        const isExtraCarne = esAlgoExtra && (nameClean.includes('carne') || nameClean.includes('medallon') || nameClean.includes('patty'));
-                        const isExtraCheddar = esAlgoExtra && (nameClean.includes('cheddar') || nameClean.includes('queso'));
-                        const isExtraBacon = esAlgoExtra && (nameClean.includes('bacon') || nameClean.includes('panceta'));
+                        // 2. O es un ingrediente suelto (Medallon, Bacon, Cheddar) sin ser hamburguesa
+                        const isIngredientName = (nameClean === 'medallon' || nameClean === 'panceta' || nameClean === 'bacon' || nameClean === 'cheddar');
 
-                        // Si detectamos que es un extra Y ya tenemos un ítem principal cargado antes...
+                        const isExtraCarne = (explicitExtra && (nameClean.includes('carne') || nameClean.includes('medallon') || nameClean.includes('patty'))) || (nameClean.includes('medallon') && !nameClean.includes('hamb'));
+                        const isExtraCheddar = (explicitExtra && (nameClean.includes('cheddar') || nameClean.includes('queso'))) || nameClean === 'cheddar';
+                        const isExtraBacon = (explicitExtra && (nameClean.includes('bacon') || nameClean.includes('panceta'))) || nameClean === 'bacon' || nameClean === 'panceta';
+
                         if ((isExtraCarne || isExtraCheddar || isExtraBacon) && itemsList.length > 0) {
                             let lastItem = itemsList[itemsList.length - 1];
-                            
                             if(!lastItem.extras) lastItem.extras = {};
 
                             if(isExtraCarne) lastItem.extras.patty = (lastItem.extras.patty || 0) + qty;
                             if(isExtraCheddar) lastItem.extras.cheddar = (lastItem.extras.cheddar || 0) + qty;
                             if(isExtraBacon) lastItem.extras.bacon = (lastItem.extras.bacon || 0) + qty;
-
-                            // IMPORTANTE: Return para NO agregar esto como un ítem suelto a la lista visual
                             return; 
                         }
 
-                        // Si no es extra, lo agregamos como producto normal
                         const catCode = window.getCat({name: name});
                         let type = 'other';
                         if(catCode === 'b') type='burger';
                         else if(catCode === 'f') type='side';
                         else if(catCode === 'd') type='drink';
 
-                        itemsList.push({ 
-                            qty, 
-                            name, 
-                            price: 0, 
-                            type, 
-                            notes: note,
-                            extras: {} 
-                        });
+                        itemsList.push({ qty, name, price: 0, type, notes: note, extras: {} });
                     });
                 } else {
                     itemsList = [{ name: 'Pedido Importado', qty: 1, price: total }];
                 }
-
                 if(itemsList.length === 1) itemsList[0].price = total;
 
-                // 6. FECHA (Manejo de formato fecha Excel)
                 let isoDate = new Date().toISOString();
                 if(dateStr) {
                     if(typeof dateStr === 'number') {
                         const excelEpoch = new Date(1899, 11, 30);
                         isoDate = new Date(excelEpoch.getTime() + dateStr * 86400000).toISOString();
-                    } else {
-                        try { isoDate = new Date(dateStr).toISOString(); } catch(e){}
-                    }
+                    } else { try { isoDate = new Date(dateStr).toISOString(); } catch(e){} }
                 }
 
-                // 7. GUARDADO EN FIREBASE
                 try {
                     const orderRef = await db.collection('orders').add({
-                        orderNumber: String(id),
-                        py_id: String(id),
-                        source: 'pedidosya',
-                        status: status,
-                        payment_status: 'paid', // FORZADO A PAGADO
-                        paid: true,             // FORZADO A PAGADO
-                        pago: 'pedidosya_online',
-                        entrega: 'delivery',
-                        nombre: clientName,
-                        total: total,           
-                        neto_excel: neto,      
-                        createdAt: isoDate,
-                        items: itemsList,
-                        stockDescontado: false // Flag en falso para que la función de abajo actúe
+                        orderNumber: String(id), py_id: String(id), source: 'pedidosya',
+                        status: status, payment_status: 'paid', paid: true, pago: 'pedidosya_online',
+                        entrega: 'delivery', nombre: clientName, total: total, neto_excel: neto,      
+                        createdAt: isoDate, items: itemsList, stockDescontado: false 
                     });
 
-                    // 8. DESCUENTO DE STOCK AUTOMÁTICO
                     if (!isCancelled) {
-                        const pedidoParaStock = {
-                            id: orderRef.id,
-                            items: itemsList,
-                            stockDescontado: false
-                        };
-                        // Llamamos a tu función gestionarStock para restar ingredientes
+                        const pedidoParaStock = { id: orderRef.id, items: itemsList, stockDescontado: false };
                         await gestionarStock(pedidoParaStock, -1);
                     }
-
                     imported++;
-
-                } catch (err) {
-                    console.error("Error importando pedido:", err);
-                }
+                } catch (err) { console.error("Error importando:", err); }
             }
 
             if(loader) loader.classList.add("hidden");
-            
-            alert(`✅ PROCESO FINALIZADO\n\n- Se importaron ${imported} pedidos.\n- Se marcaron todos como PAGADOS y ENTREGADOS.\n- Se descontó el stock de cada uno (incluyendo extras).`);
+            alert(`✅ IMPORTACIÓN FINALIZADA\n\nSe cargaron ${imported} pedidos correctamente.`);
             input.value = ""; 
             location.reload();
         };
