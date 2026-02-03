@@ -65,7 +65,7 @@
     .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 15px; }
     
     .badge { padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; display:inline-block; letter-spacing:0.5px; }
-    .bdg-web { background: #e0f2fe; color: #0284c7; }   
+    .bdg-web { background: #e0f2fe; color: #0284c7; }    
     .bdg-local { background: #f1f5f9; color: #475569; } 
     .bdg-py { background: #fee2e2; color: #ef4444; }    
     .bdg-cash { background: #dcfce7; color: #166534; }  
@@ -126,6 +126,8 @@
         <div><h2 style="margin:0; border:0">Tablero de Comando</h2></div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <div style="background:#fff7ed; padding:6px 12px; border-radius:8px; border:1px solid #fed7aa; display:flex; align-items:center; gap:8px">
+                <div class="conf-input-group"><div class="conf-lbl">PY %</div><input type="number" id="confPy" value="30" class="conf-inp"></div>
+                
                 <div class="conf-input-group"><div class="conf-lbl">Débito</div><input type="number" id="confDebit" value="0" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">Transf</div><input type="number" id="confTransf" value="0" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">QR/MP</div><input type="number" id="confQR" value="0" class="conf-inp"></div>
@@ -379,8 +381,13 @@
             if(doc.exists) FIXED_DATA = doc.data();
             if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
             if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
+            
+            // 🔥 FIX: Cargamos los valores si existen
             $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
-            $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0;
+            $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; 
+            $('#confQR').value = FIXED_DATA.config?.taxQR||0;
+            if($('#confPy')) $('#confPy').value = FIXED_DATA.config?.pyPercent||30;
+
             window.renderFixedTables();
         });
     };
@@ -719,7 +726,27 @@
     window.updFix = function(a,i,k,v) { FIXED_DATA[a][i][k]=k==='cost'?Number(v):v; };
     window.delFix = function(a,i) { FIXED_DATA[a].splice(i,1); window.renderFixedTables(); };
     window.renderFixedTables = function() { $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join(''); $('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
-    window.saveFixedData = function() { if(!FIXED_DATA.aliases)FIXED_DATA.aliases=[]; FIXED_DATA.config={pyPercent:Number($('#confPy').value), taxDebit:Number($('#confDebit').value), taxTransf:Number($('#confTransf').value), taxQR:Number($('#confQR').value)}; db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado")); window.calculateAll(); window.renderOrdersTab(); };
+    
+    // 🔥 FUNCIÓN ARREGLADA: BLINDADA CONTRA ERRORES
+    window.saveFixedData = function() { 
+        if(!FIXED_DATA.aliases) FIXED_DATA.aliases=[]; 
+        
+        // Verificamos si existe el input de PedidosYa antes de leerlo
+        const inputPy = $('#confPy');
+        const valPy = inputPy ? Number(inputPy.value) : 30; // 30% default
+
+        FIXED_DATA.config={
+            pyPercent: valPy, 
+            taxDebit: Number($('#confDebit').value||0), 
+            taxTransf: Number($('#confTransf').value||0), 
+            taxQR: Number($('#confQR').value||0)
+        }; 
+        
+        db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado")); 
+        window.calculateAll(); 
+        window.renderOrdersTab(); 
+    };
+    
     window.saveConfig = window.saveFixedData;
     window.showTab = function(id) { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); };
 
