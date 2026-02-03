@@ -51,6 +51,10 @@
     .st-ok { background:var(--green) } .st-warn { background:var(--orange) } .st-danger { background:var(--red) }
     .qty-control { display:flex; align-items:center; gap:8px } 
     .qty-btn { width:28px; height:28px; border-radius:6px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:bold; display:flex; align-items:center; justify-content:center; }
+    /* Estilo para el input de stock editable */
+    .qty-input { width:70px; text-align:center; font-weight:800; border:1px solid #ddd; border-radius:4px; padding:4px; font-size:14px; color:#334155; }
+    .qty-input:focus { border-color:var(--primary); background:#fffbeb; }
+
     .row-flex { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:15px; }
 
     .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 20px; }
@@ -126,8 +130,6 @@
         <div><h2 style="margin:0; border:0">Tablero de Comando</h2></div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <div style="background:#fff7ed; padding:6px 12px; border-radius:8px; border:1px solid #fed7aa; display:flex; align-items:center; gap:8px">
-                <div class="conf-input-group"><div class="conf-lbl">PY %</div><input type="number" id="confPy" value="30" class="conf-inp"></div>
-                
                 <div class="conf-input-group"><div class="conf-lbl">Débito</div><input type="number" id="confDebit" value="0" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">Transf</div><input type="number" id="confTransf" value="0" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">QR/MP</div><input type="number" id="confQR" value="0" class="conf-inp"></div>
@@ -382,17 +384,15 @@
             if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
             if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
             
-            // 🔥 FIX: Cargamos los valores si existen
             $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
             $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; 
             $('#confQR').value = FIXED_DATA.config?.taxQR||0;
-            if($('#confPy')) $('#confPy').value = FIXED_DATA.config?.pyPercent||30;
-
+            // Eliminado confPy load
             window.renderFixedTables();
         });
     };
 
-    // RENDER STOCK (UNIFICADO)
+    // RENDER STOCK (UNIFICADO) Y EDITABLE 🔥
     window.renderStockTable = function() {
         const t=$('#searchStock').value.toLowerCase();
         const c=$('#filterCat').value;
@@ -410,13 +410,14 @@
                 actions = `<button class="btn-icon" onclick="openSubRecipeEditor('${p.id}')">🧩</button><button class="btn-icon" onclick="deleteItem('subrecipes','${p.id}')">🗑️</button>`;
             }
 
+            // 🔥 CAMBIO CLAVE: INPUT EDITABLE EN LUGAR DE TEXTO FIJO
             b.insertAdjacentHTML('beforeend', `<tr>
                 <td><b>${p.name}</b></td>
                 <td><small>${p.category}</small></td>
                 <td>
                     <div class="qty-control">
                         <button class="qty-btn" onclick="updStock('${p.id}',-1)">-</button>
-                        <b>${formatQty(p.qty)}</b>
+                        <input type="number" class="qty-input" value="${formatQty(p.qty)}" onchange="setStock('${p.id}', this.value)">
                         <button class="qty-btn" onclick="updStock('${p.id}',1)">+</button>
                         <small style="margin-left:5px">${p.unit}</small>
                     </div>
@@ -428,13 +429,21 @@
         });
     };
 
-    // UPDATE STOCK INTELIGENTE (Sabe dónde guardar)
+    // UPDATE STOCK INCREMENTAL (+1 / -1)
     window.updStock = (id, v) => {
         const item = INVENTORY.find(i => i.id === id);
         if(!item) return;
         const collection = item.isSub ? 'subrecipes' : 'inventory';
         const newQty = Number(item.qty || 0) + v;
         db.collection(collection).doc(id).update({ qty: newQty });
+    };
+
+    // 🔥 NUEVO: SET STOCK ABSOLUTO (PARA EL INPUT MANUAL)
+    window.setStock = (id, val) => {
+        const item = INVENTORY.find(i => i.id === id);
+        if(!item) return;
+        const collection = item.isSub ? 'subrecipes' : 'inventory';
+        db.collection(collection).doc(id).update({ qty: Number(val) });
     };
 
     // --- LOGICA DE RECETAS FINALES ---
@@ -536,7 +545,7 @@
     window.calculateAll = function() {
         if(typeof Chart === 'undefined') return;
         let gross=0, comms=0, taxes=0, theoCMV=0;
-        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {};
+        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config || {};
         let dailySales = {}, productSales = {}, paymentStats = { 'Efectivo':0, 'Transferencia':0, 'MercadoPago/QR':0, 'PedidosYa':0, 'Otros':0 };
 
         ORDERS.forEach(o => {
@@ -547,8 +556,9 @@
 
             if(src.includes('pedidosya')) {
                  finalPayMethod = 'PedidosYa';
+                 // 🔥 CAMBIO: Solo descontamos si hay neto_excel, sino comisión 0 (porque la pediste sacar)
                  if(o.neto_excel && Number(o.neto_excel) > 0) comms += (sale - Number(o.neto_excel));
-                 else comms += (sale * ((pctPy||30)/100));
+                 else comms += 0; 
             } else {
                 if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) { taxes += (sale*(pctQR/100)); finalPayMethod='MercadoPago/QR'; }
                 else if(pay.includes('transfer')) { taxes += (sale*(pctTransf/100)); finalPayMethod='Transferencia'; }
@@ -595,11 +605,11 @@
     window.renderOrdersTab = function() {
         const tbody = $('#ordersTableBody'); tbody.innerHTML = '';
         if(ORDERS.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos (o no cargaron)</td></tr>'; return; }
-        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {};
+        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config || {};
         ORDERS.forEach((o, index) => {
             const total = Number(o.total || 0);
             let deduction = 0;
-            if(String(o.source).includes('pedidosya')) deduction = (o.neto_excel && o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100));
+            if(String(o.source).includes('pedidosya')) deduction = (o.neto_excel && o.neto_excel > 0) ? (total - o.neto_excel) : 0;
             else if(String(o.pago).includes('mercado') || String(o.pago).includes('qr')) deduction = total * (pctQR/100);
             else if(String(o.pago).includes('transfer')) deduction = total * (pctTransf/100);
             else if(String(o.pago).includes('debito')) deduction = total * (pctDebit/100);
@@ -727,16 +737,12 @@
     window.delFix = function(a,i) { FIXED_DATA[a].splice(i,1); window.renderFixedTables(); };
     window.renderFixedTables = function() { $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join(''); $('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
     
-    // 🔥 FUNCIÓN ARREGLADA: BLINDADA CONTRA ERRORES
+    // 🔥 FUNCIÓN ARREGLADA: REMOVIDA LÓGICA DE PY PERCENT
     window.saveFixedData = function() { 
         if(!FIXED_DATA.aliases) FIXED_DATA.aliases=[]; 
         
-        // Verificamos si existe el input de PedidosYa antes de leerlo
-        const inputPy = $('#confPy');
-        const valPy = inputPy ? Number(inputPy.value) : 30; // 30% default
-
         FIXED_DATA.config={
-            pyPercent: valPy, 
+            // pyPercent ELIMINADO
             taxDebit: Number($('#confDebit').value||0), 
             taxTransf: Number($('#confTransf').value||0), 
             taxQR: Number($('#confQR').value||0)
