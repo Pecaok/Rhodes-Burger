@@ -121,6 +121,7 @@
     let STOCK_NAME_TO_ID = {}; // Bolsa Global
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
+    let ALIASES_DB = []; // 🔥 NUEVO: Para guardar las promos
 
     function normalize(str) {
         return String(str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -162,6 +163,16 @@
         });
     });
     
+    // 🔥 CARGA DE ALIASES (PROMOS) DESDE GERENCIA
+    db.collection('config').doc('gerencia').onSnapshot(doc => {
+        if(doc.exists && doc.data().aliases) {
+            ALIASES_DB = doc.data().aliases;
+        }
+        if(doc.exists && doc.data().config) {
+            // Cargar precios de configuración si fuera necesario
+        }
+    });
+    
     db.collection('config').doc('prices').onSnapshot(doc => {
         if(doc.exists) { PRICES_DB = doc.data(); if(window.lastSnap) renderList(window.lastSnap); }
     });
@@ -182,12 +193,11 @@
         return null;
     }
 
-   // =================================================================
-    // 🔥 GESTIÓN DE STOCK (DEFINITIVA)
+    // =================================================================
+    // 🔥 GESTIÓN DE STOCK (DEFINITIVA - CON SOPORTE PROMOS/ALIASES)
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
-        // Evitamos descontar o reponer dos veces el mismo estado
         if(factor === -1 && pedido.stockDescontado) return; 
         if(factor === 1 && !pedido.stockDescontado) return; 
 
@@ -195,11 +205,42 @@
         let huboCambios = false;
         let logs = []; 
 
-        // Juntamos todos los items (comida y bebidas)
-        let itemsCalc = Array.isArray(pedido.items) ? [...pedido.items] : [];
-        if(Array.isArray(pedido.bebidas)) itemsCalc = itemsCalc.concat(pedido.bebidas);
-        if(Array.isArray(pedido.drinks)) itemsCalc = itemsCalc.concat(pedido.drinks);
+        // Juntamos todos los items raw del pedido
+        let rawItems = Array.isArray(pedido.items) ? [...pedido.items] : [];
+        if(Array.isArray(pedido.bebidas)) rawItems = rawItems.concat(pedido.bebidas);
+        if(Array.isArray(pedido.drinks)) rawItems = rawItems.concat(pedido.drinks);
 
+        // 🔥 EXPANSIÓN DE PROMOS (ALIASES) 🔥
+        // Transformamos "Promo 2x1" en sus items reales ("2x Hamburguesa", "1x Papas")
+        let itemsCalc = [];
+        
+        rawItems.forEach(item => {
+            const nameNorm = normalize(item.name || "");
+            
+            // Buscamos si este nombre coincide con un ALIAS (Promo)
+            const foundAlias = ALIASES_DB.find(a => normalize(a.external) === nameNorm);
+            
+            if (foundAlias && foundAlias.items && foundAlias.items.length > 0) {
+                logs.push(`✨ Promo Detectada: "${item.name}" -> Desglosando...`);
+                const qtyPromo = Math.ceil(Number(item.qty || 1));
+                
+                foundAlias.items.forEach(subItem => {
+                    itemsCalc.push({
+                        name: subItem.id, // El ID interno del alias suele ser el nombre de la Receta
+                        qty: (Number(subItem.qty) * qtyPromo),
+                        notes: item.notes, // Heredamos notas
+                        fries: item.fries, // Heredamos opciones
+                        extras: item.extras // Heredamos extras
+                    });
+                    logs.push(`   ↳ +${Number(subItem.qty) * qtyPromo} x ${subItem.id}`);
+                });
+            } else {
+                // Si no es promo, pasa directo
+                itemsCalc.push(item);
+            }
+        });
+
+        // AHORA PROCESAMOS LA LISTA EXPANDIDA
         let totalBurgers = 0;
         let doritosCount = 0; 
         let portionsCount = 0; 
@@ -219,12 +260,11 @@
             const rawName = item.name || "Item sin nombre";
             const nameNorm = normalize(rawName);
             const notesNorm = normalize(item.notes||"");
-            // Unimos nombre y notas para buscar "Extra Medallón" en cualquier lado
             const fullText = nameNorm + " " + notesNorm; 
             const qty = Math.ceil(Number(item.qty || 1));
             const friesOpt = String(item.fries || "").toLowerCase(); 
 
-            logs.push(`📦 ${rawName} (x${qty})`);
+            logs.push(`📦 Procesando: ${rawName} (x${qty})`);
 
             // 1. Detectar Burger
             const isBurger = nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big');
@@ -253,7 +293,7 @@
 
             if (recipeName) {
                 const ingredientes = RECETAS_DB[recipeName];
-                logs.push(`   ✅ Receta: "${recipeName}"`);
+                logs.push(`   ✅ Receta encontrada: "${recipeName}"`);
                 recipeFound = true;
                 ingredientes.forEach(ing => {
                     let targetID = ing.id;
@@ -277,15 +317,10 @@
                 if(pattyId) applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
             }
 
-            // 7. 🔥 EXTRAS DETECTADOS EN TEXTO (LÓGICA CORREGIDA) 🔥
-            // Aquí es donde estaba el fallo. Ahora busca "Medallón", "Carne" o "Patty" indistintamente.
-            
+            // 7. 🔥 EXTRAS DETECTADOS EN TEXTO
             // CARNE / MEDALLÓN
             if (fullText.includes('extra') || fullText.includes('adicional') || !isBurger) { 
-                // Solo buscamos si dice "Extra" O si NO es una burger (ej: ítem suelto "Medallón Extra")
                 if (fullText.includes('carne') || fullText.includes('medallon') || fullText.includes('patty')) {
-                     // Evitamos contar doble si la palabra es parte del nombre de la burger (ej: "Doble Carne")
-                     // Pero si dice explícitamente "Extra", entra sí o sí.
                      if (fullText.includes('extra') || fullText.includes('adicional') || !isBurger) {
                         const id = findSmartId(['medallon', 'carne', 'patty']);
                         if(id) applyDecrement(id, 1 * qty, "Extra Medallón/Carne");
@@ -305,13 +340,12 @@
                 if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
             }
 
-            // 8. EXTRAS DEL OBJETO (Lo que viene del Excel parseado)
+            // 8. EXTRAS DEL OBJETO
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
                     if (val > 0) {
                         let searchKeys = [key];
-                        // Mapeo inteligente
                         if(key==='patty') searchKeys = ['medallon', 'carne', 'patty'];
                         if(key==='bacon') searchKeys = ['panceta', 'bacon', 'tocino'];
                         if(key==='cheddar') searchKeys = ['cheddar', 'queso'];
@@ -323,14 +357,13 @@
             }
         });
 
-        // --- AUTOMÁTICOS GLOBALES (PACKAGING, ETC) ---
+        // --- AUTOMÁTICOS GLOBALES ---
         const autoDesc = (keys, qtyToDeduct, name) => {
             const id = findSmartId(keys);
             if(id) applyDecrement(id, qtyToDeduct, name);
         };
 
         if(totalBurgers > 0) {
-            // Packaging Burgers
             autoDesc(['papas fritas', 'papa frita', 'papas', 'papa', 'bastones', 'congelada', 'fritas'], totalBurgers * 200, "Papas (200g)"); 
             autoDesc(['carton', 'caja papa', 'caja', 'cajita'], Math.ceil(totalBurgers), "Cartón Papa"); 
             autoDesc(['parafinado', 'papel'], Math.ceil(totalBurgers), "Papel"); 
@@ -349,11 +382,12 @@
             const pedidoRef = db.collection('orders').doc(pedido.id);
             batch.update(pedidoRef, { stockDescontado: (factor === -1) });
             await batch.commit();
-            alert("✅ STOCK ACTUALIZADO\n\n" + logs.join("\n"));
+            alert("✅ STOCK ACTUALIZADO (Con Promos)\n\n" + logs.join("\n"));
         } else {
             alert("⚠️ NO SE DESCONTÓ NADA\n\nLog:\n" + logs.join("\n"));
         }
     }
+
     // GLOBALES
     window.logout = () => { localStorage.removeItem('rb_admin_ok'); location.replace('login.html'); };
 
@@ -490,10 +524,10 @@
         return defaultTime;
     }
 
-   /* ============================================================
-       🔥 IMPORTACIÓN PEDIDOS YA (CORREGIDA: DETECCIÓN FLEXIBLE)
+    /* ============================================================
+       🔥 IMPORTACIÓN PEDIDOS YA (CORREGIDA: DETECCIÓN FLEXIBLE + BLINDAJE EXTRAS)
     ============================================================ */
-   async function importarPedidosYa() {
+    async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
         if (!input.files.length) return;
         const file = input.files[0];
@@ -559,10 +593,7 @@
                         const nameClean = normalize(name); 
                         
                         // 🔥 LÓGICA BLINDADA DE EXTRAS 🔥
-                        // 1. Tiene palabra "extra" o "adicional"
                         const explicitExtra = nameClean.includes('extra') || nameClean.includes('adicional');
-                        
-                        // 2. O es un ingrediente suelto (Medallon, Bacon, Cheddar) sin ser hamburguesa
                         const isIngredientName = (nameClean === 'medallon' || nameClean === 'panceta' || nameClean === 'bacon' || nameClean === 'cheddar');
 
                         const isExtraCarne = (explicitExtra && (nameClean.includes('carne') || nameClean.includes('medallon') || nameClean.includes('patty'))) || (nameClean.includes('medallon') && !nameClean.includes('hamb'));
@@ -853,13 +884,13 @@
                 if(title.includes("PAPAS")) displayPrice = "";
                 
                 return `<div class="it-row">
-                   <div class="it-qty">${it.qty||1}</div>
-                   <div class="it-det">
+                    <div class="it-qty">${it.qty||1}</div>
+                    <div class="it-det">
                       <div class="it-name">${dName}</div>
                       ${extrasHtml}
                       ${it.notes ? `<div class="it-note">${esc(it.notes)}</div>` : ''}
-                   </div>
-                   <div class="it-price">${displayPrice}</div>
+                    </div>
+                    <div class="it-price">${displayPrice}</div>
                 </div>`;
             }).join("");
             return `<div class="cat-group"><div class="cat-title">${icon} ${title}</div>${rows}</div>`;
@@ -877,7 +908,6 @@
             </div>`;
         }
 
-        // 🔥 MOSTRAR EL NETO EN VERDE SI EXISTE
         let netHtml = "";
         if(o.neto_excel && o.neto_excel > 0) {
             netHtml = `<div style="font-size:12px; color:#15803d; text-align:right; font-weight:700;">Neto: ${money(o.neto_excel)}</div>`;
