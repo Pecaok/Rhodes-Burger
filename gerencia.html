@@ -56,6 +56,7 @@
     .kpi { background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--border); }
     .kpi-lbl { font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
     .kpi-val { font-size: 26px; font-weight: 800; color: #0f172a; margin-top: 5px; }
+    
     .order-row { cursor: pointer; transition: background 0.2s; }
     .order-row:hover { background: #f8fafc; }
     .order-details { display: none; background: #fcfcfc; border-bottom: 1px solid var(--border); }
@@ -364,7 +365,7 @@
         });
     };
 
-    // RENDER STOCK (UNIFICADO) Y EDITABLE
+    // RENDER STOCK (UNIFICADO) Y EDITABLE 🔥
     window.renderStockTable = function() {
         const t=$('#searchStock').value.toLowerCase();
         const c=$('#filterCat').value;
@@ -380,6 +381,7 @@
                 actions = `<button class="btn-icon" onclick="openSubRecipeEditor('${p.id}')">🧩</button><button class="btn-icon" onclick="deleteItem('subrecipes','${p.id}')">🗑️</button>`;
             }
 
+            // INPUT EDITABLE
             b.insertAdjacentHTML('beforeend', `<tr>
                 <td><b>${p.name}</b></td>
                 <td><small>${p.category}</small></td>
@@ -406,6 +408,7 @@
         db.collection(collection).doc(id).update({ qty: newQty });
     };
 
+    // 🔥 SET STOCK ABSOLUTO (PARA INPUT MANUAL)
     window.setStock = (id, val) => {
         const item = INVENTORY.find(i => i.id === id);
         if(!item) return;
@@ -492,6 +495,7 @@
         db.collection('purchases').limit(500).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); });
     };
 
+    // --- CALCULOS Y GRAFICOS ---
     window.calculateAll = function() {
         if(typeof Chart === 'undefined') return;
         let gross=0, comms=0, taxes=0, theoCMV=0;
@@ -499,14 +503,17 @@
         let dailySales = {}, productSales = {}, paymentStats = { 'Efectivo':0, 'Transferencia':0, 'MercadoPago/QR':0, 'PedidosYa':0, 'Otros':0 };
 
         ORDERS.forEach(o => {
-            const sale = Number(o.total || 0); gross += sale;
+            const sale = Number(o.total || 0); 
+            // 🔥 PRECIO RAW: Se suma tal cual viene de DB (Pedido Local)
+            gross += sale;
+            
             const src = String(o.source||'').toLowerCase();
             const pay = String(o.pago||o.paymentMethod||'').toLowerCase();
             let finalPayMethod = 'Otros';
 
             if(src.includes('pedidosya')) {
                  finalPayMethod = 'PedidosYa';
-                 // 🔥 LÓGICA DE COMISIÓN EXACTA BASADA EN EXCEL
+                 // 🔥 SOLO DESCUENTA SI HAY NETO EN DB, SINO 0
                  if(o.neto_excel && Number(o.neto_excel) > 0) comms += (sale - Number(o.neto_excel));
                  else comms += 0; 
             } else {
@@ -668,17 +675,21 @@
     window.delFix = function(a,i) { FIXED_DATA[a].splice(i,1); window.renderFixedTables(); };
     window.renderFixedTables = function() { $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join(''); $('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
     
+    // 🔥 ELIMINADA LÓGICA DE PY PERCENT
     window.saveFixedData = function() { 
         if(!FIXED_DATA.aliases) FIXED_DATA.aliases=[]; 
+        
         FIXED_DATA.config={
             taxDebit: Number($('#confDebit').value||0), 
             taxTransf: Number($('#confTransf').value||0), 
             taxQR: Number($('#confQR').value||0)
         }; 
+        
         db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado")); 
         window.calculateAll(); 
         window.renderOrdersTab(); 
     };
+    
     window.saveConfig = window.saveFixedData;
     window.showTab = function(id) { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); };
 
