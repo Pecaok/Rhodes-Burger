@@ -81,9 +81,9 @@
     .ing-list { border: 1px solid #eee; border-radius: 8px; padding: 10px; margin-top: 10px; background: #fafafa; }
     .ing-item { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px dashed #ddd; font-size: 14px; }
     
-    /* Sticky header */
+    /* Sticky header para la tabla */
     .sticky-col { position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1; background: #fff; }
-    /* Separador de categorías en la tabla */
+    /* Headers de categoría */
     .cat-header { background: #e2e8f0; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #475569; padding: 8px 10px; font-size: 11px; }
   </style>
 </head>
@@ -372,17 +372,16 @@
             PRODUCTS_DB = {};
             snap.forEach(doc => {
                 const d = doc.data();
-                // Normalizamos el nombre para búsquedas
+                // Guardamos la categoría asociada al nombre en minúsculas
                 const normName = d.name.toLowerCase().trim();
                 PRODUCTS_DB[normName] = d.category || 'otros';
             });
-            // Si ya hay pedidos cargados, refrescamos proporciones
             if(ORDERS.length) window.renderProportions();
         });
     }
 
     // ==========================================
-    // 🔥 2. LÓGICA DINÁMICA: PROPORCIONES ORDENADAS
+    // 🔥 2. LÓGICA DINÁMICA: PROPORCIONES ORDENADAS Y CORREGIDAS
     // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
@@ -393,7 +392,30 @@
         let totalS = 0;
         let totalD = 0;
 
-        // Helper para inicializar estadística
+        // Helper para adivinar categoría si no está en PRODUCTS_DB
+        // MEJORA: Lista extendida de nombres de Burgers y Bebidas conocidas
+        const guessCategory = (name) => {
+            const n = name.toLowerCase();
+            // 5. Detalle Papas
+            if (n.includes("porción papas fritas (")) return 'detalle_papas';
+            
+            // 4. Extras
+            if (n.includes("medallón") || n.includes("adicional")) return 'extras';
+
+            // 2. Guarniciones
+            if (n.includes("nugget") || (n.includes("papas") && (n.includes("cheddar") || n.includes("bacon")))) return 'guarniciones';
+
+            // 3. Bebidas (Lista expandida)
+            const drinks = ["coca", "sprite", "agua", "andes", "aquarius", "fanta", "pepsi", "7up", "levite", "paso", "schweppes", "mirinda", "baggio", "monster", "speed", "red bull", "manaos", "secuko"];
+            if (drinks.some(d => n.includes(d))) return 'bebidas';
+
+            // 1. Hamburguesas (Detectamos nombres específicos que no dicen "Burger")
+            const burgerNames = ["cheese", "bacon", "egg", "core", "morgan", "big john", "buena", "mala", "fea", "rhodes", "burguesa", "pollo", "crispy", "olo", "royale", "doble", "simple"];
+            if (burgerNames.some(b => n.includes(b))) return 'hamburguesas';
+
+            return 'otros';
+        };
+
         const addStat = (name, qty, isDouble, category) => {
             if (!stats[name]) stats[name] = { simple: 0, double: 0, category: category };
             if (isDouble) {
@@ -403,15 +425,6 @@
                 stats[name].simple += qty;
                 totalS += qty;
             }
-        };
-
-        // Helper para adivinar categoría si no está en PRODUCTS_DB
-        const guessCategory = (name) => {
-            const n = name.toLowerCase();
-            if (n.includes('burger') || n.includes('hamburguesa')) return 'hamburguesas';
-            if (n.includes('papas') || n.includes('nugget') || n.includes('bastones')) return 'guarniciones';
-            if (n.includes('coca') || n.includes('agua') || n.includes('cerveza') || n.includes('lata')) return 'bebidas';
-            return 'otros';
         };
 
         ORDERS.forEach(o => {
@@ -431,10 +444,13 @@
                 cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
 
                 // 2. Determinar Categoría (DB o Guess)
+                // Primero buscamos en DB, si no, adivinamos
                 let cat = PRODUCTS_DB[cleanName.toLowerCase()] || guessCategory(cleanName);
 
-                // Excepción: Si es "papas solas" sin cheddar/bacon, no las listamos acá (van al detalle)
-                // Pero si son Nuggets o Papas con Cheddar, SÍ se listan como Guarnición.
+                // Forzamos corrección para items conocidos que pueden haber quedado mal en DB
+                if(guessCategory(cleanName) !== 'otros') cat = guessCategory(cleanName);
+
+                // Excepción: Papas solas van al detalle
                 const isPlainFries = cleanName.toLowerCase().includes("papas") && !cleanName.toLowerCase().includes("cheddar") && !cleanName.toLowerCase().includes("bacon");
                 
                 if (!isPlainFries) {
@@ -451,12 +467,12 @@
                 let fName = (it.fries || "").toLowerCase();
                 let potatoType = "";
 
-                // Si el item principal ES papas solas, asumimos "Con Sal" si no dice nada
                 if (isPlainFries && fName === "") fName = "con sal";
 
+                // DETECCIÓN MEJORADA PARA "SIN SAL"
                 if (fName.includes("sazon") || fName.includes("dorito")) potatoType = "Porción papas fritas (Sazonadas)";
-                else if (fName.includes("sin sal")) potatoType = "Porción papas fritas (Sin Sal)";
-                else if (fName.includes("con sal") || fName.includes("normal") || isPlainFries) potatoType = "Porción papas fritas (Con Sal)";
+                else if (fName.includes("sin sal") || fName.includes("sin_sal")) potatoType = "Porción papas fritas (Sin Sal)"; // <--- AQUI ESTABA EL ERROR
+                else if (fName.includes("con sal") || fName.includes("con_sal") || fName.includes("normal") || isPlainFries) potatoType = "Porción papas fritas (Con Sal)";
 
                 if (potatoType) {
                     addStat(potatoType, qty, false, 'detalle_papas');
@@ -647,7 +663,7 @@
         chartMain = new Chart($('#mainChart').getContext('2d'), { type:'bar', data:{ labels:['Ventas','Mercadería','Fijos','Sueldos','Var','Balance'], datasets:[{data:[gross,realPurchases,totalFixed,totalSalaries,variableCosts,profitReal], backgroundColor:['#64748b','#f97316','#a855f7','#3b82f6','#eab308',profitReal>=0?'#10b981':'#ef4444'], borderRadius:6}] }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}} });
         window.renderExtraCharts(dailySales, productSales, paymentStats);
         
-        // --- LLAMADA A LA NUEVA FUNCION ---
+        // --- LLAMADA A LA NUEVA FUNCION DE PROPORCIONES ---
         window.renderProportions();
     };
 
@@ -742,7 +758,7 @@
         const now = new Date();
         $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
         $('#monthPicker').addEventListener('change', window.loadDashboardData);
-        loadProductsDB(); // 🔥 Carga los productos al iniciar
+        loadProductsDB(); // 🔥 Carga productos al inicio
         window.loadInventory(); window.loadRecipes(); window.loadFixedData(); window.loadDashboardData();
     });
 </script>
