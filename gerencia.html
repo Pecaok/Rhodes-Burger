@@ -167,15 +167,18 @@
     <div id="tab-proportions" style="display:none">
         <div class="card">
             <div class="row-flex">
-                <h2 style="margin:0; border:0">📊 Proporción de Ventas por Canal</h2>
+                <h2 style="margin:0; border:0">📊 Proporción de Ventas (Detallado)</h2>
                 <div id="totalItemsBadge" style="background:var(--primary); color:white; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700">Total: 0</div>
             </div>
             <div style="overflow-x:auto; margin-top:15px">
                 <table style="border-collapse: separate; border-spacing: 0;">
                     <thead>
                         <tr>
-                            <th class="sticky-col" style="z-index:10;">Producto</th>
-                            <th style="text-align: center; background: #fffbeb; color: #92400e;">Total</th>
+                            <th class="sticky-col" style="z-index:10; min-width:150px">Producto</th>
+                            
+                            <th style="text-align: center; background: #fff7ed; color: #9a3412;">Simple</th>
+                            <th style="text-align: center; background: #fff7ed; color: #9a3412;">Doble</th>
+                            <th style="text-align: center; background: #fffbeb; color: #92400e; font-weight:800; border-right:2px solid #e2e8f0">TOTAL</th>
                             
                             <th style="text-align: center; background: #eff6ff; color: #1e40af;">🌐 Web <small>(%)</small></th>
                             <th style="text-align: center; background: #f8fafc; color: #475569;">🏪 Local <small>(%)</small></th>
@@ -369,9 +372,11 @@
     }
 
     // ==========================================
-    // 1. CARGA MEJORADA (Guarda nombres reales)
+    // 1. CARGA DE INVENTARIO
     // ==========================================
     function loadProductsDB() {
+        // Esta función ahora es menos crítica para "Proporciones" porque usamos la MASTER_LIST,
+        // pero sigue siendo útil para otras cosas.
         db.collection('products').get().then(snap => {
             PRODUCTS_DB = {}; 
             snap.forEach(doc => {
@@ -379,19 +384,19 @@
                 const normName = d.name.toLowerCase().trim();
                 PRODUCTS_DB[normName] = { category: d.category || 'otros', realName: d.name };
             });
-            if(ORDERS.length || Object.keys(PRODUCTS_DB).length) window.renderProportions();
+            if(ORDERS.length) window.renderProportions();
         });
     }
 
     // ==========================================
-    // 🔥 2. LÓGICA DEFINITIVA: LISTA FIJA + DESGLOSE CONTEXTUAL
+    // 🔥 2. LÓGICA FINAL: SIMPLE/DOBLE + CANALES + LIMPIEZA NOMBRES
     // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
         if (!body) return;
         body.innerHTML = '';
 
-        // 1. TU LISTA EXACTA
+        // 1. LISTA MAESTRA (Tal cual tu menú)
         const MASTER_LIST = [
             "CheeseBurger", "CheeseBacon", "Easter Egg", "Core", "Morgan", 
             "Big John", "Buena", "Mala", "Fea", "Rhodes", "Burguesa", "Pollo Crispy",
@@ -401,53 +406,51 @@
             "Andes Rubia", "Andes Roja", "Aquarius Manzana", "Aquarius Pera", "Aquarius Pomelo"
         ];
 
-        // Inicializamos las estadísticas con la lista maestra en 0
+        // Helper para adivinar categoría (Mejorado para detectar burgers correctamente)
+        function getCategory(name) {
+            const n = name.toLowerCase();
+            const burgerNames = ["cheese", "bacon", "egg", "core", "morgan", "big", "john", "buena", "mala", "fea", "rhodes", "burguesa", "pollo", "crispy"];
+            if (burgerNames.some(b => n.includes(b))) return 'hamburguesas';
+            if(n.includes('coca')||n.includes('agua')||n.includes('andes')||n.includes('aquarius')||n.includes('sprite')) return 'bebidas';
+            if(n.includes('papas')||n.includes('nuggets')) return 'guarniciones';
+            if(n.includes('adicional')) return 'extras';
+            return 'otros';
+        }
+
+        // Inicializamos stats con la lista maestra
         const stats = {};
         MASTER_LIST.forEach(item => {
             stats[item.toLowerCase()] = { 
                 name: item, 
+                category: getCategory(item),
+                countSimple: 0,
+                countDouble: 0,
                 total: 0, 
-                web: 0, 
-                local: 0, 
-                py: 0,
-                category: guessCategory(item) // Auto-detectar categoría
+                web: 0, local: 0, py: 0
             };
         });
 
-        // Totales globales POR CANAL para calcular los porcentajes
         let totalGeneral = 0;
-        let grandTotalWeb = 0;
-        let grandTotalLocal = 0;
-        let grandTotalPY = 0;
+        let grandTotalWeb = 0, grandTotalLocal = 0, grandTotalPY = 0;
 
-        // Función auxiliar para saber categoría
-        function guessCategory(name) {
-            const n = name.toLowerCase();
-            if(n.includes('coca')||n.includes('agua')||n.includes('andes')||n.includes('aquarius')||n.includes('sprite')) return 'bebidas';
-            if(n.includes('papas')||n.includes('nuggets')) return 'guarniciones';
-            if(n.includes('adicional')) return 'extras';
-            return 'hamburguesas';
-        }
-
-        // Función para normalizar nombres
-        function matchToMasterList(rawName) {
-            let n = rawName.toLowerCase().trim();
-            n = n.replace('doble', '').trim();
+        // Función para limpiar nombres (quita "simple" y "doble" para encontrar la base)
+        function cleanName(raw) {
+            let n = raw.toLowerCase().trim();
+            // ESTO ES CLAVE: Quitamos 'simple' y 'doble' para que coincida con la lista maestra
+            n = n.replace('doble', '').replace('simple', '').trim(); 
             n = n.replace(/\s{2,}/g, ' ');
-            const found = MASTER_LIST.find(m => m.toLowerCase() === n);
-            if(found) return found.toLowerCase();
+            
+            if(n === 'papas fritas') return 'porción papas fritas';
             if(n.includes('coca') && n.includes('original')) return 'coca cola original';
             if(n.includes('coca') && n.includes('zero')) return 'coca cola zero';
-            if(n === 'papas fritas') return 'porción papas fritas';
+            
             return n;
         }
 
         // 2. PROCESAR PEDIDOS
         ORDERS.forEach(o => {
-            // Determinar origen
-            let source = 'local'; // default
+            let source = 'local';
             const srcRaw = String(o.source || '').toLowerCase();
-            
             if (srcRaw.includes('pedidosya')) source = 'py';
             else if (srcRaw === 'web' || srcRaw === 'app') source = 'web';
 
@@ -455,21 +458,44 @@
                 const qty = Number(it.qty || 1);
                 const rawName = it.name || "";
                 
-                const key = matchToMasterList(rawName);
+                // Detectamos si es doble ANTES de limpiar el nombre
+                const isDouble = rawName.toLowerCase().includes('doble');
+                const baseName = cleanName(rawName);
 
+                // Buscamos coincidencia en la lista maestra
+                let key = MASTER_LIST.find(m => m.toLowerCase() === baseName);
+                
+                // Si no existe, usamos el nombre base limpio (para ítems nuevos no listados)
+                if (!key) key = baseName;
+                else key = key.toLowerCase();
+
+                // Si es un item nuevo (no estaba en Master List), lo inicializamos
                 if (!stats[key]) {
-                    const cleanName = key.charAt(0).toUpperCase() + key.slice(1);
-                    stats[key] = { name: cleanName, total: 0, web: 0, local: 0, py: 0, category: 'otros' };
+                    const niceName = key.charAt(0).toUpperCase() + key.slice(1);
+                    stats[key] = { 
+                        name: niceName, 
+                        category: getCategory(niceName), 
+                        countSimple: 0, countDouble: 0, total: 0, web: 0, local: 0, py: 0 
+                    };
                 }
 
+                // Sumamos contadores
                 stats[key].total += qty;
                 stats[key][source] += qty;
-                totalGeneral += qty;
+                
+                // Lógica Simple vs Doble (Solo aplica a Hamburguesas realmente)
+                if (stats[key].category === 'hamburguesas') {
+                    if (isDouble) stats[key].countDouble += qty;
+                    else stats[key].countSimple += qty;
+                } else {
+                    // Para bebidas o papas, todo cuenta como "simple/unidad"
+                    stats[key].countSimple += qty;
+                }
 
-                // Sumar a los grandes totales para el %
-                if(source === 'web') grandTotalWeb += qty;
-                if(source === 'local') grandTotalLocal += qty;
-                if(source === 'py') grandTotalPY += qty;
+                totalGeneral += qty;
+                if(source==='web') grandTotalWeb += qty;
+                if(source==='local') grandTotalLocal += qty;
+                if(source==='py') grandTotalPY += qty;
             });
         });
 
@@ -489,33 +515,48 @@
         sortedKeys.forEach(s => {
             if (s.category !== currentCat) {
                 currentCat = s.category;
-                body.insertAdjacentHTML('beforeend', `<tr><td colspan="6" class="cat-header">${currentCat.toUpperCase()}</td></tr>`);
+                const catHeader = currentCat === 'otros' ? 'OTROS / SIN CLASIFICAR' : currentCat.toUpperCase();
+                body.insertAdjacentHTML('beforeend', `<tr><td colspan="7" class="cat-header">${catHeader}</td></tr>`);
             }
 
-            // Estilos para cuando no hay ventas
-            const rowStyle = s.total === 0 ? 'color:#cbd5e1;' : '';
+            // Estilos
+            const isZero = s.total === 0;
+            const rowStyle = isZero ? 'color:#cbd5e1;' : '';
             const zeroStyle = 'color:#e2e8f0; font-size:11px;';
-            const pctClass = s.total === 0 ? '' : 'pct-tag';
+            const pctClass = isZero ? '' : 'pct-tag';
 
-            // Cálculos de Porcentajes CONTEXTUALES (sobre el total de ese canal)
+            // Porcentajes
             const pctWeb = grandTotalWeb > 0 ? ((s.web / grandTotalWeb) * 100).toFixed(1) + '%' : '-';
             const pctLocal = grandTotalLocal > 0 ? ((s.local / grandTotalLocal) * 100).toFixed(1) + '%' : '-';
             const pctPY = grandTotalPY > 0 ? ((s.py / grandTotalPY) * 100).toFixed(1) + '%' : '-';
 
+            // Lógica visual para Simple/Doble
+            let simpleCell = `<td style="text-align:center;">${s.countSimple}</td>`;
+            let doubleCell = `<td style="text-align:center; color:#b91c1c; font-weight:600; background:#fffafb">${s.countDouble}</td>`;
+
+            if (s.category !== 'hamburguesas') {
+                doubleCell = `<td style="text-align:center; color:#e2e8f0">-</td>`; // No aplica doble
+                simpleCell = `<td style="text-align:center; color:#94a3b8">${s.total}</td>`; // Mostramos total en simple
+            } else if (isZero) {
+                simpleCell = `<td style="text-align:center;">-</td>`;
+                doubleCell = `<td style="text-align:center;">-</td>`;
+            }
+
             body.insertAdjacentHTML('beforeend', `
                 <tr style="${rowStyle}">
-                    <td style="font-weight:700; border-right:2px solid #e2e8f0; position:sticky; left:0; background:white; z-index:5">${s.name}</td>
+                    <td style="font-weight:700; border-right:1px solid #e2e8f0; position:sticky; left:0; background:white; z-index:5">${s.name}</td>
                     
-                    <td style="text-align:center; font-weight:700; background:#ffffff">${s.total}</td>
+                    ${simpleCell}
+                    ${doubleCell}
                     
+                    <td style="text-align:center; font-weight:800; background:#fffbeb; border-right:2px solid #e2e8f0; color:#78350f">${s.total}</td>
+
                     <td style="text-align:center; background:#eff6ff; ${s.web===0?zeroStyle:''}">
                         ${s.web > 0 ? `<span style="color:#1e40af; font-weight:700">${s.web}</span> <span class="${pctClass}">(${pctWeb})</span>` : '-'}
                     </td>
-
                     <td style="text-align:center; background:#f8fafc; ${s.local===0?zeroStyle:''}">
                         ${s.local > 0 ? `<span style="color:#334155; font-weight:700">${s.local}</span> <span class="${pctClass}">(${pctLocal})</span>` : '-'}
                     </td>
-
                     <td style="text-align:center; background:#fef2f2; ${s.py===0?zeroStyle:''}">
                         ${s.py > 0 ? `<span style="color:#dc2626; font-weight:700">${s.py}</span> <span class="${pctClass}">(${pctPY})</span>` : '-'}
                     </td>
