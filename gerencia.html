@@ -51,11 +51,19 @@
     .kpi-lbl { font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
     .kpi-val { font-size: 26px; font-weight: 800; color: #0f172a; margin-top: 5px; }
     
-    .row-flex { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:15px; }
-    .order-row { cursor: pointer; transition: background 0.2s; } .order-row:hover { background: #f8fafc; }
-    .order-details { display: none; background: #fcfcfc; border-bottom: 1px solid var(--border); } .order-details.open { display: table-row; }
+    .order-row { cursor: pointer; transition: background 0.2s; }
+    .order-row:hover { background: #f8fafc; }
+    .order-details { display: none; background: #fcfcfc; border-bottom: 1px solid var(--border); }
+    .order-details.open { display: table-row; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 15px; }
+    
     .badge { padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; display:inline-block; letter-spacing:0.5px; }
-    .bdg-web { background: #e0f2fe; color: #0284c7; } .bdg-py { background: #fee2e2; color: #ef4444; } .bdg-cash { background: #dcfce7; color: #166534; }
+    .bdg-web { background: #e0f2fe; color: #0284c7; }    
+    .bdg-local { background: #f1f5f9; color: #475569; } 
+    .bdg-py { background: #fee2e2; color: #ef4444; }     
+    .bdg-cash { background: #dcfce7; color: #166534; }   
+    .bdg-digital { background: #f3e8ff; color: #7e22ce; } 
+
     .conf-input-group { display:flex; flex-direction:column; align-items:center; }
     .conf-lbl { font-size:9px; color:#c2410c; margin-bottom:2px; font-weight:700; text-transform:uppercase; }
     .conf-inp { width:45px; border:1px solid #fdba74; background:#fff; font-weight:700; text-align:center; padding:2px; border-radius:4px; font-size:12px; }
@@ -75,6 +83,7 @@
     
     /* Sticky header */
     .sticky-col { position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1; background: #fff; }
+    /* Headers de categoría */
     .cat-header { background: #e2e8f0; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #475569; padding: 8px 10px; font-size: 11px; }
   </style>
 </head>
@@ -335,15 +344,19 @@
     const formatQty = (n) => { let num = Number(n); if(isNaN(num)) return '0'; return parseFloat(num.toFixed(3)); };
     
     const parseDate = (val) => { 
-        if(!val) return null; if(val.toDate) return val.toDate(); if(val instanceof Date) return val; 
-        const d = new Date(val); return isNaN(d.getTime()) ? null : d;
+        if(!val) return null; 
+        if(val.toDate) return val.toDate(); 
+        if(val instanceof Date) return val; 
+        const d = new Date(val);
+        return isNaN(d.getTime()) ? null : d;
     };
 
     let INVENTORY=[], RAW_STOCK=[], PREMADE_STOCK=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
     let FIXED_DATA = { fixed:[], prod:[], config:{taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
-    let PRODUCTS_CATALOG = {};
+    let PRODUCTS_DB = {}; // Cache de productos para la categorización
     let currentRecipeId = null, currentSubRecipeId = null;
     let chartMain=null, chartDaily=null, chartProds=null, chartPayment=null;
+    let tempAliasList = [];
     let currentRecipeIngs = [];
 
     function logStatus(msg, isError=false) {
@@ -351,173 +364,287 @@
         if(el) el.innerHTML = `<div style="padding:10px; color:${isError?'red':'#666'}; font-weight:600">${msg}</div>`;
     }
 
-    // ===============================================
-    // 🔥 LÓGICA DINÁMICA DE PROPORCIONES (FINAL)
-    // ===============================================
-    
-    // 1. Cargamos el catálogo de productos REALES desde Firebase
-    function loadProductCatalog() {
+    // ==========================================
+    // 🔥 1. CARGA DE PRODUCTOS DE LA DB (Para clasificar)
+    // ==========================================
+    function loadProductsDB() {
         db.collection('products').get().then(snap => {
-            PRODUCTS_CATALOG = {};
+            PRODUCTS_DB = {};
             snap.forEach(doc => {
                 const d = doc.data();
-                // Normalizamos el nombre para búsquedas (trim y lowercase)
+                // Guardamos la categoría asociada al nombre en minúsculas
                 const normName = d.name.toLowerCase().trim();
-                // Normalizamos la categoría para que coincida con nuestro orden
-                let cat = (d.category || 'otros').toLowerCase().trim();
-                PRODUCTS_CATALOG[normName] = cat;
+                PRODUCTS_DB[normName] = d.category || 'otros';
             });
             if(ORDERS.length) window.renderProportions();
         });
     }
 
+    // ==========================================
+    // 🔥 2. LÓGICA CORREGIDA: PROPORCIONES Y BEBIDAS
+    // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
         if (!body) return;
         body.innerHTML = '';
 
         const stats = {};
-        let totalS = 0, totalD = 0;
+        // Totales para calcular el % (Globales)
+        let totalGeneral = 0; 
 
-        // Función para inicializar item en stats
-        const initStat = (name, category) => {
-            if(!stats[name]) stats[name] = { simple:0, double:0, category: category };
+        // Helper mejorado para detectar categorías
+        const guessCategory = (name) => {
+            const n = name.toLowerCase();
+
+            // 1. BEBIDAS (Prioridad Alta para que no se confundan)
+            const drinks = [
+                "coca", "sprite", "agua", "andes", "aquarius", "fanta", "pepsi", "7up", 
+                "levite", "paso", "schweppes", "mirinda", "baggio", "monster", "speed", 
+                "red bull", "manaos", "secuko", "cerveza", "lata", "botella", "pinta", 
+                "ipa", "honey", "golden", "amber", "stella", "corona", "budweiser", 
+                "brahma", "quilmes", "heineken", "vino", "copa", "fernet", "gancia", 
+                "gin", "campari", "vidrio", "plastico", "jugo", "soda", "gatorade"
+            ];
+            if (drinks.some(d => n.includes(d))) return 'bebidas';
+
+            // 2. Papas Específicas
+            if (n.includes("porción papas fritas (")) return 'detalle_papas';
+            
+            // 3. Extras
+            if (n.includes("medallón") || n.includes("adicional")) return 'extras';
+
+            // 4. Guarniciones (Nuggets, Bastones, Aros)
+            if (n.includes("nugget") || n.includes("aro") || n.includes("bastón") || n.includes("bastones") || (n.includes("papas") && (n.includes("cheddar") || n.includes("bacon")))) return 'guarniciones';
+
+            // 5. Hamburguesas (Detectamos nombres específicos)
+            const burgerNames = ["cheese", "bacon", "egg", "core", "morgan", "big", "john", "buena", "mala", "fea", "rhodes", "burguesa", "pollo", "crispy", "olo", "royale", "doble", "simple", "triple", "cuarto", "oklahoma", "cebolla"];
+            if (burgerNames.some(b => n.includes(b)) || n.includes("hamb")) return 'hamburguesas';
+
+            return 'otros';
         };
 
-        // Función para adivinar categoría si no está en el catálogo (Fallback)
-        const guessCategory = (n) => {
-            const name = n.toLowerCase();
-            if(name.includes("hamburguesa") || name.includes("burger") || name.includes("big") || name.includes("rhodes") || name.includes("morgan") || name.includes("polo") || name.includes("crispy") || name.includes("olo") || name.includes("core") || name.includes("egg") || name.includes("mala") || name.includes("buena") || name.includes("fea")) return "hamburguesas";
-            if(name.includes("nugget") || (name.includes("papas") && (name.includes("cheddar") || name.includes("bacon")))) return "guarniciones";
-            if(name.includes("coca") || name.includes("agua") || name.includes("andes") || name.includes("aquarius") || name.includes("sprite") || name.includes("levite")) return "bebidas";
-            return "otros";
+        const addStat = (name, qty, isDouble, category) => {
+            if (!stats[name]) stats[name] = { simple: 0, double: 0, category: category };
+            
+            // CORRECCIÓN IMPORTANTE:
+            // Si es bebida, guarnición o extra, SIEMPRE suma en la columna 'simple' (como cantidad unitaria)
+            // aunque el nombre diga "doble" (ej: Doble Malta).
+            if (category === 'bebidas' || category === 'guarniciones' || category === 'extras' || category === 'otros') {
+                stats[name].simple += qty;
+            } else {
+                // Solo las hamburguesas usan la lógica de simple/doble
+                if (isDouble) {
+                    stats[name].double += qty;
+                } else {
+                    stats[name].simple += qty;
+                }
+            }
+            totalGeneral += qty;
         };
 
-        // Pre-cargar productos del catálogo para que aparezcan aunque tengan 0 ventas
-        Object.entries(PRODUCTS_CATALOG).forEach(([normName, cat]) => {
-            // Capitalizamos el nombre para mostrarlo bonito
-            const dispName = normName.charAt(0).toUpperCase() + normName.slice(1);
-            initStat(dispName, cat);
-        });
-
-        // Sumar ventas reales
         ORDERS.forEach(o => {
-            (o.items||[]).forEach(it => {
-                const qty = Number(it.qty||1);
-                let rawName = (it.name||"").trim();
-                let cleanName = rawName;
-                let isDouble = false;
+            (o.items || []).forEach(it => {
+                const qty = Number(it.qty || 1);
+                let rawName = (it.name || "").trim();
+                
+                // Limpieza básica del nombre
+                // Detectamos si es "doble" para las burgers
+                let isDouble = rawName.toLowerCase().includes("doble");
+                let cleanName = rawName.replace(/doble/gi, "").trim().replace(/\s{2,}/g, ' ');
+                cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1); // Capitalizar
 
-                // Detectar dobles
-                if(rawName.toLowerCase().includes("doble")) {
-                    isDouble = true;
-                    cleanName = rawName.replace(/doble/gi, "").trim().replace(/\s{2,}/g, ' ');
-                }
+                // 1. Determinar Categoría
+                // Primero buscamos en la DB cargada, si no, adivinamos
+                let cat = PRODUCTS_DB[cleanName.toLowerCase()] || guessCategory(cleanName);
                 
-                // Buscar categoría (DB o Adivinar)
-                const normKey = cleanName.toLowerCase();
-                let category = PRODUCTS_CATALOG[normKey] || guessCategory(normKey);
-                
-                // Capitalizar nombre
-                cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+                // Forzamos el 'guess' si la DB falló o es genérica
+                const guessed = guessCategory(cleanName);
+                if(guessed !== 'otros') cat = guessed;
 
-                // Excluir papas simples (van al detalle)
-                const isPlainFries = normKey.includes("papas") && !normKey.includes("cheddar") && !normKey.includes("bacon");
+                // 2. Filtrar Papas Solas (van al detalle aparte)
+                const isPlainFries = cleanName.toLowerCase().includes("papas") && !cleanName.toLowerCase().includes("cheddar") && !cleanName.toLowerCase().includes("bacon");
                 
-                if(!isPlainFries) {
-                    initStat(cleanName, category);
-                    if(isDouble) { stats[cleanName].double += qty; totalD += qty; }
-                    else { stats[cleanName].simple += qty; totalS += qty; }
+                if (!isPlainFries) {
+                    addStat(cleanName, qty, isDouble, cat);
                 }
 
-                // Extras y Detalle Papas
-                if(it.extras?.patty) { addExtra("Medallón adicional", Number(it.extras.patty)*qty); }
-                if(it.extras?.cheddar) { addExtra("Cheddar adicional", Number(it.extras.cheddar)*qty); }
+                // 3. EXTRAS (Estructurales)
+                if (it.extras) {
+                    if (it.extras.patty) addStat("Medallón adicional", Number(it.extras.patty) * qty, false, 'extras');
+                    if (it.extras.cheddar) addStat("Cheddar adicional", Number(it.extras.cheddar) * qty, false, 'extras');
+                }
 
-                let fName = (it.fries||"").toLowerCase();
-                // Si es hamburguesa/guarnición sin especificar papas, asumimos con sal
-                // Si es "papas solas" sin cheddar/bacon y no dice nada, asumimos con sal
-                if(fName==="" && (category==="hamburguesas" || isPlainFries)) fName="con sal";
-                
-                if(fName.includes("sazon") || fName.includes("dorito")) addExtra("Porción papas fritas (Sazonadas)", qty, "detalle_papas");
-                else if(fName.includes("sin sal") || fName.includes("sin_sal")) addExtra("Porción papas fritas (Sin Sal)", qty, "detalle_papas");
-                else if(fName.includes("con sal") || fName.includes("con_sal") || isPlainFries) addExtra("Porción papas fritas (Con Sal)", qty, "detalle_papas");
+                // 4. DETALLE DE PAPAS
+                let fName = (it.fries || "").toLowerCase();
+                let potatoType = "";
+
+                if (isPlainFries && fName === "") fName = "con sal";
+
+                if (fName.includes("sazon") || fName.includes("dorito")) potatoType = "Porción papas fritas (Sazonadas)";
+                else if (fName.includes("sin sal") || fName.includes("sin_sal")) potatoType = "Porción papas fritas (Sin Sal)"; 
+                else if (fName.includes("con sal") || fName.includes("con_sal") || fName.includes("normal") || isPlainFries) potatoType = "Porción papas fritas (Con Sal)";
+
+                if (potatoType) {
+                    addStat(potatoType, qty, false, 'detalle_papas');
+                }
             });
         });
 
-        function addExtra(name, qty, cat="extras"){
-            initStat(name, cat);
-            stats[name].simple += qty;
-            totalS += qty;
-        }
+        $('#totalItemsBadge').innerText = `Total Ítems: ${totalGeneral}`;
 
-        $('#totalItemsBadge').innerText = `Total: ${totalS + totalD}`;
+        // Orden de visualización
+        const catOrder = ['hamburguesas', 'bebidas', 'guarniciones', 'extras', 'detalle_papas', 'otros'];
 
-        // Ordenar y Renderizar
-        const catOrder = ["hamburguesas", "guarniciones", "bebidas", "extras", "detalle_papas", "otros"];
-        const sortedKeys = Object.keys(stats).sort((a,b) => {
-            const ra = catOrder.indexOf(stats[a].category);
-            const rb = catOrder.indexOf(stats[b].category);
-            if(ra !== rb) return ra - rb;
+        const sortedKeys = Object.keys(stats).sort((a, b) => {
+            const rankA = catOrder.indexOf(stats[a].category);
+            const rankB = catOrder.indexOf(stats[b].category);
+            if (rankA !== rankB) return rankA - rankB;
             return a.localeCompare(b);
         });
 
-        let lastCat = "";
+        let currentCat = null;
+
         sortedKeys.forEach(key => {
             const s = stats[key];
-            if(s.simple===0 && s.double===0) return; // Ocultar si 0 ventas (opcional)
+            if (s.simple === 0 && s.double === 0) return;
 
-            if(s.category !== lastCat){
-                lastCat = s.category;
-                const catName = lastCat === 'detalle_papas' ? 'DETALLE DE PAPAS' : lastCat.toUpperCase().replace('_',' ');
-                body.insertAdjacentHTML('beforeend', `<tr><td colspan="5" class="cat-header">${catName}</td></tr>`);
+            // Header de Categoría
+            if (s.category !== currentCat) {
+                currentCat = s.category;
+                const catTitle = currentCat.toUpperCase().replace('_', ' ');
+                body.insertAdjacentHTML('beforeend', `<tr><td colspan="5" class="cat-header" style="background:#e2e8f0; color:#334155;">${catTitle}</td></tr>`);
             }
 
-            const pS = totalS>0 ? ((s.simple/totalS)*100).toFixed(1) : 0;
-            const pD = totalD>0 ? ((s.double/totalD)*100).toFixed(1) : 0;
+            // Cálculo de porcentajes sobre el TOTAL GENERAL
+            // (Para saber qué % del negocio representa este ítem)
+            const pS = totalGeneral > 0 ? ((s.simple / totalGeneral) * 100).toFixed(1) : 0;
+            const pD = totalGeneral > 0 ? ((s.double / totalGeneral) * 100).toFixed(1) : 0;
+            
+            // Visualización diferente si no tiene dobles (ej: bebidas)
+            let cellDouble = `<td style="text-align:center; font-weight:600">${s.double}</td>`;
+            let cellPctD = `<td style="text-align:center; color:#b91c1c; font-size:11px; background:#fffafb">${pD}%</td>`;
+            
+            if(s.category === 'bebidas' || s.category === 'guarniciones' || s.category === 'extras' || s.category === 'otros' || s.category === 'detalle_papas') {
+                cellDouble = `<td style="text-align:center; color:#cbd5e1">-</td>`;
+                cellPctD = `<td style="background:#fff">-</td>`;
+            }
 
             body.insertAdjacentHTML('beforeend', `
                 <tr>
                     <td style="font-weight:700; border-right:2px solid #e2e8f0; position:sticky; left:0; background:white; z-index:1">${key}</td>
-                    <td style="text-align:center">${s.simple}</td>
-                    <td style="text-align:center; font-size:11px; color:#666; background:#f9fafb">${pS}%</td>
-                    <td style="text-align:center">${s.double}</td>
-                    <td style="text-align:center; font-size:11px; color:#666; background:#f9fafb">${pD}%</td>
+                    <td style="text-align:center; font-weight:600">${s.simple}</td>
+                    <td style="text-align:center; color:#92400e; font-size:11px; background:#fffcf4">${pS}%</td>
+                    ${cellDouble}
+                    ${cellPctD}
                 </tr>
             `);
         });
     };
 
-    // --- CARGAS ORIGINALES ---
+    // --- CARGADORES UNIFICADOS ---
     window.loadInventory = function() {
-        db.collection('inventory').orderBy('name').onSnapshot(snap => { RAW_STOCK = snap.docs.map(d => ({id:d.id, ...d.data(), isSub: false})); window.combineAndRender(); });
-        db.collection('subrecipes').onSnapshot(snap => { SUB_RECIPES = snap.docs.map(d => ({id:d.id, ...d.data()})); PREMADE_STOCK = snap.docs.map(d => ({id:d.id, ...d.data(), category:'🧩 Armado', isSub:true, unit:'u', qty:d.data().qty||0, min:d.data().min||0})); window.combineAndRender(); });
+        db.collection('inventory').orderBy('name').onSnapshot(snap => {
+            RAW_STOCK = snap.docs.map(d => ({id:d.id, ...d.data(), isSub: false}));
+            window.combineAndRender();
+        });
+        db.collection('subrecipes').onSnapshot(snap => {
+            SUB_RECIPES = snap.docs.map(d => ({id:d.id, ...d.data()})); 
+            PREMADE_STOCK = snap.docs.map(d => ({
+                id: d.id, ...d.data(), category: '🧩 Armado', isSub: true,
+                unit: 'u', qty: d.data().qty || 0, min: d.data().min || 0
+            }));
+            window.combineAndRender();
+        });
     };
-    window.combineAndRender = function() { INVENTORY = [...RAW_STOCK, ...PREMADE_STOCK]; window.renderStockTable(); window.renderCostTables(); window.renderRecipesList(); window.renderSubRecipesList(); };
-    window.loadRecipes = function() { db.collection('recipes').onSnapshot(snap => { RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderRecipesList(); }); };
-    
-    // --- ABM STOCK/RECETAS ---
-    window.openRecipeModal = function(id) { $('#modalRecipe').style.display='flex'; $('#recName').value=''; $('#recIngQty').value=''; currentRecipeIngs=[]; const s=$('#recIngSelect'); s.innerHTML='<option value="">Seleccionar...</option>'; if(SUB_RECIPES.length){ s.insertAdjacentHTML('beforeend','<optgroup label="🧩 Armado">'); SUB_RECIPES.forEach(sub=>s.insertAdjacentHTML('beforeend',`<option value="${sub.id}">🧩 ${sub.name}</option>`)); s.insertAdjacentHTML('beforeend','</optgroup>'); } s.insertAdjacentHTML('beforeend','<optgroup label="📦 Insumos">'); RAW_STOCK.sort((a,b)=>a.name.localeCompare(b.name)).forEach(i=>s.insertAdjacentHTML('beforeend',`<option value="${i.id}">${i.name} (${i.unit})</option>`)); s.insertAdjacentHTML('beforeend','</optgroup>'); if(id){ const r=RECIPES.find(x=>x.id===id); if(r){ $('#recName').value=r.id; currentRecipeIngs=[...r.ingredients]; } } window.renderCurrentRecipeList(); };
-    window.addItemToCurrentRecipe = function() { const id=$('#recIngSelect').value; const qty=Number($('#recIngQty').value); if(!id||qty<=0)return alert("Error"); const item=INVENTORY.find(i=>i.id===id); currentRecipeIngs.push({id:id, qty:qty, _name:item?(item.isSub?`🧩 ${item.name}`:item.name):"???"}); window.renderCurrentRecipeList(); $('#recIngQty').value=''; };
-    window.renderCurrentRecipeList = function() { const c=$('#currentRecipeList'); c.innerHTML=''; currentRecipeIngs.forEach((item,idx)=>{ if(!item._name){ const i=INVENTORY.find(x=>x.id===item.id); item._name=i?(i.isSub?`🧩 ${i.name}`:i.name):"???"; } c.insertAdjacentHTML('beforeend',`<div class="ing-item"><span><b>${item.qty}</b> x ${item._name}</span> <button style="color:red;border:none;cursor:pointer" onclick="currentRecipeIngs.splice(${idx},1);window.renderCurrentRecipeList()">×</button></div>`); }); };
-    window.saveRecipe = async function() { const name=$('#recName').value.trim(); if(!name||!currentRecipeIngs.length)return alert("Falta info"); await db.collection('recipes').doc(name).set({ingredients:currentRecipeIngs.map(i=>({id:i.id, qty:i.qty}))}); alert("Guardado"); $('#modalRecipe').style.display='none'; };
-    window.renderRecipesList = function() { $('#recipesListBody').innerHTML=RECIPES.map(r=>`<tr><td>${r.id}</td><td style="text-align:right"><b>${money(window.calculateRecipeTotal(r))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="openRecipeModal('${r.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('recipes','${r.id}')">🗑️</button></td></tr>`).join(''); };
 
-    // --- CARGA DATOS ---
+    window.combineAndRender = function() {
+        INVENTORY = [...RAW_STOCK, ...PREMADE_STOCK];
+        window.renderStockTable(); window.renderCostTables();
+        window.renderRecipesList(); window.renderSubRecipesList();
+    };
+
+    window.loadRecipes = function() { db.collection('recipes').onSnapshot(snap => { RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderRecipesList(); }); };
+    window.loadFixedData = function() { 
+        db.collection('config').doc('gerencia').onSnapshot(doc => {
+            if(doc.exists) FIXED_DATA = doc.data();
+            if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
+            if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
+            $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
+            $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0;
+            window.renderFixedTables();
+        });
+    };
+
+    // RENDER STOCK
+    window.renderStockTable = function() {
+        const t=$('#searchStock').value.toLowerCase(); const c=$('#filterCat').value;
+        const b=$('#stockTableBody'); b.innerHTML='';
+        INVENTORY.filter(p=>(p.name||"").toLowerCase().includes(t) && (c==='all'||p.category===c)).forEach(p=>{
+            let stHtml = `<span class="status-dot st-ok"></span>OK`;
+            if(p.qty<=p.min) stHtml=`<span class="status-dot st-danger"></span>CRIT`; 
+            else if(p.qty<=p.min*1.5) stHtml=`<span class="status-dot st-warn"></span>BAJO`;
+            let actions = `<button class="btn-icon" onclick="openProductModal('${p.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button>`;
+            if(p.isSub) actions = `<button class="btn-icon" onclick="openSubRecipeEditor('${p.id}')">🧩</button><button class="btn-icon" onclick="deleteItem('subrecipes','${p.id}')">🗑️</button>`;
+            b.insertAdjacentHTML('beforeend', `<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td><td><div class="qty-control"><button class="qty-btn" onclick="updStock('${p.id}',-1)">-</button><b>${formatQty(p.qty)}</b><button class="qty-btn" onclick="updStock('${p.id}',1)">+</button><small style="margin-left:5px">${p.unit}</small></div></td><td>${p.min}</td><td>${stHtml}</td><td>${actions}</td></tr>`);
+        });
+    };
+
+    window.updStock = (id, v) => {
+        const item = INVENTORY.find(i => i.id === id); if(!item) return;
+        const col = item.isSub ? 'subrecipes' : 'inventory';
+        db.collection(col).doc(id).update({ qty: Number(item.qty || 0) + v });
+    };
+
+    // RECETAS Y SUBRECETAS
+    window.openRecipeModal = function(id) {
+        $('#modalRecipe').style.display = 'flex'; $('#recName').value = ''; $('#recIngQty').value = ''; currentRecipeIngs = [];
+        const s = $('#recIngSelect'); s.innerHTML = '<option value="">Seleccionar...</option>';
+        if(SUB_RECIPES.length) { s.insertAdjacentHTML('beforeend', '<optgroup label="🧩 Armado">'); SUB_RECIPES.forEach(sub => s.insertAdjacentHTML('beforeend', `<option value="${sub.id}">🧩 ${sub.name}</option>`)); s.insertAdjacentHTML('beforeend', '</optgroup>'); }
+        s.insertAdjacentHTML('beforeend', '<optgroup label="📦 Insumos">'); RAW_STOCK.sort((a,b)=>a.name.localeCompare(b.name)).forEach(i => s.insertAdjacentHTML('beforeend', `<option value="${i.id}">${i.name} (${i.unit})</option>`)); s.insertAdjacentHTML('beforeend', '</optgroup>');
+        if(id) { const r = RECIPES.find(x => x.id === id); if(r) { $('#recName').value = r.id; currentRecipeIngs = [...r.ingredients]; } }
+        window.renderCurrentRecipeList();
+    };
+
+    window.addItemToCurrentRecipe = function() {
+        const id = $('#recIngSelect').value; const qty = Number($('#recIngQty').value); if(!id || qty <= 0) return alert("Error");
+        const item = INVENTORY.find(i => i.id === id);
+        currentRecipeIngs.push({ id: id, qty: qty, _name: item ? (item.isSub ? `🧩 ${item.name}` : item.name) : "???" });
+        window.renderCurrentRecipeList(); $('#recIngQty').value = '';
+    };
+
+    window.renderCurrentRecipeList = function() {
+        const c = $('#currentRecipeList'); c.innerHTML = '';
+        currentRecipeIngs.forEach((item, idx) => {
+            if(!item._name) { const i = INVENTORY.find(x => x.id === item.id); item._name = i ? (i.isSub ? `🧩 ${i.name}` : i.name) : "???"; }
+            c.insertAdjacentHTML('beforeend', `<div class="ing-item"><span><b>${item.qty}</b> x ${item._name}</span> <button style="color:red;border:none;cursor:pointer" onclick="currentRecipeIngs.splice(${idx},1);window.renderCurrentRecipeList()">×</button></div>`);
+        });
+    };
+
+    window.saveRecipe = async function() {
+        const name = $('#recName').value.trim(); if(!name || !currentRecipeIngs.length) return alert("Falta info");
+        await db.collection('recipes').doc(name).set({ ingredients: currentRecipeIngs.map(i => ({ id: i.id, qty: i.qty })) });
+        alert("Guardado"); $('#modalRecipe').style.display = 'none';
+    };
+
+    window.renderRecipesList = function() { $('#recipesListBody').innerHTML = RECIPES.map(r => `<tr><td>${r.id}</td><td style="text-align:right"><b>${money(window.calculateRecipeTotal(r))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="openRecipeModal('${r.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('recipes','${r.id}')">🗑️</button></td></tr>`).join(''); };
+
+    // DASHBOARD & DATA
     window.loadDashboardData = function() {
-        const ym = $('#monthPicker').value; if(!ym) return;
+        const ym = $('#monthPicker').value; if(!ym) return; 
         $('#ordersTitle').innerText = '🧾 Pedidos de ' + ym; logStatus("🔄 Cargando...");
         const [y, m] = ym.split('-').map(Number); const start = new Date(y, m - 1, 1); const end = new Date(y, m, 0, 23, 59, 59);
-        db.collection('orders').limit(500).get().then(snap => {
-            const rawOrders = snap.docs.map(d => ({id:d.id, ...d.data()}));
-            ORDERS = rawOrders.filter(o => { if(o.status === 'cancelled') return false; const d = parseDate(o.createdAt); return d && d >= start && d <= end; }).sort((a,b) => parseDate(b.createdAt) - parseDate(a.createdAt));
-            logStatus(`✅ Cargado: ${ORDERS.length} pedidos.`);
-            window.calculateAll(); window.renderOrdersTab();
-        }).catch(err => { console.error(err); logStatus("❌ Error: " + err.message, true); });
+        db.collection('orders').limit(500).get().then(snap => { 
+              const rawOrders = snap.docs.map(d => ({id:d.id, ...d.data()}));
+              ORDERS = rawOrders.filter(o => {
+                  if(o.status === 'cancelled') return false;
+                  const d = parseDate(o.createdAt); return d && d >= start && d <= end;
+              }).sort((a,b) => parseDate(b.createdAt) - parseDate(a.createdAt));
+              logStatus(`✅ Cargado: ${ORDERS.length} pedidos.`);
+              window.calculateAll(); window.renderOrdersTab(); 
+          }).catch(err => { console.error(err); logStatus("❌ Error cargando: " + err.message, true); });
         db.collection('purchases').limit(500).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); });
     };
 
-    // --- CALCULOS ---
     window.calculateAll = function() {
         if(typeof Chart === 'undefined') return;
         let gross=0, comms=0, taxes=0, theoCMV=0;
@@ -526,9 +653,16 @@
 
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0); gross += sale;
-            const src = String(o.source||'').toLowerCase(); let pay = String(o.pago||o.paymentMethod||'').toLowerCase(); let finalPayMethod = 'Otros';
-            if(src.includes('pedidosya')) { finalPayMethod = 'PedidosYa'; comms += (o.neto_excel > 0) ? (sale - o.neto_excel) : (sale * ((pctPy||30)/100)); }
-            else { if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) { taxes += (sale*(pctQR/100)); finalPayMethod='MercadoPago/QR'; } else if(pay.includes('transfer')) { taxes += (sale*(pctTransf/100)); finalPayMethod='Transferencia'; } else if(pay.includes('debito')||pay.includes('tarjeta')) { taxes += (sale*(pctDebit/100)); finalPayMethod='Otros'; } else finalPayMethod='Efectivo'; }
+            let pay = String(o.pago||o.paymentMethod||'').toLowerCase(); let finalPayMethod = 'Otros';
+            if(String(o.source||'').toLowerCase().includes('pedidosya')) {
+                 finalPayMethod = 'PedidosYa';
+                 comms += (o.neto_excel > 0) ? (sale - o.neto_excel) : (sale * ((pctPy||30)/100));
+            } else {
+                if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) { taxes += (sale*(pctQR/100)); finalPayMethod='MercadoPago/QR'; }
+                else if(pay.includes('transfer')) { taxes += (sale*(pctTransf/100)); finalPayMethod='Transferencia'; }
+                else if(pay.includes('debito')||pay.includes('tarjeta')) { taxes += (sale*(pctDebit/100)); finalPayMethod='Otros'; } 
+                else finalPayMethod='Efectivo';
+            }
             (o.items||[]).forEach(item => { theoCMV += (window.getUnitCost(item.name) * Number(item.qty||1)); productSales[item.name] = (productSales[item.name] || 0) + Number(item.qty||1); });
             theoCMV += window.calculateOrderConsumables(o.items||[]);
             const dObj = parseDate(o.createdAt); if(dObj) dailySales[dObj.getDate()] = (dailySales[dObj.getDate()] || 0) + sale;
@@ -537,28 +671,52 @@
 
         const totalFixed = (FIXED_DATA.fixed||[]).reduce((s,i)=>s+Number(i.cost),0); 
         const totalSalaries = (FIXED_DATA.prod||[]).reduce((s,i)=>s+Number(i.cost),0);
-        const variableCosts = comms + taxes; const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
+        const variableCosts = comms + taxes;
+        const realPurchases = PURCHASES.reduce((s,p)=>s+Number(p.total),0);
         const profitReal = gross - (realPurchases + totalFixed + totalSalaries + variableCosts);
 
         $('#kpiSales').innerText = money(gross); $('#kpiTheoCMV').innerText = '-' + money(theoCMV); $('#kpiTotalExpenses').innerText = '-' + money(realPurchases + totalFixed + totalSalaries + variableCosts);
-        const kn = $('#kpiNet'); kn.innerText = money(profitReal); kn.className = profitReal >= 0 ? 'kpi-val text-green' : 'kpi-val text-red';
-        $('#kpiNetContainer').style.backgroundColor = profitReal >= 0 ? '#f0fdf4' : '#fef2f2';
+        const kn = $('#kpiNet'); kn.innerText = money(profitReal);
+        kn.className = profitReal >= 0 ? 'kpi-val text-green' : 'kpi-val text-red'; $('#kpiNetContainer').style.backgroundColor = profitReal >= 0 ? '#f0fdf4' : '#fef2f2';
 
         if(chartMain) chartMain.destroy();
         chartMain = new Chart($('#mainChart').getContext('2d'), { type:'bar', data:{ labels:['Ventas','Mercadería','Fijos','Sueldos','Var','Balance'], datasets:[{data:[gross,realPurchases,totalFixed,totalSalaries,variableCosts,profitReal], backgroundColor:['#64748b','#f97316','#a855f7','#3b82f6','#eab308',profitReal>=0?'#10b981':'#ef4444'], borderRadius:6}] }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}} });
         window.renderExtraCharts(dailySales, productSales, paymentStats);
+        
+        // --- LLAMADA A LA NUEVA FUNCION DE PROPORCIONES ---
         window.renderProportions();
     };
 
     window.renderExtraCharts = function(dailyData, prodData, payData) {
-        if(chartDaily) chartDaily.destroy(); const days = Object.keys(dailyData).sort((a,b)=>Number(a)-Number(b));
+        if(chartDaily) chartDaily.destroy();
+        const days = Object.keys(dailyData).sort((a,b)=>Number(a)-Number(b));
         chartDaily = new Chart($('#dailyChart').getContext('2d'), { type: 'line', data: { labels: days, datasets: [{ label:'Venta', data: days.map(d=>dailyData[d]), borderColor:'var(--primary)', tension:0.3, fill:true, backgroundColor:'rgba(98,90,69,0.1)' }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} } });
-        if(chartProds) chartProds.destroy(); const sortedProds = Object.entries(prodData).sort((a,b)=>b[1]-a[1]).slice(0,5);
+        if(chartProds) chartProds.destroy();
+        const sortedProds = Object.entries(prodData).sort((a,b)=>b[1]-a[1]).slice(0,5);
         chartProds = new Chart($('#topProductsChart').getContext('2d'), { type: 'doughnut', data: { labels: sortedProds.map(x=>x[0]), datasets: [{ data: sortedProds.map(x=>x[1]), backgroundColor: ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6'] }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right', labels:{boxWidth:10, font:{size:10}}}} } });
-        if(chartPayment) chartPayment.destroy(); chartPayment = new Chart($('#paymentChart').getContext('2d'), { type: 'pie', data: { labels: Object.keys(payData), datasets: [{ data: Object.values(payData), backgroundColor: ['#10b981','#3b82f6','#06b6d4','#ef4444','#64748b'] }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right', labels:{boxWidth:10, font:{size:10}}}} } });
+        if(chartPayment) chartPayment.destroy();
+        chartPayment = new Chart($('#paymentChart').getContext('2d'), { type: 'pie', data: { labels: Object.keys(payData), datasets: [{ data: Object.values(payData), backgroundColor: ['#10b981','#3b82f6','#06b6d4','#ef4444','#64748b'] }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right', labels:{boxWidth:10, font:{size:10}}}} } });
     }
 
-    // --- HELPER COSTOS ---
+    // TABLA PEDIDOS
+    window.renderOrdersTab = function() {
+        const tbody = $('#ordersTableBody'); tbody.innerHTML = '';
+        if(ORDERS.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos</td></tr>'; return; }
+        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {};
+        ORDERS.forEach((o, index) => {
+            const total = Number(o.total || 0); let deduction = 0;
+            if(String(o.source).includes('pedidosya')) deduction = (o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100));
+            else if(String(o.pago).includes('mercado') || String(o.pago).includes('qr')) deduction = total * (pctQR/100);
+            else if(String(o.pago).includes('transfer')) deduction = total * (pctTransf/100);
+            else if(String(o.pago).includes('debito')) deduction = total * (pctDebit/100);
+            let orderCost = window.calculateOrderConsumables(o.items||[]); (o.items||[]).forEach(item => orderCost += (window.getUnitCost(item.name) * Number(item.qty||1)));
+            let profit = total - deduction - orderCost;
+            let dStr = '-'; const dt = parseDate(o.createdAt); if(dt) dStr = dt.toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+            tbody.innerHTML += `<tr class="order-row" onclick="document.getElementById('detail-${index}').classList.toggle('open')"><td>${dStr}</td><td>${o.nombre||'Cliente'}</td><td><span class="badge ${String(o.source).includes('pedidosya')?'bdg-py':'bdg-web'}">${o.source||'web'}</span></td><td><span class="badge bdg-cash">${o.pago||'efectivo'}</span></td><td style="font-weight:700">${money(total)}</td><td style="font-weight:700; color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</td><td>▼</td></tr><tr class="order-details" id="detail-${index}"><td colspan="7" style="padding:10px; background:#f9fafb"><div style="font-size:12px"><b>Items:</b> ${(o.items||[]).map(i=>i.qty+'x '+i.name).join(', ')}<br><b>Ganancia Real:</b> ${money(profit)}</div></td></tr>`;
+        });
+    };
+    
+    // CALCULADORA DE COSTOS
     window.calculateOrderConsumables = function(items) {
         let totalCost = 0, burgerCount = 0, countSazon = 0;
         items.forEach(i => {
@@ -582,15 +740,17 @@
         if(countSazon > 0) totalCost += (countSazon * 0.005) * getCost(['dorito', 'polvo']);
         return totalCost;
     };
+
     window.getUnitCost = function(n) { if(!n) return 0; const cn=n.toLowerCase().trim(), a=(FIXED_DATA.aliases||[]).find(x=>x.external.toLowerCase()===cn); if(a) return a.items?a.items.reduce((s,i)=>{const r=RECIPES.find(x=>x.id===i.id);return s+(r?window.calculateRecipeTotal(r)*i.qty:0)},0):(RECIPES.find(x=>x.id===a.internal)?window.calculateRecipeTotal(RECIPES.find(x=>x.id===a.internal)):0); let r=RECIPES.find(x=>x.id.toLowerCase()===cn)||RECIPES.find(x=>cn.includes(x.id.toLowerCase())); return r?window.calculateRecipeTotal(r):0; };
     window.calculateRecipeTotal = (r) => (r.ingredients||[]).reduce((s,i)=>{ const item = INVENTORY.find(x => x.id === i.id); return s + (item ? (i.qty * (item.isSub ? window.calculateSubRecipeCost(SUB_RECIPES.find(x=>x.id===i.id)||{ingredients:[]}) : item.cost)) : 0); },0);
     window.calculateSubRecipeCost = (sb) => (sb.ingredients||[]).reduce((s,i)=>{ const it = INVENTORY.find(x => x.id === i.id); return s + (i.qty * (it ? it.cost : 0)); },0);
-    window.renderOrdersTab = function() { const tbody = $('#ordersTableBody'); tbody.innerHTML = ''; if(ORDERS.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos</td></tr>'; return; } const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {}; ORDERS.forEach((o, index) => { const total = Number(o.total || 0); let deduction = 0; if(String(o.source).includes('pedidosya')) deduction = (o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100)); else if(String(o.pago).includes('mercado') || String(o.pago).includes('qr')) deduction = total * (pctQR/100); else if(String(o.pago).includes('transfer')) deduction = total * (pctTransf/100); else if(String(o.pago).includes('debito')) deduction = total * (pctDebit/100); let orderCost = window.calculateOrderConsumables(o.items||[]); (o.items||[]).forEach(item => orderCost += (window.getUnitCost(item.name) * Number(item.qty||1))); let profit = total - deduction - orderCost; let dStr = '-'; const dt = parseDate(o.createdAt); if(dt) dStr = dt.toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}); tbody.innerHTML += `<tr class="order-row" onclick="document.getElementById('detail-${index}').classList.toggle('open')"><td>${dStr}</td><td>${o.nombre||'Cliente'}</td><td><span class="badge ${String(o.source).includes('pedidosya')?'bdg-py':'bdg-web'}">${o.source||'web'}</span></td><td><span class="badge bdg-cash">${o.pago||'efectivo'}</span></td><td style="font-weight:700">${money(total)}</td><td style="font-weight:700; color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</td><td>▼</td></tr><tr class="order-details" id="detail-${index}"><td colspan="7" style="padding:10px; background:#f9fafb"><div style="font-size:12px"><b>Items:</b> ${(o.items||[]).map(i=>i.qty+'x '+i.name).join(', ')}<br><b>Ganancia Real:</b> ${money(profit)}</div></td></tr>`; }); };
     
-    // RESTO DE FUNCIONES UI (MANTENIDAS)
+    // UI HELPERS
     window.renderCostTables = function() { const rr=(a,t)=>{ $(t).innerHTML=a.map(p=>`<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); }; rr(INVENTORY.filter(p=>p.category!=='packaging' && !p.isSub),'#costMateriaBody'); rr(INVENTORY.filter(p=>p.category==='packaging'),'#costPackBody'); };
     window.renderSubRecipesList = function(f="") { const c=$('#subRecipesListBody'), cf=f.toLowerCase(); c.innerHTML=SUB_RECIPES.filter(s=>s.name.toLowerCase().includes(cf)).map(s=>`<div onclick="openSubRecipeEditor('${s.id}')" style="padding:15px;cursor:pointer;border-bottom:1px solid #f1f5f9;${s.id===currentSubRecipeId?'background:#f8fafc;border-left:3px solid var(--purple)':''}"><div style="font-weight:600;font-size:13px">${s.name}</div><div style="font-size:12px;color:var(--purple);font-weight:700">${money(window.calculateSubRecipeCost(s))}</div></div>`).join('')||'<div style="padding:20px;text-align:center;color:#ccc;font-size:12px">No hay items</div>'; };
     window.updateUnitSelect = function(m) { const s=m==='sub'?$('#newSubUnit'):$('#newRecUnit'), p=INVENTORY.find(i=>i.id===(m==='sub'?$('#newSubIng').value:$('#newRecIng').value)); if(!s)return; let h='<option value="1">Unidad</option>'; if(p){const u=(p.unit||'').toLowerCase(); if(u.includes('k')) h='<option value="1">Kg</option><option value="0.001">Gr</option>'; else if(u.includes('l')) h='<option value="1">Lt</option><option value="0.001">Ml</option>'; else if(u.includes('m')) h='<option value="1">Mts</option><option value="0.01">Cm</option>'; else if(u.includes('g')) h='<option value="1">Gr</option><option value="1000">Kg</option>';} s.innerHTML=h; };
+    
+    // MODALES Y ABM
     window.openProductModal = function(id, cat) { $('#modalProduct').style.display='flex'; if(id && typeof id==='string'){ const p=INVENTORY.find(i=>i.id===id); $('#mpTitle').innerText='Editar'; $('#mpId').value=id; $('#mpName').value=p.name; $('#mpCat').value=p.category; $('#mpQty').value=p.qty; $('#mpUnit').value=p.unit; $('#mpPurchCost').value=p.purchCost||p.cost; $('#mpFormat').value=p.format||''; $('#mpYield').value=p.yield||1; $('#mpMin').value=p.min||5; } else { $('#mpTitle').innerText='Nuevo'; $('#mpId').value=''; $('#mpName').value=''; $('#mpQty').value=0; $('#mpPurchCost').value=0; $('#mpYield').value=1; if(cat)$('#mpCat').value=cat; } };
     window.saveProduct = async function() { const id=$('#mpId').value, pc=Number($('#mpPurchCost').value), y=Number($('#mpYield').value); const d={name:$('#mpName').value, category:$('#mpCat').value, qty:Number($('#mpQty').value), unit:$('#mpUnit').value, purchCost:pc, format:$('#mpFormat').value, yield:y, min:Number($('#mpMin').value), cost:y>0?pc/y:0}; if(!d.name)return; id?await db.collection('inventory').doc(id).update(d):await db.collection('inventory').add(d); $('#modalProduct').style.display='none'; };
     window.openPurchaseModal = function() { $('#modalPurchase').style.display='flex'; $('#purProd').innerHTML=INVENTORY.map(p=>`<option value="${p.id}">${p.name} (${formatQty(p.qty)})</option>`).join(''); $('#purQty').value=''; $('#purTotal').value=''; };
@@ -618,7 +778,7 @@
         const now = new Date();
         $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
         $('#monthPicker').addEventListener('change', window.loadDashboardData);
-        loadProductCatalog(); // 🔥 Carga los productos al iniciar
+        loadProductsDB(); // 🔥 Carga los productos al iniciar
         window.loadInventory(); window.loadRecipes(); window.loadFixedData(); window.loadDashboardData();
     });
 </script>
