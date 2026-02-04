@@ -81,8 +81,10 @@
     .ing-list { border: 1px solid #eee; border-radius: 8px; padding: 10px; margin-top: 10px; background: #fafafa; }
     .ing-item { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px dashed #ddd; font-size: 14px; }
     
-    /* Sticky header para que se vea bien en celular */
+    /* Sticky header */
     .sticky-col { position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1; background: #fff; }
+    /* Separador de categorías en la tabla */
+    .cat-header { background: #e2e8f0; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #475569; padding: 8px 10px; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -351,6 +353,7 @@
 
     let INVENTORY=[], RAW_STOCK=[], PREMADE_STOCK=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
     let FIXED_DATA = { fixed:[], prod:[], config:{taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
+    let PRODUCTS_DB = {}; // Cache de productos para la categorización
     let currentRecipeId = null, currentSubRecipeId = null;
     let chartMain=null, chartDaily=null, chartProds=null, chartPayment=null;
     let tempAliasList = [];
@@ -362,7 +365,24 @@
     }
 
     // ==========================================
-    // 🔥 LÓGICA DINÁMICA: PROPORCIONES ORDENADAS
+    // 🔥 1. CARGA DE PRODUCTOS DE LA DB (Para clasificar)
+    // ==========================================
+    function loadProductsDB() {
+        db.collection('products').get().then(snap => {
+            PRODUCTS_DB = {};
+            snap.forEach(doc => {
+                const d = doc.data();
+                // Normalizamos el nombre para búsquedas
+                const normName = d.name.toLowerCase().trim();
+                PRODUCTS_DB[normName] = d.category || 'otros';
+            });
+            // Si ya hay pedidos cargados, refrescamos proporciones
+            if(ORDERS.length) window.renderProportions();
+        });
+    }
+
+    // ==========================================
+    // 🔥 2. LÓGICA DINÁMICA: PROPORCIONES ORDENADAS
     // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
@@ -373,31 +393,9 @@
         let totalS = 0;
         let totalD = 0;
 
-        // Categorías para ordenamiento
-        // 1: Burgers, 2: Guarniciones, 3: Bebidas, 4: Extras, 5: Detalle Papas, 6: Otros
-        const getCatRank = (name) => {
-            const n = name.toLowerCase();
-            // 5. Detalle Papas (Prioridad especial)
-            if (n.includes("porción papas fritas (")) return 5;
-            
-            // 2. Guarniciones
-            if (n.includes("nugget") || (n.includes("papas") && (n.includes("cheddar") || n.includes("bacon")))) return 2;
-            
-            // 4. Extras
-            if (n.includes("medallón") || n.includes("adicional")) return 4;
-
-            // 3. Bebidas (Lista expandida)
-            const drinks = ["coca", "sprite", "agua", "andes", "aquarius", "fanta", "pepsi", "7up", "levite", "paso", "schweppes", "mirinda", "baggio", "monster", "speed", "red bull", "manaos", "secuko"];
-            if (drinks.some(d => n.includes(d))) return 3;
-
-            // 1. Hamburguesas (Default fuerte si no es lo anterior)
-            if (n.includes("burger") || n.includes("hamburguesa") || n.includes("cheese") || n.includes("morgan") || n.includes("kevin") || n.includes("crispy") || n.includes("olo") || n.includes("egg") || n.includes("core") || n.includes("big") || n.includes("buena") || n.includes("mala") || n.includes("fea") || n.includes("rhodes")) return 1;
-
-            return 6; // Otros
-        };
-
-        const addStat = (name, qty, isDouble) => {
-            if (!stats[name]) stats[name] = { simple: 0, double: 0, rank: getCatRank(name) };
+        // Helper para inicializar estadística
+        const addStat = (name, qty, isDouble, category) => {
+            if (!stats[name]) stats[name] = { simple: 0, double: 0, category: category };
             if (isDouble) {
                 stats[name].double += qty;
                 totalD += qty;
@@ -407,6 +405,15 @@
             }
         };
 
+        // Helper para adivinar categoría si no está en PRODUCTS_DB
+        const guessCategory = (name) => {
+            const n = name.toLowerCase();
+            if (n.includes('burger') || n.includes('hamburguesa')) return 'hamburguesas';
+            if (n.includes('papas') || n.includes('nugget') || n.includes('bastones')) return 'guarniciones';
+            if (n.includes('coca') || n.includes('agua') || n.includes('cerveza') || n.includes('lata')) return 'bebidas';
+            return 'otros';
+        };
+
         ORDERS.forEach(o => {
             (o.items || []).forEach(it => {
                 const qty = Number(it.qty || 1);
@@ -414,7 +421,7 @@
                 let cleanName = rawName;
                 let isDouble = false;
 
-                // 1. Detectar Doble
+                // 1. Detectar Doble y limpiar nombre base
                 if (rawName.toLowerCase().includes("doble")) {
                     isDouble = true;
                     cleanName = rawName.replace(/doble/gi, "").trim().replace(/\s{2,}/g, ' ');
@@ -423,54 +430,65 @@
                 // Capitalizar
                 cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
 
-                // Agregar ítem principal (auto-descubrimiento)
-                // Excluimos "papas solas" de aquí para que vayan al detalle
-                if (!cleanName.toLowerCase().includes("porción papas fritas") || cleanName.toLowerCase().includes("cheddar")) {
-                    addStat(cleanName, qty, isDouble);
-                }
+                // 2. Determinar Categoría (DB o Guess)
+                let cat = PRODUCTS_DB[cleanName.toLowerCase()] || guessCategory(cleanName);
 
-                // 2. EXTRAS (Estructurales)
-                if (it.extras) {
-                    if (it.extras.patty) addStat("Medallón adicional", Number(it.extras.patty) * qty, false);
-                    if (it.extras.cheddar) addStat("Cheddar adicional", Number(it.extras.cheddar) * qty, false);
-                }
-
-                // 3. DETALLE DE PAPAS (Virtual)
-                // Si es una porción de papas (sin cheddar/bacon) o si viene como side
-                let isPotatoItem = rawName.toLowerCase().includes("porción papas") && !rawName.toLowerCase().includes("cheddar") && !rawName.toLowerCase().includes("bacon");
+                // Excepción: Si es "papas solas" sin cheddar/bacon, no las listamos acá (van al detalle)
+                // Pero si son Nuggets o Papas con Cheddar, SÍ se listan como Guarnición.
+                const isPlainFries = cleanName.toLowerCase().includes("papas") && !cleanName.toLowerCase().includes("cheddar") && !cleanName.toLowerCase().includes("bacon");
                 
-                // Analizamos el atributo fries
+                if (!isPlainFries) {
+                    addStat(cleanName, qty, isDouble, cat);
+                }
+
+                // 3. EXTRAS (Estructurales - Siempre 'extras')
+                if (it.extras) {
+                    if (it.extras.patty) addStat("Medallón adicional", Number(it.extras.patty) * qty, false, 'extras');
+                    if (it.extras.cheddar) addStat("Cheddar adicional", Number(it.extras.cheddar) * qty, false, 'extras');
+                }
+
+                // 4. DETALLE DE PAPAS (Siempre 'detalle_papas')
                 let fName = (it.fries || "").toLowerCase();
                 let potatoType = "";
 
-                if (isPotatoItem) {
-                    // Si es el ítem principal "Papas", miramos si tiene aclaración, sino default con sal
-                    if (fName === "") fName = "con sal";
-                }
+                // Si el item principal ES papas solas, asumimos "Con Sal" si no dice nada
+                if (isPlainFries && fName === "") fName = "con sal";
 
                 if (fName.includes("sazon") || fName.includes("dorito")) potatoType = "Porción papas fritas (Sazonadas)";
                 else if (fName.includes("sin sal")) potatoType = "Porción papas fritas (Sin Sal)";
-                else if (fName.includes("con sal") || fName.includes("normal") || isPotatoItem) potatoType = "Porción papas fritas (Con Sal)";
+                else if (fName.includes("con sal") || fName.includes("normal") || isPlainFries) potatoType = "Porción papas fritas (Con Sal)";
 
                 if (potatoType) {
-                    addStat(potatoType, qty, false);
+                    addStat(potatoType, qty, false, 'detalle_papas');
                 }
             });
         });
 
         $('#totalItemsBadge').innerText = `Total: ${totalS + totalD}`;
 
-        // ORDENAMIENTO FINAL
+        // Definir orden de categorías
+        const catOrder = ['hamburguesas', 'guarniciones', 'bebidas', 'extras', 'detalle_papas', 'otros'];
+
+        // Ordenar claves
         const sortedKeys = Object.keys(stats).sort((a, b) => {
-            // 1. Por Rango (Categoría)
-            if (stats[a].rank !== stats[b].rank) return stats[a].rank - stats[b].rank;
-            // 2. Alfabético dentro de la categoría
+            const rankA = catOrder.indexOf(stats[a].category);
+            const rankB = catOrder.indexOf(stats[b].category);
+            if (rankA !== rankB) return rankA - rankB;
             return a.localeCompare(b);
         });
+
+        let currentCat = null;
 
         sortedKeys.forEach(key => {
             const s = stats[key];
             if (s.simple === 0 && s.double === 0) return; // Ocultar vacíos
+
+            // Insertar separador si cambia la categoría
+            if (s.category !== currentCat) {
+                currentCat = s.category;
+                const catTitle = currentCat.toUpperCase().replace('_', ' ');
+                body.insertAdjacentHTML('beforeend', `<tr><td colspan="5" class="cat-header">${catTitle}</td></tr>`);
+            }
 
             const pS = totalS > 0 ? ((s.simple / totalS) * 100).toFixed(1) : 0;
             const pD = totalD > 0 ? ((s.double / totalD) * 100).toFixed(1) : 0;
@@ -629,7 +647,7 @@
         chartMain = new Chart($('#mainChart').getContext('2d'), { type:'bar', data:{ labels:['Ventas','Mercadería','Fijos','Sueldos','Var','Balance'], datasets:[{data:[gross,realPurchases,totalFixed,totalSalaries,variableCosts,profitReal], backgroundColor:['#64748b','#f97316','#a855f7','#3b82f6','#eab308',profitReal>=0?'#10b981':'#ef4444'], borderRadius:6}] }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}} });
         window.renderExtraCharts(dailySales, productSales, paymentStats);
         
-        // --- LLAMADA A LA NUEVA FUNCION DE PROPORCIONES ---
+        // --- LLAMADA A LA NUEVA FUNCION ---
         window.renderProportions();
     };
 
@@ -724,6 +742,7 @@
         const now = new Date();
         $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
         $('#monthPicker').addEventListener('change', window.loadDashboardData);
+        loadProductsDB(); // 🔥 Carga los productos al iniciar
         window.loadInventory(); window.loadRecipes(); window.loadFixedData(); window.loadDashboardData();
     });
 </script>
