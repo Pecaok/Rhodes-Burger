@@ -81,7 +81,7 @@
     .ing-list { border: 1px solid #eee; border-radius: 8px; padding: 10px; margin-top: 10px; background: #fafafa; }
     .ing-item { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px dashed #ddd; font-size: 14px; }
     
-    /* Sticky header */
+    /* Sticky header para que se vea bien en celular */
     .sticky-col { position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1; background: #fff; }
   </style>
 </head>
@@ -361,37 +361,51 @@
         if(el) el.innerHTML = `<div style="padding:10px; color:${isError?'red':'#666'}; font-weight:600">${msg}</div>`;
     }
 
-    // --- LÓGICA ORDENADA DE PROPORCIONES ---
+    // ==========================================
+    // 🔥 LÓGICA DINÁMICA: PROPORCIONES ORDENADAS
+    // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
         if (!body) return;
         body.innerHTML = '';
 
-        // Definimos el orden exacto de visualización
-        const displayOrder = [
-            // --- 1. HAMBURGUESAS ---
-            "CheeseBurger", "CheeseBacon", "Easter Egg", "Core", "Morgan", "Big John", 
-            "Buena", "Mala", "Fea", "Rhodes", "Burguesa", "Pollo Crispy", "olo",
-            // --- 2. GUARNICIONES ---
-            "Porción papas fritas con cheddar", "Porción papas fritas con cheddar y bacon", "Porción nuggets",
-            // --- 3. BEBIDAS ---
-            "Agua", "Coca Cola Original", "Coca Cola Zero", "Sprite", 
-            "Andes Rubia", "Andes Roja", "Aquarius Manzana", 
-            "Aquarius Pera", "Aquarius Pomelo",
-            // --- 4. EXTRAS ---
-            "Medallón adicional", "Cheddar adicional",
-            // --- 5. PAPAS DETALLE ---
-            "Porción papas fritas (Sazonadas)", 
-            "Porción papas fritas (Sin Sal)", 
-            "Porción papas fritas (Con Sal)"
-        ];
-
-        // Inicializamos los contadores con este orden
-        const counts = {};
-        displayOrder.forEach(key => counts[key] = { simple: 0, double: 0 });
-
+        const stats = {};
         let totalS = 0;
         let totalD = 0;
+
+        // Categorías para ordenamiento
+        // 1: Burgers, 2: Guarniciones, 3: Bebidas, 4: Extras, 5: Detalle Papas, 6: Otros
+        const getCatRank = (name) => {
+            const n = name.toLowerCase();
+            // 5. Detalle Papas (Prioridad especial)
+            if (n.includes("porción papas fritas (")) return 5;
+            
+            // 2. Guarniciones
+            if (n.includes("nugget") || (n.includes("papas") && (n.includes("cheddar") || n.includes("bacon")))) return 2;
+            
+            // 4. Extras
+            if (n.includes("medallón") || n.includes("adicional")) return 4;
+
+            // 3. Bebidas (Lista expandida)
+            const drinks = ["coca", "sprite", "agua", "andes", "aquarius", "fanta", "pepsi", "7up", "levite", "paso", "schweppes", "mirinda", "baggio", "monster", "speed", "red bull", "manaos", "secuko"];
+            if (drinks.some(d => n.includes(d))) return 3;
+
+            // 1. Hamburguesas (Default fuerte si no es lo anterior)
+            if (n.includes("burger") || n.includes("hamburguesa") || n.includes("cheese") || n.includes("morgan") || n.includes("kevin") || n.includes("crispy") || n.includes("olo") || n.includes("egg") || n.includes("core") || n.includes("big") || n.includes("buena") || n.includes("mala") || n.includes("fea") || n.includes("rhodes")) return 1;
+
+            return 6; // Otros
+        };
+
+        const addStat = (name, qty, isDouble) => {
+            if (!stats[name]) stats[name] = { simple: 0, double: 0, rank: getCatRank(name) };
+            if (isDouble) {
+                stats[name].double += qty;
+                totalD += qty;
+            } else {
+                stats[name].simple += qty;
+                totalS += qty;
+            }
+        };
 
         ORDERS.forEach(o => {
             (o.items || []).forEach(it => {
@@ -400,68 +414,63 @@
                 let cleanName = rawName;
                 let isDouble = false;
 
-                // 1. Detectar si es Doble
+                // 1. Detectar Doble
                 if (rawName.toLowerCase().includes("doble")) {
                     isDouble = true;
                     cleanName = rawName.replace(/doble/gi, "").trim().replace(/\s{2,}/g, ' ');
                 }
                 
-                // Normalizar primera mayuscula para matchear con la lista
+                // Capitalizar
                 cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
 
-                // --- MAPEO DE HAMBURGUESAS Y BEBIDAS ---
-                // Buscamos si el nombre limpio está en nuestra lista de visualización
-                // Usamos includes para ser flexibles (ej: "Hamburguesa Morgan" -> "Morgan")
-                const targetKey = displayOrder.find(k => cleanName.toLowerCase().includes(k.toLowerCase()));
-                
-                // Excluimos las papas genéricas de este match para que caigan en la lógica de abajo
-                if (targetKey && !targetKey.includes("Porción papas fritas (")) {
-                    counts[targetKey].simple += (isDouble ? 0 : qty);
-                    counts[targetKey].double += (isDouble ? qty : 0);
-                    if(isDouble) totalD += qty; else totalS += qty;
+                // Agregar ítem principal (auto-descubrimiento)
+                // Excluimos "papas solas" de aquí para que vayan al detalle
+                if (!cleanName.toLowerCase().includes("porción papas fritas") || cleanName.toLowerCase().includes("cheddar")) {
+                    addStat(cleanName, qty, isDouble);
                 }
 
-                // --- 2. EXTRAS (Estructurales) ---
+                // 2. EXTRAS (Estructurales)
                 if (it.extras) {
-                    if (it.extras.patty) {
-                        counts["Medallón adicional"].simple += (Number(it.extras.patty) * qty);
-                        totalS += (Number(it.extras.patty) * qty);
-                    }
-                    if (it.extras.cheddar) {
-                        counts["Cheddar adicional"].simple += (Number(it.extras.cheddar) * qty);
-                        totalS += (Number(it.extras.cheddar) * qty);
-                    }
+                    if (it.extras.patty) addStat("Medallón adicional", Number(it.extras.patty) * qty, false);
+                    if (it.extras.cheddar) addStat("Cheddar adicional", Number(it.extras.cheddar) * qty, false);
                 }
 
-                // --- 3. PAPAS DETALLE (Lógica de propiedades) ---
+                // 3. DETALLE DE PAPAS (Virtual)
+                // Si es una porción de papas (sin cheddar/bacon) o si viene como side
+                let isPotatoItem = rawName.toLowerCase().includes("porción papas") && !rawName.toLowerCase().includes("cheddar") && !rawName.toLowerCase().includes("bacon");
+                
+                // Analizamos el atributo fries
                 let fName = (it.fries || "").toLowerCase();
-                // Si el item principal es porción, lo tratamos como papa
-                if (rawName.toLowerCase().includes("porcion papas") || rawName.toLowerCase().includes("porción papas")) {
-                    // Si no tiene topping (cheddar/bacon), clasificamos por sal/sazon
-                    if (!rawName.toLowerCase().includes("cheddar") && !rawName.toLowerCase().includes("bacon")) {
-                        if (fName === "") fName = "con sal"; // Default
-                    }
+                let potatoType = "";
+
+                if (isPotatoItem) {
+                    // Si es el ítem principal "Papas", miramos si tiene aclaración, sino default con sal
+                    if (fName === "") fName = "con sal";
                 }
 
-                if (fName.includes("sazon") || fName.includes("dorito")) {
-                    counts["Porción papas fritas (Sazonadas)"].simple += qty;
-                    totalS += qty;
-                } else if (fName.includes("sin sal")) {
-                    counts["Porción papas fritas (Sin Sal)"].simple += qty;
-                    totalS += qty;
-                } else if (fName.includes("con sal") || fName.includes("normal")) {
-                    counts["Porción papas fritas (Con Sal)"].simple += qty;
-                    totalS += qty;
+                if (fName.includes("sazon") || fName.includes("dorito")) potatoType = "Porción papas fritas (Sazonadas)";
+                else if (fName.includes("sin sal")) potatoType = "Porción papas fritas (Sin Sal)";
+                else if (fName.includes("con sal") || fName.includes("normal") || isPotatoItem) potatoType = "Porción papas fritas (Con Sal)";
+
+                if (potatoType) {
+                    addStat(potatoType, qty, false);
                 }
             });
         });
 
         $('#totalItemsBadge').innerText = `Total: ${totalS + totalD}`;
 
-        // Renderizado estricto en el orden solicitado
-        displayOrder.forEach(key => {
-            const s = counts[key];
-            if (s.simple === 0 && s.double === 0) return;
+        // ORDENAMIENTO FINAL
+        const sortedKeys = Object.keys(stats).sort((a, b) => {
+            // 1. Por Rango (Categoría)
+            if (stats[a].rank !== stats[b].rank) return stats[a].rank - stats[b].rank;
+            // 2. Alfabético dentro de la categoría
+            return a.localeCompare(b);
+        });
+
+        sortedKeys.forEach(key => {
+            const s = stats[key];
+            if (s.simple === 0 && s.double === 0) return; // Ocultar vacíos
 
             const pS = totalS > 0 ? ((s.simple / totalS) * 100).toFixed(1) : 0;
             const pD = totalD > 0 ? ((s.double / totalD) * 100).toFixed(1) : 0;
