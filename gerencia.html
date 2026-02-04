@@ -85,6 +85,9 @@
     .sticky-col { position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1; background: #fff; }
     /* Headers de categoría */
     .cat-header { background: #e2e8f0; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #475569; padding: 8px 10px; font-size: 11px; }
+    
+    /* Styles para los porcentajes pequeños */
+    .pct-tag { font-size: 10px; font-weight: 400; margin-left: 4px; opacity: 0.8; }
   </style>
 </head>
 <body>
@@ -132,7 +135,7 @@
                 <div class="conf-input-group"><div class="conf-lbl">QR/MP</div><input type="number" id="confQR" value="0" class="conf-inp"></div>
                 <button class="btn-sm btn-primary" onclick="saveConfig()" style="height:32px; margin-left:5px">💾</button>
             </div>
-            <input type="month" id="monthPicker" style="font-weight:700; border:2px solid var(--primary); color:var(--primary); padding:5px; border-radius:6px;">
+            <input type="month" id="monthPicker" title="Selecciona mes anterior para ver historial" style="font-weight:700; border:2px solid var(--primary); color:var(--primary); padding:5px; border-radius:6px; cursor:pointer;">
         </div>
       </div>
 
@@ -173,11 +176,10 @@
                         <tr>
                             <th class="sticky-col" style="z-index:10;">Producto</th>
                             <th style="text-align: center; background: #fffbeb; color: #92400e;">Total</th>
-                            <th style="text-align: center; background: #fffbeb; color: #92400e; border-right: 1px solid #e2e8f0;">% Global</th>
                             
-                            <th style="text-align: center; background: #eff6ff; color: #1e40af;">🌐 Web</th>
-                            <th style="text-align: center; background: #f8fafc; color: #475569;">🏪 Local</th>
-                            <th style="text-align: center; background: #fef2f2; color: #b91c1c;">🛵 PedidosYa</th>
+                            <th style="text-align: center; background: #eff6ff; color: #1e40af;">🌐 Web <small>(%)</small></th>
+                            <th style="text-align: center; background: #f8fafc; color: #475569;">🏪 Local <small>(%)</small></th>
+                            <th style="text-align: center; background: #fef2f2; color: #b91c1c;">🛵 PedidosYa <small>(%)</small></th>
                         </tr>
                     </thead>
                     <tbody id="proportionsBody"></tbody>
@@ -382,14 +384,14 @@
     }
 
     // ==========================================
-    // 🔥 2. LÓGICA DEFINITIVA: LISTA FIJA + DESGLOSE CANALES
+    // 🔥 2. LÓGICA DEFINITIVA: LISTA FIJA + DESGLOSE CONTEXTUAL
     // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
         if (!body) return;
         body.innerHTML = '';
 
-        // 1. TU LISTA EXACTA (Esto asegura que aparezcan aunque no se vendan)
+        // 1. TU LISTA EXACTA
         const MASTER_LIST = [
             "CheeseBurger", "CheeseBacon", "Easter Egg", "Core", "Morgan", 
             "Big John", "Buena", "Mala", "Fea", "Rhodes", "Burguesa", "Pollo Crispy",
@@ -412,9 +414,13 @@
             };
         });
 
+        // Totales globales POR CANAL para calcular los porcentajes
         let totalGeneral = 0;
+        let grandTotalWeb = 0;
+        let grandTotalLocal = 0;
+        let grandTotalPY = 0;
 
-        // Función auxiliar para saber categoría (solo para ordenar visualmente)
+        // Función auxiliar para saber categoría
         function guessCategory(name) {
             const n = name.toLowerCase();
             if(n.includes('coca')||n.includes('agua')||n.includes('andes')||n.includes('aquarius')||n.includes('sprite')) return 'bebidas';
@@ -423,57 +429,47 @@
             return 'hamburguesas';
         }
 
-        // Función para normalizar nombres que vienen de pedidos y coincidan con tu lista
+        // Función para normalizar nombres
         function matchToMasterList(rawName) {
             let n = rawName.toLowerCase().trim();
-            // Quitamos "doble" para agrupar (ej: CheeseBurger Doble -> CheeseBurger)
             n = n.replace('doble', '').trim();
-            // Quitamos espacios extra
             n = n.replace(/\s{2,}/g, ' ');
-
-            // Buscamos coincidencia directa en tu lista
             const found = MASTER_LIST.find(m => m.toLowerCase() === n);
             if(found) return found.toLowerCase();
-
-            // Si no coincide exacto, intentamos aproximar
             if(n.includes('coca') && n.includes('original')) return 'coca cola original';
             if(n.includes('coca') && n.includes('zero')) return 'coca cola zero';
             if(n === 'papas fritas') return 'porción papas fritas';
-
-            return n; // Si es un producto nuevo que no está en la lista, devolvemos el nombre limpio
+            return n;
         }
 
         // 2. PROCESAR PEDIDOS
         ORDERS.forEach(o => {
-            // Determinar origen del pedido
+            // Determinar origen
             let source = 'local'; // default
             const srcRaw = String(o.source || '').toLowerCase();
-            const payRaw = String(o.pago || '').toLowerCase();
             
-            if (srcRaw.includes('pedidosya')) {
-                source = 'py';
-            } else if (srcRaw === 'web' || srcRaw === 'app') {
-                source = 'web';
-            }
+            if (srcRaw.includes('pedidosya')) source = 'py';
+            else if (srcRaw === 'web' || srcRaw === 'app') source = 'web';
 
             (o.items || []).forEach(it => {
                 const qty = Number(it.qty || 1);
                 const rawName = it.name || "";
                 
-                // Normalizar nombre para que coincida con tu lista
                 const key = matchToMasterList(rawName);
 
-                // Si el item no estaba en la lista (es nuevo), lo creamos
                 if (!stats[key]) {
-                    // Capitalizar primera letra para mostrar bonito
                     const cleanName = key.charAt(0).toUpperCase() + key.slice(1);
                     stats[key] = { name: cleanName, total: 0, web: 0, local: 0, py: 0, category: 'otros' };
                 }
 
-                // Sumar al total y al canal correspondiente
                 stats[key].total += qty;
                 stats[key][source] += qty;
                 totalGeneral += qty;
+
+                // Sumar a los grandes totales para el %
+                if(source === 'web') grandTotalWeb += qty;
+                if(source === 'local') grandTotalLocal += qty;
+                if(source === 'py') grandTotalPY += qty;
             });
         });
 
@@ -491,38 +487,37 @@
         let currentCat = null;
 
         sortedKeys.forEach(s => {
-            // Header de Categoría
             if (s.category !== currentCat) {
                 currentCat = s.category;
                 body.insertAdjacentHTML('beforeend', `<tr><td colspan="6" class="cat-header">${currentCat.toUpperCase()}</td></tr>`);
             }
 
-            // Cálculo de % del Total Global
-            const pctGlobal = totalGeneral > 0 ? ((s.total / totalGeneral) * 100).toFixed(1) : 0;
-            
-            // Estilo gris si no hay ventas
+            // Estilos para cuando no hay ventas
             const rowStyle = s.total === 0 ? 'color:#cbd5e1;' : '';
             const zeroStyle = 'color:#e2e8f0; font-size:11px;';
+            const pctClass = s.total === 0 ? '' : 'pct-tag';
+
+            // Cálculos de Porcentajes CONTEXTUALES (sobre el total de ese canal)
+            const pctWeb = grandTotalWeb > 0 ? ((s.web / grandTotalWeb) * 100).toFixed(1) + '%' : '-';
+            const pctLocal = grandTotalLocal > 0 ? ((s.local / grandTotalLocal) * 100).toFixed(1) + '%' : '-';
+            const pctPY = grandTotalPY > 0 ? ((s.py / grandTotalPY) * 100).toFixed(1) + '%' : '-';
 
             body.insertAdjacentHTML('beforeend', `
                 <tr style="${rowStyle}">
                     <td style="font-weight:700; border-right:2px solid #e2e8f0; position:sticky; left:0; background:white; z-index:5">${s.name}</td>
                     
                     <td style="text-align:center; font-weight:700; background:#ffffff">${s.total}</td>
-                    <td style="text-align:center; color:#92400e; font-size:11px; background:#fffbeb; border-right:1px solid #e2e8f0">
-                        ${s.total > 0 ? pctGlobal + '%' : '-'}
+                    
+                    <td style="text-align:center; background:#eff6ff; ${s.web===0?zeroStyle:''}">
+                        ${s.web > 0 ? `<span style="color:#1e40af; font-weight:700">${s.web}</span> <span class="${pctClass}">(${pctWeb})</span>` : '-'}
                     </td>
 
-                    <td style="text-align:center; ${s.web===0?zeroStyle:''}">
-                        ${s.web > 0 ? `<span style="color:#1e40af; font-weight:700">${s.web}</span>` : '-'}
+                    <td style="text-align:center; background:#f8fafc; ${s.local===0?zeroStyle:''}">
+                        ${s.local > 0 ? `<span style="color:#334155; font-weight:700">${s.local}</span> <span class="${pctClass}">(${pctLocal})</span>` : '-'}
                     </td>
 
-                    <td style="text-align:center; ${s.local===0?zeroStyle:''}">
-                        ${s.local > 0 ? `<span style="color:#334155; font-weight:700">${s.local}</span>` : '-'}
-                    </td>
-
-                    <td style="text-align:center; ${s.py===0?zeroStyle:''}">
-                        ${s.py > 0 ? `<span style="color:#dc2626; font-weight:700">${s.py}</span>` : '-'}
+                    <td style="text-align:center; background:#fef2f2; ${s.py===0?zeroStyle:''}">
+                        ${s.py > 0 ? `<span style="color:#dc2626; font-weight:700">${s.py}</span> <span class="${pctClass}">(${pctPY})</span>` : '-'}
                     </td>
                 </tr>
             `);
