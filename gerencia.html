@@ -65,10 +65,10 @@
     .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 15px; }
     
     .badge { padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; display:inline-block; letter-spacing:0.5px; }
-    .bdg-web { background: #e0f2fe; color: #0284c7; }   
+    .bdg-web { background: #e0f2fe; color: #0284c7; }    
     .bdg-local { background: #f1f5f9; color: #475569; } 
-    .bdg-py { background: #fee2e2; color: #ef4444; }    
-    .bdg-cash { background: #dcfce7; color: #166534; }  
+    .bdg-py { background: #fee2e2; color: #ef4444; }     
+    .bdg-cash { background: #dcfce7; color: #166534; }   
     .bdg-digital { background: #f3e8ff; color: #7e22ce; } 
 
     .conf-input-group { display:flex; flex-direction:column; align-items:center; }
@@ -104,6 +104,9 @@
   <aside class="sidebar">
     <div class="tab-btn active" onclick="showTab('dashboard')">📊 Rendimiento</div>
     
+    <div class="section-title">Análisis</div>
+    <div class="tab-btn" onclick="showTab('proportions')">📈 Proporción Ventas</div>
+
     <div class="section-title">Gestión</div>
     <div class="tab-btn" onclick="showTab('stock')">📦 Control de Stock</div>
     <div class="tab-btn" onclick="showTab('subrecipes')">🧩 Armado de Items</div>
@@ -158,6 +161,29 @@
           <div class="card"><h5>🍔 Top Productos</h5><div style="height:200px"><canvas id="topProductsChart"></canvas></div></div>
           <div class="card"><h5>💳 Medios de Pago</h5><div style="height:200px"><canvas id="paymentChart"></canvas></div></div>
       </div>
+    </div>
+
+    <div id="tab-proportions" style="display:none">
+        <div class="card">
+            <div class="row-flex">
+                <h2 style="margin:0; border:0">📊 Proporción de Ventas Local</h2>
+                <div id="totalItemsBadge" style="background:var(--primary); color:white; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700">Total: 0</div>
+            </div>
+            <div style="overflow-x:auto">
+                <table style="border-collapse: separate; border-spacing: 0;">
+                    <thead>
+                        <tr>
+                            <th style="background: #f1f5f9; position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1;">Producto</th>
+                            <th style="text-align: center; background: #fffbeb; color: #92400e;">Simple / Cant.</th>
+                            <th style="text-align: center; background: #fffbeb; color: #92400e; border-right: 1px solid #e2e8f0;">%</th>
+                            <th style="text-align: center; background: #fef2f2; color: #b91c1c;">Doble</th>
+                            <th style="text-align: center; background: #fef2f2; color: #b91c1c;">%</th>
+                        </tr>
+                    </thead>
+                    <tbody id="proportionsBody"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <div id="tab-orders" style="display:none">
@@ -332,45 +358,88 @@
     let currentRecipeId = null, currentSubRecipeId = null;
     let chartMain=null, chartDaily=null, chartProds=null, chartPayment=null;
     let tempAliasList = [];
-    let currentRecipeIngs = []; // Para el modal de recetas finales
+    let currentRecipeIngs = [];
 
     function logStatus(msg, isError=false) {
         const el = $('#lastPurchasesList');
         if(el) el.innerHTML = `<div style="padding:10px; color:${isError?'red':'#666'}; font-weight:600">${msg}</div>`;
     }
 
+    // --- NUEVA FUNCION: PROPORCION VENTAS ---
+    window.renderProportions = function() {
+        const body = $('#proportionsBody');
+        if (!body) return;
+        body.innerHTML = '';
+
+        const itemsList = [
+            "CheeseBurger", "CheeseBacon", "Easter Egg", "Core", "Morgan", "Big John", 
+            "Buena", "Mala", "Fea", "Rhodes", "Burguesa", "Pollo Crispy", "olo",
+            "Medallón adicional", "Cheddar adicional", "Porción papas fritas", 
+            "Porción papas fritas con cheddar", "Porción papas fritas con cheddar y bacon", 
+            "Porción nuggets", "Agua", "Coca Cola Original", "Coca Cola Zero", 
+            "Sprite", "Andes Rubia", "Andes Roja", "Aquarius Manzana", 
+            "Aquarius Pera", "Aquarius Pomelo"
+        ];
+
+        const stats = {};
+        let totalS = 0, totalD = 0;
+        itemsList.forEach(item => stats[item] = { simple: 0, doble: 0 });
+
+        ORDERS.forEach(o => {
+            (o.items || []).forEach(it => {
+                const name = (it.name || "").toLowerCase();
+                const qty = Number(it.qty || 1);
+                
+                const match = itemsList.find(m => name.includes(m.toLowerCase()));
+
+                if (match) {
+                    if (name.includes("doble")) { stats[match].doble += qty; totalD += qty; }
+                    else { stats[match].simple += qty; totalS += qty; }
+                }
+            });
+        });
+
+        $('#totalItemsBadge').innerText = `Total: ${totalS + totalD}`;
+
+        itemsList.forEach(item => {
+            const s = stats[item];
+            if (s.simple === 0 && s.doble === 0) return;
+
+            const pS = totalS > 0 ? ((s.simple/totalS)*100).toFixed(1) : 0;
+            const pD = totalD > 0 ? ((s.doble/totalD)*100).toFixed(1) : 0;
+
+            body.insertAdjacentHTML('beforeend', `
+                <tr>
+                    <td style="font-weight:700; border-right:2px solid #e2e8f0; position:sticky; left:0; background:white; z-index:1">${item}</td>
+                    <td style="text-align:center; font-weight:600">${s.simple}</td>
+                    <td style="text-align:center; color:#92400e; font-size:11px; background:#fffcf4">${pS}%</td>
+                    <td style="text-align:center; font-weight:600">${s.doble}</td>
+                    <td style="text-align:center; color:#b91c1c; font-size:11px; background:#fffafb">${pD}%</td>
+                </tr>
+            `);
+        });
+    };
+
     // --- CARGADORES UNIFICADOS ---
     window.loadInventory = function() {
-        // 1. Cargar Insumos Puros
         db.collection('inventory').orderBy('name').onSnapshot(snap => {
             RAW_STOCK = snap.docs.map(d => ({id:d.id, ...d.data(), isSub: false}));
             window.combineAndRender();
         });
-
-        // 2. Cargar Items de Armado (Subrecetas) y transformarlos para que parezcan insumos
         db.collection('subrecipes').onSnapshot(snap => {
-            SUB_RECIPES = snap.docs.map(d => ({id:d.id, ...d.data()})); // Guardamos original para costos
+            SUB_RECIPES = snap.docs.map(d => ({id:d.id, ...d.data()})); 
             PREMADE_STOCK = snap.docs.map(d => ({
-                id: d.id,
-                ...d.data(),
-                category: '🧩 Armado', // Forzar categoría visual
-                isSub: true,
-                unit: 'u', // Por defecto unidad
-                qty: d.data().qty || 0, // Asegurar que tenga campo qty
-                min: d.data().min || 0
+                id: d.id, ...d.data(), category: '🧩 Armado', isSub: true,
+                unit: 'u', qty: d.data().qty || 0, min: d.data().min || 0
             }));
             window.combineAndRender();
         });
     };
 
     window.combineAndRender = function() {
-        // Fusionamos ambas listas en la variable global INVENTORY
         INVENTORY = [...RAW_STOCK, ...PREMADE_STOCK];
-        // Renderizamos tablas y listas
-        window.renderStockTable();
-        window.renderCostTables();
-        window.renderRecipesList(); 
-        window.renderSubRecipesList();
+        window.renderStockTable(); window.renderCostTables();
+        window.renderRecipesList(); window.renderSubRecipesList();
     };
 
     window.loadRecipes = function() { db.collection('recipes').onSnapshot(snap => { RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderRecipesList(); }); };
@@ -385,147 +454,75 @@
         });
     };
 
-    // RENDER STOCK (UNIFICADO)
+    // RENDER STOCK
     window.renderStockTable = function() {
-        const t=$('#searchStock').value.toLowerCase();
-        const c=$('#filterCat').value;
+        const t=$('#searchStock').value.toLowerCase(); const c=$('#filterCat').value;
         const b=$('#stockTableBody'); b.innerHTML='';
-        
         INVENTORY.filter(p=>(p.name||"").toLowerCase().includes(t) && (c==='all'||p.category===c)).forEach(p=>{
             let stHtml = `<span class="status-dot st-ok"></span>OK`;
             if(p.qty<=p.min) stHtml=`<span class="status-dot st-danger"></span>CRIT`; 
             else if(p.qty<=p.min*1.5) stHtml=`<span class="status-dot st-warn"></span>BAJO`;
-            
-            // Botones de acción diferentes si es Subreceta
             let actions = `<button class="btn-icon" onclick="openProductModal('${p.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button>`;
-            if(p.isSub) {
-                // Si es subreceta, el lápiz lleva al editor de armado, y borrar borra la subreceta
-                actions = `<button class="btn-icon" onclick="openSubRecipeEditor('${p.id}')">🧩</button><button class="btn-icon" onclick="deleteItem('subrecipes','${p.id}')">🗑️</button>`;
-            }
-
-            b.insertAdjacentHTML('beforeend', `<tr>
-                <td><b>${p.name}</b></td>
-                <td><small>${p.category}</small></td>
-                <td>
-                    <div class="qty-control">
-                        <button class="qty-btn" onclick="updStock('${p.id}',-1)">-</button>
-                        <b>${formatQty(p.qty)}</b>
-                        <button class="qty-btn" onclick="updStock('${p.id}',1)">+</button>
-                        <small style="margin-left:5px">${p.unit}</small>
-                    </div>
-                </td>
-                <td>${p.min}</td>
-                <td>${stHtml}</td>
-                <td>${actions}</td>
-            </tr>`);
+            if(p.isSub) actions = `<button class="btn-icon" onclick="openSubRecipeEditor('${p.id}')">🧩</button><button class="btn-icon" onclick="deleteItem('subrecipes','${p.id}')">🗑️</button>`;
+            b.insertAdjacentHTML('beforeend', `<tr><td><b>${p.name}</b></td><td><small>${p.category}</small></td><td><div class="qty-control"><button class="qty-btn" onclick="updStock('${p.id}',-1)">-</button><b>${formatQty(p.qty)}</b><button class="qty-btn" onclick="updStock('${p.id}',1)">+</button><small style="margin-left:5px">${p.unit}</small></div></td><td>${p.min}</td><td>${stHtml}</td><td>${actions}</td></tr>`);
         });
     };
 
-    // UPDATE STOCK INTELIGENTE (Sabe dónde guardar)
     window.updStock = (id, v) => {
-        const item = INVENTORY.find(i => i.id === id);
-        if(!item) return;
-        const collection = item.isSub ? 'subrecipes' : 'inventory';
-        const newQty = Number(item.qty || 0) + v;
-        db.collection(collection).doc(id).update({ qty: newQty });
+        const item = INVENTORY.find(i => i.id === id); if(!item) return;
+        const col = item.isSub ? 'subrecipes' : 'inventory';
+        db.collection(col).doc(id).update({ qty: Number(item.qty || 0) + v });
     };
 
-    // --- LOGICA DE RECETAS FINALES ---
+    // RECETAS Y SUBRECETAS
     window.openRecipeModal = function(id) {
-        $('#modalRecipe').style.display = 'flex';
-        $('#recName').value = '';
-        $('#recIngQty').value = '';
-        currentRecipeIngs = [];
-        
+        $('#modalRecipe').style.display = 'flex'; $('#recName').value = ''; $('#recIngQty').value = ''; currentRecipeIngs = [];
         const s = $('#recIngSelect'); s.innerHTML = '<option value="">Seleccionar...</option>';
-        if(SUB_RECIPES.length) {
-            s.insertAdjacentHTML('beforeend', '<optgroup label="🧩 Armado de Items">');
-            SUB_RECIPES.forEach(sub => s.insertAdjacentHTML('beforeend', `<option value="${sub.id}">🧩 ${sub.name}</option>`));
-            s.insertAdjacentHTML('beforeend', '</optgroup>');
-        }
-        s.insertAdjacentHTML('beforeend', '<optgroup label="📦 Insumos">');
-        RAW_STOCK.sort((a,b)=>a.name.localeCompare(b.name)).forEach(i => s.insertAdjacentHTML('beforeend', `<option value="${i.id}">${i.name} (${i.unit})</option>`));
-        s.insertAdjacentHTML('beforeend', '</optgroup>');
-
-        if(id) {
-            const r = RECIPES.find(x => x.id === id);
-            if(r) {
-                $('#recName').value = r.id;
-                currentRecipeIngs = [...r.ingredients];
-            }
-        }
+        if(SUB_RECIPES.length) { s.insertAdjacentHTML('beforeend', '<optgroup label="🧩 Armado">'); SUB_RECIPES.forEach(sub => s.insertAdjacentHTML('beforeend', `<option value="${sub.id}">🧩 ${sub.name}</option>`)); s.insertAdjacentHTML('beforeend', '</optgroup>'); }
+        s.insertAdjacentHTML('beforeend', '<optgroup label="📦 Insumos">'); RAW_STOCK.sort((a,b)=>a.name.localeCompare(b.name)).forEach(i => s.insertAdjacentHTML('beforeend', `<option value="${i.id}">${i.name} (${i.unit})</option>`)); s.insertAdjacentHTML('beforeend', '</optgroup>');
+        if(id) { const r = RECIPES.find(x => x.id === id); if(r) { $('#recName').value = r.id; currentRecipeIngs = [...r.ingredients]; } }
         window.renderCurrentRecipeList();
     };
 
     window.addItemToCurrentRecipe = function() {
-        const id = $('#recIngSelect').value;
-        const qty = Number($('#recIngQty').value);
-        if(!id || qty <= 0) return alert("Selecciona ítem y cantidad");
-        
-        const item = INVENTORY.find(i => i.id === id); // Busca en la lista unificada
-        const name = item ? (item.isSub ? `🧩 ${item.name}` : item.name) : "???";
-        
-        currentRecipeIngs.push({ id: id, qty: qty, _name: name });
-        window.renderCurrentRecipeList();
-        $('#recIngQty').value = '';
+        const id = $('#recIngSelect').value; const qty = Number($('#recIngQty').value); if(!id || qty <= 0) return alert("Error");
+        const item = INVENTORY.find(i => i.id === id);
+        currentRecipeIngs.push({ id: id, qty: qty, _name: item ? (item.isSub ? `🧩 ${item.name}` : item.name) : "???" });
+        window.renderCurrentRecipeList(); $('#recIngQty').value = '';
     };
 
     window.renderCurrentRecipeList = function() {
         const c = $('#currentRecipeList'); c.innerHTML = '';
-        if(!currentRecipeIngs.length) return c.innerHTML='<div style="text-align:center; color:#999; font-size:12px">Lista vacía</div>';
-        
         currentRecipeIngs.forEach((item, idx) => {
-            if(!item._name) {
-                const i = INVENTORY.find(x => x.id === item.id);
-                item._name = i ? (i.isSub ? `🧩 ${i.name}` : i.name) : "???";
-            }
-            c.insertAdjacentHTML('beforeend', `<div class="ing-item"><span><b>${item.qty}</b> x ${item._name}</span> <button style="color:red;border:none;background:none;cursor:pointer" onclick="currentRecipeIngs.splice(${idx},1);window.renderCurrentRecipeList()">×</button></div>`);
+            if(!item._name) { const i = INVENTORY.find(x => x.id === item.id); item._name = i ? (i.isSub ? `🧩 ${i.name}` : i.name) : "???"; }
+            c.insertAdjacentHTML('beforeend', `<div class="ing-item"><span><b>${item.qty}</b> x ${item._name}</span> <button style="color:red;border:none;cursor:pointer" onclick="currentRecipeIngs.splice(${idx},1);window.renderCurrentRecipeList()">×</button></div>`);
         });
     };
 
     window.saveRecipe = async function() {
-        const name = $('#recName').value.trim();
-        if(!name || !currentRecipeIngs.length) return alert("Falta nombre o ingredientes");
-        const cleanIngs = currentRecipeIngs.map(i => ({ id: i.id, qty: i.qty }));
-        await db.collection('recipes').doc(name).set({ ingredients: cleanIngs });
-        alert("Receta guardada!");
-        $('#modalRecipe').style.display = 'none';
+        const name = $('#recName').value.trim(); if(!name || !currentRecipeIngs.length) return alert("Falta info");
+        await db.collection('recipes').doc(name).set({ ingredients: currentRecipeIngs.map(i => ({ id: i.id, qty: i.qty })) });
+        alert("Guardado"); $('#modalRecipe').style.display = 'none';
     };
 
-    window.renderRecipesList = function() { 
-        $('#recipesListBody').innerHTML = RECIPES.map(r => `<tr>
-            <td>${r.id}</td>
-            <td style="text-align:right"><b>${money(window.calculateRecipeTotal(r))}</b></td>
-            <td style="text-align:right">
-                <button class="btn-icon" onclick="openRecipeModal('${r.id}')">✏️</button>
-                <button class="btn-icon" onclick="deleteItem('recipes','${r.id}')">🗑️</button>
-            </td>
-        </tr>`).join(''); 
-    };
+    window.renderRecipesList = function() { $('#recipesListBody').innerHTML = RECIPES.map(r => `<tr><td>${r.id}</td><td style="text-align:right"><b>${money(window.calculateRecipeTotal(r))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="openRecipeModal('${r.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('recipes','${r.id}')">🗑️</button></td></tr>`).join(''); };
 
-    // --- CARGA DE DATOS ---
+    // DASHBOARD & DATA
     window.loadDashboardData = function() {
         const ym = $('#monthPicker').value; if(!ym) return; 
-        $('#ordersTitle').innerText = '🧾 Pedidos de ' + ym;
-        logStatus("🔄 Cargando pedidos...");
-        const [y, m] = ym.split('-').map(Number);
-        const start = new Date(y, m - 1, 1);
-        const end = new Date(y, m, 0, 23, 59, 59);
-
+        $('#ordersTitle').innerText = '🧾 Pedidos de ' + ym; logStatus("🔄 Cargando...");
+        const [y, m] = ym.split('-').map(Number); const start = new Date(y, m - 1, 1); const end = new Date(y, m, 0, 23, 59, 59);
         db.collection('orders').limit(500).get().then(snap => { 
-              const rawOrders = snap.docs.map(d => ({id:d.id, ...d.data()}));
-              ORDERS = rawOrders.filter(o => {
+              ORDERS = snap.docs.map(d => ({id:d.id, ...d.data()})).filter(o => {
                   if(o.status === 'cancelled') return false;
-                  const d = parseDate(o.createdAt);
-                  return d && d >= start && d <= end;
+                  const d = parseDate(o.createdAt); return d && d >= start && d <= end;
               }).sort((a,b) => parseDate(b.createdAt) - parseDate(a.createdAt));
               logStatus(`✅ Cargado: ${ORDERS.length} pedidos.`);
               window.calculateAll(); window.renderOrdersTab(); 
-          }).catch(err => { console.error(err); logStatus("❌ Error cargando: " + err.message, true); });
+          });
         db.collection('purchases').limit(500).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); });
     };
 
-    // --- CALCULOS Y GRAFICOS ---
     window.calculateAll = function() {
         if(typeof Chart === 'undefined') return;
         let gross=0, comms=0, taxes=0, theoCMV=0;
@@ -534,27 +531,19 @@
 
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0); gross += sale;
-            const src = String(o.source||'').toLowerCase();
-            const pay = String(o.pago||o.paymentMethod||'').toLowerCase();
-            let finalPayMethod = 'Otros';
-
-            if(src.includes('pedidosya')) {
+            let pay = String(o.pago||o.paymentMethod||'').toLowerCase(); let finalPayMethod = 'Otros';
+            if(String(o.source||'').toLowerCase().includes('pedidosya')) {
                  finalPayMethod = 'PedidosYa';
-                 if(o.neto_excel && Number(o.neto_excel) > 0) comms += (sale - Number(o.neto_excel));
-                 else comms += (sale * ((pctPy||30)/100));
+                 comms += (o.neto_excel > 0) ? (sale - o.neto_excel) : (sale * ((pctPy||30)/100));
             } else {
                 if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) { taxes += (sale*(pctQR/100)); finalPayMethod='MercadoPago/QR'; }
                 else if(pay.includes('transfer')) { taxes += (sale*(pctTransf/100)); finalPayMethod='Transferencia'; }
                 else if(pay.includes('debito')||pay.includes('tarjeta')) { taxes += (sale*(pctDebit/100)); finalPayMethod='Otros'; } 
-                else { finalPayMethod='Efectivo'; }
+                else finalPayMethod='Efectivo';
             }
-            (o.items||[]).forEach(item => { 
-                theoCMV += (window.getUnitCost(item.name) * Number(item.qty||1)); 
-                productSales[item.name] = (productSales[item.name] || 0) + Number(item.qty||1);
-            });
+            (o.items||[]).forEach(item => { theoCMV += (window.getUnitCost(item.name) * Number(item.qty||1)); productSales[item.name] = (productSales[item.name] || 0) + Number(item.qty||1); });
             theoCMV += window.calculateOrderConsumables(o.items||[]);
-            const dObj = parseDate(o.createdAt);
-            if(dObj) dailySales[dObj.getDate()] = (dailySales[dObj.getDate()] || 0) + sale;
+            const dObj = parseDate(o.createdAt); if(dObj) dailySales[dObj.getDate()] = (dailySales[dObj.getDate()] || 0) + sale;
             paymentStats[finalPayMethod] += sale;
         });
 
@@ -566,11 +555,14 @@
 
         $('#kpiSales').innerText = money(gross); $('#kpiTheoCMV').innerText = '-' + money(theoCMV); $('#kpiTotalExpenses').innerText = '-' + money(realPurchases + totalFixed + totalSalaries + variableCosts);
         const kn = $('#kpiNet'); kn.innerText = money(profitReal);
-        if(profitReal>=0) { kn.className='kpi-val text-green'; $('#kpiNetContainer').style.backgroundColor='#f0fdf4'; } else { kn.className='kpi-val text-red'; $('#kpiNetContainer').style.backgroundColor='#fef2f2'; }
+        kn.className = profitReal >= 0 ? 'kpi-val text-green' : 'kpi-val text-red'; $('#kpiNetContainer').style.backgroundColor = profitReal >= 0 ? '#f0fdf4' : '#fef2f2';
 
         if(chartMain) chartMain.destroy();
         chartMain = new Chart($('#mainChart').getContext('2d'), { type:'bar', data:{ labels:['Ventas','Mercadería','Fijos','Sueldos','Var','Balance'], datasets:[{data:[gross,realPurchases,totalFixed,totalSalaries,variableCosts,profitReal], backgroundColor:['#64748b','#f97316','#a855f7','#3b82f6','#eab308',profitReal>=0?'#10b981':'#ef4444'], borderRadius:6}] }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}} });
         window.renderExtraCharts(dailySales, productSales, paymentStats);
+        
+        // --- LLAMADA A LA NUEVA FUNCION ---
+        window.renderProportions();
     };
 
     window.renderExtraCharts = function(dailyData, prodData, payData) {
@@ -584,122 +576,59 @@
         chartPayment = new Chart($('#paymentChart').getContext('2d'), { type: 'pie', data: { labels: Object.keys(payData), datasets: [{ data: Object.values(payData), backgroundColor: ['#10b981','#3b82f6','#06b6d4','#ef4444','#64748b'] }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right', labels:{boxWidth:10, font:{size:10}}}} } });
     }
 
-    // --- TABLA PEDIDOS ---
+    // TABLA PEDIDOS
     window.renderOrdersTab = function() {
         const tbody = $('#ordersTableBody'); tbody.innerHTML = '';
-        if(ORDERS.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos (o no cargaron)</td></tr>'; return; }
+        if(ORDERS.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos</td></tr>'; return; }
         const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {};
         ORDERS.forEach((o, index) => {
-            const total = Number(o.total || 0);
-            let deduction = 0;
-            if(String(o.source).includes('pedidosya')) deduction = (o.neto_excel && o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100));
+            const total = Number(o.total || 0); let deduction = 0;
+            if(String(o.source).includes('pedidosya')) deduction = (o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100));
             else if(String(o.pago).includes('mercado') || String(o.pago).includes('qr')) deduction = total * (pctQR/100);
             else if(String(o.pago).includes('transfer')) deduction = total * (pctTransf/100);
             else if(String(o.pago).includes('debito')) deduction = total * (pctDebit/100);
-
-            let orderCost = window.calculateOrderConsumables(o.items||[]);
-            (o.items||[]).forEach(item => orderCost += (window.getUnitCost(item.name) * Number(item.qty||1)));
+            let orderCost = window.calculateOrderConsumables(o.items||[]); (o.items||[]).forEach(item => orderCost += (window.getUnitCost(item.name) * Number(item.qty||1)));
             let profit = total - deduction - orderCost;
-            let dStr = '-'; const dt = parseDate(o.createdAt);
-            if(dt) dStr = dt.toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+            let dStr = '-'; const dt = parseDate(o.createdAt); if(dt) dStr = dt.toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
             tbody.innerHTML += `<tr class="order-row" onclick="document.getElementById('detail-${index}').classList.toggle('open')"><td>${dStr}</td><td>${o.nombre||'Cliente'}</td><td><span class="badge ${String(o.source).includes('pedidosya')?'bdg-py':'bdg-web'}">${o.source||'web'}</span></td><td><span class="badge bdg-cash">${o.pago||'efectivo'}</span></td><td style="font-weight:700">${money(total)}</td><td style="font-weight:700; color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</td><td>▼</td></tr><tr class="order-details" id="detail-${index}"><td colspan="7" style="padding:10px; background:#f9fafb"><div style="font-size:12px"><b>Items:</b> ${(o.items||[]).map(i=>i.qty+'x '+i.name).join(', ')}<br><b>Ganancia Real:</b> ${money(profit)}</div></td></tr>`;
         });
     };
     
-    // =================================================================
-    // 💰 CALCULADORA DE COSTOS (CORREGIDA: UNIDADES VS KILOS)
-    // =================================================================
+    // CALCULADORA DE COSTOS
     window.calculateOrderConsumables = function(items) {
-        let totalCost = 0;
-        let burgerCount = 0;
-        let countSazon = 0;
-        
+        let totalCost = 0, burgerCount = 0, countSazon = 0;
         items.forEach(i => {
-            const n = String(i.name||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            const qty = Math.ceil(Number(i.qty||1));
-            
+            const n = String(i.name||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); const qty = Math.ceil(Number(i.qty||1));
             if(n.includes('hamb')||n.includes('burger')||n.includes('doble')||n.includes('simple')||n.includes('royal')||n.includes('cheese')||n.includes('cuarto')||n.includes('big')) {
-                burgerCount += qty;
-                if(n.includes('dorito')) countSazon += qty;
-
-                // 1. FALLBACK CARNE (Si no hay receta)
+                burgerCount += qty; if(n.includes('dorito')) countSazon += qty;
                 const unitCost = window.getUnitCost(i.name);
                 if (unitCost === 0) {
-                    let patties = 1;
-                    if(n.includes('doble')) patties = 2;
-                    if(n.includes('triple')) patties = 3;
-                    // Buscamos precio de la carne (asumiendo precio UNITARIO por medallón en stock)
-                    // Si tu carne en stock está por KG, avísame para dividir por peso.
+                    let patties = 1; if(n.includes('doble')) patties = 2; if(n.includes('triple')) patties = 3;
                     const pattyItem = INVENTORY.find(x => x.name.toLowerCase().includes('medallon') || x.name.toLowerCase().includes('patty'));
                     if(pattyItem) totalCost += (pattyItem.cost * patties * qty);
                 }
             }
         });
-
         if(burgerCount === 0) return 0;
-
-        const getCost = (keywords) => {
-            const item = INVENTORY.find(p => {
-                const pName = String(p.name).toLowerCase();
-                return keywords.some(k => pName.includes(k) || k.includes(pName));
-            });
-            return item ? Number(item.cost || 0) : 0;
-        };
-
-        // --- AUTOMÁTICOS (CORREGIDOS DECIMALES) ---
-        
-        // 🍟 Papas: 200g = 0.2 Kg
-        // Multiplicamos por 0.2 asumiendo que el "Costo" en el inventario es por 1 KG o 1 Bolsa
-        totalCost += (burgerCount * 0.200) * getCost(['papas fritas', 'papa frita', 'papas', 'bastones', 'congelada']);
-
-        // 🥡 Packaging (Enteros)
-        totalCost += burgerCount * getCost(['carton', 'caja papa', 'cajita']);
-        totalCost += burgerCount * getCost(['parafinado', 'papel']);
-
-        const bolsas = Math.ceil(burgerCount / 2);
-        totalCost += bolsas * getCost(['bolsa', 'packaging', 'kraft']);
-        totalCost += (bolsas * 3) * getCost(['ganchito', 'grampa', 'broche']);
-
-        const unidadesImp = burgerCount + bolsas;
-        totalCost += (unidadesImp * 0.25) * getCost(['tinta', 'sello']);
-
-        // 🧀 Sazonador: 5g = 0.005 Kg
-        if(countSazon > 0) {
-            totalCost += (countSazon * 0.005) * getCost(['dorito', 'polvo', 'sazonador']);
-        }
-
+        const getCost = (keys) => { const item = INVENTORY.find(p => keys.some(k => String(p.name).toLowerCase().includes(k))); return item ? Number(item.cost || 0) : 0; };
+        totalCost += (burgerCount * 0.200) * getCost(['papas fritas', 'papa frita', 'papas']);
+        totalCost += burgerCount * getCost(['carton', 'caja papa']); totalCost += burgerCount * getCost(['parafinado', 'papel']);
+        const bolsas = Math.ceil(burgerCount / 2); totalCost += bolsas * getCost(['bolsa', 'packaging']); totalCost += (bolsas * 3) * getCost(['ganchito']);
+        totalCost += (burgerCount + bolsas) * 0.25 * getCost(['tinta', 'sello']);
+        if(countSazon > 0) totalCost += (countSazon * 0.005) * getCost(['dorito', 'polvo']);
         return totalCost;
     };
 
     window.getUnitCost = function(n) { if(!n) return 0; const cn=n.toLowerCase().trim(), a=(FIXED_DATA.aliases||[]).find(x=>x.external.toLowerCase()===cn); if(a) return a.items?a.items.reduce((s,i)=>{const r=RECIPES.find(x=>x.id===i.id);return s+(r?window.calculateRecipeTotal(r)*i.qty:0)},0):(RECIPES.find(x=>x.id===a.internal)?window.calculateRecipeTotal(RECIPES.find(x=>x.id===a.internal)):0); let r=RECIPES.find(x=>x.id.toLowerCase()===cn)||RECIPES.find(x=>cn.includes(x.id.toLowerCase())); return r?window.calculateRecipeTotal(r):0; };
+    window.calculateRecipeTotal = (r) => (r.ingredients||[]).reduce((s,i)=>{ const item = INVENTORY.find(x => x.id === i.id); return s + (item ? (i.qty * (item.isSub ? window.calculateSubRecipeCost(SUB_RECIPES.find(x=>x.id===i.id)||{ingredients:[]}) : item.cost)) : 0); },0);
+    window.calculateSubRecipeCost = (sb) => (sb.ingredients||[]).reduce((s,i)=>{ const it = INVENTORY.find(x => x.id === i.id); return s + (i.qty * (it ? it.cost : 0)); },0);
     
-    // Costo Receta: Insumos + Subrecetas
-    window.calculateRecipeTotal = (r) => (r.ingredients||[]).reduce((s,i)=>{
-        if(i.id) {
-            const item = INVENTORY.find(x => x.id === i.id);
-            if(item) {
-                if(item.isSub) {
-                    const sub = SUB_RECIPES.find(x => x.id === i.id);
-                    return s + (i.qty * (sub ? window.calculateSubRecipeCost(sub) : 0));
-                } else {
-                    return s + (i.qty * item.cost);
-                }
-            }
-        }
-        return s;
-    },0);
-
-    window.calculateSubRecipeCost = (sb) => (sb.ingredients||[]).reduce((s,i)=>{
-        const it = INVENTORY.find(x => x.id === i.id);
-        return s + (i.qty * (it ? it.cost : 0));
-    },0);
-    
-    // --- HELPER UI ---
+    // UI HELPERS
     window.renderCostTables = function() { const rr=(a,t)=>{ $(t).innerHTML=a.map(p=>`<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`).join(''); }; rr(INVENTORY.filter(p=>p.category!=='packaging' && !p.isSub),'#costMateriaBody'); rr(INVENTORY.filter(p=>p.category==='packaging'),'#costPackBody'); };
     window.renderSubRecipesList = function(f="") { const c=$('#subRecipesListBody'), cf=f.toLowerCase(); c.innerHTML=SUB_RECIPES.filter(s=>s.name.toLowerCase().includes(cf)).map(s=>`<div onclick="openSubRecipeEditor('${s.id}')" style="padding:15px;cursor:pointer;border-bottom:1px solid #f1f5f9;${s.id===currentSubRecipeId?'background:#f8fafc;border-left:3px solid var(--purple)':''}"><div style="font-weight:600;font-size:13px">${s.name}</div><div style="font-size:12px;color:var(--purple);font-weight:700">${money(window.calculateSubRecipeCost(s))}</div></div>`).join('')||'<div style="padding:20px;text-align:center;color:#ccc;font-size:12px">No hay items</div>'; };
     window.updateUnitSelect = function(m) { const s=m==='sub'?$('#newSubUnit'):$('#newRecUnit'), p=INVENTORY.find(i=>i.id===(m==='sub'?$('#newSubIng').value:$('#newRecIng').value)); if(!s)return; let h='<option value="1">Unidad</option>'; if(p){const u=(p.unit||'').toLowerCase(); if(u.includes('k')) h='<option value="1">Kg</option><option value="0.001">Gr</option>'; else if(u.includes('l')) h='<option value="1">Lt</option><option value="0.001">Ml</option>'; else if(u.includes('m')) h='<option value="1">Mts</option><option value="0.01">Cm</option>'; else if(u.includes('g')) h='<option value="1">Gr</option><option value="1000">Kg</option>';} s.innerHTML=h; };
     
-    // --- MODALES Y ABM ---
+    // MODALES Y ABM
     window.openProductModal = function(id, cat) { $('#modalProduct').style.display='flex'; if(id && typeof id==='string'){ const p=INVENTORY.find(i=>i.id===id); $('#mpTitle').innerText='Editar'; $('#mpId').value=id; $('#mpName').value=p.name; $('#mpCat').value=p.category; $('#mpQty').value=p.qty; $('#mpUnit').value=p.unit; $('#mpPurchCost').value=p.purchCost||p.cost; $('#mpFormat').value=p.format||''; $('#mpYield').value=p.yield||1; $('#mpMin').value=p.min||5; } else { $('#mpTitle').innerText='Nuevo'; $('#mpId').value=''; $('#mpName').value=''; $('#mpQty').value=0; $('#mpPurchCost').value=0; $('#mpYield').value=1; if(cat)$('#mpCat').value=cat; } };
     window.saveProduct = async function() { const id=$('#mpId').value, pc=Number($('#mpPurchCost').value), y=Number($('#mpYield').value); const d={name:$('#mpName').value, category:$('#mpCat').value, qty:Number($('#mpQty').value), unit:$('#mpUnit').value, purchCost:pc, format:$('#mpFormat').value, yield:y, min:Number($('#mpMin').value), cost:y>0?pc/y:0}; if(!d.name)return; id?await db.collection('inventory').doc(id).update(d):await db.collection('inventory').add(d); $('#modalProduct').style.display='none'; };
     window.openPurchaseModal = function() { $('#modalPurchase').style.display='flex'; $('#purProd').innerHTML=INVENTORY.map(p=>`<option value="${p.id}">${p.name} (${formatQty(p.qty)})</option>`).join(''); $('#purQty').value=''; $('#purTotal').value=''; };
@@ -721,7 +650,7 @@
     window.renderFixedTables = function() { $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join(''); $('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
     window.saveFixedData = function() { if(!FIXED_DATA.aliases)FIXED_DATA.aliases=[]; FIXED_DATA.config={pyPercent:Number($('#confPy').value), taxDebit:Number($('#confDebit').value), taxTransf:Number($('#confTransf').value), taxQR:Number($('#confQR').value)}; db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado")); window.calculateAll(); window.renderOrdersTab(); };
     window.saveConfig = window.saveFixedData;
-    window.showTab = function(id) { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); };
+    window.showTab = function(id) { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); if(id==='proportions') window.renderProportions(); };
 
     window.addEventListener('load', () => {
         const now = new Date();
