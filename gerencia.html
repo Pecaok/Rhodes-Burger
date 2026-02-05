@@ -372,41 +372,56 @@
     }
 
     // ==========================================
-    // 1. CARGA DE INVENTARIO
+    // 1. CARGA DE BASE DE DATOS (Nombres Reales)
     // ==========================================
     function loadProductsDB() {
-        // Esta función ahora es menos crítica para "Proporciones" porque usamos la MASTER_LIST,
-        // pero sigue siendo útil para otras cosas.
+        // Obtenemos los productos REALES de la DB para pintar la tabla con 0 ventas al inicio
         db.collection('products').get().then(snap => {
             PRODUCTS_DB = {}; 
             snap.forEach(doc => {
                 const d = doc.data();
+                // Normalizamos el nombre para búsqueda (minúsculas, sin espacios extra)
                 const normName = d.name.toLowerCase().trim();
-                PRODUCTS_DB[normName] = { category: d.category || 'otros', realName: d.name };
+                PRODUCTS_DB[normName] = { 
+                    realName: d.name, 
+                    category: d.category || 'otros' 
+                };
             });
+            // Si ya se cargaron órdenes, actualizamos la tabla
             if(ORDERS.length) window.renderProportions();
         });
     }
 
     // ==========================================
-    // 🔥 2. LÓGICA FINAL: EXTRAS ANIDADOS + SIMPLE/DOBLE + CANALES
+    // 🔥 2. LÓGICA DINÁMICA: DB + EXTRAS + CANALES
     // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
         if (!body) return;
         body.innerHTML = '';
 
-        // 1. LISTA MAESTRA (Tal cual tu menú)
-        const MASTER_LIST = [
-            "CheeseBurger", "CheeseBacon", "Easter Egg", "Core", "Morgan", 
-            "Big John", "Buena", "Mala", "Fea", "Rhodes", "Burguesa", "Pollo Crispy",
-            "Medallón adicional", "Cheddar adicional",
-            "Porción papas fritas", "Porción papas fritas con cheddar", "Porción papas fritas con cheddar y bacon", "Porción nuggets",
-            "Agua", "Coca Cola Original", "Coca Cola Zero", "Sprite", 
-            "Andes Rubia", "Andes Roja", "Aquarius Manzana", "Aquarius Pera", "Aquarius Pomelo"
-        ];
+        const stats = {};
 
-        // Helper para adivinar categoría
+        // PASO 1: Llenar la tabla con TODO lo que hay en la base de datos (ventas = 0)
+        Object.keys(PRODUCTS_DB).forEach(key => {
+            const p = PRODUCTS_DB[key];
+            // Usamos el nombre real para mostrar, pero la key normalizada para buscar
+            // Normalizamos la key limpiando "simple"/"doble" para agrupar burgers
+            let statsKey = key.replace('simple', '').replace('doble', '').trim();
+            
+            if (!stats[statsKey]) {
+                stats[statsKey] = {
+                    name: p.realName.replace(/simple|doble/gi, '').trim(), // Nombre bonito sin variantes
+                    category: p.category,
+                    countSimple: 0,
+                    countDouble: 0,
+                    total: 0, 
+                    web: 0, local: 0, py: 0
+                };
+            }
+        });
+
+        // Helper para categorizar si viene algo nuevo (extra, o producto borrado)
         function getCategory(name) {
             const n = name.toLowerCase();
             const burgerNames = ["cheese", "bacon", "egg", "core", "morgan", "big", "john", "buena", "mala", "fea", "rhodes", "burguesa", "pollo", "crispy"];
@@ -417,52 +432,49 @@
             return 'otros';
         }
 
-        // Inicializamos stats con la lista maestra
-        const stats = {};
-        MASTER_LIST.forEach(item => {
-            stats[item.toLowerCase()] = { 
-                name: item, 
-                category: getCategory(item),
-                countSimple: 0,
-                countDouble: 0,
-                total: 0, 
-                web: 0, local: 0, py: 0
-            };
-        });
-
-        let totalGeneral = 0;
-        let grandTotalWeb = 0, grandTotalLocal = 0, grandTotalPY = 0;
-
-        // Función para limpiar nombres
+        // Helper para normalizar nombres de pedidos
         function cleanName(raw) {
             let n = raw.toLowerCase().trim();
-            // ESTO ES CLAVE: Quitamos 'simple' y 'doble' para que coincida con la lista maestra
             n = n.replace('doble', '').replace('simple', '').trim(); 
             n = n.replace(/\s{2,}/g, ' ');
-            
             if(n === 'papas fritas') return 'porción papas fritas';
-            if(n.includes('coca') && n.includes('original')) return 'coca cola original';
-            if(n.includes('coca') && n.includes('zero')) return 'coca cola zero';
-            
+            // Match manual para bebidas comunes si el nombre varía
+            if(n.includes('coca') && n.includes('original')) return 'coca-cola original 500ml'; // Ajustar según DB
             return n;
         }
 
-        // --- Helper interno para sumar extras a los contadores ---
-        function addExtraToStats(extraName, quantity, source) {
-            const key = extraName.toLowerCase();
-            if (stats[key]) {
-                stats[key].total += quantity;
-                stats[key][source] += quantity;
-                stats[key].countSimple += quantity; // Extras siempre cuentan como simple/unidad
-                totalGeneral += quantity;
-                
-                if(source === 'web') grandTotalWeb += quantity;
-                if(source === 'local') grandTotalLocal += quantity;
-                if(source === 'py') grandTotalPY += quantity;
+        // Helper para sumar extras
+        let totalGeneral = 0;
+        let grandTotalWeb = 0, grandTotalLocal = 0, grandTotalPY = 0;
+
+        function addToStats(key, niceName, qty, source, isDouble, cat) {
+            // Si no existe (producto nuevo o extra que no está en DB), lo creamos
+            if (!stats[key]) {
+                stats[key] = { 
+                    name: niceName, 
+                    category: cat || getCategory(niceName),
+                    countSimple: 0, countDouble: 0, total: 0, web: 0, local: 0, py: 0 
+                };
             }
+
+            stats[key].total += qty;
+            stats[key][source] += qty;
+            
+            // Si es hamburguesa y es doble
+            if (stats[key].category === 'hamburguesas' || stats[key].category === 'Hamburguesas') {
+                if (isDouble) stats[key].countDouble += qty;
+                else stats[key].countSimple += qty;
+            } else {
+                stats[key].countSimple += qty;
+            }
+
+            totalGeneral += qty;
+            if(source==='web') grandTotalWeb += qty;
+            if(source==='local') grandTotalLocal += qty;
+            if(source==='py') grandTotalPY += qty;
         }
 
-        // 2. PROCESAR PEDIDOS
+        // PASO 2: Procesar Pedidos
         ORDERS.forEach(o => {
             let source = 'local';
             const srcRaw = String(o.source || '').toLowerCase();
@@ -473,48 +485,27 @@
                 const qty = Number(it.qty || 1);
                 const rawName = it.name || "";
                 
-                // --- A. PROCESAR EL ÍTEM PRINCIPAL ---
+                // 1. Ítem Principal
                 const isDouble = rawName.toLowerCase().includes('doble');
-                const baseName = cleanName(rawName);
-                let key = MASTER_LIST.find(m => m.toLowerCase() === baseName);
-                if (!key) key = baseName.toLowerCase(); // Si es nuevo
-
-                if (!stats[key]) {
-                    const niceName = key.charAt(0).toUpperCase() + key.slice(1);
-                    stats[key] = { 
-                        name: niceName, 
-                        category: getCategory(niceName), 
-                        countSimple: 0, countDouble: 0, total: 0, web: 0, local: 0, py: 0 
-                    };
-                }
-
-                stats[key].total += qty;
-                stats[key][source] += qty;
+                let baseName = cleanName(rawName);
                 
-                if (stats[key].category === 'hamburguesas') {
-                    if (isDouble) stats[key].countDouble += qty;
-                    else stats[key].countSimple += qty;
-                } else {
-                    stats[key].countSimple += qty;
-                }
+                // Intentar matchear con la DB existente
+                let key = Object.keys(stats).find(k => k === baseName) || baseName;
+                let prettyName = stats[key] ? stats[key].name : (baseName.charAt(0).toUpperCase() + baseName.slice(1));
 
-                totalGeneral += qty;
-                if(source==='web') grandTotalWeb += qty;
-                if(source==='local') grandTotalLocal += qty;
-                if(source==='py') grandTotalPY += qty;
+                addToStats(key, prettyName, qty, source, isDouble, stats[key]?.category);
 
-                // --- B. PROCESAR EXTRAS DENTRO DEL ÍTEM (AQUÍ ESTABA EL FALLO) ---
+                // 2. Extras (Dentro del ítem)
                 if (it.extras) {
-                    // Detectar Meat/Carne/Patty
+                    // Carne Extra
                     let extraMeat = Number(it.extras.patty || it.extras.carne || it.extras.medallon || 0);
                     if (extraMeat > 0) {
-                        addExtraToStats("Medallón adicional", extraMeat * qty, source);
+                        addToStats("medallon adicional", "Medallón adicional", extraMeat * qty, source, false, 'extras');
                     }
-
-                    // Detectar Cheddar
+                    // Cheddar Extra
                     let extraCheddar = Number(it.extras.cheddar || 0);
                     if (extraCheddar > 0) {
-                        addExtraToStats("Cheddar adicional", extraCheddar * qty, source);
+                        addToStats("cheddar adicional", "Cheddar adicional", extraCheddar * qty, source, false, 'extras');
                     }
                 }
             });
@@ -522,11 +513,21 @@
 
         $('#totalItemsBadge').innerText = `Total Ítems: ${totalGeneral}`;
 
-        // 3. ORDENAR Y RENDERIZAR
+        // PASO 3: Ordenar y Renderizar
+        // Definir orden de categorías
         const catOrder = ['hamburguesas', 'bebidas', 'guarniciones', 'extras', 'otros'];
+        
         const sortedKeys = Object.values(stats).sort((a, b) => {
-            const rankA = catOrder.indexOf(a.category);
-            const rankB = catOrder.indexOf(b.category);
+            let catA = (a.category||'otros').toLowerCase();
+            let catB = (b.category||'otros').toLowerCase();
+            
+            // Normalizar categorías para el sort
+            if(catA.includes('hamburguesa')) catA = 'hamburguesas';
+            if(catB.includes('hamburguesa')) catB = 'hamburguesas';
+
+            const rankA = catOrder.indexOf(catA) === -1 ? 99 : catOrder.indexOf(catA);
+            const rankB = catOrder.indexOf(catB) === -1 ? 99 : catOrder.indexOf(catB);
+            
             if (rankA !== rankB) return rankA - rankB;
             return a.name.localeCompare(b.name);
         });
@@ -534,30 +535,29 @@
         let currentCat = null;
 
         sortedKeys.forEach(s => {
-            if (s.category !== currentCat) {
-                currentCat = s.category;
-                const catHeader = currentCat === 'otros' ? 'OTROS / SIN CLASIFICAR' : currentCat.toUpperCase();
-                body.insertAdjacentHTML('beforeend', `<tr><td colspan="7" class="cat-header">${catHeader}</td></tr>`);
+            let displayCat = (s.category || 'OTROS').toUpperCase();
+            if (displayCat !== currentCat) {
+                currentCat = displayCat;
+                body.insertAdjacentHTML('beforeend', `<tr><td colspan="7" class="cat-header">${currentCat}</td></tr>`);
             }
 
-            // Estilos
             const isZero = s.total === 0;
             const rowStyle = isZero ? 'color:#cbd5e1;' : '';
             const zeroStyle = 'color:#e2e8f0; font-size:11px;';
             const pctClass = isZero ? '' : 'pct-tag';
 
-            // Porcentajes
             const pctWeb = grandTotalWeb > 0 ? ((s.web / grandTotalWeb) * 100).toFixed(1) + '%' : '-';
             const pctLocal = grandTotalLocal > 0 ? ((s.local / grandTotalLocal) * 100).toFixed(1) + '%' : '-';
             const pctPY = grandTotalPY > 0 ? ((s.py / grandTotalPY) * 100).toFixed(1) + '%' : '-';
 
-            // Lógica visual para Simple/Doble
+            // Visualización Simple/Doble
             let simpleCell = `<td style="text-align:center;">${s.countSimple}</td>`;
             let doubleCell = `<td style="text-align:center; color:#b91c1c; font-weight:600; background:#fffafb">${s.countDouble}</td>`;
 
-            if (s.category !== 'hamburguesas') {
+            // Si no es hamburguesa, anulamos la columna doble visualmente
+            if (!displayCat.includes('HAMBURGUESA')) {
                 doubleCell = `<td style="text-align:center; color:#e2e8f0">-</td>`; 
-                simpleCell = `<td style="text-align:center; color:#94a3b8">${s.total}</td>`; 
+                simpleCell = `<td style="text-align:center; color:${isZero?'#ccc':'#555'}">${s.total}</td>`; 
             } else if (isZero) {
                 simpleCell = `<td style="text-align:center;">-</td>`;
                 doubleCell = `<td style="text-align:center;">-</td>`;
