@@ -389,7 +389,7 @@
     }
 
     // ==========================================
-    // 🔥 2. LÓGICA FINAL: SIMPLE/DOBLE + CANALES + LIMPIEZA NOMBRES
+    // 🔥 2. LÓGICA FINAL: EXTRAS ANIDADOS + SIMPLE/DOBLE + CANALES
     // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
@@ -406,7 +406,7 @@
             "Andes Rubia", "Andes Roja", "Aquarius Manzana", "Aquarius Pera", "Aquarius Pomelo"
         ];
 
-        // Helper para adivinar categoría (Mejorado para detectar burgers correctamente)
+        // Helper para adivinar categoría
         function getCategory(name) {
             const n = name.toLowerCase();
             const burgerNames = ["cheese", "bacon", "egg", "core", "morgan", "big", "john", "buena", "mala", "fea", "rhodes", "burguesa", "pollo", "crispy"];
@@ -433,7 +433,7 @@
         let totalGeneral = 0;
         let grandTotalWeb = 0, grandTotalLocal = 0, grandTotalPY = 0;
 
-        // Función para limpiar nombres (quita "simple" y "doble" para encontrar la base)
+        // Función para limpiar nombres
         function cleanName(raw) {
             let n = raw.toLowerCase().trim();
             // ESTO ES CLAVE: Quitamos 'simple' y 'doble' para que coincida con la lista maestra
@@ -447,6 +447,21 @@
             return n;
         }
 
+        // --- Helper interno para sumar extras a los contadores ---
+        function addExtraToStats(extraName, quantity, source) {
+            const key = extraName.toLowerCase();
+            if (stats[key]) {
+                stats[key].total += quantity;
+                stats[key][source] += quantity;
+                stats[key].countSimple += quantity; // Extras siempre cuentan como simple/unidad
+                totalGeneral += quantity;
+                
+                if(source === 'web') grandTotalWeb += quantity;
+                if(source === 'local') grandTotalLocal += quantity;
+                if(source === 'py') grandTotalPY += quantity;
+            }
+        }
+
         // 2. PROCESAR PEDIDOS
         ORDERS.forEach(o => {
             let source = 'local';
@@ -458,18 +473,12 @@
                 const qty = Number(it.qty || 1);
                 const rawName = it.name || "";
                 
-                // Detectamos si es doble ANTES de limpiar el nombre
+                // --- A. PROCESAR EL ÍTEM PRINCIPAL ---
                 const isDouble = rawName.toLowerCase().includes('doble');
                 const baseName = cleanName(rawName);
-
-                // Buscamos coincidencia en la lista maestra
                 let key = MASTER_LIST.find(m => m.toLowerCase() === baseName);
-                
-                // Si no existe, usamos el nombre base limpio (para ítems nuevos no listados)
-                if (!key) key = baseName;
-                else key = key.toLowerCase();
+                if (!key) key = baseName.toLowerCase(); // Si es nuevo
 
-                // Si es un item nuevo (no estaba en Master List), lo inicializamos
                 if (!stats[key]) {
                     const niceName = key.charAt(0).toUpperCase() + key.slice(1);
                     stats[key] = { 
@@ -479,16 +488,13 @@
                     };
                 }
 
-                // Sumamos contadores
                 stats[key].total += qty;
                 stats[key][source] += qty;
                 
-                // Lógica Simple vs Doble (Solo aplica a Hamburguesas realmente)
                 if (stats[key].category === 'hamburguesas') {
                     if (isDouble) stats[key].countDouble += qty;
                     else stats[key].countSimple += qty;
                 } else {
-                    // Para bebidas o papas, todo cuenta como "simple/unidad"
                     stats[key].countSimple += qty;
                 }
 
@@ -496,6 +502,21 @@
                 if(source==='web') grandTotalWeb += qty;
                 if(source==='local') grandTotalLocal += qty;
                 if(source==='py') grandTotalPY += qty;
+
+                // --- B. PROCESAR EXTRAS DENTRO DEL ÍTEM (AQUÍ ESTABA EL FALLO) ---
+                if (it.extras) {
+                    // Detectar Meat/Carne/Patty
+                    let extraMeat = Number(it.extras.patty || it.extras.carne || it.extras.medallon || 0);
+                    if (extraMeat > 0) {
+                        addExtraToStats("Medallón adicional", extraMeat * qty, source);
+                    }
+
+                    // Detectar Cheddar
+                    let extraCheddar = Number(it.extras.cheddar || 0);
+                    if (extraCheddar > 0) {
+                        addExtraToStats("Cheddar adicional", extraCheddar * qty, source);
+                    }
+                }
             });
         });
 
@@ -535,8 +556,8 @@
             let doubleCell = `<td style="text-align:center; color:#b91c1c; font-weight:600; background:#fffafb">${s.countDouble}</td>`;
 
             if (s.category !== 'hamburguesas') {
-                doubleCell = `<td style="text-align:center; color:#e2e8f0">-</td>`; // No aplica doble
-                simpleCell = `<td style="text-align:center; color:#94a3b8">${s.total}</td>`; // Mostramos total en simple
+                doubleCell = `<td style="text-align:center; color:#e2e8f0">-</td>`; 
+                simpleCell = `<td style="text-align:center; color:#94a3b8">${s.total}</td>`; 
             } else if (isZero) {
                 simpleCell = `<td style="text-align:center;">-</td>`;
                 doubleCell = `<td style="text-align:center;">-</td>`;
