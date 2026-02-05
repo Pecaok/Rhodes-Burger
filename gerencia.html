@@ -16,7 +16,8 @@
 
     header { background: #fff; border-bottom: 1px solid var(--border); height: 60px; display: flex; align-items: center; padding: 0 20px; justify-content: space-between; flex-shrink: 0; z-index: 10; }
     .brand { font-weight: 800; font-size: 18px; color: var(--primary); text-decoration: none; display: flex; align-items: center; gap: 10px; }
-    .nav-btn { padding: 8px 12px; border-radius: 6px; text-decoration: none; color: #64748b; font-weight: 600; font-size: 13px; transition:0.2s }
+    .nav-group { display: flex; gap: 5px; align-items: center; }
+    .nav-btn { padding: 8px 12px; border-radius: 6px; text-decoration: none; color: #64748b; font-weight: 600; font-size: 13px; transition:0.2s; white-space: nowrap; }
     .nav-btn:hover { background: #f1f5f9; color: #0f172a; }
     .nav-btn.active { background: var(--primary); color: #fff; }
 
@@ -102,9 +103,14 @@
 
 <header>
   <a href="#" class="brand"><img src="images/logo.png" width="30"> Gerencia Rhodes</a>
-  <div>
-    <a href="pedido_local.html" class="nav-btn">Pedidos</a>
-    <a href="#" class="nav-btn active">Gerencia</a>
+  <div class="nav-group">
+    <a href="pedido_local.html" class="nav-btn">📦 Pedidos</a>
+    <a href="finanzas.html" class="nav-btn">📈 Finanzas</a>
+    <a href="stock.html" class="nav-btn">📋 Stock</a>
+    <a href="ingresos.html" class="nav-btn">📥 Ingresos</a>
+    <a href="mostrador.html" class="nav-btn">🧾 Mostrador</a>
+    <a href="admin.html" class="nav-btn">⚙️ Admin</a>
+    <a href="#" class="nav-btn active">📊 Gerencia</a>
     <button onclick="location.href='login.html'" class="nav-btn" style="color:var(--red)">Salir</button>
   </div>
 </header>
@@ -143,7 +149,7 @@
                 <div class="conf-input-group"><div class="conf-lbl">QR/MP</div><input type="number" id="confQR" value="0" class="conf-inp"></div>
                 <button class="btn-sm btn-primary" onclick="saveConfig()" style="height:32px; margin-left:5px">💾</button>
             </div>
-            <input type="month" id="monthPicker" title="Selecciona mes anterior para ver historial" style="font-weight:700; border:2px solid var(--primary); color:var(--primary); padding:5px; border-radius:6px; cursor:pointer;">
+            <input type="month" id="monthPicker" title="Selecciona mes" onchange="changeDate(this.value)" style="font-weight:700; border:2px solid var(--primary); color:var(--primary); padding:5px; border-radius:6px; cursor:pointer;">
         </div>
       </div>
 
@@ -176,7 +182,10 @@
         <div class="card">
             <div class="row-flex">
                 <h2 style="margin:0; border:0">📊 Proporción de Ventas (Detallado)</h2>
-                <div id="totalItemsBadge" style="background:var(--primary); color:white; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700">Total: 0</div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="month" id="monthPickerProp" title="Selecciona mes" onchange="changeDate(this.value)" style="font-weight:700; border:1px solid #cbd5e1; color:#64748b; padding:5px; border-radius:6px; cursor:pointer; font-size:13px;">
+                    <div id="totalItemsBadge" style="background:var(--primary); color:white; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700">Total: 0</div>
+                </div>
             </div>
             <div style="overflow-x:auto; margin-top:15px">
                 <table style="border-collapse: separate; border-spacing: 0;">
@@ -508,7 +517,7 @@
                     isSide = true; sideKey = "papas fritas sazonadas"; sideName = "Porción Papas Fritas (Sazonadas)";
                 } else if (n.includes("sin sal")) {
                     isSide = true; sideKey = "papas fritas sin sal"; sideName = "Porción Papas Fritas (Sin Sal)";
-                } else if (n === "papas" || n === "papas fritas" || n.includes("con sal")) {
+                } else if (n === "papas" || n === "papas fritas" || n.includes("con sal") || n.includes("bastones")) {
                     // A veces se guardan solo como "Papas" -> Asumimos con sal
                     isSide = true; sideKey = "papas fritas con sal"; sideName = "Porción Papas Fritas (Con Sal)";
                 }
@@ -735,9 +744,12 @@
 
     // DASHBOARD & DATA
     window.loadDashboardData = function() {
-        const ym = $('#monthPicker').value; if(!ym) return; 
-        $('#ordersTitle').innerText = '🧾 Pedidos de ' + ym; logStatus("🔄 Cargando...");
-        const [y, m] = ym.split('-').map(Number); const start = new Date(y, m - 1, 1); const end = new Date(y, m, 0, 23, 59, 59);
+        // Obtenemos la fecha de CUALQUIERA de los dos pickers (siempre están sincronizados)
+        const dateVal = $('#monthPicker').value; 
+        if(!dateVal) return; 
+        
+        $('#ordersTitle').innerText = '🧾 Pedidos de ' + dateVal; logStatus("🔄 Cargando...");
+        const [y, m] = dateVal.split('-').map(Number); const start = new Date(y, m - 1, 1); const end = new Date(y, m, 0, 23, 59, 59);
         db.collection('orders').limit(500).get().then(snap => { 
               const rawOrders = snap.docs.map(d => ({id:d.id, ...d.data()}));
               ORDERS = rawOrders.filter(o => {
@@ -748,6 +760,14 @@
               window.calculateAll(); window.renderOrdersTab(); 
           }).catch(err => { console.error(err); logStatus("❌ Error cargando: " + err.message, true); });
         db.collection('purchases').limit(500).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); });
+    };
+
+    // Función para sincronizar fechas
+    window.changeDate = function(val) {
+        if(!val) return;
+        $('#monthPicker').value = val;
+        $('#monthPickerProp').value = val;
+        window.loadDashboardData();
     };
 
     window.calculateAll = function() {
@@ -881,6 +901,8 @@
     window.addEventListener('load', () => {
         const now = new Date();
         $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+        // Inicializar el segundo picker
+        $('#monthPickerProp').value = $('#monthPicker').value;
         $('#monthPicker').addEventListener('change', window.loadDashboardData);
         loadProductsDB(); // 🔥 Carga los productos al iniciar
         window.loadInventory(); window.loadRecipes(); window.loadFixedData(); window.loadDashboardData();
