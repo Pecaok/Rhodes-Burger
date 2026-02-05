@@ -436,7 +436,8 @@
             initStat(statsKey, p.realName.replace(/simple|doble/gi, '').trim(), p.category);
         });
 
-        // PASO 1.5: Agregar PAPAS FRITAS según configuración
+        // PASO 1.5: Agregar PAPAS FRITAS según configuración (image_106fdd.png)
+        // Esto asegura que aparezcan aunque nadie las haya comprado
         if (SIDES_CONFIG.con_sal) initStat("papas fritas con sal", "Porción Papas Fritas (Con Sal)", "guarniciones");
         if (SIDES_CONFIG.con_sazon) initStat("papas fritas sazonadas", "Porción Papas Fritas (Sazonadas)", "guarniciones");
         if (SIDES_CONFIG.sin_sal) initStat("papas fritas sin sal", "Porción Papas Fritas (Sin Sal)", "guarniciones");
@@ -488,10 +489,8 @@
 
         // PASO 2: Procesar Pedidos
         ORDERS.forEach(o => {
-            // DETECTAR ORIGEN REAL (PEDIDOSYA, WEB, LOCAL)
             let source = 'local';
             const srcRaw = String(o.source || '').toLowerCase();
-            
             if (srcRaw.includes('pedidosya')) source = 'py';
             else if (srcRaw === 'web' || srcRaw === 'app') source = 'web';
 
@@ -509,13 +508,28 @@
                     isSide = true; sideKey = "papas fritas sazonadas"; sideName = "Porción Papas Fritas (Sazonadas)";
                 } else if (n.includes("sin sal")) {
                     isSide = true; sideKey = "papas fritas sin sal"; sideName = "Porción Papas Fritas (Sin Sal)";
-                } else if (n === "papas" || n === "papas fritas" || n.includes("con sal") || n.includes("bastones")) {
+                } else if (n === "papas" || n === "papas fritas" || n.includes("con sal")) {
+                    // A veces se guardan solo como "Papas" -> Asumimos con sal
                     isSide = true; sideKey = "papas fritas con sal"; sideName = "Porción Papas Fritas (Con Sal)";
                 }
 
                 if (isSide) {
                     addToStats(sideKey, sideName, qty, source, false, "guarniciones");
                     return; // Terminamos con este item si era papa
+                }
+
+                // 2. CHEQUEO SI LA HAMBURGUESA TRAE PAPAS (Propiedad .fries)
+                // Esto es vital para pedidos locales que agrupan papas dentro de la burger
+                if (it.fries) {
+                    let fProp = String(it.fries).toLowerCase();
+                    let fKey = "";
+                    let fName = "";
+                    
+                    if (fProp.includes("sazon")) { fKey="papas fritas sazonadas"; fName="Porción Papas Fritas (Sazonadas)"; }
+                    else if (fProp.includes("sin sal")) { fKey="papas fritas sin sal"; fName="Porción Papas Fritas (Sin Sal)"; }
+                    else { fKey="papas fritas con sal"; fName="Porción Papas Fritas (Con Sal)"; }
+                    
+                    if(fKey) addToStats(fKey, fName, qty, source, false, "guarniciones");
                 }
 
                 // 1. Ítem Normal (Burger, Bebida)
