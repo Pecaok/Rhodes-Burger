@@ -99,7 +99,7 @@
 
   <div id="storeBlocker" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:99999;color:white;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;">
     <div style="font-size:60px; margin-bottom: 20px;">🔒</div>
-    <h2 style="color:white;margin:0; font-size: 28px;">LOCAL CERRADO</h2>
+    <h2 id="blockerTitle" style="color:white;margin:0; font-size: 28px;">LOCAL CERRADO</h2>
     <p id="blockerMsg" style="color:#ccc; margin-top: 10px; font-size: 16px;">Volvemos pronto.</p>
   </div>
 
@@ -188,7 +188,7 @@
 
   <script defer>
     // === CONFIGURACIÓN Y ESTADO ===
-    const CACHE_KEY = "rhodes_data_v1"; 
+    const CACHE_KEY = "rhodes_data_v2"; 
     const CART_KEY = "rhodes_cart_v5";
     const PHONE_NUMBER = "543484346113"; // Tu número
     const EXTRAS_PRICE = { patty: 2800, cheddar: 300 };
@@ -201,12 +201,13 @@
     // Estado en memoria
     let STATE = {
         products: [],
+        menuOrder: {}, // Aquí guardamos el orden del Admin
         config: { sides: { con_sazon:true, con_sal:true, sin_sal:true }, store: { forceOpen: null, maintenance: {} } },
         cart: { items: [] }
     };
     
     let MODAL = { item: null, extras: { patty:0, cheddar:0 } };
-    let db; // Firebase DB instance
+    let db; 
 
     // === INICIO ULTRA-RÁPIDO ===
     document.addEventListener("DOMContentLoaded", () => {
@@ -231,11 +232,11 @@
         const cached = localStorage.getItem(CACHE_KEY);
         if (cached) {
             const parsed = JSON.parse(cached);
-            // Si la caché es muy vieja (ej: más de 24hs), la ignoramos? No, mejor mostrar algo viejo que nada.
             STATE.products = parsed.products || [];
             STATE.config = parsed.config || STATE.config;
-            renderMenu(); // PINTAR INSTANTÁNEAMENTE
-            checkStatus(); // VERIFICAR HORARIO CON DATOS VIEJOS (Mejor que nada)
+            STATE.menuOrder = parsed.menuOrder || {}; // Cargar orden del caché
+            renderMenu(); 
+            checkStatus(); 
         }
     }
 
@@ -243,6 +244,7 @@
         localStorage.setItem(CACHE_KEY, JSON.stringify({
             products: STATE.products,
             config: STATE.config,
+            menuOrder: STATE.menuOrder, // Guardar orden
             timestamp: Date.now()
         }));
     }
@@ -253,11 +255,8 @@
         firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
 
-        // Intentar persistencia offline nativa de Firebase
         db.enablePersistence({synchronizeTabs:true}).catch(err => {});
 
-        // LISTENERS (Actualizan la UI y la Caché)
-        
         // 1. Productos
         db.collection("products").onSnapshot(snap => {
             STATE.products = [];
@@ -265,8 +264,6 @@
                 const d = doc.data();
                 if(d.available !== false) STATE.products.push({ id: doc.id, ...d });
             });
-            // Ordenar por precio
-            STATE.products.sort((a,b) => a.price - b.price);
             renderMenu();
             saveToCache();
         });
@@ -288,17 +285,39 @@
             };
             saveToCache();
         });
+
+        // 4. 🔥 ORDEN DEL MENÚ (Nuevo listener)
+        db.collection("config").doc("menuOrder").onSnapshot(doc => {
+            STATE.menuOrder = doc.exists ? doc.data() : {};
+            renderMenu();
+            saveToCache();
+        });
     }
 
-    // === RENDERIZADO ===
+    // === RENDERIZADO (CON ORDEN) ===
     function renderMenu() {
         const container = document.getElementById("menuContainer");
-        if(STATE.products.length === 0) return; // No borrar skeleton si no hay datos aun
+        if(STATE.products.length === 0) return; 
 
         let html = '';
-        const burgers = STATE.products.filter(p => p.category === 'hamburguesas');
-        const sides = STATE.products.filter(p => p.category === 'guarniciones');
-        const drinks = STATE.products.filter(p => p.category === 'bebidas');
+        
+        // Función de ordenamiento usando el array de IDs del Admin
+        const sortList = (list, catName) => {
+            const orderList = STATE.menuOrder[catName] || [];
+            // Mapa para búsqueda rápida O(1)
+            const orderMap = new Map(orderList.map((id, i) => [id, i]));
+            
+            return list.sort((a, b) => {
+                const idxA = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
+                const idxB = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
+                return idxA - idxB; // Menor índice primero
+            });
+        };
+
+        // Filtrar y Ordenar
+        const burgers = sortList(STATE.products.filter(p => p.category === 'hamburguesas'), 'hamburguesas');
+        const sides = sortList(STATE.products.filter(p => p.category === 'guarniciones'), 'guarniciones');
+        const drinks = sortList(STATE.products.filter(p => p.category === 'bebidas'), 'bebidas');
 
         const renderSection = (title, list) => {
             if(!list.length) return '';
@@ -327,7 +346,7 @@
 
         container.innerHTML = html;
         
-        // Lazy Load Images Manual (Más compatible)
+        // Lazy Load Images
         const lazyImages = document.querySelectorAll('img.lazy');
         const observer = new IntersectionObserver((entries, observer) => {
             entries.forEach(entry => {
@@ -347,7 +366,6 @@
         const conf = STATE.config.store;
         const now = new Date();
         
-        // 1. Mantenimiento (Bloqueo Total)
         if (conf.maintenance?.active) {
             document.getElementById("storeBlocker").classList.remove("hidden");
             document.getElementById("blockerTitle").innerText = conf.maintenance.title || "EN MANTENIMIENTO";
@@ -357,7 +375,6 @@
             document.getElementById("storeBlocker").classList.add("hidden");
         }
 
-        // 2. Horario
         let isOpen = false;
         let label = "CERRADO";
         
@@ -366,11 +383,9 @@
         } else if (conf.forceOpen === false) {
             isOpen = false; label = "CERRADO";
         } else {
-            // Automático
             const day = now.getDay();
             const min = now.getHours() * 60 + now.getMinutes();
             const todayHours = HOURS[day] || [];
-            
             for(let slot of todayHours) {
                 if(min >= (slot[0]*60 + slot[1]) && min < (slot[2]*60 + slot[3])) {
                     isOpen = true;
@@ -401,18 +416,15 @@
         document.getElementById("modTitle").innerText = item.name;
         document.getElementById("modNotes").value = "";
         
-        // Configurar Extras y Papas
         const isBurger = item.category === 'hamburguesas';
         document.getElementById("extrasSection").style.display = isBurger ? 'block' : 'none';
         
-        // Renderizar opciones de papas (Solo disponibles)
         const friesContainer = document.getElementById("friesOptions");
         friesContainer.innerHTML = '';
         
         const sidesMap = { con_sazon: "Sazonadas", con_sal: "Con Sal", sin_sal: "Sin Sal" };
         let firstFound = false;
 
-        // Si es bebida, ocultamos sección de papas
         if (item.category === 'bebidas') {
             friesContainer.parentElement.style.display = 'none';
         } else {
@@ -470,7 +482,6 @@
             finalPrice: Number(document.getElementById("modTotal").innerText.replace('$',''))
         };
 
-        // Agrupar si es igual
         const existing = STATE.cart.items.find(i => 
             i.id === cartItem.id && 
             i.fries === cartItem.fries && 
@@ -540,7 +551,6 @@
         if(confirm("¿Vaciar carrito?")) { STATE.cart.items = []; saveCart(); toggleDrawer(false); }
     }
 
-    // === UI UTILS ===
     window.toggleDrawer = (open) => {
         const d = document.getElementById("drawer");
         if(open) { d.classList.add("open"); updateCartUI(); }
