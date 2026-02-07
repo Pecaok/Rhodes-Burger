@@ -359,8 +359,26 @@
 
 <script>
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
-    try { firebase.initializeApp(firebaseConfig); } catch(e) {}
-    const db = firebase.firestore();
+    let db;
+
+    // 🔥 1. INICIALIZACIÓN SEGURA DE FIREBASE
+    document.addEventListener("DOMContentLoaded", () => {
+        if (typeof firebase === 'undefined') {
+            alert("Error crítico: No se pudo cargar Firebase. Revisa tu conexión.");
+            return;
+        }
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+                console.log("Persistencia no disponible:", err.code);
+            });
+            startApp();
+        } catch (e) {
+            console.error("Error init firebase:", e);
+        }
+    });
+
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency", currency:"ARS", maximumFractionDigits:2});
     const formatQty = (n) => { let num = Number(n); if(isNaN(num)) return '0'; return parseFloat(num.toFixed(3)); };
@@ -385,19 +403,22 @@
         if(el) el.innerHTML = `<div style="padding:10px; color:${isError?'red':'#666'}; font-weight:600">${msg}</div>`;
     }
 
-    // ==========================================
-    // 1. CARGA DE BASE DE DATOS
-    // ==========================================
+    function startApp() {
+        const now = new Date();
+        $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+        $('#monthPickerProp').value = $('#monthPicker').value;
+        $('#monthPicker').addEventListener('change', window.loadDashboardData);
+        loadProductsDB(); 
+        window.loadInventory(); window.loadRecipes(); window.loadFixedData(); window.loadDashboardData();
+    }
+
     function loadProductsDB() {
         db.collection('products').get().then(snap => {
             PRODUCTS_DB = {}; 
             snap.forEach(doc => {
                 const d = doc.data();
                 const normName = (d.name || "").toLowerCase().trim();
-                PRODUCTS_DB[normName] = { 
-                    realName: d.name, 
-                    category: d.category || 'otros' 
-                };
+                PRODUCTS_DB[normName] = { realName: d.name, category: d.category || 'otros' };
             });
             if(ORDERS.length) window.renderProportions();
         });
@@ -408,9 +429,6 @@
         });
     }
 
-    // ==========================================
-    // 2. DASHBOARD Y PEDIDOS (PRINCIPAL)
-    // ==========================================
     window.loadDashboardData = function() {
         const dateVal = $('#monthPicker').value; 
         if(!dateVal) return; 
@@ -424,8 +442,6 @@
 
         db.collection('orders').orderBy('createdAt', 'desc').limit(800).get().then(snap => { 
             const rawOrders = snap.docs.map(d => ({id:d.id, ...d.data()}));
-            
-            // Filtro en memoria por fecha
             ORDERS = rawOrders.filter(o => {
                 if(o.status === 'cancelled') return false;
                 const d = parseDate(o.createdAt); 
@@ -433,15 +449,8 @@
             });
 
             logStatus(`✅ Cargado: ${ORDERS.length} pedidos.`);
-            
-            // 🔥 IMPORTANTE: Renderizar lista PRIMERO, luego gráficos
             window.renderOrdersTab(); 
-            
-            try {
-                window.calculateAll(); 
-            } catch(err) {
-                console.error("Error en gráficos:", err);
-            }
+            try { window.calculateAll(); } catch(err) { console.error("Error gráficos:", err); }
         }).catch(err => { 
             console.error(err); 
             logStatus("❌ Error cargando: " + err.message, true); 
@@ -459,118 +468,53 @@
 
     // TABLA PEDIDOS
     window.renderOrdersTab = function() {
-        const tbody = $('#ordersTableBody'); 
-        tbody.innerHTML = '';
-        
-        if(ORDERS.length === 0) { 
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos en este mes</td></tr>'; 
-            return; 
-        }
-        
+        const tbody = $('#ordersTableBody'); tbody.innerHTML = '';
+        if(ORDERS.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos</td></tr>'; return; }
         const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {};
 
         ORDERS.forEach((o, index) => {
             try {
-                const total = Number(o.total || 0); 
-                let deduction = 0;
+                const total = Number(o.total || 0); let deduction = 0;
                 let source = String(o.source || "").toLowerCase();
                 let pago = String(o.pago || o.paymentMethod || "").toLowerCase();
 
-                if(source.includes('pedidosya')) {
-                    deduction = (o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100));
-                } else if(pago.includes('mercado') || pago.includes('qr')) {
-                    deduction = total * (pctQR/100);
-                } else if(pago.includes('transfer')) {
-                    deduction = total * (pctTransf/100);
-                } else if(pago.includes('debito')) {
-                    deduction = total * (pctDebit/100);
-                }
+                if(source.includes('pedidosya')) deduction = (o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100));
+                else if(pago.includes('mercado') || pago.includes('qr')) deduction = total * (pctQR/100);
+                else if(pago.includes('transfer')) deduction = total * (pctTransf/100);
+                else if(pago.includes('debito')) deduction = total * (pctDebit/100);
 
                 let orderCost = window.calculateOrderConsumables(o.items||[]); 
-                (o.items||[]).forEach(item => {
-                     // Solo sumar costo unitario si NO es un extra suelto que ya calculamos
-                     // (Aquí podrías refinar más, pero dejamos el base para no romper)
-                     orderCost += (window.getUnitCost(item.name) * Number(item.qty||1));
-                });
+                (o.items||[]).forEach(item => { orderCost += (window.getUnitCost(item.name) * Number(item.qty||1)); });
                 
                 let profit = total - deduction - orderCost;
-                
-                let dStr = '-'; 
-                const dt = parseDate(o.createdAt); 
+                let dStr = '-'; const dt = parseDate(o.createdAt); 
                 if(dt) dStr = dt.toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
                 
-                // Badges
-                let badgeClass = 'bdg-local';
-                if(source.includes('pedidosya')) badgeClass = 'bdg-py';
-                else if(source === 'web') badgeClass = 'bdg-web';
-
+                let badgeClass = 'bdg-local'; if(source.includes('pedidosya')) badgeClass = 'bdg-py'; else if(source === 'web') badgeClass = 'bdg-web';
                 let itemsStr = (o.items||[]).map(i=> `${i.qty}x ${i.name}`).join(', ');
 
-                tbody.insertAdjacentHTML('beforeend', `
-                    <tr class="order-row" onclick="document.getElementById('detail-${index}').classList.toggle('open')">
-                        <td>${dStr}</td>
-                        <td>${o.nombre||'Cliente'}</td>
-                        <td><span class="badge ${badgeClass}">${o.source||'local'}</span></td>
-                        <td><span class="badge bdg-cash">${o.pago||'efectivo'}</span></td>
-                        <td style="font-weight:700">${money(total)}</td>
-                        <td style="font-weight:700; color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</td>
-                        <td>▼</td>
-                    </tr>
-                    <tr class="order-details" id="detail-${index}">
-                        <td colspan="7" style="padding:10px; background:#f9fafb">
-                            <div style="font-size:12px; line-height:1.5">
-                                <b>Items:</b> ${itemsStr}<br>
-                                <b>Costo Estimado:</b> ${money(orderCost)} | <b>Deducciones:</b> ${money(deduction)}<br>
-                                <b>Ganancia Real:</b> ${money(profit)}
-                            </div>
-                        </td>
-                    </tr>
-                `);
-            } catch(e) {
-                console.error("Error renderizando fila", e);
-            }
+                tbody.insertAdjacentHTML('beforeend', `<tr class="order-row" onclick="document.getElementById('detail-${index}').classList.toggle('open')"><td>${dStr}</td><td>${o.nombre||'Cliente'}</td><td><span class="badge ${badgeClass}">${o.source||'local'}</span></td><td><span class="badge bdg-cash">${o.pago||'efectivo'}</span></td><td style="font-weight:700">${money(total)}</td><td style="font-weight:700; color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</td><td>▼</td></tr><tr class="order-details" id="detail-${index}"><td colspan="7" style="padding:10px; background:#f9fafb"><div style="font-size:12px"><b>Items:</b> ${itemsStr}<br><b>Ganancia Real:</b> ${money(profit)}</div></td></tr>`);
+            } catch(e) {}
         });
     };
 
-    // ==========================================
-    // 3. PROPORCIONES Y GRÁFICOS
-    // ==========================================
+    // PROPORCIONES
     window.renderProportions = function() {
-        const body = $('#proportionsBody');
-        if (!body) return;
-        body.innerHTML = '';
-
+        const body = $('#proportionsBody'); if (!body) return; body.innerHTML = '';
         const stats = {};
-        function initStat(key, name, cat) {
-            if (!stats[key]) {
-                stats[key] = {
-                    name: name, category: cat || getCategory(name),
-                    countSimple: 0, countDouble: 0, total: 0, 
-                    web: 0, local: 0, py: 0
-                };
-            }
-        }
+        function initStat(key, name, cat) { if (!stats[key]) stats[key] = { name, category: cat || getCategory(name), countSimple: 0, countDouble: 0, total: 0, web: 0, local: 0, py: 0 }; }
 
-        // Cargar Base
-        Object.keys(PRODUCTS_DB).forEach(key => {
-            const p = PRODUCTS_DB[key];
-            let statsKey = key.replace('simple', '').replace('doble', '').trim();
-            initStat(statsKey, p.realName.replace(/simple|doble/gi, '').trim(), p.category);
-        });
-
-        // Asegurar Papas
-        if (SIDES_CONFIG.con_sal) initStat("papas fritas con sal", "Porción Papas Fritas (Con Sal)", "guarniciones");
-        if (SIDES_CONFIG.con_sazon) initStat("papas fritas sazonadas", "Porción Papas Fritas (Sazonadas)", "guarniciones");
-        if (SIDES_CONFIG.sin_sal) initStat("papas fritas sin sal", "Porción Papas Fritas (Sin Sal)", "guarniciones");
-        initStat("medallon adicional", "Medallón adicional", "extras");
-        initStat("cheddar adicional", "Cheddar adicional", "extras");
-        initStat("bacon adicional", "Bacon adicional", "extras");
+        Object.keys(PRODUCTS_DB).forEach(key => { const p = PRODUCTS_DB[key]; initStat(key.replace(/simple|doble/g,'').trim(), p.realName.replace(/simple|doble/gi,'').trim(), p.category); });
+        if (SIDES_CONFIG.con_sal) initStat("papas fritas con sal", "Papas (Con Sal)", "guarniciones");
+        if (SIDES_CONFIG.con_sazon) initStat("papas fritas sazonadas", "Papas (Sazonadas)", "guarniciones");
+        if (SIDES_CONFIG.sin_sal) initStat("papas fritas sin sal", "Papas (Sin Sal)", "guarniciones");
+        initStat("medallon adicional", "Medallón Extra", "extras"); initStat("cheddar adicional", "Cheddar Extra", "extras"); initStat("bacon adicional", "Bacon Extra", "extras");
 
         function getCategory(name) {
             const n = name.toLowerCase();
             const burgerNames = ["cheese", "bacon", "egg", "core", "morgan", "big", "john", "buena", "mala", "fea", "rhodes", "burguesa", "pollo", "crispy"];
             if (burgerNames.some(b => n.includes(b))) return 'hamburguesas';
-            if(n.includes('coca')||n.includes('agua')||n.includes('andes')||n.includes('aquarius')||n.includes('sprite')) return 'bebidas';
+            if(n.includes('coca')||n.includes('agua')||n.includes('andes')) return 'bebidas';
             if(n.includes('papas')||n.includes('nuggets')) return 'guarniciones';
             if(n.includes('adicional')) return 'extras';
             return 'otros';
@@ -585,69 +529,41 @@
             return n;
         }
 
-        let totalGeneral = 0;
-        let grandTotalWeb = 0, grandTotalLocal = 0, grandTotalPY = 0;
-
+        let totalGeneral = 0, grandTotalWeb = 0, grandTotalLocal = 0, grandTotalPY = 0;
         function addToStats(key, niceName, qty, source, isDouble, cat) {
             initStat(key, niceName, cat);
-            stats[key].total += qty;
-            stats[key][source] += qty;
-            if (stats[key].category === 'hamburguesas' || stats[key].category === 'Hamburguesas') {
-                if (isDouble) stats[key].countDouble += qty;
-                else stats[key].countSimple += qty;
-            } else {
-                stats[key].countSimple += qty;
-            }
-            totalGeneral += qty;
-            if(source==='web') grandTotalWeb += qty;
-            if(source==='local') grandTotalLocal += qty;
-            if(source==='py') grandTotalPY += qty;
+            stats[key].total += qty; stats[key][source] += qty;
+            if (stats[key].category.includes('hamburguesas')) { if (isDouble) stats[key].countDouble += qty; else stats[key].countSimple += qty; } else { stats[key].countSimple += qty; }
+            totalGeneral += qty; if(source==='web') grandTotalWeb += qty; if(source==='local') grandTotalLocal += qty; if(source==='py') grandTotalPY += qty;
         }
 
-        // Procesar
         ORDERS.forEach(o => {
-            let source = 'local';
-            const srcRaw = String(o.source || '').toLowerCase();
-            if (srcRaw.includes('pedidosya')) source = 'py';
-            else if (srcRaw === 'web' || srcRaw === 'app') source = 'web';
+            let source = 'local'; const srcRaw = String(o.source || '').toLowerCase();
+            if (srcRaw.includes('pedidosya')) source = 'py'; else if (srcRaw === 'web' || srcRaw === 'app') source = 'web';
 
             (o.items || []).forEach(it => {
-                const qty = Number(it.qty || 1);
-                let rawName = it.name || "";
-                let n = rawName.toLowerCase().trim();
+                const qty = Number(it.qty || 1); let rawName = it.name || ""; let n = rawName.toLowerCase().trim();
                 
-                // 1. Detectar Extras PedidosYa [En corchetes]
+                // 1. Extras en nombre (PedidosYa)
                 if (rawName.includes('[')) {
                     let content = rawName.match(/\[(.*?)\]/)[1].toLowerCase();
-                    if (content.includes('cheddar')) addToStats("cheddar adicional", "Cheddar adicional", qty, source, false, 'extras');
-                    if (content.includes('carne') || content.includes('medallon')) addToStats("medallon adicional", "Medallón adicional", qty, source, false, 'extras');
-                    if (content.includes('bacon') || content.includes('panceta')) addToStats("bacon adicional", "Bacon adicional", qty, source, false, 'extras');
+                    if (content.includes('cheddar')) addToStats("cheddar adicional", "Cheddar Extra", qty, source, false, 'extras');
+                    if (content.includes('carne')||content.includes('medallon')) addToStats("medallon adicional", "Medallón Extra", qty, source, false, 'extras');
+                    if (content.includes('bacon')||content.includes('panceta')) addToStats("bacon adicional", "Bacon Extra", qty, source, false, 'extras');
                 }
 
-                // 2. Papas Ocultas o Explicitas
-                let isSide = false;
-                let sideKey = "";
-                let sideName = "";
-
-                if (n.includes("sazonadas")) {
-                    isSide = true; sideKey = "papas fritas sazonadas"; sideName = "Porción Papas Fritas (Sazonadas)";
-                } else if (n.includes("sin sal")) {
-                    isSide = true; sideKey = "papas fritas sin sal"; sideName = "Porción Papas Fritas (Sin Sal)";
-                } else if (n === "papas" || n === "papas fritas" || n.includes("con sal") || n.includes("bastones")) {
-                    isSide = true; sideKey = "papas fritas con sal"; sideName = "Porción Papas Fritas (Con Sal)";
-                }
-
-                if (isSide) {
-                    addToStats(sideKey, sideName, qty, source, false, "guarniciones");
-                    return; 
-                }
+                // 2. Papas
+                let isSide = false, sideKey = "", sideName = "";
+                if (n.includes("sazonadas")) { isSide=true; sideKey="papas fritas sazonadas"; sideName="Papas (Sazonadas)"; }
+                else if (n.includes("sin sal")) { isSide=true; sideKey="papas fritas sin sal"; sideName="Papas (Sin Sal)"; }
+                else if (n === "papas" || n === "papas fritas" || n.includes("con sal") || n.includes("bastones")) { isSide=true; sideKey="papas fritas con sal"; sideName="Papas (Con Sal)"; }
+                if (isSide) { addToStats(sideKey, sideName, qty, source, false, "guarniciones"); return; }
 
                 if (it.fries) {
-                    let fProp = String(it.fries).toLowerCase();
-                    let fKey = "", fName = "";
-                    if (fProp.includes("sazon")) { fKey="papas fritas sazonadas"; fName="Porción Papas Fritas (Sazonadas)"; }
-                    else if (fProp.includes("sin sal")) { fKey="papas fritas sin sal"; fName="Porción Papas Fritas (Sin Sal)"; }
-                    else { fKey="papas fritas con sal"; fName="Porción Papas Fritas (Con Sal)"; }
+                    let fProp = String(it.fries).toLowerCase(); let fKey="", fName="";
+                    if (fProp.includes("sazon")) { fKey="papas fritas sazonadas"; fName="Papas (Sazonadas)"; }
+                    else if (fProp.includes("sin sal")) { fKey="papas fritas sin sal"; fName="Papas (Sin Sal)"; }
+                    else { fKey="papas fritas con sal"; fName="Papas (Con Sal)"; }
                     if(fKey) addToStats(fKey, fName, qty, source, false, "guarniciones");
                 }
 
@@ -656,55 +572,37 @@
                 let baseName = cleanName(rawName);
                 let key = Object.keys(stats).find(k => k === baseName) || baseName;
                 let prettyName = stats[key] ? stats[key].name : (baseName.charAt(0).toUpperCase() + baseName.slice(1));
-
                 addToStats(key, prettyName, qty, source, isDouble, stats[key]?.category);
 
-                // 4. Extras (Objeto)
+                // 4. Extras Objeto
                 if (it.extras) {
-                    let extraMeat = Number(it.extras.patty || it.extras.carne || it.extras.medallon || 0);
-                    if (extraMeat > 0) addToStats("medallon adicional", "Medallón adicional", extraMeat * qty, source, false, 'extras');
-                    let extraCheddar = Number(it.extras.cheddar || 0);
-                    if (extraCheddar > 0) addToStats("cheddar adicional", "Cheddar adicional", extraCheddar * qty, source, false, 'extras');
+                    let extraMeat = Number(it.extras.patty || 0); if (extraMeat > 0) addToStats("medallon adicional", "Medallón Extra", extraMeat * qty, source, false, 'extras');
+                    let extraCheddar = Number(it.extras.cheddar || 0); if (extraCheddar > 0) addToStats("cheddar adicional", "Cheddar Extra", extraCheddar * qty, source, false, 'extras');
                 }
             });
         });
 
-        $('#totalItemsBadge').innerText = `Total Ítems: ${totalGeneral}`;
-
-        // Render Tabla
+        $('#totalItemsBadge').innerText = `Total: ${totalGeneral}`;
         const catOrder = ['hamburguesas', 'bebidas', 'guarniciones', 'extras', 'otros'];
         const sortedKeys = Object.values(stats).sort((a, b) => {
             let catA = (a.category||'otros').toLowerCase(); if(catA.includes('hamburguesa')) catA='hamburguesas';
             let catB = (b.category||'otros').toLowerCase(); if(catB.includes('hamburguesa')) catB='hamburguesas';
             const rankA = catOrder.indexOf(catA) === -1 ? 99 : catOrder.indexOf(catA);
             const rankB = catOrder.indexOf(catB) === -1 ? 99 : catOrder.indexOf(catB);
-            if (rankA !== rankB) return rankA - rankB;
-            return a.name.localeCompare(b.name);
+            if (rankA !== rankB) return rankA - rankB; return a.name.localeCompare(b.name);
         });
 
         let currentCat = null;
         sortedKeys.forEach(s => {
             let displayCat = (s.category || 'OTROS').toUpperCase();
-            if (displayCat !== currentCat) {
-                currentCat = displayCat;
-                body.insertAdjacentHTML('beforeend', `<tr><td colspan="7" class="cat-header">${currentCat}</td></tr>`);
-            }
-            const isZero = s.total === 0;
-            const rowStyle = isZero ? 'color:#cbd5e1;' : '';
-            const zeroStyle = 'color:#e2e8f0; font-size:11px;';
-            const pctClass = isZero ? '' : 'pct-tag';
+            if (displayCat !== currentCat) { currentCat = displayCat; body.insertAdjacentHTML('beforeend', `<tr><td colspan="7" class="cat-header">${currentCat}</td></tr>`); }
+            const isZero = s.total === 0; const rowStyle = isZero ? 'color:#cbd5e1;' : ''; const zeroStyle = 'color:#e2e8f0; font-size:11px;'; const pctClass = isZero ? '' : 'pct-tag';
             const pctWeb = grandTotalWeb > 0 ? ((s.web / grandTotalWeb) * 100).toFixed(1) + '%' : '-';
             const pctLocal = grandTotalLocal > 0 ? ((s.local / grandTotalLocal) * 100).toFixed(1) + '%' : '-';
             const pctPY = grandTotalPY > 0 ? ((s.py / grandTotalPY) * 100).toFixed(1) + '%' : '-';
-            let simpleCell = `<td style="text-align:center;">${s.countSimple}</td>`;
-            let doubleCell = `<td style="text-align:center; color:#b91c1c; font-weight:600; background:#fffafb">${s.countDouble}</td>`;
-
-            if (!displayCat.includes('HAMBURGUESA')) {
-                doubleCell = `<td style="text-align:center; color:#e2e8f0">-</td>`; 
-                simpleCell = `<td style="text-align:center; color:${isZero?'#ccc':'#555'}">${s.total}</td>`; 
-            } else if (isZero) {
-                simpleCell = `<td style="text-align:center;">-</td>`; doubleCell = `<td style="text-align:center;">-</td>`;
-            }
+            let simpleCell = `<td style="text-align:center;">${s.countSimple}</td>`, doubleCell = `<td style="text-align:center; color:#b91c1c; font-weight:600; background:#fffafb">${s.countDouble}</td>`;
+            if (!displayCat.includes('HAMBURGUESA')) { doubleCell = `<td style="text-align:center; color:#e2e8f0">-</td>`; simpleCell = `<td style="text-align:center; color:${isZero?'#ccc':'#555'}">${s.total}</td>`; } 
+            else if (isZero) { simpleCell = `<td style="text-align:center;">-</td>`; doubleCell = `<td style="text-align:center;">-</td>`; }
             body.insertAdjacentHTML('beforeend', `<tr style="${rowStyle}"><td style="font-weight:700; border-right:1px solid #e2e8f0; position:sticky; left:0; background:white; z-index:5">${s.name}</td>${simpleCell}${doubleCell}<td style="text-align:center; font-weight:800; background:#fffbeb; border-right:2px solid #e2e8f0; color:#78350f">${s.total}</td><td style="text-align:center; background:#eff6ff; ${s.web===0?zeroStyle:''}">${s.web > 0 ? `<span style="color:#1e40af; font-weight:700">${s.web}</span> <span class="${pctClass}">(${pctWeb})</span>` : '-'}</td><td style="text-align:center; background:#f8fafc; ${s.local===0?zeroStyle:''}">${s.local > 0 ? `<span style="color:#334155; font-weight:700">${s.local}</span> <span class="${pctClass}">(${pctLocal})</span>` : '-'}</td><td style="text-align:center; background:#fef2f2; ${s.py===0?zeroStyle:''}">${s.py > 0 ? `<span style="color:#dc2626; font-weight:700">${s.py}</span> <span class="${pctClass}">(${pctPY})</span>` : '-'}</td></tr>`);
         });
     };
@@ -718,10 +616,8 @@
         ORDERS.forEach(o => {
             const sale = Number(o.total || 0); gross += sale;
             let pay = String(o.pago||o.paymentMethod||'').toLowerCase(); let finalPayMethod = 'Otros';
-            if(String(o.source||'').toLowerCase().includes('pedidosya')) {
-                 finalPayMethod = 'PedidosYa';
-                 comms += (o.neto_excel > 0) ? (sale - o.neto_excel) : (sale * ((pctPy||30)/100));
-            } else {
+            if(String(o.source||'').toLowerCase().includes('pedidosya')) { finalPayMethod = 'PedidosYa'; comms += (o.neto_excel > 0) ? (sale - o.neto_excel) : (sale * ((pctPy||30)/100)); } 
+            else {
                 if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) { taxes += (sale*(pctQR/100)); finalPayMethod='MercadoPago/QR'; }
                 else if(pay.includes('transfer')) { taxes += (sale*(pctTransf/100)); finalPayMethod='Transferencia'; }
                 else if(pay.includes('debito')||pay.includes('tarjeta')) { taxes += (sale*(pctDebit/100)); finalPayMethod='Otros'; } 
@@ -746,7 +642,6 @@
         if(chartMain) chartMain.destroy();
         chartMain = new Chart($('#mainChart').getContext('2d'), { type:'bar', data:{ labels:['Ventas','Mercadería','Fijos','Sueldos','Var','Balance'], datasets:[{data:[gross,realPurchases,totalFixed,totalSalaries,variableCosts,profitReal], backgroundColor:['#64748b','#f97316','#a855f7','#3b82f6','#eab308',profitReal>=0?'#10b981':'#ef4444'], borderRadius:6}] }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}} });
         window.renderExtraCharts(dailySales, productSales, paymentStats);
-        
         window.renderProportions();
     };
 
