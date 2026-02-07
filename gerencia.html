@@ -16,7 +16,8 @@
 
     header { background: #fff; border-bottom: 1px solid var(--border); height: 60px; display: flex; align-items: center; padding: 0 20px; justify-content: space-between; flex-shrink: 0; z-index: 10; }
     .brand { font-weight: 800; font-size: 18px; color: var(--primary); text-decoration: none; display: flex; align-items: center; gap: 10px; }
-    .nav-btn { padding: 8px 12px; border-radius: 6px; text-decoration: none; color: #64748b; font-weight: 600; font-size: 13px; transition:0.2s }
+    .nav-group { display: flex; gap: 5px; align-items: center; }
+    .nav-btn { padding: 8px 12px; border-radius: 6px; text-decoration: none; color: #64748b; font-weight: 600; font-size: 13px; transition:0.2s; white-space: nowrap; }
     .nav-btn:hover { background: #f1f5f9; color: #0f172a; }
     .nav-btn.active { background: var(--primary); color: #fff; }
 
@@ -102,7 +103,7 @@
 
 <header>
   <a href="#" class="brand"><img src="images/logo.png" width="30"> Gerencia Rhodes</a>
-  <div>
+  <div class="nav-group">
     <a href="pedido_local.html" class="nav-btn">📦 Pedidos</a>
     <a href="finanzas.html" class="nav-btn">📈 Finanzas</a>
     <a href="stock.html" class="nav-btn">📋 Stock</a>
@@ -181,7 +182,10 @@
         <div class="card">
             <div class="row-flex">
                 <h2 style="margin:0; border:0">📊 Proporción de Ventas (Detallado)</h2>
-                <div id="totalItemsBadge" style="background:var(--primary); color:white; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700">Total: 0</div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="month" id="monthPickerProp" title="Selecciona mes" onchange="changeDate(this.value)" style="font-weight:700; border:1px solid #cbd5e1; color:#64748b; padding:5px; border-radius:6px; cursor:pointer; font-size:13px;">
+                    <div id="totalItemsBadge" style="background:var(--primary); color:white; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700">Total: 0</div>
+                </div>
             </div>
             <div style="overflow-x:auto; margin-top:15px">
                 <table style="border-collapse: separate; border-spacing: 0;">
@@ -369,11 +373,9 @@
     let INVENTORY=[], RAW_STOCK=[], PREMADE_STOCK=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
     let FIXED_DATA = { fixed:[], prod:[], config:{taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
     let PRODUCTS_DB = {}; 
-    let SIDES_CONFIG = {}; // Nueva variable para configuración de papas
+    let SIDES_CONFIG = {}; 
     let currentRecipeId = null, currentSubRecipeId = null;
     let chartMain=null, chartDaily=null, chartProds=null, chartPayment=null;
-    let tempAliasList = [];
-    let currentRecipeIngs = [];
 
     function logStatus(msg, isError=false) {
         const el = $('#lastPurchasesList');
@@ -381,36 +383,154 @@
     }
 
     // ==========================================
-    // 1. CARGA DE BASE DE DATOS Y CONFIG
+    // 1. CARGA DE BASE DE DATOS
     // ==========================================
     function loadProductsDB() {
-        // Cargar productos normales
         db.collection('products').get().then(snap => {
             PRODUCTS_DB = {}; 
             snap.forEach(doc => {
                 const d = doc.data();
-                const normName = d.name.toLowerCase().trim();
+                const normName = (d.name || "").toLowerCase().trim();
                 PRODUCTS_DB[normName] = { 
                     realName: d.name, 
                     category: d.category || 'otros' 
                 };
             });
-            checkLoadComplete();
+            if(ORDERS.length) window.renderProportions();
         });
 
-        // Cargar configuración de PAPAS (SIDES)
         db.collection('config').doc('sides').get().then(doc => {
             if(doc.exists) SIDES_CONFIG = doc.data();
-            checkLoadComplete();
+            if(ORDERS.length) window.renderProportions();
         });
-    }
-
-    function checkLoadComplete() {
-        if(ORDERS.length) window.renderProportions();
     }
 
     // ==========================================
-    // 🔥 2. LÓGICA DINÁMICA: DB + EXTRAS + PAPAS + CANALES + FILTRO PEDIDOSYA
+    // 2. DASHBOARD Y PEDIDOS (PRINCIPAL)
+    // ==========================================
+    window.loadDashboardData = function() {
+        const dateVal = $('#monthPicker').value; 
+        if(!dateVal) return; 
+        
+        $('#ordersTitle').innerText = '🧾 Pedidos de ' + dateVal; 
+        logStatus("🔄 Cargando...");
+        
+        const [y, m] = dateVal.split('-').map(Number); 
+        const start = new Date(y, m - 1, 1); 
+        const end = new Date(y, m, 0, 23, 59, 59);
+
+        db.collection('orders').orderBy('createdAt', 'desc').limit(800).get().then(snap => { 
+            const rawOrders = snap.docs.map(d => ({id:d.id, ...d.data()}));
+            
+            // Filtro en memoria por fecha
+            ORDERS = rawOrders.filter(o => {
+                if(o.status === 'cancelled') return false;
+                const d = parseDate(o.createdAt); 
+                return d && d >= start && d <= end;
+            });
+
+            logStatus(`✅ Cargado: ${ORDERS.length} pedidos.`);
+            
+            // 🔥 IMPORTANTE: Renderizar lista PRIMERO, luego gráficos
+            window.renderOrdersTab(); 
+            
+            try {
+                window.calculateAll(); 
+            } catch(err) {
+                console.error("Error en gráficos:", err);
+            }
+        }).catch(err => { 
+            console.error(err); 
+            logStatus("❌ Error cargando: " + err.message, true); 
+        });
+
+        db.collection('purchases').limit(500).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); });
+    };
+
+    window.changeDate = function(val) {
+        if(!val) return;
+        $('#monthPicker').value = val;
+        $('#monthPickerProp').value = val;
+        window.loadDashboardData();
+    };
+
+    // TABLA PEDIDOS
+    window.renderOrdersTab = function() {
+        const tbody = $('#ordersTableBody'); 
+        tbody.innerHTML = '';
+        
+        if(ORDERS.length === 0) { 
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos en este mes</td></tr>'; 
+            return; 
+        }
+        
+        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {};
+
+        ORDERS.forEach((o, index) => {
+            try {
+                const total = Number(o.total || 0); 
+                let deduction = 0;
+                let source = String(o.source || "").toLowerCase();
+                let pago = String(o.pago || o.paymentMethod || "").toLowerCase();
+
+                if(source.includes('pedidosya')) {
+                    deduction = (o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100));
+                } else if(pago.includes('mercado') || pago.includes('qr')) {
+                    deduction = total * (pctQR/100);
+                } else if(pago.includes('transfer')) {
+                    deduction = total * (pctTransf/100);
+                } else if(pago.includes('debito')) {
+                    deduction = total * (pctDebit/100);
+                }
+
+                let orderCost = window.calculateOrderConsumables(o.items||[]); 
+                (o.items||[]).forEach(item => {
+                     // Solo sumar costo unitario si NO es un extra suelto que ya calculamos
+                     // (Aquí podrías refinar más, pero dejamos el base para no romper)
+                     orderCost += (window.getUnitCost(item.name) * Number(item.qty||1));
+                });
+                
+                let profit = total - deduction - orderCost;
+                
+                let dStr = '-'; 
+                const dt = parseDate(o.createdAt); 
+                if(dt) dStr = dt.toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+                
+                // Badges
+                let badgeClass = 'bdg-local';
+                if(source.includes('pedidosya')) badgeClass = 'bdg-py';
+                else if(source === 'web') badgeClass = 'bdg-web';
+
+                let itemsStr = (o.items||[]).map(i=> `${i.qty}x ${i.name}`).join(', ');
+
+                tbody.insertAdjacentHTML('beforeend', `
+                    <tr class="order-row" onclick="document.getElementById('detail-${index}').classList.toggle('open')">
+                        <td>${dStr}</td>
+                        <td>${o.nombre||'Cliente'}</td>
+                        <td><span class="badge ${badgeClass}">${o.source||'local'}</span></td>
+                        <td><span class="badge bdg-cash">${o.pago||'efectivo'}</span></td>
+                        <td style="font-weight:700">${money(total)}</td>
+                        <td style="font-weight:700; color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</td>
+                        <td>▼</td>
+                    </tr>
+                    <tr class="order-details" id="detail-${index}">
+                        <td colspan="7" style="padding:10px; background:#f9fafb">
+                            <div style="font-size:12px; line-height:1.5">
+                                <b>Items:</b> ${itemsStr}<br>
+                                <b>Costo Estimado:</b> ${money(orderCost)} | <b>Deducciones:</b> ${money(deduction)}<br>
+                                <b>Ganancia Real:</b> ${money(profit)}
+                            </div>
+                        </td>
+                    </tr>
+                `);
+            } catch(e) {
+                console.error("Error renderizando fila", e);
+            }
+        });
+    };
+
+    // ==========================================
+    // 3. PROPORCIONES Y GRÁFICOS
     // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
@@ -418,39 +538,31 @@
         body.innerHTML = '';
 
         const stats = {};
-
-        // Helper para inicializar un item
         function initStat(key, name, cat) {
             if (!stats[key]) {
                 stats[key] = {
-                    name: name,
-                    category: cat || getCategory(name),
+                    name: name, category: cat || getCategory(name),
                     countSimple: 0, countDouble: 0, total: 0, 
                     web: 0, local: 0, py: 0
                 };
             }
         }
 
-        // PASO 1: Llenar la tabla con TODO lo que hay en la base de datos (ventas = 0)
+        // Cargar Base
         Object.keys(PRODUCTS_DB).forEach(key => {
             const p = PRODUCTS_DB[key];
             let statsKey = key.replace('simple', '').replace('doble', '').trim();
             initStat(statsKey, p.realName.replace(/simple|doble/gi, '').trim(), p.category);
         });
 
-        // PASO 1.5: Agregar PAPAS FRITAS según configuración (image_106fdd.png)
-        // Esto asegura que aparezcan aunque nadie las haya comprado
+        // Asegurar Papas
         if (SIDES_CONFIG.con_sal) initStat("papas fritas con sal", "Porción Papas Fritas (Con Sal)", "guarniciones");
         if (SIDES_CONFIG.con_sazon) initStat("papas fritas sazonadas", "Porción Papas Fritas (Sazonadas)", "guarniciones");
         if (SIDES_CONFIG.sin_sal) initStat("papas fritas sin sal", "Porción Papas Fritas (Sin Sal)", "guarniciones");
-        
-        // Agregar Filas de Extras Fijas
         initStat("medallon adicional", "Medallón adicional", "extras");
         initStat("cheddar adicional", "Cheddar adicional", "extras");
         initStat("bacon adicional", "Bacon adicional", "extras");
 
-
-        // Helper para categorizar
         function getCategory(name) {
             const n = name.toLowerCase();
             const burgerNames = ["cheese", "bacon", "egg", "core", "morgan", "big", "john", "buena", "mala", "fea", "rhodes", "burguesa", "pollo", "crispy"];
@@ -461,43 +573,35 @@
             return 'otros';
         }
 
-        // 🔥 Helper Mejorado para normalizar nombres (Elimina Corchetes de PedidosYa)
         function cleanName(raw) {
             let n = raw.toLowerCase().trim();
-            // Elimina lo que está entre corchetes [] y paréntesis ()
             n = n.replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "").trim(); 
-            n = n.replace('doble', '').replace('simple', '').trim(); 
-            n = n.replace(/\s{2,}/g, ' '); // Dobles espacios
-            
+            n = n.replace('doble', '').replace('simple', '').trim().replace(/\s{2,}/g, ' ');
             if(n === 'papas fritas') return 'porción papas fritas';
             if(n.includes('coca') && n.includes('original')) return 'coca-cola original 500ml'; 
             return n;
         }
 
-        // Helper para sumar
         let totalGeneral = 0;
         let grandTotalWeb = 0, grandTotalLocal = 0, grandTotalPY = 0;
 
         function addToStats(key, niceName, qty, source, isDouble, cat) {
-            initStat(key, niceName, cat); // Se asegura que exista
-
+            initStat(key, niceName, cat);
             stats[key].total += qty;
             stats[key][source] += qty;
-            
             if (stats[key].category === 'hamburguesas' || stats[key].category === 'Hamburguesas') {
                 if (isDouble) stats[key].countDouble += qty;
                 else stats[key].countSimple += qty;
             } else {
                 stats[key].countSimple += qty;
             }
-
             totalGeneral += qty;
             if(source==='web') grandTotalWeb += qty;
             if(source==='local') grandTotalLocal += qty;
             if(source==='py') grandTotalPY += qty;
         }
 
-        // PASO 2: Procesar Pedidos
+        // Procesar
         ORDERS.forEach(o => {
             let source = 'local';
             const srcRaw = String(o.source || '').toLowerCase();
@@ -509,17 +613,15 @@
                 let rawName = it.name || "";
                 let n = rawName.toLowerCase().trim();
                 
-                // 🔹 1. DETECCIÓN DE EXTRAS DENTRO DE LOS CORCHETES (PedidosYa Style)
-                // Ej: "Cheesebacon [1 feta de cheddar]"
+                // 1. Detectar Extras PedidosYa [En corchetes]
                 if (rawName.includes('[')) {
                     let content = rawName.match(/\[(.*?)\]/)[1].toLowerCase();
-                    // Si encontramos carne o cheddar en el corchete, lo sumamos como EXTRA
                     if (content.includes('cheddar')) addToStats("cheddar adicional", "Cheddar adicional", qty, source, false, 'extras');
                     if (content.includes('carne') || content.includes('medallon')) addToStats("medallon adicional", "Medallón adicional", qty, source, false, 'extras');
                     if (content.includes('bacon') || content.includes('panceta')) addToStats("bacon adicional", "Bacon adicional", qty, source, false, 'extras');
                 }
 
-                // 🔹 2. DETECCIÓN ESPECIAL DE PAPAS (CORREGIDA)
+                // 2. Papas Ocultas o Explicitas
                 let isSide = false;
                 let sideKey = "";
                 let sideName = "";
@@ -534,38 +636,30 @@
 
                 if (isSide) {
                     addToStats(sideKey, sideName, qty, source, false, "guarniciones");
-                    return; // Terminamos con este item si era papa
+                    return; 
                 }
 
-                // 2. CHEQUEO SI LA HAMBURGUESA TRAE PAPAS (Propiedad .fries)
                 if (it.fries) {
                     let fProp = String(it.fries).toLowerCase();
-                    let fKey = "";
-                    let fName = "";
-                    
+                    let fKey = "", fName = "";
                     if (fProp.includes("sazon")) { fKey="papas fritas sazonadas"; fName="Porción Papas Fritas (Sazonadas)"; }
                     else if (fProp.includes("sin sal")) { fKey="papas fritas sin sal"; fName="Porción Papas Fritas (Sin Sal)"; }
                     else { fKey="papas fritas con sal"; fName="Porción Papas Fritas (Con Sal)"; }
-                    
                     if(fKey) addToStats(fKey, fName, qty, source, false, "guarniciones");
                 }
 
-                // 3. ÍTEM NORMAL (Burger, Bebida)
-                // Usamos cleanName para quitar los corchetes y que se agrupe bien
+                // 3. Item Principal
                 const isDouble = rawName.toLowerCase().includes('doble');
                 let baseName = cleanName(rawName);
-                
-                // Buscar nombre bonito en DB o usar el limpio
                 let key = Object.keys(stats).find(k => k === baseName) || baseName;
                 let prettyName = stats[key] ? stats[key].name : (baseName.charAt(0).toUpperCase() + baseName.slice(1));
 
                 addToStats(key, prettyName, qty, source, isDouble, stats[key]?.category);
 
-                // 4. EXTRAS (Propiedad del objeto)
+                // 4. Extras (Objeto)
                 if (it.extras) {
                     let extraMeat = Number(it.extras.patty || it.extras.carne || it.extras.medallon || 0);
                     if (extraMeat > 0) addToStats("medallon adicional", "Medallón adicional", extraMeat * qty, source, false, 'extras');
-                    
                     let extraCheddar = Number(it.extras.cheddar || 0);
                     if (extraCheddar > 0) addToStats("cheddar adicional", "Cheddar adicional", extraCheddar * qty, source, false, 'extras');
                 }
@@ -574,14 +668,11 @@
 
         $('#totalItemsBadge').innerText = `Total Ítems: ${totalGeneral}`;
 
-        // PASO 3: Ordenar y Renderizar
+        // Render Tabla
         const catOrder = ['hamburguesas', 'bebidas', 'guarniciones', 'extras', 'otros'];
-        
         const sortedKeys = Object.values(stats).sort((a, b) => {
-            let catA = (a.category||'otros').toLowerCase();
-            let catB = (b.category||'otros').toLowerCase();
-            if(catA.includes('hamburguesa')) catA = 'hamburguesas';
-            if(catB.includes('hamburguesa')) catB = 'hamburguesas';
+            let catA = (a.category||'otros').toLowerCase(); if(catA.includes('hamburguesa')) catA='hamburguesas';
+            let catB = (b.category||'otros').toLowerCase(); if(catB.includes('hamburguesa')) catB='hamburguesas';
             const rankA = catOrder.indexOf(catA) === -1 ? 99 : catOrder.indexOf(catA);
             const rankB = catOrder.indexOf(catB) === -1 ? 99 : catOrder.indexOf(catB);
             if (rankA !== rankB) return rankA - rankB;
@@ -589,23 +680,19 @@
         });
 
         let currentCat = null;
-
         sortedKeys.forEach(s => {
             let displayCat = (s.category || 'OTROS').toUpperCase();
             if (displayCat !== currentCat) {
                 currentCat = displayCat;
                 body.insertAdjacentHTML('beforeend', `<tr><td colspan="7" class="cat-header">${currentCat}</td></tr>`);
             }
-
             const isZero = s.total === 0;
             const rowStyle = isZero ? 'color:#cbd5e1;' : '';
             const zeroStyle = 'color:#e2e8f0; font-size:11px;';
             const pctClass = isZero ? '' : 'pct-tag';
-
             const pctWeb = grandTotalWeb > 0 ? ((s.web / grandTotalWeb) * 100).toFixed(1) + '%' : '-';
             const pctLocal = grandTotalLocal > 0 ? ((s.local / grandTotalLocal) * 100).toFixed(1) + '%' : '-';
             const pctPY = grandTotalPY > 0 ? ((s.py / grandTotalPY) * 100).toFixed(1) + '%' : '-';
-
             let simpleCell = `<td style="text-align:center;">${s.countSimple}</td>`;
             let doubleCell = `<td style="text-align:center; color:#b91c1c; font-weight:600; background:#fffafb">${s.countDouble}</td>`;
 
@@ -613,170 +700,10 @@
                 doubleCell = `<td style="text-align:center; color:#e2e8f0">-</td>`; 
                 simpleCell = `<td style="text-align:center; color:${isZero?'#ccc':'#555'}">${s.total}</td>`; 
             } else if (isZero) {
-                simpleCell = `<td style="text-align:center;">-</td>`;
-                doubleCell = `<td style="text-align:center;">-</td>`;
+                simpleCell = `<td style="text-align:center;">-</td>`; doubleCell = `<td style="text-align:center;">-</td>`;
             }
-
-            body.insertAdjacentHTML('beforeend', `
-                <tr style="${rowStyle}">
-                    <td style="font-weight:700; border-right:1px solid #e2e8f0; position:sticky; left:0; background:white; z-index:5">${s.name}</td>
-                    ${simpleCell}
-                    ${doubleCell}
-                    <td style="text-align:center; font-weight:800; background:#fffbeb; border-right:2px solid #e2e8f0; color:#78350f">${s.total}</td>
-                    <td style="text-align:center; background:#eff6ff; ${s.web===0?zeroStyle:''}">
-                        ${s.web > 0 ? `<span style="color:#1e40af; font-weight:700">${s.web}</span> <span class="${pctClass}">(${pctWeb})</span>` : '-'}
-                    </td>
-                    <td style="text-align:center; background:#f8fafc; ${s.local===0?zeroStyle:''}">
-                        ${s.local > 0 ? `<span style="color:#334155; font-weight:700">${s.local}</span> <span class="${pctClass}">(${pctLocal})</span>` : '-'}
-                    </td>
-                    <td style="text-align:center; background:#fef2f2; ${s.py===0?zeroStyle:''}">
-                        ${s.py > 0 ? `<span style="color:#dc2626; font-weight:700">${s.py}</span> <span class="${pctClass}">(${pctPY})</span>` : '-'}
-                    </td>
-                </tr>
-            `);
+            body.insertAdjacentHTML('beforeend', `<tr style="${rowStyle}"><td style="font-weight:700; border-right:1px solid #e2e8f0; position:sticky; left:0; background:white; z-index:5">${s.name}</td>${simpleCell}${doubleCell}<td style="text-align:center; font-weight:800; background:#fffbeb; border-right:2px solid #e2e8f0; color:#78350f">${s.total}</td><td style="text-align:center; background:#eff6ff; ${s.web===0?zeroStyle:''}">${s.web > 0 ? `<span style="color:#1e40af; font-weight:700">${s.web}</span> <span class="${pctClass}">(${pctWeb})</span>` : '-'}</td><td style="text-align:center; background:#f8fafc; ${s.local===0?zeroStyle:''}">${s.local > 0 ? `<span style="color:#334155; font-weight:700">${s.local}</span> <span class="${pctClass}">(${pctLocal})</span>` : '-'}</td><td style="text-align:center; background:#fef2f2; ${s.py===0?zeroStyle:''}">${s.py > 0 ? `<span style="color:#dc2626; font-weight:700">${s.py}</span> <span class="${pctClass}">(${pctPY})</span>` : '-'}</td></tr>`);
         });
-    };
-
-    // --- CARGADORES UNIFICADOS ---
-    window.loadInventory = function() {
-        db.collection('inventory').orderBy('name').onSnapshot(snap => {
-            RAW_STOCK = snap.docs.map(d => ({id:d.id, ...d.data(), isSub: false}));
-            window.combineAndRender();
-        });
-        db.collection('subrecipes').onSnapshot(snap => {
-            SUB_RECIPES = snap.docs.map(d => ({id:d.id, ...d.data()})); 
-            PREMADE_STOCK = snap.docs.map(d => ({
-                id: d.id, ...d.data(), category: '🧩 Armado', isSub: true,
-                unit: 'u', qty: d.data().qty || 0, min: d.data().min || 0
-            }));
-            window.combineAndRender();
-        });
-    };
-
-    window.combineAndRender = function() {
-        INVENTORY = [...RAW_STOCK, ...PREMADE_STOCK];
-        window.renderStockTable(); window.renderCostTables();
-        window.renderRecipesList(); window.renderSubRecipesList();
-    };
-
-    window.loadRecipes = function() { db.collection('recipes').onSnapshot(snap => { RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); window.renderRecipesList(); }); };
-    window.loadFixedData = function() { 
-        db.collection('config').doc('gerencia').onSnapshot(doc => {
-            if(doc.exists) FIXED_DATA = doc.data();
-            if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
-            if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
-            $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
-            $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0;
-            window.renderFixedTables();
-        });
-    };
-
-    // STOCK MEJORADO
-    window.renderStockTable = function() {
-        const t = $('#searchStock').value.toLowerCase(); 
-        const c = $('#filterCat').value;
-        const b = $('#stockTableBody'); 
-        b.innerHTML='';
-
-        INVENTORY.filter(p => (p.name||"").toLowerCase().includes(t) && (c==='all'||p.category===c)).forEach(p => {
-            let stHtml = `<span class="status-dot st-ok"></span>OK`;
-            if(p.qty <= p.min) stHtml=`<span class="status-dot st-danger"></span>CRIT`; 
-            else if(p.qty <= p.min*1.5) stHtml=`<span class="status-dot st-warn"></span>BAJO`;
-            
-            let actions = `<button class="btn-icon" onclick="openProductModal('${p.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button>`;
-            if(p.isSub) actions = `<button class="btn-icon" onclick="openSubRecipeEditor('${p.id}')">🧩</button><button class="btn-icon" onclick="deleteItem('subrecipes','${p.id}')">🗑️</button>`;
-            
-            b.insertAdjacentHTML('beforeend', `
-                <tr>
-                    <td><b>${p.name}</b></td>
-                    <td><small style="background:#f1f5f9; padding:2px 6px; border-radius:4px; border:1px solid #e2e8f0">${p.category}</small></td>
-                    <td>
-                        <div class="qty-control">
-                            <button class="qty-btn" onclick="updStock('${p.id}', -1)">-</button>
-                            <input type="number" class="qty-input" value="${formatQty(p.qty)}" 
-                                   onchange="setStockDirect('${p.id}', this.value)" 
-                                   step="0.001">
-                            <button class="qty-btn" onclick="updStock('${p.id}', 1)">+</button>
-                            <small style="margin-left:5px; color:#94a3b8; font-size:10px">${p.unit}</small>
-                        </div>
-                    </td>
-                    <td>${p.min}</td>
-                    <td>${stHtml}</td>
-                    <td>${actions}</td>
-                </tr>
-            `);
-        });
-    };
-
-    window.setStockDirect = async (id, val) => {
-        const item = INVENTORY.find(i => i.id === id); if(!item) return;
-        const newQty = Number(val); 
-        const col = item.isSub ? 'subrecipes' : 'inventory';
-        await db.collection(col).doc(id).update({ qty: newQty });
-    };
-
-    window.updStock = (id, v) => {
-        const item = INVENTORY.find(i => i.id === id); if(!item) return;
-        const newQty = Number(item.qty || 0) + v;
-        window.setStockDirect(id, newQty);
-    };
-
-    // RECETAS Y SUBRECETAS
-    window.openRecipeModal = function(id) {
-        $('#modalRecipe').style.display = 'flex'; $('#recName').value = ''; $('#recIngQty').value = ''; currentRecipeIngs = [];
-        const s = $('#recIngSelect'); s.innerHTML = '<option value="">Seleccionar...</option>';
-        if(SUB_RECIPES.length) { s.insertAdjacentHTML('beforeend', '<optgroup label="🧩 Armado">'); SUB_RECIPES.forEach(sub => s.insertAdjacentHTML('beforeend', `<option value="${sub.id}">🧩 ${sub.name}</option>`)); s.insertAdjacentHTML('beforeend', '</optgroup>'); }
-        s.insertAdjacentHTML('beforeend', '<optgroup label="📦 Insumos">'); RAW_STOCK.sort((a,b)=>a.name.localeCompare(b.name)).forEach(i => s.insertAdjacentHTML('beforeend', `<option value="${i.id}">${i.name} (${i.unit})</option>`)); s.insertAdjacentHTML('beforeend', '</optgroup>');
-        if(id) { const r = RECIPES.find(x => x.id === id); if(r) { $('#recName').value = r.id; currentRecipeIngs = [...r.ingredients]; } }
-        window.renderCurrentRecipeList();
-    };
-
-    window.addItemToCurrentRecipe = function() {
-        const id = $('#recIngSelect').value; const qty = Number($('#recIngQty').value); if(!id || qty <= 0) return alert("Error");
-        const item = INVENTORY.find(i => i.id === id);
-        currentRecipeIngs.push({ id: id, qty: qty, _name: item ? (item.isSub ? `🧩 ${item.name}` : item.name) : "???" });
-        window.renderCurrentRecipeList(); $('#recIngQty').value = '';
-    };
-
-    window.renderCurrentRecipeList = function() {
-        const c = $('#currentRecipeList'); c.innerHTML = '';
-        currentRecipeIngs.forEach((item, idx) => {
-            if(!item._name) { const i = INVENTORY.find(x => x.id === item.id); item._name = i ? (i.isSub ? `🧩 ${i.name}` : i.name) : "???"; }
-            c.insertAdjacentHTML('beforeend', `<div class="ing-item"><span><b>${item.qty}</b> x ${item._name}</span> <button style="color:red;border:none;cursor:pointer" onclick="currentRecipeIngs.splice(${idx},1);window.renderCurrentRecipeList()">×</button></div>`);
-        });
-    };
-
-    window.saveRecipe = async function() {
-        const name = $('#recName').value.trim(); if(!name || !currentRecipeIngs.length) return alert("Falta info");
-        await db.collection('recipes').doc(name).set({ ingredients: currentRecipeIngs.map(i => ({ id: i.id, qty: i.qty })) });
-        alert("Guardado"); $('#modalRecipe').style.display = 'none';
-    };
-
-    window.renderRecipesList = function() { $('#recipesListBody').innerHTML = RECIPES.map(r => `<tr><td>${r.id}</td><td style="text-align:right"><b>${money(window.calculateRecipeTotal(r))}</b></td><td style="text-align:right"><button class="btn-icon" onclick="openRecipeModal('${r.id}')">✏️</button><button class="btn-icon" onclick="deleteItem('recipes','${r.id}')">🗑️</button></td></tr>`).join(''); };
-
-    // DASHBOARD & DATA
-    window.loadDashboardData = function() {
-        const ym = $('#monthPicker').value; if(!ym) return; 
-        $('#ordersTitle').innerText = '🧾 Pedidos de ' + ym; logStatus("🔄 Cargando...");
-        const [y, m] = ym.split('-').map(Number); const start = new Date(y, m - 1, 1); const end = new Date(y, m, 0, 23, 59, 59);
-        db.collection('orders').limit(500).get().then(snap => { 
-              const rawOrders = snap.docs.map(d => ({id:d.id, ...d.data()}));
-              ORDERS = rawOrders.filter(o => {
-                  if(o.status === 'cancelled') return false;
-                  const d = parseDate(o.createdAt); return d && d >= start && d <= end;
-              }).sort((a,b) => parseDate(b.createdAt) - parseDate(a.createdAt));
-              logStatus(`✅ Cargado: ${ORDERS.length} pedidos.`);
-              window.calculateAll(); window.renderOrdersTab(); 
-          }).catch(err => { console.error(err); logStatus("❌ Error cargando: " + err.message, true); });
-        db.collection('purchases').limit(500).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); });
-    };
-
-    // Función para sincronizar fechas
-    window.changeDate = function(val) {
-        if(!val) return;
-        $('#monthPicker').value = val;
-        $('#monthPickerProp').value = val;
-        window.loadDashboardData();
     };
 
     window.calculateAll = function() {
@@ -830,24 +757,6 @@
         if(chartPayment) chartPayment.destroy();
         chartPayment = new Chart($('#paymentChart').getContext('2d'), { type: 'pie', data: { labels: Object.keys(payData), datasets: [{ data: Object.values(payData), backgroundColor: ['#10b981','#3b82f6','#06b6d4','#ef4444','#64748b'] }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right', labels:{boxWidth:10, font:{size:10}}}} } });
     }
-
-    // TABLA PEDIDOS
-    window.renderOrdersTab = function() {
-        const tbody = $('#ordersTableBody'); tbody.innerHTML = '';
-        if(ORDERS.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos</td></tr>'; return; }
-        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {};
-        ORDERS.forEach((o, index) => {
-            const total = Number(o.total || 0); let deduction = 0;
-            if(String(o.source).includes('pedidosya')) deduction = (o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100));
-            else if(String(o.pago).includes('mercado') || String(o.pago).includes('qr')) deduction = total * (pctQR/100);
-            else if(String(o.pago).includes('transfer')) deduction = total * (pctTransf/100);
-            else if(String(o.pago).includes('debito')) deduction = total * (pctDebit/100);
-            let orderCost = window.calculateOrderConsumables(o.items||[]); (o.items||[]).forEach(item => orderCost += (window.getUnitCost(item.name) * Number(item.qty||1)));
-            let profit = total - deduction - orderCost;
-            let dStr = '-'; const dt = parseDate(o.createdAt); if(dt) dStr = dt.toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
-            tbody.innerHTML += `<tr class="order-row" onclick="document.getElementById('detail-${index}').classList.toggle('open')"><td>${dStr}</td><td>${o.nombre||'Cliente'}</td><td><span class="badge ${String(o.source).includes('pedidosya')?'bdg-py':'bdg-web'}">${o.source||'web'}</span></td><td><span class="badge bdg-cash">${o.pago||'efectivo'}</span></td><td style="font-weight:700">${money(total)}</td><td style="font-weight:700; color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</td><td>▼</td></tr><tr class="order-details" id="detail-${index}"><td colspan="7" style="padding:10px; background:#f9fafb"><div style="font-size:12px"><b>Items:</b> ${(o.items||[]).map(i=>i.qty+'x '+i.name).join(', ')}<br><b>Ganancia Real:</b> ${money(profit)}</div></td></tr>`;
-        });
-    };
     
     // CALCULADORA DE COSTOS
     window.calculateOrderConsumables = function(items) {
@@ -910,11 +819,8 @@
     window.addEventListener('load', () => {
         const now = new Date();
         $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-        $('#monthPickerProp').value = $('#monthPicker').value;
         $('#monthPicker').addEventListener('change', window.loadDashboardData);
         loadProductsDB(); // 🔥 Carga los productos al iniciar
         window.loadInventory(); window.loadRecipes(); window.loadFixedData(); window.loadDashboardData();
     });
 </script>
-</body>
-</html>
