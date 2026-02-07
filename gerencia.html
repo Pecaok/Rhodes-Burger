@@ -430,6 +430,7 @@
             // Iniciar App
             const now = new Date();
             $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+            if($('#monthPickerProp')) $('#monthPickerProp').value = $('#monthPicker').value;
             $('#monthPicker').addEventListener('change', loadDashboardData);
             
             loadProductsDB(); 
@@ -517,7 +518,6 @@
     function renderCostTables() { 
         const renderRow = (p) => `<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`;
         
-        // 🔥 FILTRO SEGURO
         const rawMat = INVENTORY.filter(p => (p.category || 'otros') !== 'packaging' && !p.isSub);
         const packMat = INVENTORY.filter(p => (p.category || '') === 'packaging');
 
@@ -547,15 +547,13 @@
             return 'otros';
         }
 
-        // 🔥 CORRECCIÓN NOMBRES PEDIDOS YA (Blindada contra errores)
+        // 🔥 CORRECCIÓN NOMBRES PEDIDOS YA (AGRESIVA Y SIMPLE)
         function cleanName(raw) {
             let n = raw.toLowerCase().trim();
-            // PROTECCIÓN: Solo usar .match si estamos seguros
-            let match = n.match(/\[(.*?)\]/);
-            if (match && match[1]) {
-                n = n.replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "");
-            }
+            // Eliminamos todo lo que esté entre corchetes [] y paréntesis ()
+            n = n.replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "");
             n = n.replace('doble', '').replace('simple', '').trim().replace(/\s{2,}/g, ' ');
+            
             if(n === 'papas fritas') return 'porción papas fritas';
             if(n.includes('coca') && n.includes('original')) return 'coca-cola original 500ml'; 
             return n;
@@ -577,12 +575,17 @@
                 const qty = Number(it.qty || 1); let rawName = it.name || ""; let n = rawName.toLowerCase().trim();
                 
                 // 1. Extras en nombre (PedidosYa)
-                let match = rawName.match(/\[(.*?)\]/);
-                if (match && match[1]) {
-                    let content = match[1].toLowerCase();
-                    if (content.includes('cheddar')) addToStats("cheddar adicional", "Cheddar Extra", qty, source, false, 'extras');
-                    if (content.includes('carne')||content.includes('medallon')) addToStats("medallon adicional", "Medallón Extra", qty, source, false, 'extras');
-                    if (content.includes('bacon')||content.includes('panceta')) addToStats("bacon adicional", "Bacon Extra", qty, source, false, 'extras');
+                if (rawName.includes('[')) {
+                    // Try catch por si el match falla
+                    try {
+                        let match = rawName.match(/\[(.*?)\]/);
+                        if(match && match[1]) {
+                            let content = match[1].toLowerCase();
+                            if (content.includes('cheddar')) addToStats("cheddar adicional", "Cheddar Extra", qty, source, false, 'extras');
+                            if (content.includes('carne')||content.includes('medallon')) addToStats("medallon adicional", "Medallón Extra", qty, source, false, 'extras');
+                            if (content.includes('bacon')||content.includes('panceta')) addToStats("bacon adicional", "Bacon Extra", qty, source, false, 'extras');
+                        }
+                    } catch(e) {}
                 }
 
                 // 2. Papas
