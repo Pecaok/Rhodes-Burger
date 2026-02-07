@@ -359,11 +359,11 @@
 <div class="modal-overlay" id="modalPurchase"><div class="modal"><h3>🛒 Registrar Compra</h3><div style="margin-bottom:10px"><label>Insumo</label><select id="purProd"></select></div><div style="display:flex; gap:10px; margin-bottom:10px"><div><label>Cantidad</label><input type="number" id="purQty" step="0.001"></div><div><label>Total ($)</label><input type="number" id="purTotal"></div></div><div style="margin-bottom:15px"><label>Fecha</label><input type="date" id="purDate"></div><div style="display:flex; gap:10px"><button class="btn btn-primary" style="flex:1" onclick="confirmPurchase()">Confirmar</button><button class="btn" style="flex:1" onclick="$('#modalPurchase').style.display='none'">Cancelar</button></div></div></div>
 
 <script>
-    // 🔥 CONFIGURACIÓN FIREBASE
+    // 🔥 CONFIGURACIÓN GLOBAL
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
-    let db; // Instancia global de DB
+    let db; // DB Instance
 
-    // VARIABLES GLOBALES
+    // VARIABLES
     let INVENTORY=[], RAW_STOCK=[], PREMADE_STOCK=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
     let FIXED_DATA = { fixed:[], prod:[], config:{taxDebit:0, taxTransf:0, taxQR:0}, aliases:[] };
     let PRODUCTS_DB = {}; 
@@ -373,7 +373,7 @@
     let tempAliasList = [];
     let currentRecipeIngs = [];
 
-    // 🔥 HELPER FUNCTIONS (DEFINIDAS ANTES DE USAR)
+    // HELPER FUNCTIONS
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency", currency:"ARS", maximumFractionDigits:2});
     const formatQty = (n) => { let num = Number(n); if(isNaN(num)) return '0'; return parseFloat(num.toFixed(3)); };
@@ -389,44 +389,13 @@
         if(el) el.innerHTML = `<div style="padding:10px; color:${isError?'red':'#666'}; font-weight:600">${msg}</div>`;
     }
 
-    // 🔥 FUNCIÓN DE INICIO SEGURA
-    document.addEventListener('DOMContentLoaded', () => {
-        if(typeof firebase === 'undefined') {
-            alert("Error crítico: No se pudo conectar con la base de datos. Revisa tu internet.");
-            return;
-        }
-        try {
-            firebase.initializeApp(firebaseConfig);
-            db = firebase.firestore();
-            db.enablePersistence({ synchronizeTabs: true }).catch(err => console.log("Modo offline activado o no soportado"));
-            
-            // Iniciar App
-            const now = new Date();
-            $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-            $('#monthPickerProp').value = $('#monthPicker').value;
-            $('#monthPicker').addEventListener('change', loadDashboardData);
-            
-            loadProductsDB(); 
-            loadInventory(); 
-            loadRecipes(); 
-            loadFixedData(); 
-            loadDashboardData();
-        } catch(e) {
-            console.error("Error al iniciar:", e);
-            alert("Error al iniciar la aplicación: " + e.message);
-        }
-    });
-
-    // ==========================================
-    // EXPOSE GLOBAL FUNCTIONS (PARA EL HTML)
-    // ==========================================
+    // 🔥 FUNCIONES GLOBALES (EXPOSED)
     window.showTab = function(id) { 
         document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); 
         const target = $('#tab-'+id);
         if(target) target.style.display='block'; 
         
         document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); 
-        // Hack para encontrar el botón si se clickea en hijo
         const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.toLowerCase().includes(id.replace('_',' '))) || event.target;
         if(btn && btn.classList) btn.classList.add('active');
 
@@ -446,9 +415,34 @@
     };
 
     // ==========================================
-    // FUNCIONES DEL SISTEMA
+    // INICIALIZACIÓN
     // ==========================================
-    
+    document.addEventListener('DOMContentLoaded', () => {
+        if(typeof firebase === 'undefined') {
+            alert("Error crítico: No se pudo conectar con la base de datos.");
+            return;
+        }
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+            
+            // Iniciar App
+            const now = new Date();
+            $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+            $('#monthPicker').addEventListener('change', loadDashboardData);
+            
+            loadProductsDB(); 
+            loadInventory(); 
+            loadRecipes(); 
+            loadFixedData(); 
+            loadDashboardData();
+        } catch(e) { console.error("Error init:", e); }
+    });
+
+    // ==========================================
+    // LOGICA DE DATOS
+    // ==========================================
     function loadProductsDB() {
         db.collection('products').get().then(snap => {
             PRODUCTS_DB = {}; 
@@ -516,72 +510,21 @@
         db.collection('purchases').limit(500).get().then(snap=>{ PURCHASES=snap.docs.map(d=>d.data()); });
     }
 
-    function renderOrdersTab() {
-        const tbody = $('#ordersTableBody'); 
-        tbody.innerHTML = '';
-        if(ORDERS.length === 0) { 
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">No hay pedidos en este mes</td></tr>'; 
-            return; 
-        }
+    // ==========================================
+    // RENDERIZADO TABLAS (Costos, Stock, Proporciones)
+    // ==========================================
+    
+    function renderCostTables() { 
+        const renderRow = (p) => `<tr><td><b>${p.name}</b></td><td>$${p.purchCost||p.cost}</td><td><small>${p.format||'u'}</small></td><td>${p.yield||1} ${p.unit}</td><td style="font-weight:700;color:#166534">${money(p.cost)}</td><td><button class="btn-icon" onclick="openProductModal('${p.id}')">✎</button> <button class="btn-icon" onclick="deleteItem('inventory','${p.id}')">🗑️</button></td></tr>`;
         
-        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {};
+        // 🔥 FILTRO SEGURO
+        const rawMat = INVENTORY.filter(p => (p.category || 'otros') !== 'packaging' && !p.isSub);
+        const packMat = INVENTORY.filter(p => (p.category || '') === 'packaging');
 
-        ORDERS.forEach((o, index) => {
-            try {
-                const total = Number(o.total || 0); let deduction = 0;
-                let source = String(o.source || "").toLowerCase();
-                let pago = String(o.pago || o.paymentMethod || "").toLowerCase();
-
-                if(source.includes('pedidosya')) {
-                    deduction = (o.neto_excel > 0) ? (total - o.neto_excel) : (total * ((pctPy||30)/100));
-                } else if(pago.includes('mercado') || pago.includes('qr')) {
-                    deduction = total * (pctQR/100);
-                } else if(pago.includes('transfer')) {
-                    deduction = total * (pctTransf/100);
-                } else if(pago.includes('debito')) {
-                    deduction = total * (pctDebit/100);
-                }
-
-                let orderCost = calculateOrderConsumables(o.items||[]); 
-                (o.items||[]).forEach(item => {
-                     orderCost += (getUnitCost(item.name) * Number(item.qty||1));
-                });
-                
-                let profit = total - deduction - orderCost;
-                let dStr = '-'; const dt = parseDate(o.createdAt); 
-                if(dt) dStr = dt.toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
-                
-                let badgeClass = 'bdg-local';
-                if(source.includes('pedidosya')) badgeClass = 'bdg-py';
-                else if(source === 'web') badgeClass = 'bdg-web';
-
-                let itemsStr = (o.items||[]).map(i=> `${i.qty}x ${i.name}`).join(', ');
-
-                tbody.insertAdjacentHTML('beforeend', `
-                    <tr class="order-row" onclick="document.getElementById('detail-${index}').classList.toggle('open')">
-                        <td>${dStr}</td>
-                        <td>${o.nombre||'Cliente'}</td>
-                        <td><span class="badge ${badgeClass}">${o.source||'local'}</span></td>
-                        <td><span class="badge bdg-cash">${o.pago||'efectivo'}</span></td>
-                        <td style="font-weight:700">${money(total)}</td>
-                        <td style="font-weight:700; color:${profit>=0?'var(--green)':'var(--red)'}">${money(profit)}</td>
-                        <td>▼</td>
-                    </tr>
-                    <tr class="order-details" id="detail-${index}">
-                        <td colspan="7" style="padding:10px; background:#f9fafb">
-                            <div style="font-size:12px; line-height:1.5">
-                                <b>Items:</b> ${itemsStr}<br>
-                                <b>Costo Estimado:</b> ${money(orderCost)} | <b>Deducciones:</b> ${money(deduction)}<br>
-                                <b>Ganancia Real:</b> ${money(profit)}
-                            </div>
-                        </td>
-                    </tr>
-                `);
-            } catch(e) { console.error("Error fila", e); }
-        });
+        $('#costMateriaBody').innerHTML = rawMat.map(renderRow).join(''); 
+        $('#costPackBody').innerHTML = packMat.map(renderRow).join(''); 
     }
 
-    // PROPORCIONES
     function renderProportions() {
         const body = $('#proportionsBody'); if (!body) return; body.innerHTML = '';
         const stats = {};
@@ -604,7 +547,7 @@
             return 'otros';
         }
 
-        // 🔥 CORRECCIÓN NOMBRES PEDIDOS YA (Limpia [corchetes])
+        // 🔥 CORRECCIÓN NOMBRES PEDIDOS YA (Blindada contra errores)
         function cleanName(raw) {
             let n = raw.toLowerCase().trim();
             // PROTECCIÓN: Solo usar .match si estamos seguros
@@ -673,6 +616,8 @@
         });
 
         $('#totalItemsBadge').innerText = `Total: ${totalGeneral}`;
+        if($('#monthPickerProp')) $('#monthPickerProp').value = $('#monthPicker').value;
+
         const catOrder = ['hamburguesas', 'bebidas', 'guarniciones', 'extras', 'otros'];
         const sortedKeys = Object.values(stats).sort((a, b) => {
             let catA = (a.category||'otros').toLowerCase(); if(catA.includes('hamburguesa')) catA='hamburguesas';
@@ -790,7 +735,7 @@
         db.collection('inventory').orderBy('name').onSnapshot(snap => { RAW_STOCK = snap.docs.map(d => ({id:d.id, ...d.data(), isSub: false})); combineAndRender(); });
         db.collection('subrecipes').onSnapshot(snap => { SUB_RECIPES = snap.docs.map(d => ({id:d.id, ...d.data()})); PREMADE_STOCK = snap.docs.map(d => ({id: d.id, ...d.data(), category: '🧩 Armado', isSub: true, unit: 'u', qty: d.data().qty || 0, min: d.data().min || 0})); combineAndRender(); });
     }
-    window.combineAndRender = function() { INVENTORY = [...RAW_STOCK, ...PREMADE_STOCK]; renderStockTable(); try { renderCostTables(); } catch(e) { console.log(e); } renderRecipesList(); renderSubRecipesList(); }
+    window.combineAndRender = function() { INVENTORY = [...RAW_STOCK, ...PREMADE_STOCK]; renderStockTable(); try { renderCostTables(); } catch(e) { console.error("Error Cost Tables", e); } renderRecipesList(); renderSubRecipesList(); }
     window.loadRecipes = function() { db.collection('recipes').onSnapshot(snap => { RECIPES=snap.docs.map(d=>({id:d.id,...d.data()})); renderRecipesList(); }); }
     window.loadFixedData = function() { db.collection('config').doc('gerencia').onSnapshot(doc => { if(doc.exists) FIXED_DATA = doc.data(); if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[]; if(!FIXED_DATA.aliases) FIXED_DATA.aliases = []; $('#confDebit').value = FIXED_DATA.config?.taxDebit||0; $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0; renderFixedTables(); }); }
     
