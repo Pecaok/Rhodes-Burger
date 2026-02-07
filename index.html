@@ -89,8 +89,6 @@
     .sk-text { height: 24px; width: 50%; margin: 20px 0 10px; background: #d1d1d1; border-radius: 4px; }
     
     #storeBlocker.hidden { display: none !important; }
-    
-    /* MENSAJE DE ERROR */
     #errorMsg { display:none; background:#fee2e2; color:#b91c1c; padding:15px; border-radius:10px; text-align:center; margin-top:20px; font-weight:600; }
   </style>
 
@@ -106,7 +104,6 @@
     };
     window.MODAL = { item: null, extras: { patty:0, cheddar:0 } };
 
-    // Función de dibujado rápido
     window.fastRender = function() {
         const container = document.getElementById("menuContainer");
         if(!container || window.STATE.products.length === 0) return;
@@ -292,7 +289,7 @@
         const savedCart = localStorage.getItem(CART_KEY);
         if(savedCart) { window.STATE.cart = JSON.parse(savedCart); updateCartUI(); }
 
-        // TIMEOUT DE SEGURIDAD: Si no carga en 6s, mostrar aviso
+        // Timeout de seguridad: Si en 6s no cargó nada (ni caché ni red), mostrar aviso
         setTimeout(() => {
             if(window.STATE.products.length === 0) {
                 document.getElementById('errorMsg').style.display = 'block';
@@ -321,8 +318,12 @@
         firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
         
-        // 🔥 EL FIX PARA MÓVILES: Forzar Long Polling
-        db.settings({ experimentalForceLongPolling: true, merge: true });
+        // 🔥 FIX CRÍTICO: CONFIGURACIÓN PARA REDES MÓVILES
+        // Desactivamos la detección automática y forzamos Long Polling
+        db.settings({
+            experimentalForceLongPolling: true, 
+            experimentalAutoDetectLongPolling: false
+        });
 
         db.enablePersistence({synchronizeTabs:true}).catch(err => {});
 
@@ -332,10 +333,10 @@
                 const d = doc.data();
                 if(d.available !== false) window.STATE.products.push({ id: doc.id, ...d });
             });
-            // Ocultar mensaje de error si cargó bien
+            // Si cargó bien, ocultar error
             document.getElementById('errorMsg').style.display = 'none';
             window.fastRender(); saveToCache();
-        }, err => console.log("Offline mode"));
+        });
 
         db.collection("config").doc("store").onSnapshot(doc => {
             window.STATE.config.store = doc.data() || {};
