@@ -461,7 +461,8 @@
 
         function cleanName(raw) {
             let n = raw.toLowerCase().trim();
-            n = n.replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "").trim(); // Borra corchetes
+            // Esta línea ahora es más agresiva: borra desde el primer '[' hasta el final O hasta un ']'
+            n = n.replace(/\[.*?(?:\]|$)/g, "").replace(/\(.*?\)/g, "").trim(); 
             n = n.replace('doble', '').replace('simple', '').trim(); 
             n = n.replace(/\s{2,}/g, ' ');
             if(n === 'papas fritas') return 'porción papas fritas';
@@ -500,11 +501,21 @@
             (o.items || []).forEach(it => {
                 const qty = Number(it.qty || 1);
                 let rawName = it.name || "";
+                let n = rawName.toLowerCase().trim();
                 
-                // --- NUEVA LÓGICA: Detección de Extras en Corchetes (PedidosYa) ---
+                // --- 1. INTERCEPTAR SI EL ITEM ES PURAMENTE UN EXTRA (FETA, ETC) ---
+                // Esto soluciona que aparezca "Feta de cheddar" en Otros
+                if (n.includes("feta de cheddar") || n.includes("feta cheddar")) {
+                    addToStats("cheddar adicional", "Cheddar adicional", qty, source, false, 'extras');
+                    // Si el nombre es CASI SOLO eso, cortamos aquí para que no se agregue como producto principal
+                    if (n.replace(/\[|\]/g, '').trim().length < 20) return; 
+                }
+
+                // --- 2. DETECCIÓN DE EXTRAS DENTRO DE CORCHETES ---
                 if (rawName.includes('[')) {
                     try {
-                        const match = rawName.match(/\[(.*?)\]/);
+                        // Regex mejorado: no obliga a que cierre con ']' por si viene cortado
+                        const match = rawName.match(/\[(.*?)(?:\]|$)/);
                         if (match && match[1]) {
                             const content = match[1].toLowerCase();
                             // Detectar cantidad dentro del corchete (ej: "2 fetas" -> 2). Si no, es 1.
@@ -519,10 +530,9 @@
                         }
                     } catch(e) { console.log("Error leyendo extras en corchetes", e); }
                 }
-                // ------------------------------------------------------------------
 
+                // --- 3. PAPAS ---
                 let isSide = false;
-                let n = rawName.toLowerCase().trim();
                 let sideKey = ""; let sideName = "";
 
                 if (n.includes("sazonadas")) { isSide = true; sideKey = "papas fritas sazonadas"; sideName = "Porción Papas Fritas (Sazonadas)"; }
@@ -540,14 +550,19 @@
                     if(fKey) addToStats(fKey, fName, qty, source, false, "guarniciones");
                 }
 
-                // El resto sigue igual (cleanName borrará los corchetes para agrupar bien)
+                // --- 4. LIMPIEZA Y AGREGADO DE PRODUCTO PRINCIPAL ---
                 const isDouble = rawName.toLowerCase().includes('doble');
                 let baseName = cleanName(rawName);
+
+                // Si al limpiar queda vacío (ej: era solo "[Extra]"), no agregar nada más
+                if (!baseName || baseName.length < 2) return;
+
                 let key = Object.keys(stats).find(k => k === baseName) || baseName;
                 let prettyName = stats[key] ? stats[key].name : (baseName.charAt(0).toUpperCase() + baseName.slice(1));
 
                 addToStats(key, prettyName, qty, source, isDouble, stats[key]?.category);
 
+                // Extras legacy (web)
                 if (it.extras) {
                     let extraMeat = Number(it.extras.patty || it.extras.carne || it.extras.medallon || 0);
                     if (extraMeat > 0) addToStats("medallon adicional", "Medallón adicional", extraMeat * qty, source, false, 'extras');
