@@ -318,6 +318,13 @@
         firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
         
+        // 🔥 VOLVEMOS A FORZAR EL LONG POLLING
+        // Tu entorno bloquea los WebSockets, así que esto es obligatorio para que conecte.
+        db.settings({
+            experimentalForceLongPolling: true, 
+            experimentalAutoDetectLongPolling: false
+        });
+
         // Habilitamos persistencia offline
         db.enablePersistence({synchronizeTabs:true}).catch(err => {});
 
@@ -330,30 +337,30 @@
             });
             document.getElementById('errorMsg').style.display = 'none';
             window.fastRender(); saveToCache();
-        }, err => console.log("Offline mode"));
+        }, err => console.log("Offline mode: ", err));
 
         db.collection("config").doc("store").onSnapshot(doc => {
             window.STATE.config.store = doc.data() || {};
             window.checkStatus(); saveToCache();
         });
 
-        // 2. PEDIMOS UNA SOLA VEZ LAS CONFIGURACIONES ESTÁTICAS
+        // 2. PEDIMOS UNA SOLA VEZ LAS CONFIGURACIONES ESTÁTICAS (Con control de errores)
         db.collection("config").doc("sides").get().then(doc => {
             const d = doc.data() || {};
             window.STATE.config.sides = { con_sazon: d.con_sazon!==false, con_sal: d.con_sal!==false, sin_sal: d.sin_sal!==false };
             saveToCache();
-        });
+        }).catch(e => console.log("Error sides:", e));
 
         db.collection("config").doc("menuOrder").get().then(doc => {
             window.STATE.menuOrder = doc.exists ? doc.data() : {};
             window.fastRender(); saveToCache();
-        });
+        }).catch(e => console.log("Error menuOrder:", e));
 
         db.collection("config").doc("prices").get().then(doc => {
             const d = doc.data() || {};
             window.STATE.config.prices = { patty: Number(d.patty)||2800, cheddar: Number(d.cheddar)||300 };
             saveToCache();
-        });
+        }).catch(e => console.log("Error prices:", e));
     }
 
     // MODAL
