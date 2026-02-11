@@ -344,23 +344,33 @@
             window.checkStatus(); saveToCache();
         });
 
-        // 2. PEDIMOS UNA SOLA VEZ LAS CONFIGURACIONES ESTÁTICAS (Con control de errores)
-        db.collection("config").doc("sides").get().then(doc => {
+        // 2. ESCUCHAMOS CONFIGURACIONES ESTÁTICAS EN TIEMPO REAL
+        db.collection("config").doc("sides").onSnapshot(doc => {
             const d = doc.data() || {};
             window.STATE.config.sides = { con_sazon: d.con_sazon!==false, con_sal: d.con_sal!==false, sin_sal: d.sin_sal!==false };
             saveToCache();
-        }).catch(e => console.log("Error sides:", e));
+            window.fastRender(); // Re-renderiza en caso de que actives/desactives una guarnición
+        }, err => console.log("Error sides:", err));
 
-        db.collection("config").doc("menuOrder").get().then(doc => {
+        db.collection("config").doc("menuOrder").onSnapshot(doc => {
             window.STATE.menuOrder = doc.exists ? doc.data() : {};
             window.fastRender(); saveToCache();
-        }).catch(e => console.log("Error menuOrder:", e));
+        }, err => console.log("Error menuOrder:", err));
 
-        db.collection("config").doc("prices").get().then(doc => {
+        db.collection("config").doc("prices").onSnapshot(doc => {
             const d = doc.data() || {};
             window.STATE.config.prices = { patty: Number(d.patty)||2800, cheddar: Number(d.cheddar)||300 };
             saveToCache();
-        }).catch(e => console.log("Error prices:", e));
+            
+            // Actualiza en vivo si el cliente tiene el modal abierto justo en este momento
+            if (window.MODAL && window.MODAL.item) {
+                const pricePattyEl = document.getElementById("pricePattyDisplay");
+                const priceCheddarEl = document.getElementById("priceCheddarDisplay");
+                if(pricePattyEl) pricePattyEl.innerText = `($${window.STATE.config.prices.patty})`;
+                if(priceCheddarEl) priceCheddarEl.innerText = `($${window.STATE.config.prices.cheddar})`;
+                updateModalPrice();
+            }
+        }, err => console.log("Error prices:", err));
     }
 
     // MODAL
