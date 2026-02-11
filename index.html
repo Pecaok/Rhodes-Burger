@@ -318,22 +318,16 @@
         firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
         
-        // 🔥 FIX CRÍTICO: CONFIGURACIÓN PARA REDES MÓVILES
-        // Desactivamos la detección automática y forzamos Long Polling
-        db.settings({
-            experimentalForceLongPolling: true, 
-            experimentalAutoDetectLongPolling: false
-        });
-
+        // Habilitamos persistencia offline
         db.enablePersistence({synchronizeTabs:true}).catch(err => {});
 
+        // 1. ESCUCHAMOS EN TIEMPO REAL (Stock y Estado del local)
         db.collection("products").onSnapshot(snap => {
             window.STATE.products = [];
             snap.forEach(doc => {
                 const d = doc.data();
                 if(d.available !== false) window.STATE.products.push({ id: doc.id, ...d });
             });
-            // Si cargó bien, ocultar error
             document.getElementById('errorMsg').style.display = 'none';
             window.fastRender(); saveToCache();
         }, err => console.log("Offline mode"));
@@ -343,18 +337,19 @@
             window.checkStatus(); saveToCache();
         });
 
-        db.collection("config").doc("sides").onSnapshot(doc => {
+        // 2. PEDIMOS UNA SOLA VEZ LAS CONFIGURACIONES ESTÁTICAS
+        db.collection("config").doc("sides").get().then(doc => {
             const d = doc.data() || {};
             window.STATE.config.sides = { con_sazon: d.con_sazon!==false, con_sal: d.con_sal!==false, sin_sal: d.sin_sal!==false };
             saveToCache();
         });
 
-        db.collection("config").doc("menuOrder").onSnapshot(doc => {
+        db.collection("config").doc("menuOrder").get().then(doc => {
             window.STATE.menuOrder = doc.exists ? doc.data() : {};
             window.fastRender(); saveToCache();
         });
 
-        db.collection("config").doc("prices").onSnapshot(doc => {
+        db.collection("config").doc("prices").get().then(doc => {
             const d = doc.data() || {};
             window.STATE.config.prices = { patty: Number(d.patty)||2800, cheddar: Number(d.cheddar)||300 };
             saveToCache();
