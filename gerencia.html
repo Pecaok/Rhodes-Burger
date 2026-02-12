@@ -144,6 +144,7 @@
         <div><h2 style="margin:0; border:0">Tablero de Comando</h2></div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <div style="background:#fff7ed; padding:6px 12px; border-radius:8px; border:1px solid #fed7aa; display:flex; align-items:center; gap:8px">
+                <div class="conf-input-group"><div class="conf-lbl">PY %</div><input type="number" id="confPy" value="30" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">Débito</div><input type="number" id="confDebit" value="0" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">Transf</div><input type="number" id="confTransf" value="0" class="conf-inp"></div>
                 <div class="conf-input-group"><div class="conf-lbl">QR/MP</div><input type="number" id="confQR" value="0" class="conf-inp"></div>
@@ -664,8 +665,12 @@
             if(doc.exists) FIXED_DATA = doc.data();
             if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
             if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
+            
+            // Cargar configuración en inputs (con protección si no existe)
+            if($('#confPy')) $('#confPy').value = FIXED_DATA.config?.pyPercent || 30;
             $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
             $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0;
+            
             window.renderFixedTables();
         });
     };
@@ -782,7 +787,13 @@
     window.calculateAll = function() {
         if(typeof Chart === 'undefined') return;
         let gross=0, comms=0, taxes=0, theoCMV=0;
-        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR, pyPercent:pctPy } = FIXED_DATA.config || {};
+        
+        // Obtener porcentaje de PY (Protegido por si no existe el input)
+        let pyPct = 30;
+        if(FIXED_DATA.config && FIXED_DATA.config.pyPercent) pyPct = FIXED_DATA.config.pyPercent;
+        
+        const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config || {};
+        
         let dailySales = {}, productSales = {}, paymentStats = { 'Efectivo':0, 'Transferencia':0, 'MercadoPago/QR':0, 'PedidosYa':0, 'Otros':0 };
 
         ORDERS.forEach(o => {
@@ -790,7 +801,7 @@
             let pay = String(o.pago||o.paymentMethod||'').toLowerCase(); let finalPayMethod = 'Otros';
             if(String(o.source||'').toLowerCase().includes('pedidosya')) {
                  finalPayMethod = 'PedidosYa';
-                 comms += (o.neto_excel > 0) ? (sale - o.neto_excel) : (sale * ((pctPy||30)/100));
+                 comms += (o.neto_excel > 0) ? (sale - o.neto_excel) : (sale * ((pyPct)/100));
             } else {
                 if(pay.includes('mercado')||pay.includes('mp')||pay.includes('qr')) { taxes += (sale*(pctQR/100)); finalPayMethod='MercadoPago/QR'; }
                 else if(pay.includes('transfer')) { taxes += (sale*(pctTransf/100)); finalPayMethod='Transferencia'; }
@@ -903,7 +914,23 @@
     window.updFix = function(a,i,k,v) { FIXED_DATA[a][i][k]=k==='cost'?Number(v):v; };
     window.delFix = function(a,i) { FIXED_DATA[a].splice(i,1); window.renderFixedTables(); };
     window.renderFixedTables = function() { $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join(''); $('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
-    window.saveFixedData = function() { if(!FIXED_DATA.aliases)FIXED_DATA.aliases=[]; FIXED_DATA.config={pyPercent:Number($('#confPy').value), taxDebit:Number($('#confDebit').value), taxTransf:Number($('#confTransf').value), taxQR:Number($('#confQR').value)}; db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado")); window.calculateAll(); window.renderOrdersTab(); };
+    window.saveFixedData = function() { 
+        if(!FIXED_DATA.aliases) FIXED_DATA.aliases=[]; 
+        
+        // CORRECCIÓN PRINCIPAL: Protección contra el input faltante
+        let pyVal = 30; // Valor por defecto
+        if($('#confPy')) pyVal = Number($('#confPy').value);
+        
+        FIXED_DATA.config = {
+            pyPercent: pyVal,
+            taxDebit: Number($('#confDebit').value),
+            taxTransf: Number($('#confTransf').value),
+            taxQR: Number($('#confQR').value)
+        };
+        
+        db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("Guardado"));
+        window.calculateAll(); window.renderOrdersTab(); 
+    };
     window.saveConfig = window.saveFixedData;
     window.showTab = function(id) { document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none'); $('#tab-'+id).style.display='block'; document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); if(id==='proportions') window.renderProportions(); };
 
