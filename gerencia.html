@@ -445,11 +445,8 @@
         if (SIDES_CONFIG.con_sal) initStat("papas fritas con sal", "Porción Papas Fritas (Con Sal)", "guarniciones");
         if (SIDES_CONFIG.con_sazon) initStat("papas fritas sazonadas", "Porción Papas Fritas (Sazonadas)", "guarniciones");
         if (SIDES_CONFIG.sin_sal) initStat("papas fritas sin sal", "Porción Papas Fritas (Sin Sal)", "guarniciones");
-        initStat("medallon adicional", "Medallón adicional", "extras");
-        initStat("cheddar adicional", "Cheddar adicional", "extras");
-        initStat("bacon adicional", "Bacon adicional", "extras");
-        initStat("huevo adicional", "Huevo adicional", "extras");
-
+        // 🔥 Solo inicializamos extras si se detectan en ventas más adelante, no por defecto
+        
         function getCategory(name) {
             const n = name.toLowerCase();
             const burgerNames = ["cheese", "bacon", "egg", "core", "morgan", "big", "john", "buena", "mala", "fea", "rhodes", "burguesa", "pollo", "crispy"];
@@ -462,8 +459,8 @@
 
         function cleanName(raw) {
             let n = raw.toLowerCase().trim();
-            // Esta línea ahora es más agresiva: borra desde el primer '[' hasta el final O hasta un ']'
-            n = n.replace(/\[.*?(?:\]|$)/g, "").replace(/\(.*?\)/g, "").trim(); 
+            // Esta línea es clave: borra todo desde el primer '['
+            n = n.split('[')[0].trim(); 
             n = n.replace('doble', '').replace('simple', '').trim(); 
             n = n.replace(/\s{2,}/g, ' ');
             if(n === 'papas fritas') return 'porción papas fritas';
@@ -505,31 +502,28 @@
                 let n = rawName.toLowerCase().trim();
                 
                 // --- 1. INTERCEPTAR SI EL ITEM ES PURAMENTE UN EXTRA (FETA, ETC) ---
-                // Esto soluciona que aparezca "Feta de cheddar" en Otros
                 if (n.includes("feta de cheddar") || n.includes("feta cheddar")) {
                     addToStats("cheddar adicional", "Cheddar adicional", qty, source, false, 'extras');
-                    // Si el nombre es CASI SOLO eso, cortamos aquí para que no se agregue como producto principal
                     if (n.replace(/\[|\]/g, '').trim().length < 20) return; 
                 }
 
                 // --- 2. DETECCIÓN DE EXTRAS DENTRO DE CORCHETES ---
                 if (rawName.includes('[')) {
                     try {
-                        // Regex mejorado: no obliga a que cierre con ']' por si viene cortado
-                        const match = rawName.match(/\[(.*?)(?:\]|$)/);
-                        if (match && match[1]) {
-                            const content = match[1].toLowerCase();
-                            // Detectar cantidad dentro del corchete (ej: "2 fetas" -> 2). Si no, es 1.
+                        const parts = rawName.split('[');
+                        if (parts.length > 1) {
+                            const content = parts[1].toLowerCase();
+                            // Detectar cantidad
                             const extraQtyMatch = content.match(/(\d+)/);
                             const extraMultiplier = extraQtyMatch ? Number(extraQtyMatch[1]) : 1;
-                            const totalExtraQty = qty * extraMultiplier; // Multiplicar por cant de burgers
+                            const totalExtraQty = qty * extraMultiplier; 
 
                             if (content.includes('cheddar')) addToStats("cheddar adicional", "Cheddar adicional", totalExtraQty, source, false, 'extras');
                             if (content.includes('carne') || content.includes('medallon') || content.includes('patty')) addToStats("medallon adicional", "Medallón adicional", totalExtraQty, source, false, 'extras');
                             if (content.includes('bacon') || content.includes('panceta')) addToStats("bacon adicional", "Bacon adicional", totalExtraQty, source, false, 'extras');
                             if (content.includes('huevo')) addToStats("huevo adicional", "Huevo adicional", totalExtraQty, source, false, 'extras');
                         }
-                    } catch(e) { console.log("Error leyendo extras en corchetes", e); }
+                    } catch(e) { console.log("Error leyendo extras", e); }
                 }
 
                 // --- 3. PAPAS ---
@@ -553,9 +547,8 @@
 
                 // --- 4. LIMPIEZA Y AGREGADO DE PRODUCTO PRINCIPAL ---
                 const isDouble = rawName.toLowerCase().includes('doble');
-                let baseName = cleanName(rawName);
+                let baseName = cleanName(rawName); // Limpia todo después del '['
 
-                // Si al limpiar queda vacío (ej: era solo "[Extra]"), no agregar nada más
                 if (!baseName || baseName.length < 2) return;
 
                 let key = Object.keys(stats).find(k => k === baseName) || baseName;
@@ -563,7 +556,7 @@
 
                 addToStats(key, prettyName, qty, source, isDouble, stats[key]?.category);
 
-                // Extras legacy (web)
+                // Extras legacy
                 if (it.extras) {
                     let extraMeat = Number(it.extras.patty || it.extras.carne || it.extras.medallon || 0);
                     if (extraMeat > 0) addToStats("medallon adicional", "Medallón adicional", extraMeat * qty, source, false, 'extras');
@@ -591,6 +584,9 @@
         let currentCat = null;
 
         sortedKeys.forEach(s => {
+            // 🔥 FILTRO: Si es un extra y el total es 0, NO mostrarlo.
+            if(s.category === 'extras' && s.total === 0) return;
+
             let displayCat = (s.category || 'OTROS').toUpperCase();
             if (displayCat !== currentCat) {
                 currentCat = displayCat;
