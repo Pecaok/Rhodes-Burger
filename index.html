@@ -318,8 +318,6 @@
         firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
         
-        // 🔥 VOLVEMOS A FORZAR EL LONG POLLING
-        // Tu entorno bloquea los WebSockets, así que esto es obligatorio para que conecte.
         db.settings({
             experimentalForceLongPolling: true, 
             experimentalAutoDetectLongPolling: false
@@ -349,7 +347,7 @@
             const d = doc.data() || {};
             window.STATE.config.sides = { con_sazon: d.con_sazon!==false, con_sal: d.con_sal!==false, sin_sal: d.sin_sal!==false };
             saveToCache();
-            window.fastRender(); // Re-renderiza en caso de que actives/desactives una guarnición
+            window.fastRender(); 
         }, err => console.log("Error sides:", err));
 
         db.collection("config").doc("menuOrder").onSnapshot(doc => {
@@ -397,8 +395,22 @@
             friesContainer.parentElement.style.display = 'none';
         } else {
             friesContainer.parentElement.style.display = 'block';
+            
+            // 🔥 APLICAR CONFIGURACIÓN DE PAPAS ESPECÍFICA SI EXISTE (DE ADMIN)
+            const pOpts = item.potatoOptions || {};
+            const useGlobal = !pOpts.sazon && !pOpts.sal && !pOpts.sinSal; 
+
             for (const [key, label] of Object.entries(sidesMap)) {
-                if (window.STATE.config.sides[key]) {
+                let isAllowed = false;
+                if (useGlobal) {
+                    isAllowed = window.STATE.config.sides[key];
+                } else {
+                    if (key === 'con_sazon') isAllowed = pOpts.sazon;
+                    if (key === 'con_sal') isAllowed = pOpts.sal;
+                    if (key === 'sin_sal') isAllowed = pOpts.sinSal;
+                }
+
+                if (isAllowed) {
                     const checked = !firstFound ? 'checked' : ''; firstFound = true;
                     friesContainer.innerHTML += `<label class="chip"><input type="radio" name="fries" value="${key}" ${checked}> ${label}</label>`;
                 }
@@ -429,6 +441,8 @@
         const item = window.MODAL.item;
         const notes = document.getElementById("modNotes").value.trim();
         let fries = "";
+        
+        // Verifica selección para todo lo que no sea bebida
         if (item.category !== 'bebidas') {
             const friesInput = document.querySelector('input[name="fries"]:checked');
             if(!friesInput) { alert("Selecciona un tipo de papas"); return; }
@@ -461,13 +475,20 @@
         window.STATE.cart.items.forEach((item, idx) => {
             total += item.finalPrice * item.qty;
             let detail = [];
-            if(item.category === 'hamburguesas') {
+            
+            // 🔥 CORRECCIÓN AQUÍ: Mostrar el tipo de papa tanto para Hamburguesas como para Guarniciones
+            if (item.category !== 'bebidas' && item.fries) {
                 const map = { con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal" };
-                detail.push("🍟 " + map[item.fries]);
+                if (map[item.fries]) detail.push("🍟 " + map[item.fries]);
+            }
+            
+            if(item.category === 'hamburguesas') {
                 if(item.extras.patty) detail.push(`+${item.extras.patty} Carne`);
                 if(item.extras.cheddar) detail.push(`+${item.extras.cheddar} Cheddar`);
             }
+            
             if(item.notes) detail.push(`📝 ${item.notes}`);
+            
             container.innerHTML += `
                 <div class="item">
                     <div style="flex:1">
