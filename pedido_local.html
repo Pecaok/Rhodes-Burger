@@ -104,15 +104,6 @@
     const db = firebase.firestore();
     window.idToDoc = new Map();
 
-    const TTL_MS = 20 * 60 * 60 * 1000;
-    function checkSession(){
-      const ok = localStorage.getItem('rb_admin_ok')==='true';
-      const ts = Number(localStorage.getItem('rb_admin_t')||0);
-      if(!ok || (Date.now()-ts > TTL_MS)) location.replace('login.html');
-      else localStorage.setItem('rb_admin_t', String(Date.now()));
-    }
-    checkSession(); setInterval(checkSession, 5*60*1000);
-
     // DATOS EN MEMORIA
     let RECETAS_DB = {}; 
     let SUB_RECIPES_DB = {}; 
@@ -121,7 +112,7 @@
     let STOCK_NAME_TO_ID = {}; // Bolsa Global
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
-    let ALIASES_DB = []; // 🔥 NUEVO: Para guardar las promos
+    let ALIASES_DB = []; 
 
     function normalize(str) {
         return String(str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -163,13 +154,9 @@
         });
     });
     
-    // 🔥 CARGA DE ALIASES (PROMOS) DESDE GERENCIA
     db.collection('config').doc('gerencia').onSnapshot(doc => {
         if(doc.exists && doc.data().aliases) {
             ALIASES_DB = doc.data().aliases;
-        }
-        if(doc.exists && doc.data().config) {
-            // Cargar precios de configuración si fuera necesario
         }
     });
     
@@ -194,7 +181,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK (DEFINITIVA - CON SOPORTE PROMOS/ALIASES)
+    // 🔥 GESTIÓN DE STOCK 
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -205,19 +192,14 @@
         let huboCambios = false;
         let logs = []; 
 
-        // Juntamos todos los items raw del pedido
         let rawItems = Array.isArray(pedido.items) ? [...pedido.items] : [];
         if(Array.isArray(pedido.bebidas)) rawItems = rawItems.concat(pedido.bebidas);
         if(Array.isArray(pedido.drinks)) rawItems = rawItems.concat(pedido.drinks);
 
-        // 🔥 EXPANSIÓN DE PROMOS (ALIASES) 🔥
-        // Transformamos "Promo 2x1" en sus items reales ("2x Hamburguesa", "1x Papas")
         let itemsCalc = [];
         
         rawItems.forEach(item => {
             const nameNorm = normalize(item.name || "");
-            
-            // Buscamos si este nombre coincide con un ALIAS (Promo)
             const foundAlias = ALIASES_DB.find(a => normalize(a.external) === nameNorm);
             
             if (foundAlias && foundAlias.items && foundAlias.items.length > 0) {
@@ -226,21 +208,19 @@
                 
                 foundAlias.items.forEach(subItem => {
                     itemsCalc.push({
-                        name: subItem.id, // El ID interno del alias suele ser el nombre de la Receta
+                        name: subItem.id, 
                         qty: (Number(subItem.qty) * qtyPromo),
-                        notes: item.notes, // Heredamos notas
-                        fries: item.fries, // Heredamos opciones
-                        extras: item.extras // Heredamos extras
+                        notes: item.notes, 
+                        fries: item.fries, 
+                        extras: item.extras 
                     });
                     logs.push(`   ↳ +${Number(subItem.qty) * qtyPromo} x ${subItem.id}`);
                 });
             } else {
-                // Si no es promo, pasa directo
                 itemsCalc.push(item);
             }
         });
 
-        // AHORA PROCESAMOS LA LISTA EXPANDIDA
         let totalBurgers = 0;
         let doritosCount = 0; 
         let portionsCount = 0; 
@@ -266,26 +246,21 @@
 
             logs.push(`📦 Procesando: ${rawName} (x${qty})`);
 
-            // 1. Detectar Burger
             const isBurger = nameNorm.includes('hamb')||nameNorm.includes('burger')||nameNorm.includes('doble')||nameNorm.includes('simple')||nameNorm.includes('royal')||nameNorm.includes('cheese')||nameNorm.includes('cuarto')||nameNorm.includes('big');
             
             if(isBurger) totalBurgers += qty;
 
-            // 2. Porción Papas
             if(nameNorm.includes("porcion") && (nameNorm.includes("papa") || nameNorm.includes("frita"))) {
                 portionsCount += qty;
             }
 
-            // 3. Sazonador
             const hasSazon = friesOpt.includes('sazon') || nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon");
             if (hasSazon) doritosCount += qty;
 
-            // 4. Sal
             const hasNoSalt = friesOpt.includes('sin') && (friesOpt.includes('sal') || friesOpt.includes('sodio')) || nameNorm.includes("sin sal") || notesNorm.includes("sin sal");
             const isPotatoItem = isBurger || nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones");
             if (isPotatoItem && !hasNoSalt && !hasSazon) saltCount += qty;
 
-            // 5. RECETA AUTOMÁTICA
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
 
@@ -306,7 +281,6 @@
                 });
             } 
             
-            // 6. FALLBACK CARNE (Si no hay receta y es burger)
             if (!recipeFound && isBurger) {
                 let patties = 1;
                 if(nameNorm.includes('doble')) patties = 2;
@@ -317,30 +291,25 @@
                 if(pattyId) applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
             }
 
-            // 7. 🔥 EXTRAS DETECTADOS EN TEXTO
-            // CARNE / MEDALLÓN
             if (fullText.includes('extra') || fullText.includes('adicional') || !isBurger) { 
                 if (fullText.includes('carne') || fullText.includes('medallon') || fullText.includes('patty')) {
-                     if (fullText.includes('extra') || fullText.includes('adicional') || !isBurger) {
+                      if (fullText.includes('extra') || fullText.includes('adicional') || !isBurger) {
                         const id = findSmartId(['medallon', 'carne', 'patty']);
                         if(id) applyDecrement(id, 1 * qty, "Extra Medallón/Carne");
-                     }
+                      }
                 }
             }
 
-            // CHEDDAR
             if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar') || fullText.includes('cheddar extra')) {
                 const id = findSmartId(['cheddar', 'queso']);
                 if(id) applyDecrement(id, 1 * qty, "Extra Cheddar");
             }
 
-            // PANCETA / BACON
             if (fullText.includes('extra bacon') || fullText.includes('panceta') || fullText.includes('tocino')) {
                 const id = findSmartId(['bacon', 'panceta']);
                 if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon"); 
             }
 
-            // 8. EXTRAS DEL OBJETO
             if(item.extras){
                 for (const [key, valRaw] of Object.entries(item.extras)) {
                     const val = Number(valRaw);
@@ -357,7 +326,6 @@
             }
         });
 
-        // --- AUTOMÁTICOS GLOBALES ---
         const autoDesc = (keys, qtyToDeduct, name) => {
             const id = findSmartId(keys);
             if(id) applyDecrement(id, qtyToDeduct, name);
@@ -389,8 +357,6 @@
     }
 
     // GLOBALES
-    window.logout = () => { localStorage.removeItem('rb_admin_ok'); location.replace('login.html'); };
-
     window.setOrderStatus = async (id, next, isPaid) => {
         if(next==='delivered' && !isPaid){ alert("⚠️ COBRAR PRIMERO: El pedido figura pendiente."); return; }
         try{ 
@@ -525,7 +491,7 @@
     }
 
     /* ============================================================
-       🔥 IMPORTACIÓN PEDIDOS YA (CORREGIDA: DETECCIÓN FLEXIBLE + BLINDAJE EXTRAS)
+       🔥 IMPORTACIÓN PEDIDOS YA 
     ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
@@ -555,7 +521,7 @@
                 if (!existing.empty) { skipped++; continue; }
 
                 let total = r['total del pedido'];    
-                let neto = r['ingreso estimado'];      
+                let neto = r['ingreso estimado'];       
                 if(typeof total !== 'number') total = Number(String(total).replace(/\./g, '').replace(',', '.'));
                 if(typeof neto !== 'number') neto = Number(String(neto).replace(/\./g, '').replace(',', '.'));
                 if (!total || total <= 0) continue;
@@ -592,7 +558,6 @@
 
                         const nameClean = normalize(name); 
                         
-                        // 🔥 LÓGICA BLINDADA DE EXTRAS 🔥
                         const explicitExtra = nameClean.includes('extra') || nameClean.includes('adicional');
                         const isIngredientName = (nameClean === 'medallon' || nameClean === 'panceta' || nameClean === 'bacon' || nameClean === 'cheddar');
 
@@ -687,9 +652,9 @@
       </div>
       <a href="mostrador.html" class="nav-btn">🧾 Mostrador</a>
       <a href="admin.html" class="nav-btn">⚙️ Admin</a>
+      <a href="gerencia.html" class="nav-btn">📊 Gerencia</a> 
       <button id="btnBell" class="icon-btn" title="Sonido">🔔</button>
       <button id="btnAutoPrint" class="icon-btn" title="Autoimprimir">🖨️</button>
-      <button onclick="window.logout()" class="nav-btn btn-danger">Salir</button>
     </div>
   </header>
 
@@ -836,26 +801,13 @@
             const cat = window.getCat(it);
             if(cat === 'b'){
                 cats.b.push(it);
-                let fName = it.fries;
-                if(!fName && it.extras?.fries) fName = it.extras.fries;
-                if(!fName && it.guarnicion) fName = it.guarnicion;
-                if(fName){
-                   const fClean = String(fName).toLowerCase();
-                   if(fClean !== 'sin_papas' && fClean !== 'ninguna') {
-                       cats.f.push({name: fName, qty: it.qty||1});
-                   }
-                }
-                let dName = it.bebida || it.drink; 
-                if(!dName && it.extras?.bebida) dName = it.extras.bebida;
-                if(!dName && it.extras?.drink) dName = it.extras.drink;
-                if(!dName && it.extras?.gaseosa) dName = it.extras.gaseosa;
-                if(dName) {
-                    const dClean = String(dName).toLowerCase();
-                    if(dClean !== 'sin_bebida' && dClean !== 'ninguna' && dClean !== '') {
-                        cats.d.push({name: dName, qty: it.qty||1});
-                    }
-                }
-            } else { cats[cat].push(it); }
+            } else if (cat === 'f') {
+                cats.f.push(it);
+            } else if (cat === 'd') {
+                cats.d.push(it);
+            } else { 
+                cats.o.push(it); 
+            }
         });
 
         cats.b = consolidateItems(cats.b);
@@ -876,9 +828,14 @@
                 if(it.extras?.patty) ex.push(`+${it.extras.patty} carne`);
                 if(it.extras?.cheddar) ex.push(`+${it.extras.cheddar} cheddar`);
                 
-                let dName = esc(it.name);
-                if(title.includes("PAPAS")) dName = window.cleanFries(it.name);
+                // 🔥 CORRECCIÓN: Agregar descripción de papa a la tarjeta UI de pedidos si no es bebida
+                if (it.fries) {
+                    const map = {con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal"};
+                    if (map[it.fries]) ex.push(`🍟 ${map[it.fries]}`);
+                }
 
+                let dName = esc(it.name);
+                
                 const extrasHtml = ex.map(e => `<div class="it-sub" style="color:#d97706; font-weight:600">• ${e}</div>`).join('');
                 let displayPrice = money(lineTotal);
                 if(title.includes("PAPAS")) displayPrice = "";
@@ -996,28 +953,10 @@
        let cats = { b:[], f:[], d:[], o:[] };
        items.forEach(it => {
           const cat = window.getCat(it);
-          if(cat==='b'){
-             cats.b.push(it);
-             let fName = it.fries;
-             if(!fName && it.extras?.fries) fName = it.extras.fries;
-             if(!fName && it.guarnicion) fName = it.guarnicion;
-             if(fName){
-                 const fClean = String(fName).toLowerCase();
-                 if(fClean !== 'sin_papas' && fClean !== 'ninguna') {
-                    cats.f.push({name: fName, qty: it.qty||1});
-                 }
-             }
-             let dName = it.bebida || it.drink; 
-             if(!dName && it.extras?.bebida) dName = it.extras.bebida;
-             if(!dName && it.extras?.drink) dName = it.extras.drink;
-             if(!dName && it.extras?.gaseosa) dName = it.extras.gaseosa;
-             if(dName) {
-                 const dClean = String(dName).toLowerCase();
-                 if(dClean !== 'sin_bebida' && dClean !== 'ninguna' && dClean !== '') {
-                      cats.d.push({name: dName, qty: it.qty||1});
-                 }
-             }
-          } else { cats[cat].push(it); }
+          if(cat==='b') cats.b.push(it);
+          else if(cat==='f') cats.f.push(it);
+          else if(cat==='d') cats.d.push(it);
+          else cats.o.push(it);
        });
 
        cats.b = consolidateItems(cats.b);
@@ -1029,7 +968,6 @@
          if(!l.length) return "";
          const r = l.map(i => {
             let dName = esc(i.name);
-            if(ti.includes("PAPA")) dName = window.cleanFries(i.name);
             
             let basePrice = Number(i.price) || 0;
             let extraPatty = (i.extras?.patty || 0) * (PRICES_DB.patty || 2500);
@@ -1042,6 +980,12 @@
             
             let h = `<div class="row name"><div class="l">${i.qty||1} × ${dName}</div><div class="r">${displayPrice}</div></div>`;
             
+            // 🔥 CORRECCIÓN: Agregar descripción de papa a la impresión si no es bebida
+            if (i.fries) {
+                const map = {con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal"};
+                if (map[i.fries]) h += `<div class="sub">• 🍟 ${map[i.fries]}</div>`;
+            }
+
             if(!ti.includes("PAPA")){
                if(i.extras?.patty) h+=`<div class="sub">• +${i.extras.patty} carne</div>`;
                if(i.extras?.cheddar) h+=`<div class="sub">• +${i.extras.cheddar} cheddar</div>`;
