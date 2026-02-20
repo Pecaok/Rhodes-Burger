@@ -196,7 +196,7 @@
     <a class="btn" href="pedido_local.html">📦 Pedidos</a>
     <a class="btn" href="finanzas.html">📈 Finanzas</a>
     <a class="btn" href="admin.html">⚙️ Admin</a>
-    <a class="btn" href="gerencia.html">📊 Gerencia</a> <strong style="margin-left:8px">Mostrador</strong>
+    <strong style="margin-left:8px">Mostrador</strong>
   </div>
 </header>
 
@@ -206,10 +206,12 @@
     <h1>Menú</h1>
     <h2>Hamburguesas</h2>
     <div id="burgersGrid" class="grid"></div>
-    <h2 style="margin-top:30px">Bebidas</h2>
-    <div id="drinksGrid" class="grid"></div>
+    
     <h2 style="margin-top:30px">Guarniciones</h2>
     <div id="sidesGrid" class="grid"></div>
+
+    <h2 style="margin-top:30px">Bebidas</h2>
+    <div id="drinksGrid" class="grid"></div>
   </section>
 
   <aside class="side">
@@ -347,7 +349,7 @@ const $ = s => document.querySelector(s);
 const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 const FALLBACK_IMG = "images/logo.png";
 
-// 🔥 PRECIOS DINÁMICOS (Defaults por si no hay conexión)
+// 🔥 PRECIOS DINÁMICOS
 let EXTRA_PRICE_PATTY   = 2500;
 let EXTRA_PRICE_CHEDDAR = 300;
 
@@ -358,13 +360,12 @@ db.collection("config").doc("prices").onSnapshot(doc => {
         if(d.patty) EXTRA_PRICE_PATTY = Number(d.patty);
         if(d.cheddar) EXTRA_PRICE_CHEDDAR = Number(d.cheddar);
         
-        // Actualizar textos modal si está abierto o se abre luego
         if($("#lblPricePatty")) $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
         if($("#lblPriceCheddar")) $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
     }
 });
 
-/* ============= LOGICA PAGO (DEFAULT PENDIENTE) ============= */
+/* ============= LOGICA PAGO ============= */
 let isOrderPaid = false; 
 
 window.setPaymentStatus = function(isPaid){
@@ -406,7 +407,7 @@ db.collection("products").onSnapshot(snap=>{
       description: d.description || "",
       category: d.category,
       kind: d.kind || "",
-      allowedExtras: d.allowedExtras || {} // 🔥 LEER CONFIG DE EXTRAS
+      allowedExtras: d.allowedExtras || {}
     };
     if(d.available === false) availability.set(doc.id, false);
     const cat = (d.category||"").toLowerCase();
@@ -452,31 +453,25 @@ function renderCard(item){
   const btn = card.querySelector(".addBtn");
   const cat = (item.category||"").toLowerCase();
 
+  // 🔥 AHORA SOLO LAS BEBIDAS SE AGREGAN DIRECTO. GUARNICIONES TAMBIÉN ABREN MODAL.
   if(cat.includes("bebida") || cat.includes("drink")){
     btn.onclick = ()=>{
       if(!cart.drink[item.id]) cart.drink[item.id]={qty:0,item};
       cart.drink[item.id].qty++;
       renderCart();
     };
-  }
-  else if(cat.includes("guarnicion") || cat.includes("side") || cat.includes("papas")){
-    btn.onclick = ()=>{
-      if(!cart.side[item.id]) cart.side[item.id]={qty:0,item};
-      cart.side[item.id].qty++;
-      renderCart();
-    };
-  }
-  else{
+  } else {
     btn.onclick = ()=> openCustomize(item);
   }
+  
   return card;
 }
 
 function mountMenu(){
   elBurgersGrid.innerHTML = ""; elDrinksGrid.innerHTML = ""; elSidesGrid.innerHTML = "";
   orderedList("hamburguesas", PRODUCTS.burgers).forEach(x=> elBurgersGrid.appendChild(renderCard(x)));
-  orderedList("bebidas", PRODUCTS.drinks).forEach(x=> elDrinksGrid.appendChild(renderCard(x)));
   orderedList("guarniciones", PRODUCTS.sides).forEach(x=> elSidesGrid.appendChild(renderCard(x)));
+  orderedList("bebidas", PRODUCTS.drinks).forEach(x=> elDrinksGrid.appendChild(renderCard(x)));
 }
 
 /* ============= CARRITO ============= */
@@ -491,7 +486,6 @@ function renderCart(){
   // Hamburguesas
   for(const id in cart.burger){
     const b = cart.burger[id];
-    // Usar precios dinámicos
     const unit = b.item.price + b.extras.patty * EXTRA_PRICE_PATTY + b.extras.cheddar * EXTRA_PRICE_CHEDDAR;
     total += unit * b.qty;
 
@@ -523,6 +517,36 @@ function renderCart(){
     `;
   }
 
+  // Guarniciones (NUEVO: Ahora muestran opciones de papas)
+  for(const id in cart.side){
+    const s = cart.side[id];
+    total += s.item.price * s.qty;
+    
+    const extras=[];
+    if(s.fries) {
+        extras.push(`🍟 ${s.fries}`);
+    } else {
+        extras.push(`<div class="missing-fries-alert">⚠️ FALTAN ELEGIR PAPAS</div>`);
+    }
+    if(s.notes) extras.push("📝 "+s.notes);
+
+    html += `
+      <div class="cart-item">
+        <div class="cart-item-info">
+          <span class="cart-item-name">${s.qty}× ${s.item.name}</span>
+          <div class="cart-item-desc">${extras.join(" ")}</div>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:flex-end">
+            <span class="cart-item-price">${money(s.item.price*s.qty)}</span>
+            <div class="cart-actions">
+              <button class="btn-icon" onclick="editSide('${id}')" title="Editar">✏️</button>
+              <button class="btn-icon" onclick="removeFromCart('${id}', 'side')" style="color:#b00" title="Eliminar">✕</button>
+            </div>
+        </div>
+      </div>
+    `;
+  }
+
   // Bebidas
   for(const id in cart.drink){
     const d = cart.drink[id];
@@ -537,26 +561,6 @@ function renderCart(){
             <span class="cart-item-price">${money(d.item.price*d.qty)}</span>
             <div class="cart-actions">
               <button class="btn-icon" onclick="removeFromCart('${id}', 'drink')" style="color:#b00">✕</button>
-            </div>
-        </div>
-      </div>
-    `;
-  }
-
-  // Guarniciones
-  for(const id in cart.side){
-    const s = cart.side[id];
-    total += s.item.price * s.qty;
-    html += `
-      <div class="cart-item">
-        <div class="cart-item-info">
-          <span class="cart-item-name">${s.qty}× ${s.item.name}</span>
-          <div class="cart-item-desc">Extra</div>
-        </div>
-        <div style="display:flex; flex-direction:column; align-items:flex-end">
-            <span class="cart-item-price">${money(s.item.price*s.qty)}</span>
-            <div class="cart-actions">
-              <button class="btn-icon" onclick="removeFromCart('${id}', 'side')" style="color:#b00">✕</button>
             </div>
         </div>
       </div>
@@ -578,12 +582,19 @@ function openCustomize(item){
   $("#notesCount").textContent="0/200";
   document.querySelectorAll("input[name='fries']").forEach(x=> x.checked=false);
 
-  // 🔥 MOSTRAR U OCULTAR EXTRAS SEGÚN CONFIG DEL ADMIN
-  const allowed = item.allowedExtras || {};
-  $("#rowPatties").style.display = allowed.patty ? "flex" : "none";
-  $("#rowCheddar").style.display = allowed.cheddar ? "flex" : "none";
+  // Ocultar extras si es guarnición
+  const cat = (item.category||"").toLowerCase();
+  const isBurger = cat.includes("burger") || cat.includes("hamburguesa");
   
-  // Actualizar textos de precios
+  if (isBurger) {
+      const allowed = item.allowedExtras || {};
+      $("#rowPatties").style.display = allowed.patty ? "flex" : "none";
+      $("#rowCheddar").style.display = allowed.cheddar ? "flex" : "none";
+  } else {
+      $("#rowPatties").style.display = "none";
+      $("#rowCheddar").style.display = "none";
+  }
+  
   $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
   $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
   
@@ -591,7 +602,6 @@ function openCustomize(item){
   updatePreview();
 
   $("#overlayCustomize").style.display="flex";
-  
   $("#btnAdd").onclick = addItemFromModal;
   $("#btnAdd").textContent = "AGREGAR";
 }
@@ -603,6 +613,7 @@ function removeFromCart(id, type){
   renderCart();
 }
 
+// 🔥 EDICIÓN DE HAMBURGUESAS
 function editBurger(id){
   const b = cart.burger[id];
   if(!b) return;
@@ -614,12 +625,10 @@ function editBurger(id){
   $("#notes").value = b.notes || "";
   $("#notesCount").textContent = (b.notes || "").length + "/200";
 
-  // Check config
   const allowed = b.item.allowedExtras || {};
   $("#rowPatties").style.display = allowed.patty ? "flex" : "none";
   $("#rowCheddar").style.display = allowed.cheddar ? "flex" : "none";
   
-  // Precios
   $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
   $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
   
@@ -646,21 +655,65 @@ function editBurger(id){
   };
 }
 
+// 🔥 EDICIÓN DE GUARNICIONES
+function editSide(id){
+  const s = cart.side[id];
+  if(!s) return;
+  currentItem = s.item;
+
+  document.querySelectorAll("input[name='fries']").forEach(x=> x.checked = (x.value === s.friesRaw));
+  $("#patVal").textContent = "0";
+  $("#cheVal").textContent = "0";
+  $("#notes").value = s.notes || "";
+  $("#notesCount").textContent = (s.notes || "").length + "/200";
+
+  $("#rowPatties").style.display = "none";
+  $("#rowCheddar").style.display = "none";
+  
+  $("#modTitle").textContent = "Editar " + s.item.name;
+  updatePreview();
+
+  $("#overlayCustomize").style.display = "flex";
+
+  $("#btnAdd").textContent = "GUARDAR CAMBIOS";
+  $("#btnAdd").onclick = () => {
+    let friesRaw = document.querySelector("input[name='fries']:checked")?.value;
+    let friesName = getFriesName(friesRaw);
+
+    cart.side[id] = {
+      ...s,
+      fries: friesName,
+      friesRaw: friesRaw,
+      notes: $("#notes").value.trim()
+    };
+
+    $("#overlayCustomize").style.display = "none";
+    renderCart();
+  };
+}
+
 const addItemFromModal = ()=>{
   let friesRaw = document.querySelector("input[name='fries']:checked")?.value;
   let friesName = getFriesName(friesRaw);
 
-  const entry={
-    item:currentItem,
-    qty:1,
-    fries:friesName,
-    friesRaw:friesRaw, 
-    extras:{ patty:+$("#patVal").textContent, cheddar:+$("#cheVal").textContent },
-    notes:$("#notes").value.trim()
+  const entry = {
+    item: currentItem,
+    qty: 1,
+    fries: friesName,
+    friesRaw: friesRaw, 
+    extras: { patty:+$("#patVal").textContent, cheddar:+$("#cheVal").textContent },
+    notes: $("#notes").value.trim()
   };
 
-  const newId=currentItem.id+"_"+Date.now();
-  cart.burger[newId]=entry;
+  const newId = currentItem.id + "_" + Date.now();
+  const cat = (currentItem.category || "").toLowerCase();
+  
+  // Guardar en la categoría correcta
+  if (cat.includes("guarnicion") || cat.includes("side") || cat.includes("papas")) {
+      cart.side[newId] = entry;
+  } else {
+      cart.burger[newId] = entry;
+  }
 
   $("#overlayCustomize").style.display="none";
   renderCart();
@@ -743,10 +796,8 @@ function loadSlotsMostrador(){
   });
 }
 
-// 🔥 LOGICA HORA LOCAL (UTC-3) + 30 MIN
 function updateRealTimeSlot(){
     const now = new Date();
-    
     const minutes = now.getMinutes();
     const quarter = Math.floor(minutes / 15) * 15;
     
@@ -755,10 +806,8 @@ function updateRealTimeSlot(){
     baseTime.setSeconds(0);
     baseTime.setMilliseconds(0);
     
-    // Sumar 30 min
     const cutoff = new Date(baseTime.getTime() + 30 * 60000);
 
-    // Comparar
     let futureIdx = slotObjects.findIndex(s => s.date.getTime() >= cutoff.getTime() && !s.full);
 
     if (futureIdx === -1) {
@@ -818,6 +867,7 @@ async function sendToFirestore(){
   }
   if(!slot){ alert("Elegí un horario"); return; }
 
+  // 🔥 VALIDACIÓN DE PAPAS EN HAMBURGUESAS
   for (const id in cart.burger) {
     const burger = cart.burger[id];
     const name = burger.item.name.toLowerCase();
@@ -825,6 +875,15 @@ async function sendToFirestore(){
     
     if (!isSimple && !burger.friesRaw) {
       alert(`⚠️ ATENCIÓN:\n\nLa hamburguesa "${burger.item.name}" no tiene papas seleccionadas.\n\nPor favor, tocá el lápiz ✏️ para editarla.`);
+      return;
+    }
+  }
+
+  // 🔥 VALIDACIÓN DE PAPAS EN GUARNICIONES
+  for (const id in cart.side) {
+    const side = cart.side[id];
+    if (!side.friesRaw) {
+      alert(`⚠️ ATENCIÓN:\n\nLa guarnición "${side.item.name}" no tiene papas seleccionadas.\n\nPor favor, tocá el lápiz ✏️ para editarla.`);
       return;
     }
   }
@@ -844,7 +903,6 @@ async function sendToFirestore(){
 
       for(const id in cart.burger){
         const b=cart.burger[id];
-        // Calcular total con precios dinámicos
         const unit = b.item.price + b.extras.patty*EXTRA_PRICE_PATTY + b.extras.cheddar*EXTRA_PRICE_CHEDDAR;
         rawTotal += unit*b.qty;
         items.push({
@@ -854,6 +912,7 @@ async function sendToFirestore(){
           qty:b.qty, quantity:b.qty,
           price:b.item.price,
           fries:b.fries,
+          friesRaw:b.friesRaw,
           extras:b.extras,
           notes:b.notes||""
         });
@@ -871,6 +930,7 @@ async function sendToFirestore(){
         });
       }
 
+      // 🔥 ENVIAR PAPAS EN GUARNICIONES A FIREBASE
       for(const id in cart.side){
         const s=cart.side[id];
         rawTotal += s.item.price*s.qty;
@@ -879,7 +939,10 @@ async function sendToFirestore(){
           id:s.item.id,
           name:s.item.name,
           qty:s.qty, quantity:s.qty,
-          price:s.item.price
+          price:s.item.price,
+          fries:s.fries,
+          friesRaw:s.friesRaw,
+          notes:s.notes||""
         });
       }
 
