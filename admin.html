@@ -364,7 +364,7 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
       <a class="nav-link" href="finanzas.html">Finanzas</a>
       <a class="nav-link" href="pedido_local.html">Pedidos</a>
       <a class="nav-link" href="mostrador.html">Mostrador</a>
-      <a class="nav-link" href="gerencia.html">📊 Gerencia</a> <button class="btn-logout" onclick="logout()">Salir</button>
+      <button class="btn-logout" onclick="logout()">Salir</button>
     </nav>
   </div>
 </header>
@@ -505,6 +505,21 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
         </div>
     </div>
 
+    <div id="potatoOptionsGroup" style="grid-column:1/-1; display:none; background:#fefce8; padding:15px; border-radius:10px; border:1px solid #fde68a; margin-top: 5px;">
+        <label style="color:#b45309; margin-bottom:8px;">Variantes de Papas Permitidas (Solo Guarniciones)</label>
+        <div style="display:flex; gap:10px; flex-wrap:wrap">
+            <label class="check-row" style="background:#fff;">
+                <input type="checkbox" id="prdOptSazon"> 🍟 Sazonadas
+            </label>
+            <label class="check-row" style="background:#fff;">
+                <input type="checkbox" id="prdOptSal"> 🧂 Con Sal
+            </label>
+            <label class="check-row" style="background:#fff;">
+                <input type="checkbox" id="prdOptSinSal"> 🥔 Sin Sal
+            </label>
+        </div>
+    </div>
+
     <div style="grid-column:1/-1">
       <label>Descripción</label>
       <textarea id="prdDesc" rows="3" placeholder="Descripción corta…"></textarea>
@@ -543,7 +558,7 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
           <th>Estado</th>
           <th>Acciones</th>
         </tr>
-            </thead>
+      </thead>
       <tbody id="prdTable"></tbody>
     </table>
   </div>
@@ -678,7 +693,7 @@ async function fileToBase64(file){
   });
 }
 
-/* 3. SAVE PRODUCT (CORREGIDO) */
+/* 3. SAVE PRODUCT (ACTUALIZADO) */
 async function saveProduct(){
   const id = $('#prdId').value.trim();
   const name = $('#prdName').value.trim();
@@ -689,6 +704,11 @@ async function saveProduct(){
   
   const exPatty = $('#prdExPatty').checked;
   const exCheddar = $('#prdExCheddar').checked;
+
+  // 🔥 NUEVAS OPCIONES DE PAPAS
+  const optSazon = $('#prdOptSazon').checked;
+  const optSal = $('#prdOptSal').checked;
+  const optSinSal = $('#prdOptSinSal').checked;
 
   const file = $('#prdImgFile').files[0];
 
@@ -713,6 +733,12 @@ async function saveProduct(){
         patty: exPatty,
         cheddar: exCheddar
     },
+    // Guardamos la configuración de las papas
+    potatoOptions: {
+        sazon: optSazon,
+        sal: optSal,
+        sinSal: optSinSal
+    },
     kind: autoDetectKind(id, name, desc),
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -728,7 +754,7 @@ async function saveProduct(){
   }
 }
 
-/* 4. CLEAR FORM */
+/* 4. CLEAR FORM (ACTUALIZADO) */
 function clearProductForm(){
   $('#prdId').value = '';
   $('#prdName').value = '';
@@ -739,10 +765,17 @@ function clearProductForm(){
   $('#prdDesc').value = '';
   $('#prdExPatty').checked = false;
   $('#prdExCheddar').checked = false;
+  
+  // Limpiar nuevas opciones
+  $('#prdOptSazon').checked = false;
+  $('#prdOptSal').checked = false;
+  $('#prdOptSinSal').checked = false;
+  $('#potatoOptionsGroup').style.display = 'none';
+  
   editingProductImg = null; 
 }
 
-/* 5. LOAD FORM */
+/* 5. LOAD FORM (ACTUALIZADO) */
 function loadProductIntoForm(data, id){
   $('#prdId').value = id;
   $('#prdName').value = data.name || '';
@@ -757,6 +790,15 @@ function loadProductIntoForm(data, id){
   const extras = data.allowedExtras || {};
   $('#prdExPatty').checked = !!extras.patty;
   $('#prdExCheddar').checked = !!extras.cheddar;
+
+  // Cargar las opciones de papas
+  const pOpts = data.potatoOptions || {};
+  $('#prdOptSazon').checked = !!pOpts.sazon;
+  $('#prdOptSal').checked = !!pOpts.sal;
+  $('#prdOptSinSal').checked = !!pOpts.sinSal;
+
+  // Solo mostrar el recuadro si la categoría es guarniciones
+  $('#potatoOptionsGroup').style.display = data.category === 'guarniciones' ? 'block' : 'none';
 
   window.scrollTo({top:0, behavior:'smooth'});
 }
@@ -777,7 +819,7 @@ async function toggleProductAvailability(id, current){
   }catch(e){ alert("Error."); }
 }
 
-/* 8. RENDER TABLE (CON FILTROS Y BÚSQUEDA) */
+/* 8. RENDER TABLE (CON FILTROS Y BÚSQUEDA ACTUALIZADO) */
 let ALL_PRODUCTS_DATA = []; // Cache local para filtrar rápido
 let FILTER_CAT = "all";
 let FILTER_TXT = "";
@@ -817,8 +859,13 @@ function applyFilters(){
         let exIcons = "";
         const ex = p.allowedExtras || {};
         if(ex.patty) exIcons += "🥩 ";
-        if(ex.cheddar) exIcons += "🧀";
-        if(!exIcons) exIcons = '<span style="color:#ccc; font-size:12px">-</span>';
+        if(ex.cheddar) exIcons += "🧀 ";
+        
+        // Agregar ícono si tiene opciones de papa activadas
+        const po = p.potatoOptions || {};
+        if(po.sazon || po.sal || po.sinSal) exIcons += "🍟";
+
+        if(!exIcons.trim()) exIcons = '<span style="color:#ccc; font-size:12px">-</span>';
 
         tr.innerHTML = `
           <td><strong>${p.id}</strong></td>
@@ -869,6 +916,11 @@ document.querySelectorAll('#prdFilters .filter-tab').forEach(btn => {
         FILTER_CAT = btn.dataset.f;
         applyFilters();
     };
+});
+
+/* EVENTO CATEGORÍA PARA MOSTRAR/OCULTAR OPCIONES DE PAPAS */
+$('#prdCategory').addEventListener('change', (e) => {
+    $('#potatoOptionsGroup').style.display = e.target.value === 'guarniciones' ? 'block' : 'none';
 });
 
 productsCol.onSnapshot(renderProductsTable);
@@ -1038,7 +1090,7 @@ function renderInventory(snapshot){
 productsCol.onSnapshot(renderInventory);
 
 /* ============================================================
-     SIDES (PAPAS)
+     SIDES (PAPAS GLOBALES)
 =============================================================== */
 const sidesRef = () => db.collection("config").doc("sides");
 const SIDES_META = [
