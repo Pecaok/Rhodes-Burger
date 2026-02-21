@@ -207,6 +207,9 @@
     <h2>Hamburguesas</h2>
     <div id="burgersGrid" class="grid"></div>
     
+    <h2 style="margin-top:30px">Sándwiches</h2>
+    <div id="sandwichesGrid" class="grid"></div>
+    
     <h2 style="margin-top:30px">Guarniciones</h2>
     <div id="sidesGrid" class="grid"></div>
 
@@ -282,11 +285,8 @@
 
     <div class="field">
       <label style="margin-bottom:8px">Elegí las papas</label>
-      <div class="chip-group">
-        <label class="chip"><input type="radio" name="fries" value="con_sazon"> 🍟 Sazonadas</label>
-        <label class="chip"><input type="radio" name="fries" value="con_sal"> 🧂 Con sal</label>
-        <label class="chip"><input type="radio" name="fries" value="sin_sal"> 🥔 Sin sal</label>
-      </div>
+      <div class="chip-group" id="friesOptions">
+        </div>
     </div>
 
     <div id="rowPatties" class="row" style="display:none;margin-top:20px;">
@@ -383,9 +383,18 @@ window.setPaymentStatus = function(isPaid){
 }
 
 /* ============= MENÚ ============= */
-let PRODUCTS = { burgers: [], drinks: [], sides: [] };
+let PRODUCTS = { burgers: [], sandwiches: [], drinks: [], sides: [] }; // Agregado sandwiches
 let MENU_ORDER = {};
 let availability = new Map();
+let GLOBAL_SIDES = { con_sazon:true, con_sal:true, sin_sal:true };
+
+// Escuchar config global de papas
+db.collection("config").doc("sides").onSnapshot(doc => {
+    if(doc.exists) {
+        const d = doc.data();
+        GLOBAL_SIDES = { con_sazon: d.con_sazon!==false, con_sal: d.con_sal!==false, sin_sal: d.sin_sal!==false };
+    }
+});
 
 db.collection("config").doc("menuOrder").onSnapshot(snap=>{
   MENU_ORDER = snap.exists ? snap.data() : {};
@@ -396,7 +405,7 @@ const isAvailable = id => availability.get(id) !== false;
 
 db.collection("products").onSnapshot(snap=>{
   availability.clear();
-  PRODUCTS = { burgers: [], drinks: [], sides: [] };
+  PRODUCTS = { burgers: [], sandwiches: [], drinks: [], sides: [] };
   snap.forEach(doc=>{
     const d = doc.data();
     const item = {
@@ -407,11 +416,14 @@ db.collection("products").onSnapshot(snap=>{
       description: d.description || "",
       category: d.category,
       kind: d.kind || "",
-      allowedExtras: d.allowedExtras || {}
+      allowedExtras: d.allowedExtras || {},
+      potatoOptions: d.potatoOptions || null 
     };
     if(d.available === false) availability.set(doc.id, false);
     const cat = (d.category||"").toLowerCase();
+    
     if(cat.includes("burger") || cat.includes("hamburguesa")) PRODUCTS.burgers.push(item);
+    else if(cat.includes("sandwich") || cat.includes("sándwich")) PRODUCTS.sandwiches.push(item);
     else if(cat.includes("drink") || cat.includes("bebida")) PRODUCTS.drinks.push(item);
     else if(cat.includes("side") || cat.includes("guarnicion") || cat.includes("papas")) PRODUCTS.sides.push(item);
   });
@@ -428,9 +440,10 @@ function orderedList(category, arr){
   });
 }
 
-const elBurgersGrid = $("#burgersGrid");
-const elDrinksGrid  = $("#drinksGrid");
-const elSidesGrid   = $("#sidesGrid");
+const elBurgersGrid    = $("#burgersGrid");
+const elSandwichesGrid = $("#sandwichesGrid");
+const elDrinksGrid     = $("#drinksGrid");
+const elSidesGrid      = $("#sidesGrid");
 
 function renderCard(item){
   const ok = isAvailable(item.id);
@@ -453,7 +466,7 @@ function renderCard(item){
   const btn = card.querySelector(".addBtn");
   const cat = (item.category||"").toLowerCase();
 
-  // 🔥 AHORA SOLO LAS BEBIDAS SE AGREGAN DIRECTO. GUARNICIONES TAMBIÉN ABREN MODAL.
+  // Solo las bebidas se agregan directo, todo lo demás abre modal
   if(cat.includes("bebida") || cat.includes("drink")){
     btn.onclick = ()=>{
       if(!cart.drink[item.id]) cart.drink[item.id]={qty:0,item};
@@ -468,10 +481,19 @@ function renderCard(item){
 }
 
 function mountMenu(){
-  elBurgersGrid.innerHTML = ""; elDrinksGrid.innerHTML = ""; elSidesGrid.innerHTML = "";
+  elBurgersGrid.innerHTML = ""; elSandwichesGrid.innerHTML = ""; elDrinksGrid.innerHTML = ""; elSidesGrid.innerHTML = "";
   orderedList("hamburguesas", PRODUCTS.burgers).forEach(x=> elBurgersGrid.appendChild(renderCard(x)));
+  orderedList("sandwiches", PRODUCTS.sandwiches).forEach(x=> elSandwichesGrid.appendChild(renderCard(x)));
   orderedList("guarniciones", PRODUCTS.sides).forEach(x=> elSidesGrid.appendChild(renderCard(x)));
   orderedList("bebidas", PRODUCTS.drinks).forEach(x=> elDrinksGrid.appendChild(renderCard(x)));
+  
+  if(PRODUCTS.sandwiches.length === 0) {
+      elSandwichesGrid.style.display = 'none';
+      elSandwichesGrid.previousElementSibling.style.display = 'none';
+  } else {
+      elSandwichesGrid.style.display = 'grid';
+      elSandwichesGrid.previousElementSibling.style.display = 'block';
+  }
 }
 
 /* ============= CARRITO ============= */
@@ -483,14 +505,14 @@ function renderCart(){
   const wrap = $("#cartItems");
   const totalEl=$("#cartTotal");
 
-  // Hamburguesas
+  // Hamburguesas y Sándwiches
   for(const id in cart.burger){
     const b = cart.burger[id];
     const unit = b.item.price + b.extras.patty * EXTRA_PRICE_PATTY + b.extras.cheddar * EXTRA_PRICE_CHEDDAR;
     total += unit * b.qty;
 
     const extras=[];
-    if(b.fries) {
+    if(b.friesRaw || b.fries) {
         extras.push(`🍟 ${b.fries}`);
     } else {
         extras.push(`<div class="missing-fries-alert">⚠️ FALTAN ELEGIR PAPAS</div>`);
@@ -517,13 +539,13 @@ function renderCart(){
     `;
   }
 
-  // Guarniciones (NUEVO: Ahora muestran opciones de papas)
+  // Guarniciones 
   for(const id in cart.side){
     const s = cart.side[id];
     total += s.item.price * s.qty;
     
     const extras=[];
-    if(s.fries) {
+    if(s.friesRaw || s.fries) {
         extras.push(`🍟 ${s.fries}`);
     } else {
         extras.push(`<div class="missing-fries-alert">⚠️ FALTAN ELEGIR PAPAS</div>`);
@@ -580,23 +602,40 @@ function openCustomize(item){
   $("#cheVal").textContent="0";
   $("#notes").value="";
   $("#notesCount").textContent="0/200";
-  document.querySelectorAll("input[name='fries']").forEach(x=> x.checked=false);
-
-  // Ocultar extras si es guarnición
-  const cat = (item.category||"").toLowerCase();
-  const isBurger = cat.includes("burger") || cat.includes("hamburguesa");
   
-  if (isBurger) {
-      const allowed = item.allowedExtras || {};
-      $("#rowPatties").style.display = allowed.patty ? "flex" : "none";
-      $("#rowCheddar").style.display = allowed.cheddar ? "flex" : "none";
-  } else {
-      $("#rowPatties").style.display = "none";
-      $("#rowCheddar").style.display = "none";
-  }
+  const cat = (item.category||"").toLowerCase();
+  const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich");
+  
+  const allowed = item.allowedExtras || {};
+  
+  $("#rowPatties").style.display = (allowed.patty || (isBurgerType && allowed.patty !== false)) ? "flex" : "none";
+  $("#rowCheddar").style.display = (allowed.cheddar || (isBurgerType && allowed.cheddar !== false)) ? "flex" : "none";
   
   $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
   $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
+  
+  // Renderizar opciones de papas
+  const friesContainer = $("#friesOptions");
+  friesContainer.innerHTML = '';
+  const sidesMap = { con_sazon: "Sazonadas", con_sal: "Con Sal", sin_sal: "Sin Sal" };
+  
+  const pOpts = item.potatoOptions || {};
+  const useGlobal = !pOpts.sazon && !pOpts.sal && !pOpts.sinSal; 
+
+  for (const [key, label] of Object.entries(sidesMap)) {
+      let isAllowed = false;
+      if (useGlobal) {
+          isAllowed = GLOBAL_SIDES[key];
+      } else {
+          if (key === 'con_sazon') isAllowed = pOpts.sazon;
+          if (key === 'con_sal') isAllowed = pOpts.sal;
+          if (key === 'sin_sal') isAllowed = pOpts.sinSal;
+      }
+
+      if (isAllowed) {
+          friesContainer.innerHTML += `<label class="chip"><input type="radio" name="fries" value="${key}"> 🍟 ${label}</label>`;
+      }
+  }
   
   $("#modTitle").textContent = "Personalizar " + item.name;
   updatePreview();
@@ -613,24 +652,43 @@ function removeFromCart(id, type){
   renderCart();
 }
 
-// 🔥 EDICIÓN DE HAMBURGUESAS
 function editBurger(id){
   const b = cart.burger[id];
   if(!b) return;
   currentItem = b.item;
+  
+  const friesContainer = $("#friesOptions");
+  friesContainer.innerHTML = '';
+  const sidesMap = { con_sazon: "Sazonadas", con_sal: "Con Sal", sin_sal: "Sin Sal" };
+  const pOpts = b.item.potatoOptions || {};
+  const useGlobal = !pOpts.sazon && !pOpts.sal && !pOpts.sinSal; 
 
-  document.querySelectorAll("input[name='fries']").forEach(x=> x.checked = (x.value === b.friesRaw));
+  for (const [key, label] of Object.entries(sidesMap)) {
+      let isAllowed = false;
+      if (useGlobal) { isAllowed = GLOBAL_SIDES[key]; } 
+      else {
+          if (key === 'con_sazon') isAllowed = pOpts.sazon;
+          if (key === 'con_sal') isAllowed = pOpts.sal;
+          if (key === 'sin_sal') isAllowed = pOpts.sinSal;
+      }
+
+      if (isAllowed || key === b.friesRaw) {
+          const checked = key === b.friesRaw ? 'checked' : '';
+          friesContainer.innerHTML += `<label class="chip"><input type="radio" name="fries" value="${key}" ${checked}> 🍟 ${label}</label>`;
+      }
+  }
+
   $("#patVal").textContent = b.extras.patty;
   $("#cheVal").textContent = b.extras.cheddar;
   $("#notes").value = b.notes || "";
   $("#notesCount").textContent = (b.notes || "").length + "/200";
 
+  const cat = (b.item.category||"").toLowerCase();
+  const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich");
   const allowed = b.item.allowedExtras || {};
-  $("#rowPatties").style.display = allowed.patty ? "flex" : "none";
-  $("#rowCheddar").style.display = allowed.cheddar ? "flex" : "none";
   
-  $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
-  $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
+  $("#rowPatties").style.display = (allowed.patty || (isBurgerType && allowed.patty !== false)) ? "flex" : "none";
+  $("#rowCheddar").style.display = (allowed.cheddar || (isBurgerType && allowed.cheddar !== false)) ? "flex" : "none";
   
   $("#modTitle").textContent = "Editar " + b.item.name;
   updatePreview();
@@ -655,13 +713,32 @@ function editBurger(id){
   };
 }
 
-// 🔥 EDICIÓN DE GUARNICIONES
 function editSide(id){
   const s = cart.side[id];
   if(!s) return;
   currentItem = s.item;
 
-  document.querySelectorAll("input[name='fries']").forEach(x=> x.checked = (x.value === s.friesRaw));
+  const friesContainer = $("#friesOptions");
+  friesContainer.innerHTML = '';
+  const sidesMap = { con_sazon: "Sazonadas", con_sal: "Con Sal", sin_sal: "Sin Sal" };
+  const pOpts = s.item.potatoOptions || {};
+  const useGlobal = !pOpts.sazon && !pOpts.sal && !pOpts.sinSal; 
+
+  for (const [key, label] of Object.entries(sidesMap)) {
+      let isAllowed = false;
+      if (useGlobal) { isAllowed = GLOBAL_SIDES[key]; } 
+      else {
+          if (key === 'con_sazon') isAllowed = pOpts.sazon;
+          if (key === 'con_sal') isAllowed = pOpts.sal;
+          if (key === 'sin_sal') isAllowed = pOpts.sinSal;
+      }
+
+      if (isAllowed || key === s.friesRaw) {
+          const checked = key === s.friesRaw ? 'checked' : '';
+          friesContainer.innerHTML += `<label class="chip"><input type="radio" name="fries" value="${key}" ${checked}> 🍟 ${label}</label>`;
+      }
+  }
+
   $("#patVal").textContent = "0";
   $("#cheVal").textContent = "0";
   $("#notes").value = s.notes || "";
@@ -708,7 +785,6 @@ const addItemFromModal = ()=>{
   const newId = currentItem.id + "_" + Date.now();
   const cat = (currentItem.category || "").toLowerCase();
   
-  // Guardar en la categoría correcta
   if (cat.includes("guarnicion") || cat.includes("side") || cat.includes("papas")) {
       cart.side[newId] = entry;
   } else {
@@ -742,7 +818,7 @@ $("#notes").oninput=()=> $("#notesCount").textContent = $("#notes").value.length
 $("#btnCancel").onclick=()=>{ $("#overlayCustomize").style.display="none"; };
 
 
-/* ============= SLOTS (TIEMPO REAL + 30 MIN REGLA) ============= */
+/* ============= SLOTS ============= */
 const SLOT_START = "19:15";
 const SLOT_END   = "23:45";
 const SLOT_INTERVAL_MIN = 15;
@@ -867,19 +943,17 @@ async function sendToFirestore(){
   }
   if(!slot){ alert("Elegí un horario"); return; }
 
-  // 🔥 VALIDACIÓN DE PAPAS EN HAMBURGUESAS
   for (const id in cart.burger) {
     const burger = cart.burger[id];
     const name = burger.item.name.toLowerCase();
-    const isSimple = !name.includes("doble") && !name.includes("pollo");
+    const isSimple = !name.includes("doble") && !name.includes("pollo") && !burger.item.category.includes("sandwich");
     
     if (!isSimple && !burger.friesRaw) {
-      alert(`⚠️ ATENCIÓN:\n\nLa hamburguesa "${burger.item.name}" no tiene papas seleccionadas.\n\nPor favor, tocá el lápiz ✏️ para editarla.`);
+      alert(`⚠️ ATENCIÓN:\n\nEl producto "${burger.item.name}" no tiene papas seleccionadas.\n\nPor favor, tocá el lápiz ✏️ para editarla.`);
       return;
     }
   }
 
-  // 🔥 VALIDACIÓN DE PAPAS EN GUARNICIONES
   for (const id in cart.side) {
     const side = cart.side[id];
     if (!side.friesRaw) {
@@ -906,11 +980,12 @@ async function sendToFirestore(){
         const unit = b.item.price + b.extras.patty*EXTRA_PRICE_PATTY + b.extras.cheddar*EXTRA_PRICE_CHEDDAR;
         rawTotal += unit*b.qty;
         items.push({
-          type:"burger",
+          type: b.item.category.includes("sandwich") ? "sandwich" : "burger",
           id:b.item.id,
           name:b.item.name,
           qty:b.qty, quantity:b.qty,
           price:b.item.price,
+          category: b.item.category,
           fries:b.fries,
           friesRaw:b.friesRaw,
           extras:b.extras,
@@ -926,11 +1001,11 @@ async function sendToFirestore(){
           id:d.item.id,
           name:d.item.name,
           qty:d.qty, quantity:d.qty,
-          price:d.item.price
+          price:d.item.price,
+          category: d.item.category
         });
       }
 
-      // 🔥 ENVIAR PAPAS EN GUARNICIONES A FIREBASE
       for(const id in cart.side){
         const s=cart.side[id];
         rawTotal += s.item.price*s.qty;
@@ -940,6 +1015,7 @@ async function sendToFirestore(){
           name:s.item.name,
           qty:s.qty, quantity:s.qty,
           price:s.item.price,
+          category: s.item.category,
           fries:s.fries,
           friesRaw:s.friesRaw,
           notes:s.notes||""
