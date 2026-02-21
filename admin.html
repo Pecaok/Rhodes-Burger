@@ -1,38 +1,6 @@
 <!doctype html>
 <html lang="es">
 
-<script>
-const TTL_HOURS = 20;
-const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
-
-function sessionValid(){
-  const ok = localStorage.getItem('rb_admin_ok') === 'true';
-  const ts = Number(localStorage.getItem('rb_admin_t') || 0);
-  return ok && (Date.now() - ts) < TTL_MS;
-}
-function bumpSession(){
-  if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
-}
-function logout(){
-  localStorage.removeItem('rb_admin_ok');
-  localStorage.removeItem('rb_admin_t');
-  localStorage.removeItem('rb_auth_v2');
-  sessionStorage.removeItem('rb_auth_v2');
-  location.replace('login.html');
-}
-(function requireSession(){
-  if (!sessionValid()){
-    const next = encodeURIComponent(
-      (location.pathname.replace(/^\//,'') || 'pedido_local.html') +
-      (location.search || '') + (location.hash || '')
-    );
-    location.replace('login.html?next=' + next);
-  } else bumpSession();
-})();
-['click','keydown','focus','mousemove','touchstart','scroll']
-  .forEach(e => window.addEventListener(e, bumpSession, {passive:true}));
-</script>
-
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -122,20 +90,6 @@ header {
 }
 .nav-link:hover { background: #f0f0f0; color: var(--text); }
 .nav-link.active { background: var(--bg); color: var(--text); box-shadow: inset 0 0 0 1px #eee; }
-
-.btn-logout {
-  background: #ffebee;
-  color: var(--bad);
-  border: 1px solid #ffcdd2;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-weight: 700;
-  cursor: pointer;
-  font-size: 13px;
-  margin-left: 10px;
-  transition: 0.2s;
-}
-.btn-logout:hover { background: #ffcdd2; }
 
 /* MAIN & CARDS */
 main {
@@ -364,7 +318,7 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
       <a class="nav-link" href="finanzas.html">Finanzas</a>
       <a class="nav-link" href="pedido_local.html">Pedidos</a>
       <a class="nav-link" href="mostrador.html">Mostrador</a>
-      <button class="btn-logout" onclick="logout()">Salir</button>
+      <a class="nav-link" href="gerencia.html">📊 Gerencia</a>
     </nav>
   </div>
 </header>
@@ -477,6 +431,7 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
       <label>Categoría</label>
       <select id="prdCategory">
         <option value="hamburguesas">Hamburguesas</option>
+        <option value="sandwiches">Sándwiches</option>
         <option value="bebidas">Bebidas</option>
         <option value="guarniciones">Guarniciones</option>
       </select>
@@ -540,6 +495,7 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
       <div class="filter-tabs" id="prdFilters">
           <div class="filter-tab active" data-f="all">Todos</div>
           <div class="filter-tab" data-f="hamburguesas">Burgers</div>
+          <div class="filter-tab" data-f="sandwiches">Sándwiches</div>
           <div class="filter-tab" data-f="bebidas">Bebidas</div>
           <div class="filter-tab" data-f="guarniciones">Papas</div>
       </div>
@@ -572,6 +528,7 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
 
     <div class="row" id="orderCatButtons" style="margin-bottom:15px; background:#f5f5f5; padding:4px; border-radius:10px; display:inline-flex;">
       <button class="mini-btn primary" data-cat="hamburguesas">Burgers</button>
+      <button class="mini-btn" data-cat="sandwiches" style="color:#555; background:transparent">Sándwiches</button>
       <button class="mini-btn" data-cat="bebidas" style="color:#555; background:transparent">Bebidas</button>
       <button class="mini-btn" data-cat="guarniciones" style="color:#555; background:transparent">Papas</button>
     </div>
@@ -673,6 +630,10 @@ function autoDetectKind(id, name = "", desc = "") {
   id    = id.toLowerCase();
   name = (name || "").toLowerCase();
   desc = (desc || "").toLowerCase();
+  
+  // Si es un sándwich, evitamos que lo marque como simple por defecto
+  if (name.includes("sandwich") || name.includes("sándwich")) return "sandwich";
+  
   if (id.includes("_doble"))  return "doble";
   if (id.includes("_simple")) return "simple";
   if (id.includes("_pollo"))  return "pollo";
@@ -705,7 +666,6 @@ async function saveProduct(){
   const exPatty = $('#prdExPatty').checked;
   const exCheddar = $('#prdExCheddar').checked;
 
-  // 🔥 NUEVAS OPCIONES DE PAPAS
   const optSazon = $('#prdOptSazon').checked;
   const optSal = $('#prdOptSal').checked;
   const optSinSal = $('#prdOptSinSal').checked;
@@ -716,7 +676,6 @@ async function saveProduct(){
   if(!name){ alert("Ingresá un nombre"); return; }
   if(!(price>0)){ alert("Precio inválido"); return; }
 
-  // 🔥 LOGICA INTELIGENTE DE IMAGEN
   let finalImg = urlImg; 
   if(file){
     finalImg = await fileToBase64(file);
@@ -733,7 +692,6 @@ async function saveProduct(){
         patty: exPatty,
         cheddar: exCheddar
     },
-    // Guardamos la configuración de las papas
     potatoOptions: {
         sazon: optSazon,
         sal: optSal,
@@ -766,7 +724,6 @@ function clearProductForm(){
   $('#prdExPatty').checked = false;
   $('#prdExCheddar').checked = false;
   
-  // Limpiar nuevas opciones
   $('#prdOptSazon').checked = false;
   $('#prdOptSal').checked = false;
   $('#prdOptSinSal').checked = false;
@@ -779,7 +736,11 @@ function clearProductForm(){
 function loadProductIntoForm(data, id){
   $('#prdId').value = id;
   $('#prdName').value = data.name || '';
-  $('#prdCategory').value = data.category || 'hamburguesas';
+  
+  // Mapeamos por si tiene una categoría vieja, pero damos soporte a la nueva
+  const cat = data.category || 'hamburguesas';
+  $('#prdCategory').value = cat;
+  
   $('#prdPrice').value = data.price || '';
   
   editingProductImg = data.img || null;
@@ -791,14 +752,12 @@ function loadProductIntoForm(data, id){
   $('#prdExPatty').checked = !!extras.patty;
   $('#prdExCheddar').checked = !!extras.cheddar;
 
-  // Cargar las opciones de papas
   const pOpts = data.potatoOptions || {};
   $('#prdOptSazon').checked = !!pOpts.sazon;
   $('#prdOptSal').checked = !!pOpts.sal;
   $('#prdOptSinSal').checked = !!pOpts.sinSal;
 
-  // Solo mostrar el recuadro si la categoría es guarniciones
-  $('#potatoOptionsGroup').style.display = data.category === 'guarniciones' ? 'block' : 'none';
+  $('#potatoOptionsGroup').style.display = cat === 'guarniciones' ? 'block' : 'none';
 
   window.scrollTo({top:0, behavior:'smooth'});
 }
@@ -819,13 +778,12 @@ async function toggleProductAvailability(id, current){
   }catch(e){ alert("Error."); }
 }
 
-/* 8. RENDER TABLE (CON FILTROS Y BÚSQUEDA ACTUALIZADO) */
-let ALL_PRODUCTS_DATA = []; // Cache local para filtrar rápido
+/* 8. RENDER TABLE (CON FILTROS Y BÚSQUEDA) */
+let ALL_PRODUCTS_DATA = []; 
 let FILTER_CAT = "all";
 let FILTER_TXT = "";
 
 function renderProductsTable(snapshot){
-  // Guardamos datos
   ALL_PRODUCTS_DATA = [];
   snapshot.forEach(doc => {
       ALL_PRODUCTS_DATA.push({ id: doc.id, ...doc.data() });
@@ -833,7 +791,6 @@ function renderProductsTable(snapshot){
   applyFilters();
 }
 
-// 🔥 FUNCIÓN DE FILTRADO
 function applyFilters(){
     const tbody = $('#prdTable');
     tbody.innerHTML = '';
@@ -861,7 +818,6 @@ function applyFilters(){
         if(ex.patty) exIcons += "🥩 ";
         if(ex.cheddar) exIcons += "🧀 ";
         
-        // Agregar ícono si tiene opciones de papa activadas
         const po = p.potatoOptions || {};
         if(po.sazon || po.sal || po.sinSal) exIcons += "🍟";
 
@@ -886,7 +842,6 @@ function applyFilters(){
         tbody.appendChild(tr);
     });
 
-    // Reasignar eventos
     tbody.querySelectorAll("button").forEach(btn=>{
         btn.onclick = async()=>{
           const id = btn.dataset.id;
@@ -903,7 +858,6 @@ function applyFilters(){
     });
 }
 
-// 🔥 EVENTOS DE BÚSQUEDA
 $('#prdSearch').addEventListener('input', (e) => {
     FILTER_TXT = e.target.value;
     applyFilters();
@@ -918,18 +872,14 @@ document.querySelectorAll('#prdFilters .filter-tab').forEach(btn => {
     };
 });
 
-/* EVENTO CATEGORÍA PARA MOSTRAR/OCULTAR OPCIONES DE PAPAS */
 $('#prdCategory').addEventListener('change', (e) => {
     $('#potatoOptionsGroup').style.display = e.target.value === 'guarniciones' ? 'block' : 'none';
 });
 
 productsCol.onSnapshot(renderProductsTable);
 
-/* ============================================================
-     GESTIÓN DE PRECIOS DE EXTRAS
-=============================================================== */
+/* GESTIÓN DE PRECIOS DE EXTRAS */
 const pricesRef = db.collection("config").doc("prices");
-
 pricesRef.get().then(doc => {
     if(doc.exists) {
         const d = doc.data();
@@ -937,7 +887,6 @@ pricesRef.get().then(doc => {
         if(d.cheddar) $('#priceCheddar').value = d.cheddar;
     }
 });
-
 $('#btnSaveExtras').onclick = async () => {
     const pPatty = Number($('#pricePatty').value);
     const pCheddar = Number($('#priceCheddar').value);
@@ -945,16 +894,10 @@ $('#btnSaveExtras').onclick = async () => {
     try {
         await pricesRef.set({ patty: pPatty, cheddar: pCheddar }, {merge:true});
         alert("Precios de extras actualizados.");
-    } catch(e) {
-        console.error(e);
-        alert("Error al guardar precios.");
-    }
+    } catch(e) { alert("Error al guardar precios."); }
 };
 
-
-/* ============================================================
-     ORDEN VISUAL
-=============================================================== */
+/* ORDEN VISUAL */
 let ORDER_PRODUCTS = [];
 let CURRENT_CAT = "hamburguesas";
 const menuOrderRef = db.collection("config").doc("menuOrder");
@@ -1011,13 +954,8 @@ function renderOrderGrid(){
       </div>
       <div style="padding:8px; font-weight:700; font-size:13px; text-align:center">${p.name}</div>
     `;
-    card.addEventListener("dragstart", e=>{
-      e.dataTransfer.setData("id", p.id);
-      card.classList.add("dragging");
-    });
-    card.addEventListener("dragend", ()=>{
-      card.classList.remove("dragging");
-    });
+    card.addEventListener("dragstart", e=>{ e.dataTransfer.setData("id", p.id); card.classList.add("dragging"); });
+    card.addEventListener("dragend", ()=>{ card.classList.remove("dragging"); });
     card.addEventListener("dragover", e=>{
       e.preventDefault();
       const dragging = orderGrid.querySelector(".dragging");
@@ -1033,10 +971,7 @@ function renderOrderGrid(){
   });
 }
 
-productsCol.onSnapshot(snap=>{
-  ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()}));
-  renderOrderGrid();
-});
+productsCol.onSnapshot(snap=>{ ORDER_PRODUCTS = snap.docs.map(d=>({id:d.id, ...d.data()})); renderOrderGrid(); });
 
 const btnSaveOrder = document.querySelector("#btnSaveOrder");
 if(btnSaveOrder){
@@ -1047,9 +982,7 @@ if(btnSaveOrder){
   };
 }
 
-/* ============================================================
-     INVENTARIO
-=============================================================== */
+/* INVENTARIO */
 const invList = document.querySelector('#invList');
 function renderInventory(snapshot){
   if(!invList) return;
@@ -1059,10 +992,8 @@ function renderInventory(snapshot){
     const available = !!p.available;
     const el = document.createElement('div');
     el.className = "tile";
-    
     const btnText = available ? 'Quitar' : 'Agregar';
     const btnClass = available ? 'bad' : 'good';
-
     el.innerHTML = `
       <div>
         <div style="font-weight:700; font-size:14px">${p.name}</div>
@@ -1081,23 +1012,15 @@ function renderInventory(snapshot){
     btn.onclick = async()=>{
       const id = btn.dataset.id;
       const next = btn.dataset.next === "1";
-      try{
-        await productsCol.doc(id).set({available: next, updatedAt: firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
-      }catch(e){}
+      try{ await productsCol.doc(id).set({available: next, updatedAt: firebase.firestore.FieldValue.serverTimestamp()},{merge:true}); }catch(e){}
     };
   });
 }
 productsCol.onSnapshot(renderInventory);
 
-/* ============================================================
-     SIDES (PAPAS GLOBALES)
-=============================================================== */
+/* SIDES (PAPAS GLOBALES) */
 const sidesRef = () => db.collection("config").doc("sides");
-const SIDES_META = [
-  { key:"con_sazon", label:"Con sazón" },
-  { key:"con_sal",   label:"Con sal" },
-  { key:"sin_sal",   label:"Sin sal" }
-];
+const SIDES_META = [ { key:"con_sazon", label:"Con sazón" }, { key:"con_sal", label:"Con sal" }, { key:"sin_sal", label:"Sin sal" } ];
 const sidesContainer = document.querySelector("#sidesContainer");
 function renderSidesUI(state){
   if(!sidesContainer) return;
@@ -1106,16 +1029,7 @@ function renderSidesUI(state){
     const enabled = state ? !!state[s.key] : true;
     const el = document.createElement("div");
     el.className = "side-pill " + (enabled ? "on" : "off");
-    el.innerHTML = `
-      <div>
-        <div style="font-weight:700">${s.label}</div>
-      </div>
-      <div>
-        <button class="mini-btn ${enabled?'bad':'good'}" data-side="${s.key}" data-next="${enabled?0:1}">
-          ${enabled ? "Desactivar" : "Activar"}
-        </button>
-      </div>
-    `;
+    el.innerHTML = `<div><div style="font-weight:700">${s.label}</div></div><div><button class="mini-btn ${enabled?'bad':'good'}" data-side="${s.key}" data-next="${enabled?0:1}">${enabled ? "Desactivar" : "Activar"}</button></div>`;
     sidesContainer.appendChild(el);
   });
   sidesContainer.querySelectorAll("button[data-side]").forEach(btn=>{
@@ -1128,195 +1042,75 @@ function renderSidesUI(state){
 }
 sidesRef().onSnapshot(snap=>{ renderSidesUI(snap.exists ? snap.data() : {}); });
 
-/* ============================================================
-     STORE OVERRIDE LOGIC (CON RESET & DOBLE BOTON)
-=============================================================== */
+/* STORE OVERRIDE LOGIC */
 const storeRef = () => db.collection("config").doc("store");
 const storePill = document.querySelector("#storePill");
 const storeSub = document.querySelector("#storeSub");
-
-// Elementos Control Diario
 const btnSimpleOpen = document.querySelector("#btnSimpleOpen");
 const btnSimpleClose = document.querySelector("#btnSimpleClose");
 const btnResetStore = document.querySelector("#btnResetStore");
-
-// Elementos Mantenimiento
 const maintTitle = document.querySelector("#maintTitle"); 
 const maintMsg = document.querySelector("#maintMsg");
 const maintFrom = document.querySelector("#maintFrom");
 const maintTo = document.querySelector("#maintTo");
-// Nuevos Botones separados
 const btnSetVacation = document.querySelector("#btnSetVacation");
 const btnSetMaint = document.querySelector("#btnSetMaint");
 
-// 1. ABRIR TIENDA (Manual)
 btnSimpleOpen.onclick = async () => {
     if(!confirm("¿Abrir la tienda manualmente?")) return;
-    try {
-        await storeRef().set({
-            forceOpen: true,
-            maintenance: firebase.firestore.FieldValue.delete(), 
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, {merge: true});
-    } catch(e) { alert("Error al abrir"); }
+    try { await storeRef().set({ forceOpen: true, maintenance: firebase.firestore.FieldValue.delete(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge: true}); } catch(e) { alert("Error al abrir"); }
 };
-
-// 2. CERRAR TIENDA (Manual)
 btnSimpleClose.onclick = async () => {
-    try {
-        await storeRef().set({
-            forceOpen: false,
-            maintenance: firebase.firestore.FieldValue.delete(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, {merge: true});
-    } catch(e) { alert("Error al cerrar"); }
+    try { await storeRef().set({ forceOpen: false, maintenance: firebase.firestore.FieldValue.delete(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge: true}); } catch(e) { alert("Error al cerrar"); }
 };
-
-// 3. RESET TOTAL (Volver a automático)
 btnResetStore.onclick = async () => {
     if(!confirm("¿Borrar configuraciones manuales y usar SOLO horario automático?")) return;
-    try {
-        await storeRef().set({
-            forceOpen: firebase.firestore.FieldValue.delete(),
-            forceOpenMessage: firebase.firestore.FieldValue.delete(),
-            forceOpenUntil: firebase.firestore.FieldValue.delete(),
-            maintenance: firebase.firestore.FieldValue.delete(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, {merge: true});
-        alert("Configuración reseteada. La tienda ahora obedece al horario automático.");
-    } catch(e) { 
-        console.error(e);
-        alert("Error al resetear."); 
-    }
+    try { await storeRef().set({ forceOpen: firebase.firestore.FieldValue.delete(), forceOpenMessage: firebase.firestore.FieldValue.delete(), forceOpenUntil: firebase.firestore.FieldValue.delete(), maintenance: firebase.firestore.FieldValue.delete(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge: true}); alert("Configuración reseteada."); } catch(e) { alert("Error al resetear."); }
 };
-
-// 4. FUNCIÓN COMÚN PARA GUARDAR VACACIONES O MANTENIMIENTO
 async function scheduleClosure(type) {
     let title = maintTitle.value.trim();
     const msg = maintMsg.value.trim();
     const fromVal = maintFrom.value;
     const toVal = maintTo.value;
-
     if(!fromVal || !toVal) { alert("Seleccioná fecha DESDE y HASTA."); return; }
-
     const dateFrom = new Date(fromVal);
     const dateTo = new Date(toVal);
-
     if(dateTo <= dateFrom) { alert("La fecha 'Hasta' debe ser después de 'Desde'."); return; }
-
-    // Definir título e ícono por defecto si no escribió nada
     let icon = "🛠️";
-    if(type === "vacation") {
-        if(!title) title = "CERRADO POR VACACIONES";
-        icon = "✈️";
-    } else {
-        if(!title) title = "EN MANTENIMIENTO";
-        icon = "🛠️";
-    }
-
-    try {
-        await storeRef().set({
-            forceOpen: false, 
-            maintenance: {
-                active: true,
-                title: title, 
-                message: msg,
-                icon: icon, // Guardamos el ícono en la base de datos
-                start: firebase.firestore.Timestamp.fromDate(dateFrom),
-                end: firebase.firestore.Timestamp.fromDate(dateTo)
-            },
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, {merge: true});
-        alert(`Programado: ${title}`);
-    } catch(e) { 
-        console.error(e);
-        alert("Error al guardar."); 
-    }
+    if(type === "vacation") { if(!title) title = "CERRADO POR VACACIONES"; icon = "✈️"; } else { if(!title) title = "EN MANTENIMIENTO"; icon = "🛠️"; }
+    try { await storeRef().set({ forceOpen: false, maintenance: { active: true, title: title, message: msg, icon: icon, start: firebase.firestore.Timestamp.fromDate(dateFrom), end: firebase.firestore.Timestamp.fromDate(dateTo) }, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge: true}); alert(`Programado: ${title}`); } catch(e) { alert("Error al guardar."); }
 }
-
-// ASIGNAR EVENTOS A LOS DOS BOTONES
 btnSetVacation.onclick = () => scheduleClosure("vacation");
 btnSetMaint.onclick = () => scheduleClosure("maintenance");
 
-
-// 5. ACTUALIZAR UI AL RECIBIR DATOS
 function applyStoreDocToUI(d) {
     const now = new Date();
-    let isOpen = false;
-    let statusText = "Estado desconocido";
-    let pillClass = "off";
-
-    let maintActive = false;
+    let isOpen = false; let statusText = "Estado desconocido"; let pillClass = "off"; let maintActive = false;
     if(d.maintenance && d.maintenance.active) {
-        const start = d.maintenance.start.toDate();
-        const end = d.maintenance.end.toDate();
-        
-        maintTitle.value = d.maintenance.title || "";
-        maintMsg.value = d.maintenance.message || "";
+        const start = d.maintenance.start.toDate(); const end = d.maintenance.end.toDate();
+        maintTitle.value = d.maintenance.title || ""; maintMsg.value = d.maintenance.message || "";
         maintFrom.value = new Date(start.getTime() - start.getTimezoneOffset()*60000).toISOString().slice(0,16);
         maintTo.value = new Date(end.getTime() - end.getTimezoneOffset()*60000).toISOString().slice(0,16);
-
-        if(now >= start && now <= end) {
-            maintActive = true;
-            statusText = `⚠️ ${d.maintenance.icon || ""} ${d.maintenance.title}`;
-            isOpen = false;
-        } else if (now < start) {
-             statusText = `🕒 Programado: ${d.maintenance.title}`;
-             isOpen = d.forceOpen === true; 
-        } else {
-             isOpen = d.forceOpen === true;
-             statusText = "Operación normal";
-        }
+        if(now >= start && now <= end) { maintActive = true; statusText = `⚠️ ${d.maintenance.icon || ""} ${d.maintenance.title}`; isOpen = false; }
+        else if (now < start) { statusText = `🕒 Programado: ${d.maintenance.title}`; isOpen = d.forceOpen === true; }
+        else { isOpen = d.forceOpen === true; statusText = "Operación normal"; }
     } else {
-        maintTitle.value = "";
-        maintMsg.value = "";
-        maintFrom.value = "";
-        maintTo.value = "";
-        
-        if (d.forceOpen === true) {
-            isOpen = true;
-            statusText = "Abierto Manualmente";
-        } else if (d.forceOpen === false) {
-            isOpen = false;
-            statusText = "Cerrado Manualmente";
-        } else {
-            statusText = "Modo Automático (Horarios)";
-            isOpen = false; 
-            pillClass = "blue";
-        }
+        maintTitle.value = ""; maintMsg.value = ""; maintFrom.value = ""; maintTo.value = "";
+        if (d.forceOpen === true) { isOpen = true; statusText = "Abierto Manualmente"; }
+        else if (d.forceOpen === false) { isOpen = false; statusText = "Cerrado Manualmente"; }
+        else { statusText = "Modo Automático (Horarios)"; isOpen = false; pillClass = "blue"; }
     }
-
-    if(maintActive) {
-        storePill.textContent = "MANTENIMIENTO";
-        storePill.className = "pill warn";
-    } else if (d.forceOpen === true) {
-        storePill.textContent = "ABIERTO (MANUAL)";
-        storePill.className = "pill ok";
-    } else if (d.forceOpen === false) {
-        storePill.textContent = "CERRADO (MANUAL)";
-        storePill.className = "pill off";
-    } else {
-        storePill.textContent = "AUTOMÁTICO";
-        storePill.className = "pill blue";
-    }
-
+    if(maintActive) { storePill.textContent = "MANTENIMIENTO"; storePill.className = "pill warn"; }
+    else if (d.forceOpen === true) { storePill.textContent = "ABIERTO (MANUAL)"; storePill.className = "pill ok"; }
+    else if (d.forceOpen === false) { storePill.textContent = "CERRADO (MANUAL)"; storePill.className = "pill off"; }
+    else { storePill.textContent = "AUTOMÁTICO"; storePill.className = "pill blue"; }
     storeSub.textContent = statusText;
 }
-
 storeRef().onSnapshot(snap => { applyStoreDocToUI(snap.exists ? snap.data() : {}); });
 
-/* ============================================================
-     CUPONES LOGIC
-=============================================================== */
+/* CUPONES LOGIC */
 const cpTbody = document.querySelector("#cpTable");
 const btnCreateCp = document.querySelector("#btnCreateCp");
-
-function fmtDate(ts){ 
-  if(!ts) return null;
-  if(ts.toDate) return ts.toDate();
-  return new Date(ts.seconds*1000);
-}
-
 if(btnCreateCp){
   btnCreateCp.onclick = () => {
     const code = (document.querySelector("#cpCode").value||"").trim().toUpperCase();
@@ -1328,68 +1122,31 @@ if(btnCreateCp){
     const note = (document.querySelector("#cpNote").value||"").trim();
     const fromVal = document.querySelector("#cpFrom").value;
     const toVal = document.querySelector("#cpTo").value;
-    
-    const payload = {
-      code, type, value, enabled:true,
-      note: note || null,
-      validFrom: fromVal ? firebase.firestore.Timestamp.fromDate(new Date(fromVal)) : null,
-      validTo:   toVal   ? firebase.firestore.Timestamp.fromDate(new Date(toVal))   : null,
-      maxUses: maxUses > 0 ? maxUses : null,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-
-    db.collection("coupons").doc(code).set({
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      uses:0, ...payload
-    },{merge:true}).then(()=>{ alert("Cupón guardado"); loadCoupons(); });
+    const payload = { code, type, value, enabled:true, note: note || null, validFrom: fromVal ? firebase.firestore.Timestamp.fromDate(new Date(fromVal)) : null, validTo: toVal ? firebase.firestore.Timestamp.fromDate(new Date(toVal)) : null, maxUses: maxUses > 0 ? maxUses : null, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+    db.collection("coupons").doc(code).set({ createdAt: firebase.firestore.FieldValue.serverTimestamp(), uses:0, ...payload },{merge:true}).then(()=>{ alert("Cupón guardado"); loadCoupons(); });
   };
 }
-
 function renderCoupons(list){
   if(!cpTbody) return;
   cpTbody.innerHTML = "";
   list.forEach(doc=>{
     const c = doc.data();
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><strong>${c.code}</strong></td>
-      <td>${c.type==='percent'?'%':'$'}</td>
-      <td>${c.value}</td>
-      <td>${c.enabled ? "<span class='pill ok'>ON</span>" : "<span class='pill off'>OFF</span>"}</td>
-      <td class="row">
-        <button class="mini-btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">
-          ${c.enabled ? "Pausar" : "Activar"}
-        </button>
-        <button class="mini-btn bad" data-act="delete" data-id="${doc.id}">X</button>
-      </td>
-    `;
+    tr.innerHTML = `<td><strong>${c.code}</strong></td><td>${c.type==='percent'?'%':'$'}</td><td>${c.value}</td><td>${c.enabled ? "<span class='pill ok'>ON</span>" : "<span class='pill off'>OFF</span>"}</td><td class="row"><button class="mini-btn ${c.enabled?'warn':'good'}" data-act="toggle" data-id="${doc.id}">${c.enabled ? "Pausar" : "Activar"}</button><button class="mini-btn bad" data-act="delete" data-id="${doc.id}">X</button></td>`;
     cpTbody.appendChild(tr);
   });
-  
   cpTbody.querySelectorAll("button").forEach(btn=>{
     btn.onclick = async()=>{
-      const id = btn.dataset.id;
-      const act = btn.dataset.act;
-      if(act === "toggle"){
-        const snap = await db.collection("coupons").doc(id).get();
-        await db.collection("coupons").doc(id).set({ enabled:!snap.data()?.enabled },{merge:true});
-        loadCoupons();
-      } else if(act === "delete" && confirm("¿Eliminar?")){
-        await db.collection("coupons").doc(id).delete();
-        loadCoupons();
-      }
+      const id = btn.dataset.id; const act = btn.dataset.act;
+      if(act === "toggle"){ const snap = await db.collection("coupons").doc(id).get(); await db.collection("coupons").doc(id).set({ enabled:!snap.data()?.enabled },{merge:true}); loadCoupons(); }
+      else if(act === "delete" && confirm("¿Eliminar?")){ await db.collection("coupons").doc(id).delete(); loadCoupons(); }
     };
   });
 }
-async function loadCoupons(){
-  const q = await db.collection("coupons").orderBy("code").get();
-  renderCoupons(q.docs);
-}
+async function loadCoupons(){ const q = await db.collection("coupons").orderBy("code").get(); renderCoupons(q.docs); }
 loadCoupons();
 
-/* ============================================================
-     SAVE BTNS
-=============================================================== */
+/* SAVE BTNS */
 const btnSaveProduct = document.querySelector("#btnSaveProduct");
 if(btnSaveProduct) btnSaveProduct.onclick = saveProduct;
 const btnClearProduct = document.querySelector("#btnClearProduct");
