@@ -120,6 +120,7 @@
         };
 
         const burgers = sortList(window.STATE.products.filter(p => p.category === 'hamburguesas'), 'hamburguesas');
+        const sandwiches = sortList(window.STATE.products.filter(p => p.category === 'sandwiches'), 'sandwiches'); 
         const sides = sortList(window.STATE.products.filter(p => p.category === 'guarniciones'), 'guarniciones');
         const drinks = sortList(window.STATE.products.filter(p => p.category === 'bebidas'), 'bebidas');
 
@@ -145,6 +146,7 @@
         };
 
         html += renderSection('Hamburguesas', burgers);
+        html += renderSection('Sándwiches', sandwiches); 
         html += renderSection('Guarniciones', sides);
         html += renderSection('Bebidas', drinks);
         container.innerHTML = html;
@@ -383,9 +385,17 @@
         document.getElementById("pricePattyDisplay").innerText = `($${prices.patty})`;
         document.getElementById("priceCheddarDisplay").innerText = `($${prices.cheddar})`;
 
-        const isBurger = item.category === 'hamburguesas';
-        document.getElementById("extrasSection").style.display = isBurger ? 'block' : 'none';
+        const isBurgerType = item.category === 'hamburguesas' || item.category === 'sandwiches';
+        const allowed = item.allowedExtras || {};
         
+        // Determinar si mostramos la sección de extras completos (para hamburguesas o sándwiches si lo tienen permitido)
+        const showExtrasSection = isBurgerType || allowed.patty || allowed.cheddar;
+        document.getElementById("extrasSection").style.display = showExtrasSection ? 'block' : 'none';
+        
+        // Y luego dentro, ocultar/mostrar carne y cheddar individualmente
+        document.getElementById("pricePattyDisplay").parentElement.parentElement.style.display = (allowed.patty || (isBurgerType && allowed.patty !== false)) ? 'flex' : 'none';
+        document.getElementById("priceCheddarDisplay").parentElement.parentElement.style.display = (allowed.cheddar || (isBurgerType && allowed.cheddar !== false)) ? 'flex' : 'none';
+
         const friesContainer = document.getElementById("friesOptions");
         friesContainer.innerHTML = '';
         const sidesMap = { con_sazon: "Sazonadas", con_sal: "Con Sal", sin_sal: "Sin Sal" };
@@ -450,15 +460,26 @@
         }
         const prices = window.STATE.config.prices;
         const finalPrice = Number(item.price) + (window.MODAL.extras.patty * prices.patty) + (window.MODAL.extras.cheddar * prices.cheddar);
+        
+        const catGroup = (item.category === 'guarniciones') ? 'side' : (item.category === 'bebidas' ? 'drink' : 'burger');
+
         const cartItem = {
             id: item.id, name: item.name, price: Number(item.price), category: item.category,
             qty: 1, fries: fries, extras: { ...window.MODAL.extras }, notes: notes, finalPrice: finalPrice
         };
-        const existing = window.STATE.cart.items.find(i => 
+        
+        // Buscar si ya existe para agruparlo
+        let existingIndex = window.STATE.cart.items.findIndex(i => 
             i.id === cartItem.id && i.fries === cartItem.fries && 
             JSON.stringify(i.extras) === JSON.stringify(cartItem.extras) && i.notes === cartItem.notes
         );
-        if(existing) existing.qty++; else window.STATE.cart.items.push(cartItem);
+        
+        if(existingIndex > -1) {
+            window.STATE.cart.items[existingIndex].qty++;
+        } else {
+            window.STATE.cart.items.push(cartItem);
+        }
+        
         saveCart();
         document.getElementById("modalOverlay").classList.remove("open");
         toggleDrawer(true);
@@ -476,13 +497,12 @@
             total += item.finalPrice * item.qty;
             let detail = [];
             
-            // 🔥 CORRECCIÓN AQUÍ: Mostrar el tipo de papa tanto para Hamburguesas como para Guarniciones
             if (item.category !== 'bebidas' && item.fries) {
                 const map = { con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal" };
                 if (map[item.fries]) detail.push("🍟 " + map[item.fries]);
             }
             
-            if(item.category === 'hamburguesas') {
+            if(item.category === 'hamburguesas' || item.category === 'sandwiches') {
                 if(item.extras.patty) detail.push(`+${item.extras.patty} Carne`);
                 if(item.extras.cheddar) detail.push(`+${item.extras.cheddar} Cheddar`);
             }
