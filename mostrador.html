@@ -171,7 +171,6 @@
     .toggle-btn.paid.active { background: #e8f5e9; border-color: var(--success); color: var(--success); opacity: 1; box-shadow: 0 2px 8px rgba(46, 125, 50, 0.2); }
     .toggle-btn.pending.active { background: #fff3e0; border-color: var(--warn); color: #e65100; opacity: 1; box-shadow: 0 2px 8px rgba(255, 152, 0, 0.2); }
 
-
     /* Modal */
     .overlay{ position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:9999; }
     .modal{ width:450px; max-width:95%; background:white; border-radius:20px; padding:25px; box-shadow:0 20px 50px rgba(0,0,0,.4); }
@@ -466,7 +465,7 @@ function renderCard(item){
   const btn = card.querySelector(".addBtn");
   const cat = (item.category||"").toLowerCase();
 
-  // Solo las bebidas se agregan directo, todo lo demás abre modal
+  // Solo bebidas se agregan directo, todo lo demás abre modal
   if(cat.includes("bebida") || cat.includes("drink")){
     btn.onclick = ()=>{
       if(!cart.drink[item.id]) cart.drink[item.id]={qty:0,item};
@@ -486,7 +485,7 @@ function mountMenu(){
   orderedList("sandwiches", PRODUCTS.sandwiches).forEach(x=> elSandwichesGrid.appendChild(renderCard(x)));
   orderedList("guarniciones", PRODUCTS.sides).forEach(x=> elSidesGrid.appendChild(renderCard(x)));
   orderedList("bebidas", PRODUCTS.drinks).forEach(x=> elDrinksGrid.appendChild(renderCard(x)));
-  
+
   if(PRODUCTS.sandwiches.length === 0) {
       elSandwichesGrid.style.display = 'none';
       elSandwichesGrid.previousElementSibling.style.display = 'none';
@@ -604,7 +603,7 @@ function openCustomize(item){
   $("#notesCount").textContent="0/200";
   
   const cat = (item.category||"").toLowerCase();
-  const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich");
+  const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich") || cat.includes("sándwich");
   
   const allowed = item.allowedExtras || {};
   
@@ -684,7 +683,7 @@ function editBurger(id){
   $("#notesCount").textContent = (b.notes || "").length + "/200";
 
   const cat = (b.item.category||"").toLowerCase();
-  const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich");
+  const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich") || cat.includes("sándwich");
   const allowed = b.item.allowedExtras || {};
   
   $("#rowPatties").style.display = (allowed.patty || (isBurgerType && allowed.patty !== false)) ? "flex" : "none";
@@ -943,10 +942,14 @@ async function sendToFirestore(){
   }
   if(!slot){ alert("Elegí un horario"); return; }
 
+  // 🔥 VALIDACIÓN DE PAPAS EN HAMBURGUESAS/SÁNDWICHES
   for (const id in cart.burger) {
     const burger = cart.burger[id];
     const name = burger.item.name.toLowerCase();
-    const isSimple = !name.includes("doble") && !name.includes("pollo") && !burger.item.category.includes("sandwich");
+    const cat = (burger.item.category || "").toLowerCase();
+    
+    // Solo permitimos saltar el paso de papas si es "simple" (que no sea doble ni de pollo) y no es un sandwich
+    const isSimple = !name.includes("doble") && !name.includes("pollo") && !cat.includes("sandwich") && !cat.includes("sándwich");
     
     if (!isSimple && !burger.friesRaw) {
       alert(`⚠️ ATENCIÓN:\n\nEl producto "${burger.item.name}" no tiene papas seleccionadas.\n\nPor favor, tocá el lápiz ✏️ para editarla.`);
@@ -954,6 +957,7 @@ async function sendToFirestore(){
     }
   }
 
+  // 🔥 VALIDACIÓN DE PAPAS EN GUARNICIONES
   for (const id in cart.side) {
     const side = cart.side[id];
     if (!side.friesRaw) {
@@ -979,8 +983,12 @@ async function sendToFirestore(){
         const b=cart.burger[id];
         const unit = b.item.price + b.extras.patty*EXTRA_PRICE_PATTY + b.extras.cheddar*EXTRA_PRICE_CHEDDAR;
         rawTotal += unit*b.qty;
+        
+        const cat = (b.item.category || "").toLowerCase();
+        const itemType = (cat.includes("sandwich") || cat.includes("sándwich")) ? "sandwich" : "burger";
+        
         items.push({
-          type: b.item.category.includes("sandwich") ? "sandwich" : "burger",
+          type: itemType,
           id:b.item.id,
           name:b.item.name,
           qty:b.qty, quantity:b.qty,
