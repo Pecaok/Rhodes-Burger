@@ -71,11 +71,15 @@
     @media(min-width: 600px) { .overlay { align-items: center; } .modal { border-radius: 20px; } }
     @keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
 
-    /* CONTROLS */
-    .qtybox { display: flex; align-items: center; gap: 10px; border: 1px solid #e5e5e5; padding: 3px 8px; border-radius: 20px; }
-    .qtybtn { width: 24px; height: 24px; border-radius: 50%; border: none; background: #eee; color: #333; font-weight: 900; font-size: 14px; }
-    .chip { padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e5e5; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; }
-    .chip input { accent-color: var(--primary); width: 16px; height: 16px; margin: 0; }
+    /* --- ESTILOS MOSTRADOR APLICADOS AL CLIENTE --- */
+    .chip-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    .chip{ display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; background: #f9fafb; border-radius: 99px; cursor: pointer; font-size: 13px; font-weight: 600; border: 2px solid transparent; transition: all 0.2s; }
+    .chip:has(input:checked) { background: #e3ebd3; border-color: var(--primary); color: var(--primary); }
+    .chip input { accent-color: var(--primary); margin: 0; cursor: pointer;}
+    
+    .qty-ctrl { display: flex; align-items: center; gap: 10px; background: #f9f9f9; padding: 4px; border-radius: 8px; border: 1px solid #eee; }
+    .qtybtn { width: 28px; height: 28px; border-radius: 6px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-weight: 700; display: flex; justify-content: center; align-items: center; }
+    
     textarea { width: 100%; border: 1px solid #e5e5e5; border-radius: 12px; padding: 10px; margin-top: 10px; resize: none; font-family: inherit; }
     
     .btn { width: 100%; padding: 12px; border-radius: 12px; font-weight: 700; border: none; cursor: pointer; font-size: 15px; }
@@ -97,13 +101,13 @@
     const CART_KEY = "rhodes_cart_v5";
     const PHONE_NUMBER = "543484346113"; 
     
-    // 🔥 Agregado "onionRings" al estado inicial y a los extras del modal
     window.STATE = {
         products: [], menuOrder: {}, 
-        config: { sides: { con_sazon:true, con_sal:true, sin_sal:true }, store: { forceOpen: null, maintenance: {} }, prices: { patty:2800, cheddar:300, onionRings:800 } },
-        cart: { items: [] }, isOpen: false
+        config: { sides: { con_sazon:true, con_sal:true, sin_sal:true }, store: { forceOpen: null, maintenance: {} }, prices: { patty:2800, cheddar:300, onionRings:1600 } },
+        cart: { burger:{}, drink:{}, side:{} }, // Adaptado a estructura de mostrador
+        isOpen: false
     };
-    window.MODAL = { item: null, extras: { patty:0, cheddar:0, onionRings:0 } };
+    window.MODAL = { item: null, extras: { patty:0, cheddar:0 } }; // onionRings ya no es un extra, es un sideType
 
     window.fastRender = function() {
         const container = document.getElementById("menuContainer");
@@ -259,29 +263,46 @@
 
   <div class="overlay" id="modalOverlay">
     <div class="modal">
-      <h3 id="modTitle" style="margin-top:0; font-size: 18px;"></h3>
-      <div style="margin-top:15px">
-        <label style="font-weight:700; font-size:13px; color:#4b5563">Guarnición</label>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px" id="friesOptions"></div>
+      <h3 id="modTitle" style="margin-top:0; font-size: 18px;">Personalizar</h3>
+      
+      <div style="margin-top:15px" id="sideTypeSection">
+        <label style="font-weight:700; font-size:12px; color:#666; text-transform:uppercase; letter-spacing: 0.5px;">Guarnición que acompaña</label>
+        <div class="chip-group" id="sideTypeOptions">
+            <label class="chip"><input type="radio" name="sideType" value="crinkles" onchange="toggleSeasoning()"> 🍟 Papas Crinkles</label>
+            <label class="chip"><input type="radio" name="sideType" value="rejillas" onchange="toggleSeasoning()"> 🍟 Papas Rejillas</label>
+            <label class="chip"><input type="radio" name="sideType" value="aros" onchange="toggleSeasoning()"> 🧅 Aros de Cebolla <span id="lblPriceOnionDisplay" style="font-size:11px; color:var(--primary)"></span></label>
+        </div>
       </div>
+
+      <div style="margin-top:15px" id="seasoningSection">
+        <label style="font-weight:700; font-size:12px; color:#666; text-transform:uppercase; letter-spacing: 0.5px;" id="lblSeasoning">Elegí la preparación</label>
+        <div class="chip-group" id="friesOptions"></div>
+      </div>
+      
       <div id="extrasSection" style="margin-top:20px;">
           <div class="row" style="margin-bottom:12px" id="rowPatty">
-              <span style="font-size:14px">Extra Carne <b style="color:var(--primary)" id="pricePattyDisplay"></b></span>
-              <div class="qtybox"><button class="qtybtn" onclick="updExtra('patty', -1)">-</button><span id="qtyPatty" style="font-weight:700; width:20px; text-align:center; font-size:14px">0</span><button class="qtybtn" onclick="updExtra('patty', 1)">+</button></div>
+              <span style="font-size:14px; font-weight: 600;">Carne Extra <b style="color:var(--primary); font-weight: 400; font-size: 12px;" id="pricePattyDisplay"></b></span>
+              <div class="qty-ctrl"><button class="qtybtn" onclick="updExtra('patty', -1)">-</button><span id="qtyPatty" style="font-weight:700; width:20px; text-align:center; font-size:14px">0</span><button class="qtybtn" onclick="updExtra('patty', 1)">+</button></div>
           </div>
           <div class="row" style="margin-bottom:12px" id="rowCheddar">
-              <span style="font-size:14px">Extra Cheddar <b style="color:var(--primary)" id="priceCheddarDisplay"></b></span>
-              <div class="qtybox"><button class="qtybtn" onclick="updExtra('cheddar', -1)">-</button><span id="qtyCheddar" style="font-weight:700; width:20px; text-align:center; font-size:14px">0</span><button class="qtybtn" onclick="updExtra('cheddar', 1)">+</button></div>
-          </div>
-          <div class="row" id="rowOnionRings">
-              <span style="font-size:14px">Aros de Cebolla <b style="color:var(--primary)" id="priceOnionRingsDisplay"></b></span>
-              <div class="qtybox"><button class="qtybtn" onclick="updExtra('onionRings', -1)">-</button><span id="qtyOnionRings" style="font-weight:700; width:20px; text-align:center; font-size:14px">0</span><button class="qtybtn" onclick="updExtra('onionRings', 1)">+</button></div>
+              <span style="font-size:14px; font-weight: 600;">Cheddar Extra <b style="color:var(--primary); font-weight: 400; font-size: 12px;" id="priceCheddarDisplay"></b></span>
+              <div class="qty-ctrl"><button class="qtybtn" onclick="updExtra('cheddar', -1)">-</button><span id="qtyCheddar" style="font-weight:700; width:20px; text-align:center; font-size:14px">0</span><button class="qtybtn" onclick="updExtra('cheddar', 1)">+</button></div>
           </div>
       </div>
-      <textarea id="modNotes" rows="2" placeholder="Notas (Ej: Sin cebolla)"></textarea>
+      
+      <div style="margin-top:20px">
+        <label style="font-weight:700; font-size:12px; color:#666; text-transform:uppercase; letter-spacing: 0.5px;">Notas</label>
+        <textarea id="modNotes" rows="2" placeholder="Aclaraciones..."></textarea>
+      </div>
+
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px; padding-top:15px; border-top:1px solid #eee">
+          <span style="font-size:14px; color:#555">Total ítem:</span>
           <div style="font-size:20px; font-weight:900; color:var(--primary)" id="modTotal">$0</div>
-          <button class="btn primary" id="btnAddCart" style="width:auto; padding:10px 20px;">Agregar</button>
+      </div>
+      
+      <div class="row" style="margin-top:20px; gap:10px">
+          <button class="btn" id="btnCancel" style="flex:1; background: #fff; border: 1px solid #ddd; color: #333">Cancelar</button>
+          <button class="btn primary" id="btnAddCart" style="flex:1">AGREGAR</button>
       </div>
     </div>
   </div>
@@ -294,9 +315,18 @@
 
     document.addEventListener("DOMContentLoaded", () => {
         const savedCart = localStorage.getItem(CART_KEY);
-        if(savedCart) { window.STATE.cart = JSON.parse(savedCart); updateCartUI(); }
+        if(savedCart) { 
+            // Si el carrito viejo tiene formato viejo, lo inicializamos de cero
+            const parsedCart = JSON.parse(savedCart);
+            if(Array.isArray(parsedCart.items)) {
+                window.STATE.cart = { burger:{}, drink:{}, side:{} };
+                localStorage.removeItem(CART_KEY);
+            } else {
+                window.STATE.cart = parsedCart; 
+                updateCartUI(); 
+            }
+        }
 
-        // Timeout de seguridad: Si en 6s no cargó nada (ni caché ni red), mostrar aviso
         setTimeout(() => {
             if(window.STATE.products.length === 0) {
                 document.getElementById('errorMsg').style.display = 'block';
@@ -330,10 +360,8 @@
             experimentalAutoDetectLongPolling: false
         });
 
-        // Habilitamos persistencia offline
         db.enablePersistence({synchronizeTabs:true}).catch(err => {});
 
-        // 1. ESCUCHAMOS EN TIEMPO REAL (Stock y Estado del local)
         db.collection("products").onSnapshot(snap => {
             window.STATE.products = [];
             snap.forEach(doc => {
@@ -349,7 +377,6 @@
             window.checkStatus(); saveToCache();
         });
 
-        // 2. ESCUCHAMOS CONFIGURACIONES ESTÁTICAS EN TIEMPO REAL
         db.collection("config").doc("sides").onSnapshot(doc => {
             const d = doc.data() || {};
             window.STATE.config.sides = { con_sazon: d.con_sazon!==false, con_sal: d.con_sal!==false, sin_sal: d.sin_sal!==false };
@@ -362,149 +389,211 @@
             window.fastRender(); saveToCache();
         }, err => console.log("Error menuOrder:", err));
 
-        // 🔥 LECTURA DE PRECIOS ACTUALIZADA
         db.collection("config").doc("prices").onSnapshot(doc => {
             const d = doc.data() || {};
             window.STATE.config.prices = { 
-                patty: Number(d.patty)||2800, 
+                patty: Number(d.patty)||2500, 
                 cheddar: Number(d.cheddar)||300,
-                onionRings: Number(d.onionRings)||800 
+                onionRings: Number(d.onionRings)||1600 
             };
             saveToCache();
             
-            // Actualiza en vivo si el cliente tiene el modal abierto justo en este momento
             if (window.MODAL && window.MODAL.item) {
                 const pricePattyEl = document.getElementById("pricePattyDisplay");
                 const priceCheddarEl = document.getElementById("priceCheddarDisplay");
-                const priceOnionRingsEl = document.getElementById("priceOnionRingsDisplay");
+                const priceOnionRingsEl = document.getElementById("lblPriceOnionDisplay");
                 
-                if(pricePattyEl) pricePattyEl.innerText = `($${window.STATE.config.prices.patty})`;
-                if(priceCheddarEl) priceCheddarEl.innerText = `($${window.STATE.config.prices.cheddar})`;
-                if(priceOnionRingsEl) priceOnionRingsEl.innerText = `($${window.STATE.config.prices.onionRings})`;
+                if(pricePattyEl) pricePattyEl.innerText = `(+$${window.STATE.config.prices.patty})`;
+                if(priceCheddarEl) priceCheddarEl.innerText = `(+$${window.STATE.config.prices.cheddar})`;
+                if(priceOnionRingsEl) priceOnionRingsEl.innerText = `(+$${window.STATE.config.prices.onionRings})`;
                 updateModalPrice();
             }
         }, err => console.log("Error prices:", err));
     }
 
-    // MODAL
+    // 🔥 LOGICA DE MOSTRADOR PARA EL MODAL
+    window.toggleSeasoning = function() {
+        const type = document.querySelector('input[name="sideType"]:checked')?.value;
+        const seasoningSec = document.getElementById('seasoningSection');
+        
+        if (type === 'crinkles' || type === 'rejillas') {
+            seasoningSec.style.display = 'block';
+        } else {
+            seasoningSec.style.display = 'none';
+            document.querySelectorAll("input[name='fries']").forEach(x=> x.checked=false);
+        }
+        updateModalPrice();
+    }
+
     window.openModal = (id) => {
         if (!window.STATE.isOpen && !window.STATE.config.store.forceOpen) { alert("El local está cerrado en este momento."); return; }
         const item = window.STATE.products.find(p => p.id === id); if(!item) return;
         
-        // 🔥 Resetea extras y cantidad de aros
-        window.MODAL.item = item; window.MODAL.extras = { patty:0, cheddar:0, onionRings:0 };
-        document.getElementById("modTitle").innerText = item.name;
+        const cat = (item.category || "").toLowerCase();
+        
+        // Si es bebida, se agrega directo al carrito (igual que mostrador)
+        if(cat.includes("bebida") || cat.includes("drink")){
+            const cartItem = {
+                item: item, qty: 1, type: 'drink',
+                extras: {}, notes: "", finalPrice: Number(item.price)
+            };
+            const newId = item.id + "_" + Date.now();
+            window.STATE.cart.drink[newId] = cartItem;
+            saveCart();
+            toggleDrawer(true);
+            return;
+        }
+
+        window.MODAL.item = item; window.MODAL.extras = { patty:0, cheddar:0 };
+        document.getElementById("modTitle").innerText = "Personalizar " + item.name;
         document.getElementById("modNotes").value = "";
         
         document.getElementById("qtyPatty").innerText = "0";
         document.getElementById("qtyCheddar").innerText = "0";
-        document.getElementById("qtyOnionRings").innerText = "0";
         
         const prices = window.STATE.config.prices;
-        document.getElementById("pricePattyDisplay").innerText = `($${prices.patty})`;
-        document.getElementById("priceCheddarDisplay").innerText = `($${prices.cheddar})`;
-        document.getElementById("priceOnionRingsDisplay").innerText = `($${prices.onionRings})`;
+        document.getElementById("pricePattyDisplay").innerText = `(+$${prices.patty})`;
+        document.getElementById("priceCheddarDisplay").innerText = `(+$${prices.cheddar})`;
+        document.getElementById("lblPriceOnionDisplay").innerText = `(+$${prices.onionRings})`;
 
-        const isBurgerType = item.category === 'hamburguesas' || item.category === 'sandwiches';
+        document.querySelectorAll("input[name='sideType']").forEach(x=> x.checked=false);
+        document.querySelectorAll("input[name='fries']").forEach(x=> x.checked=false);
+
+        const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich") || cat.includes("sándwich");
         const allowed = item.allowedExtras || {};
         
-        // Determinar si mostramos la sección de extras
-        const showExtrasSection = isBurgerType || allowed.patty || allowed.cheddar || allowed.onionRings;
+        if (isBurgerType) {
+            document.getElementById("sideTypeSection").style.display = "block";
+            document.getElementById("lblSeasoning").innerText = "Preparación de las papas";
+            document.getElementById("seasoningSection").style.display = "none";
+        } else {
+            document.getElementById("sideTypeSection").style.display = "none";
+            document.getElementById("lblSeasoning").innerText = "Elegí la preparación";
+            document.getElementById("seasoningSection").style.display = "block";
+        }
+
+        const showExtrasSection = isBurgerType || allowed.patty || allowed.cheddar;
         document.getElementById("extrasSection").style.display = showExtrasSection ? 'block' : 'none';
         
-        // Ocultar/mostrar extras individualmente
         document.getElementById("rowPatty").style.display = (allowed.patty || (isBurgerType && allowed.patty !== false)) ? 'flex' : 'none';
         document.getElementById("rowCheddar").style.display = (allowed.cheddar || (isBurgerType && allowed.cheddar !== false)) ? 'flex' : 'none';
-        document.getElementById("rowOnionRings").style.display = (allowed.onionRings || (isBurgerType && allowed.onionRings !== false)) ? 'flex' : 'none';
 
         const friesContainer = document.getElementById("friesOptions");
         friesContainer.innerHTML = '';
         const sidesMap = { con_sazon: "Sazonadas", con_sal: "Con Sal", sin_sal: "Sin Sal" };
         let firstFound = false;
 
-        if (item.category === 'bebidas') {
-            friesContainer.parentElement.style.display = 'none';
-        } else {
-            friesContainer.parentElement.style.display = 'block';
-            
-            const pOpts = item.potatoOptions || {};
-            const useGlobal = !pOpts.sazon && !pOpts.sal && !pOpts.sinSal; 
+        const pOpts = item.potatoOptions || {};
+        const useGlobal = !pOpts.sazon && !pOpts.sal && !pOpts.sinSal; 
 
-            for (const [key, label] of Object.entries(sidesMap)) {
-                let isAllowed = false;
-                if (useGlobal) {
-                    isAllowed = window.STATE.config.sides[key];
-                } else {
-                    if (key === 'con_sazon') isAllowed = pOpts.sazon;
-                    if (key === 'con_sal') isAllowed = pOpts.sal;
-                    if (key === 'sin_sal') isAllowed = pOpts.sinSal;
-                }
+        for (const [key, label] of Object.entries(sidesMap)) {
+            let isAllowed = false;
+            if (useGlobal) {
+                isAllowed = window.STATE.config.sides[key];
+            } else {
+                if (key === 'con_sazon') isAllowed = pOpts.sazon;
+                if (key === 'con_sal') isAllowed = pOpts.sal;
+                if (key === 'sin_sal') isAllowed = pOpts.sinSal;
+            }
 
-                if (isAllowed) {
-                    const checked = !firstFound ? 'checked' : ''; firstFound = true;
-                    friesContainer.innerHTML += `<label class="chip"><input type="radio" name="fries" value="${key}" ${checked}> ${label}</label>`;
-                }
+            if (isAllowed) {
+                // Selecciona la primera opción de preparación por defecto
+                const checked = (!isBurgerType && !firstFound) ? 'checked' : ''; firstFound = true;
+                friesContainer.innerHTML += `<label class="chip"><input type="radio" name="fries" value="${key}" onchange="updateModalPrice()" ${checked}> 🍟 ${label}</label>`;
             }
         }
+        
         updateModalPrice();
         document.getElementById("modalOverlay").classList.add("open");
     }
 
-    // 🔥 Soporte para sumar/restar aros de cebolla
     window.updExtra = (type, delta) => {
         const newVal = window.MODAL.extras[type] + delta;
-        if (newVal >= 0 && newVal <= 3) { // Máximo 3 de cada uno
+        const maxLimit = type === 'patty' ? 2 : 3; 
+        if (newVal >= 0 && newVal <= maxLimit) {
             window.MODAL.extras[type] = newVal;
-            const idMap = { patty: 'qtyPatty', cheddar: 'qtyCheddar', onionRings: 'qtyOnionRings' };
+            const idMap = { patty: 'qtyPatty', cheddar: 'qtyCheddar' };
             document.getElementById(idMap[type]).innerText = newVal;
             updateModalPrice();
         }
     }
 
-    // 🔥 Calculadora de precio actualizada
-    function updateModalPrice() {
+    window.updateModalPrice = function() {
         let total = Number(window.MODAL.item.price);
         const prices = window.STATE.config.prices;
         total += (window.MODAL.extras.patty * prices.patty);
         total += (window.MODAL.extras.cheddar * prices.cheddar);
-        total += (window.MODAL.extras.onionRings * prices.onionRings);
+        
+        const sideType = document.querySelector('input[name="sideType"]:checked')?.value;
+        if (sideType === 'aros') {
+            total += prices.onionRings;
+        }
+        
         document.getElementById("modTotal").innerText = "$" + total;
     }
+
+    document.getElementById("btnCancel").onclick = () => {
+        document.getElementById("modalOverlay").classList.remove("open");
+    };
 
     document.getElementById("btnAddCart").onclick = () => {
         const item = window.MODAL.item;
         const notes = document.getElementById("modNotes").value.trim();
-        let fries = "";
+        const cat = (item.category || "").toLowerCase();
+        const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich") || cat.includes("sándwich");
         
-        if (item.category !== 'bebidas') {
-            const friesInput = document.querySelector('input[name="fries"]:checked');
-            if(!friesInput) { alert("Selecciona un tipo de papas"); return; }
-            fries = friesInput.value;
+        let friesStr = "";
+        let friesRawStr = "";
+        let sideTypeVal = null;
+
+        if (isBurgerType) {
+            sideTypeVal = document.querySelector('input[name="sideType"]:checked')?.value;
+            if (!sideTypeVal) { alert("Seleccioná una guarnición."); return; }
+            
+            if (sideTypeVal === 'aros') {
+                friesStr = "Aros de Cebolla";
+                friesRawStr = "aros";
+            } else {
+                const seasonRaw = document.querySelector('input[name="fries"]:checked')?.value;
+                if(!seasonRaw) { alert("Seleccioná la preparación de las papas."); return; }
+                
+                const mapSeason = { con_sazon: "Sazonadas", con_sal: "Con sal", sin_sal: "Sin sal" };
+                const typeName = sideTypeVal === 'crinkles' ? 'Papas Crinkles' : 'Papas Rejillas';
+                friesStr = `${typeName} (${mapSeason[seasonRaw]})`;
+                friesRawStr = `${sideTypeVal}_${seasonRaw}`;
+            }
+        } else {
+            const seasonRaw = document.querySelector('input[name="fries"]:checked')?.value;
+            if(!seasonRaw) { alert("Seleccioná la preparación."); return; }
+            const mapSeason = { con_sazon: "Sazonadas", con_sal: "Con sal", sin_sal: "Sin sal" };
+            friesStr = mapSeason[seasonRaw];
+            friesRawStr = seasonRaw;
         }
-        
-        // 🔥 Calcula el finalPrice con todos los extras
+
         const prices = window.STATE.config.prices;
-        const finalPrice = Number(item.price) + 
-                           (window.MODAL.extras.patty * prices.patty) + 
-                           (window.MODAL.extras.cheddar * prices.cheddar) +
-                           (window.MODAL.extras.onionRings * prices.onionRings);
-        
-        const catGroup = (item.category === 'guarniciones') ? 'side' : (item.category === 'bebidas' ? 'drink' : 'burger');
+        let finalPrice = Number(item.price) + 
+                         (window.MODAL.extras.patty * prices.patty) + 
+                         (window.MODAL.extras.cheddar * prices.cheddar);
+                         
+        if (sideTypeVal === 'aros') finalPrice += prices.onionRings;
 
         const cartItem = {
-            id: item.id, name: item.name, price: Number(item.price), category: item.category,
-            qty: 1, fries: fries, extras: { ...window.MODAL.extras }, notes: notes, finalPrice: finalPrice
+            item: item,
+            qty: 1,
+            sideType: sideTypeVal,
+            fries: friesStr,
+            friesRaw: friesRawStr, 
+            extras: { ...window.MODAL.extras },
+            notes: notes,
+            finalPrice: finalPrice
         };
         
-        let existingIndex = window.STATE.cart.items.findIndex(i => 
-            i.id === cartItem.id && i.fries === cartItem.fries && 
-            JSON.stringify(i.extras) === JSON.stringify(cartItem.extras) && i.notes === cartItem.notes
-        );
+        const newId = item.id + "_" + friesRawStr + "_" + Date.now();
         
-        if(existingIndex > -1) {
-            window.STATE.cart.items[existingIndex].qty++;
+        if (cat.includes("guarnicion") || cat.includes("side") || cat.includes("papas")) {
+            window.STATE.cart.side[newId] = cartItem;
         } else {
-            window.STATE.cart.items.push(cartItem);
+            window.STATE.cart.burger[newId] = cartItem;
         }
         
         saveCart();
@@ -515,57 +604,118 @@
     function saveCart() { localStorage.setItem(CART_KEY, JSON.stringify(window.STATE.cart)); updateCartUI(); }
 
     function updateCartUI() {
-        const count = window.STATE.cart.items.reduce((s,i) => s + i.qty, 0);
-        document.getElementById("cartBubble").innerText = count;
-        document.getElementById("cartBubble").style.display = count > 0 ? 'inline-block' : 'none';
-        const container = document.getElementById("cartItems"); container.innerHTML = '';
+        let count = 0;
         let total = 0;
-        window.STATE.cart.items.forEach((item, idx) => {
-            total += item.finalPrice * item.qty;
+        const container = document.getElementById("cartItems"); 
+        container.innerHTML = '';
+        
+        const renderItem = (id, obj, typeStr) => {
+            count += obj.qty;
+            total += obj.finalPrice * obj.qty;
             let detail = [];
             
-            if (item.category !== 'bebidas' && item.fries) {
-                const map = { con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal" };
-                if (map[item.fries]) detail.push("🍟 " + map[item.fries]);
-            }
+            if (obj.fries) detail.push("🍟 " + obj.fries);
+            if(obj.extras && obj.extras.patty) detail.push(`+${obj.extras.patty} Carne`);
+            if(obj.extras && obj.extras.cheddar) detail.push(`+${obj.extras.cheddar} Cheddar`);
+            if(obj.notes) detail.push(`📝 ${obj.notes}`);
             
-            if(item.category === 'hamburguesas' || item.category === 'sandwiches') {
-                if(item.extras.patty) detail.push(`+${item.extras.patty} Carne`);
-                if(item.extras.cheddar) detail.push(`+${item.extras.cheddar} Cheddar`);
-                if(item.extras.onionRings) detail.push(`+${item.extras.onionRings} Aros Cebolla`);
-            }
-            
-            if(item.notes) detail.push(`📝 ${item.notes}`);
-            
-            container.innerHTML += `
+            return `
                 <div class="item">
                     <div style="flex:1">
-                        <div style="font-weight:700">${item.name}</div>
+                        <div style="font-weight:700">${obj.item.name}</div>
                         <div style="font-size:12px;color:#666">${detail.join(" • ")}</div>
-                        <div style="color:var(--primary);font-weight:700">$${item.finalPrice}</div>
+                        <div style="color:var(--primary);font-weight:700">$${obj.finalPrice}</div>
                     </div>
                     <div class="qtybox">
-                        <button class="qtybtn" onclick="cartQty(${idx}, -1)">-</button>
-                        <span style="width:20px;text-align:center;font-weight:700">${item.qty}</span>
-                        <button class="qtybtn" onclick="cartQty(${idx}, 1)">+</button>
+                        <button class="qtybtn" onclick="cartQty('${typeStr}', '${id}', -1)">-</button>
+                        <span style="width:20px;text-align:center;font-weight:700">${obj.qty}</span>
+                        <button class="qtybtn" onclick="cartQty('${typeStr}', '${id}', 1)">+</button>
                     </div>
                 </div>
             `;
-        });
+        };
+
+        for(let id in window.STATE.cart.burger) container.innerHTML += renderItem(id, window.STATE.cart.burger[id], 'burger');
+        for(let id in window.STATE.cart.side) container.innerHTML += renderItem(id, window.STATE.cart.side[id], 'side');
+        
+        for(let id in window.STATE.cart.drink){
+            const d = window.STATE.cart.drink[id];
+            count += d.qty;
+            total += d.finalPrice * d.qty;
+            container.innerHTML += `
+                <div class="item">
+                    <div style="flex:1">
+                        <div style="font-weight:700">${d.item.name}</div>
+                        <div style="font-size:12px;color:#666">Bebida</div>
+                        <div style="color:var(--primary);font-weight:700">$${d.finalPrice}</div>
+                    </div>
+                    <div class="qtybox">
+                        <button class="qtybtn" onclick="cartQty('drink', '${id}', -1)">-</button>
+                        <span style="width:20px;text-align:center;font-weight:700">${d.qty}</span>
+                        <button class="qtybtn" onclick="cartQty('drink', '${id}', 1)">+</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        document.getElementById("cartBubble").innerText = count;
+        document.getElementById("cartBubble").style.display = count > 0 ? 'inline-block' : 'none';
         document.getElementById("cartTotal").innerText = "$" + total;
+        
+        if(count === 0) {
+            container.innerHTML = `<span class="muted" style="display:block; text-align:center; padding-top:20px">Carrito vacío.</span>`;
+        }
     }
 
-    window.cartQty = (idx, delta) => {
-        const item = window.STATE.cart.items[idx];
+    window.cartQty = (type, id, delta) => {
+        const item = window.STATE.cart[type][id];
         item.qty += delta;
-        if(item.qty <= 0) window.STATE.cart.items.splice(idx, 1);
+        if(item.qty <= 0) delete window.STATE.cart[type][id];
         saveCart();
     }
 
-    window.emptyCart = () => { if(confirm("¿Vaciar carrito?")) { window.STATE.cart.items = []; saveCart(); toggleDrawer(false); } }
+    window.emptyCart = () => { 
+        if(confirm("¿Vaciar carrito?")) { 
+            window.STATE.cart = { burger:{}, drink:{}, side:{} }; 
+            saveCart(); 
+            toggleDrawer(false); 
+        } 
+    }
     window.toggleDrawer = (open) => { const d = document.getElementById("drawer"); if(open) { d.classList.add("open"); updateCartUI(); } else d.classList.remove("open"); }
     document.getElementById("modalOverlay").onclick = (e) => { if(e.target.id === "modalOverlay") document.getElementById("modalOverlay").classList.remove("open"); }
-    document.getElementById("btnCheckout").onclick = () => { if(window.STATE.cart.items.length === 0) return alert("Tu carrito está vacío"); window.location.href = "pedido_cliente.html"; }
+    
+    // Adaptación para que funcione con tu script de pedido_cliente.html actual
+    document.getElementById("btnCheckout").onclick = () => { 
+        const itemsCount = Object.keys(window.STATE.cart.burger).length + Object.keys(window.STATE.cart.drink).length + Object.keys(window.STATE.cart.side).length;
+        if(itemsCount === 0) return alert("Tu carrito está vacío"); 
+        
+        // Transformar al formato que espera pedido_cliente.html
+        let legacyCart = { items: [] };
+        
+        const convertToLegacy = (id, obj, typeStr) => {
+            legacyCart.items.push({
+                id: obj.item.id,
+                name: obj.item.name,
+                price: Number(obj.item.price),
+                category: obj.item.category,
+                qty: obj.qty,
+                fries: obj.fries,
+                friesRaw: obj.friesRaw,
+                sideType: obj.sideType,
+                extras: obj.extras,
+                notes: obj.notes,
+                finalPrice: obj.finalPrice,
+                type: typeStr
+            });
+        };
+        
+        for(let id in window.STATE.cart.burger) convertToLegacy(id, window.STATE.cart.burger[id], 'burger');
+        for(let id in window.STATE.cart.side) convertToLegacy(id, window.STATE.cart.side[id], 'side');
+        for(let id in window.STATE.cart.drink) convertToLegacy(id, window.STATE.cart.drink[id], 'drink');
+        
+        localStorage.setItem("rhodes_cart_legacy_format", JSON.stringify(legacyCart));
+        window.location.href = "pedido_cliente.html"; 
+    }
   </script>
 </body>
 </html>
