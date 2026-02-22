@@ -123,9 +123,8 @@ const firebaseConfig={apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomai
 firebase.initializeApp(firebaseConfig);
 const db=firebase.firestore();
 
-// Nueva llave del carrito (v5)
 const CART_KEY = "rhodes_cart_v5";
-const WHATSAPP_NUMBER = "5491170596483"; 
+const WHATSAPP_NUMBER = "543484346113"; 
 
 // Configuración de Slots
 const GRAMOS_POR_BLOQUE = 1500;
@@ -149,10 +148,43 @@ function slotKey(date){ const y=date.getFullYear(); const M=String(date.getMonth
 function formatHHMM(date){ return date.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false}); }
 function generateToken() { return Math.random().toString(36).substr(2) + Date.now().toString(36); }
 
-// --- 1. CARGA DEL CARRITO (NUEVA ESTRUCTURA v5) ---
-function loadCart(){ 
+// --- 1. CARGA DEL CARRITO (ADAPTADO AL FORMATO MOSTRADOR) ---
+function loadCart() { 
     try { 
-        return JSON.parse(localStorage.getItem(CART_KEY)) || { items: [] }; 
+        const raw = JSON.parse(localStorage.getItem(CART_KEY));
+        if(!raw) return { items: [] };
+
+        // Si ya es un array plano (formato viejo)
+        if(Array.isArray(raw.items)) return raw;
+
+        // Si viene del nuevo formato dividido (burger, side, drink) lo aplanamos
+        let flatItems = [];
+        const processCategory = (categoryObj, typeStr) => {
+            if(!categoryObj) return;
+            for(let id in categoryObj) {
+                const item = categoryObj[id];
+                flatItems.push({
+                    id: item.item.id,
+                    name: item.item.name,
+                    price: Number(item.item.price),
+                    category: item.item.category,
+                    qty: item.qty,
+                    fries: item.fries,
+                    friesRaw: item.friesRaw,
+                    sideType: item.sideType,
+                    extras: item.extras || {},
+                    notes: item.notes,
+                    finalPrice: item.finalPrice,
+                    type: typeStr
+                });
+            }
+        };
+
+        processCategory(raw.burger, 'burger');
+        processCategory(raw.side, 'side');
+        processCategory(raw.drink, 'drink');
+
+        return { items: flatItems };
     } catch { 
         return { items: [] }; 
     } 
@@ -175,18 +207,19 @@ function renderResumen() {
         subtotal += itemTotal;
         
         let details = [];
-        const map = {con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal"};
         
-        // 🔥 CORRECCIÓN: Mostrar papas para hamburguesas o guarniciones
-        if (item.category !== 'bebidas' && item.fries) {
-            if (map[item.fries]) details.push("🍟 " + map[item.fries]);
+        // Mostrar la guarnición 
+        if (item.fries) {
+            details.push("🍟 " + item.fries);
         }
         
-        // Mostrar extras solo si es hamburguesa
-        if(item.category === 'hamburguesas') {
-            if(item.extras?.patty) details.push(`+${item.extras.patty} Carne`);
-            if(item.extras?.cheddar) details.push(`+${item.extras.cheddar} Cheddar`);
+        // Mostrar extras si existen
+        if(item.extras) {
+            if(item.extras.patty) details.push(`+${item.extras.patty} Carne`);
+            if(item.extras.cheddar) details.push(`+${item.extras.cheddar} Cheddar`);
         }
+        
+        if (item.type === 'drink') details.push("Bebida");
         
         div.innerHTML += `
             <div class="resumen-item">
@@ -213,9 +246,13 @@ function calculateWeight() {
     const cart = loadCart();
     let grams = 0;
     cart.items.forEach(item => {
-        // Si es Burger, pesa 200g. Si es Guarnición suelta, 350g.
-        if (item.category === 'hamburguesas') grams += (item.qty * G_POR_BURGER);
-        else if (item.category === 'guarniciones') grams += (item.qty * G_POR_SIDE);
+        //
+        const cat = (item.category || "").toLowerCase();
+        if (cat.includes('burger') || cat.includes('hamburguesa') || cat.includes('sandwich')) {
+            grams += (item.qty * G_POR_BURGER);
+        } else if (cat.includes('guarnicion') || cat.includes('side') || cat.includes('papas')) {
+            grams += (item.qty * G_POR_SIDE);
+        }
     });
     return grams;
 }
@@ -375,7 +412,7 @@ $("#btnConfirmar").onclick = async () => {
             pickup_slot: slot.key,
             pickup_time_pretty: slot.pretty,
             trackToken: trackToken,
-            items: cart.items // Guardamos la lista plana v5
+            items: cart.items // Guardamos la lista aplanada para compatibilidad
         };
 
         // 4. Guardar en Firebase
@@ -395,17 +432,11 @@ $("#btnConfirmar").onclick = async () => {
         cart.items.forEach(i => {
             msg += `${i.qty}x *${i.name}*\n`;
             
-            const map = {con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal"};
+            if (i.fries) msg += `   🍟 ${i.fries}\n`;
             
-            // 🔥 CORRECCIÓN: Agregar papa si corresponde
-            if (i.category !== 'bebidas' && i.fries && map[i.fries]) {
-                msg += `   🍟 ${map[i.fries]}\n`;
-            }
-            
-            // Agregar extras solo si es hamburguesa
-            if(i.category==='hamburguesas'){
-                if(i.extras && i.extras.patty) msg += `   🥩 +${i.extras.patty} Carne\n`;
-                if(i.extras && i.extras.cheddar) msg += `   🧀 +${i.extras.cheddar} Cheddar\n`;
+            if(i.extras) {
+                if(i.extras.patty) msg += `   🥩 +${i.extras.patty} Carne\n`;
+                if(i.extras.cheddar) msg += `   🧀 +${i.extras.cheddar} Cheddar\n`;
             }
             if(i.notes) msg += `   📝 ${i.notes}\n`;
         });
