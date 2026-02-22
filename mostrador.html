@@ -171,6 +171,7 @@
     .toggle-btn.paid.active { background: #e8f5e9; border-color: var(--success); color: var(--success); opacity: 1; box-shadow: 0 2px 8px rgba(46, 125, 50, 0.2); }
     .toggle-btn.pending.active { background: #fff3e0; border-color: var(--warn); color: #e65100; opacity: 1; box-shadow: 0 2px 8px rgba(255, 152, 0, 0.2); }
 
+
     /* Modal */
     .overlay{ position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:9999; }
     .modal{ width:450px; max-width:95%; background:white; border-radius:20px; padding:25px; box-shadow:0 20px 50px rgba(0,0,0,.4); }
@@ -282,8 +283,17 @@
   <div class="modal">
     <h3 id="modTitle" style="margin-top:0">Personalizar</h3>
 
-    <div class="field">
-      <label style="margin-bottom:8px">Elegí las papas</label>
+    <div class="field" id="sideTypeSection" style="display:none; margin-bottom:15px">
+      <label style="margin-bottom:8px">Guarnición que acompaña</label>
+      <div class="chip-group" id="sideTypeOptions">
+        <label class="chip"><input type="radio" name="sideType" value="crinkles" onchange="toggleSeasoning()"> 🍟 Papas Crinkles</label>
+        <label class="chip"><input type="radio" name="sideType" value="rejillas" onchange="toggleSeasoning()"> 🍟 Papas Rejillas</label>
+        <label class="chip"><input type="radio" name="sideType" value="aros" onchange="toggleSeasoning()"> 🧅 Aros de Cebolla <span id="lblPriceOnion" style="font-size:11px; color:var(--primary)"></span></label>
+      </div>
+    </div>
+
+    <div class="field" id="seasoningSection">
+      <label style="margin-bottom:8px" id="lblSeasoning">Elegí la preparación</label>
       <div class="chip-group" id="friesOptions">
         </div>
     </div>
@@ -351,6 +361,7 @@ const FALLBACK_IMG = "images/logo.png";
 // 🔥 PRECIOS DINÁMICOS
 let EXTRA_PRICE_PATTY   = 2500;
 let EXTRA_PRICE_CHEDDAR = 300;
+let EXTRA_PRICE_ONION   = 1600;
 
 // Cargar precios de la DB
 db.collection("config").doc("prices").onSnapshot(doc => {
@@ -358,9 +369,11 @@ db.collection("config").doc("prices").onSnapshot(doc => {
         const d = doc.data();
         if(d.patty) EXTRA_PRICE_PATTY = Number(d.patty);
         if(d.cheddar) EXTRA_PRICE_CHEDDAR = Number(d.cheddar);
+        if(d.onionRings) EXTRA_PRICE_ONION = Number(d.onionRings);
         
         if($("#lblPricePatty")) $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
         if($("#lblPriceCheddar")) $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
+        if($("#lblPriceOnion")) $("#lblPriceOnion").textContent = `(+$${EXTRA_PRICE_ONION})`;
     }
 });
 
@@ -465,7 +478,7 @@ function renderCard(item){
   const btn = card.querySelector(".addBtn");
   const cat = (item.category||"").toLowerCase();
 
-  // Solo bebidas se agregan directo, todo lo demás abre modal
+  // Solo las bebidas se agregan directo, todo lo demás abre modal
   if(cat.includes("bebida") || cat.includes("drink")){
     btn.onclick = ()=>{
       if(!cart.drink[item.id]) cart.drink[item.id]={qty:0,item};
@@ -507,7 +520,9 @@ function renderCart(){
   // Hamburguesas y Sándwiches
   for(const id in cart.burger){
     const b = cart.burger[id];
-    const unit = b.item.price + b.extras.patty * EXTRA_PRICE_PATTY + b.extras.cheddar * EXTRA_PRICE_CHEDDAR;
+    let unit = b.item.price + b.extras.patty * EXTRA_PRICE_PATTY + b.extras.cheddar * EXTRA_PRICE_CHEDDAR;
+    if (b.sideType === 'aros') unit += EXTRA_PRICE_ONION;
+
     total += unit * b.qty;
 
     const extras=[];
@@ -547,7 +562,7 @@ function renderCart(){
     if(s.friesRaw || s.fries) {
         extras.push(`🍟 ${s.fries}`);
     } else {
-        extras.push(`<div class="missing-fries-alert">⚠️ FALTAN ELEGIR PAPAS</div>`);
+        extras.push(`<div class="missing-fries-alert">⚠️ FALTAN ELEGIR PREPARACIÓN</div>`);
     }
     if(s.notes) extras.push("📝 "+s.notes);
 
@@ -595,6 +610,21 @@ function renderCart(){
 /* ============= MODAL ============= */
 let currentItem=null;
 
+// Lógica para mostrar/ocultar sazonadores cuando se eligen aros
+window.toggleSeasoning = function() {
+    const type = document.querySelector('input[name="sideType"]:checked')?.value;
+    const seasoningSec = document.getElementById('seasoningSection');
+    
+    if (type === 'aros') {
+        seasoningSec.style.display = 'none';
+        // Deseleccionar papas si estaba seleccionada alguna
+        document.querySelectorAll("input[name='fries']").forEach(x=> x.checked=false);
+    } else {
+        seasoningSec.style.display = 'block';
+    }
+    updateModalPrice();
+}
+
 function openCustomize(item){
   currentItem=item;
   $("#patVal").textContent="0";
@@ -605,15 +635,24 @@ function openCustomize(item){
   const cat = (item.category||"").toLowerCase();
   const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich") || cat.includes("sándwich");
   
+  // Resetear radios
+  document.querySelectorAll("input[name='sideType']").forEach(x=> x.checked=false);
+  document.querySelectorAll("input[name='fries']").forEach(x=> x.checked=false);
+
+  // Mostrar u ocultar sección SideType (Crinkles, Rejillas, Aros) solo para Burgers/Sandwiches
+  if (isBurgerType) {
+      $("#sideTypeSection").style.display = "block";
+      $("#lblSeasoning").textContent = "Preparación de las papas";
+  } else {
+      $("#sideTypeSection").style.display = "none";
+      $("#lblSeasoning").textContent = "Elegí la preparación";
+  }
+
   const allowed = item.allowedExtras || {};
-  
   $("#rowPatties").style.display = (allowed.patty || (isBurgerType && allowed.patty !== false)) ? "flex" : "none";
   $("#rowCheddar").style.display = (allowed.cheddar || (isBurgerType && allowed.cheddar !== false)) ? "flex" : "none";
   
-  $("#lblPricePatty").textContent = `(+$${EXTRA_PRICE_PATTY})`;
-  $("#lblPriceCheddar").textContent = `(+$${EXTRA_PRICE_CHEDDAR})`;
-  
-  // Renderizar opciones de papas
+  // Renderizar opciones de preparación (Sazonadas, etc)
   const friesContainer = $("#friesOptions");
   friesContainer.innerHTML = '';
   const sidesMap = { con_sazon: "Sazonadas", con_sal: "Con Sal", sin_sal: "Sin Sal" };
@@ -636,6 +675,7 @@ function openCustomize(item){
       }
   }
   
+  toggleSeasoning(); // Para ajustar visibilidad inicial
   $("#modTitle").textContent = "Personalizar " + item.name;
   updatePreview();
 
@@ -651,11 +691,19 @@ function removeFromCart(id, type){
   renderCart();
 }
 
+// 🔥 EDICIÓN DE HAMBURGUESAS/SÁNDWICHES
 function editBurger(id){
   const b = cart.burger[id];
   if(!b) return;
   currentItem = b.item;
   
+  $("#sideTypeSection").style.display = "block";
+  $("#lblSeasoning").textContent = "Preparación de las papas";
+
+  // Marcar Side Type
+  document.querySelectorAll("input[name='sideType']").forEach(x=> x.checked = (x.value === b.sideType));
+
+  // Re-render chips de preparación
   const friesContainer = $("#friesOptions");
   friesContainer.innerHTML = '';
   const sidesMap = { con_sazon: "Sazonadas", con_sal: "Con Sal", sin_sal: "Sin Sal" };
@@ -677,6 +725,8 @@ function editBurger(id){
       }
   }
 
+  toggleSeasoning();
+
   $("#patVal").textContent = b.extras.patty;
   $("#cheVal").textContent = b.extras.cheddar;
   $("#notes").value = b.notes || "";
@@ -696,13 +746,31 @@ function editBurger(id){
 
   $("#btnAdd").textContent = "GUARDAR CAMBIOS";
   $("#btnAdd").onclick = () => {
-    let friesRaw = document.querySelector("input[name='fries']:checked")?.value;
-    let friesName = getFriesName(friesRaw);
+    
+    let friesStr = "";
+    let friesRawStr = "";
+    
+    const typeRaw = document.querySelector('input[name="sideType"]:checked')?.value;
+    if (!typeRaw) { alert("Seleccioná una guarnición."); return; }
+    
+    if (typeRaw === 'aros') {
+        friesStr = "Aros de Cebolla";
+        friesRawStr = "aros";
+    } else {
+        const seasonRaw = document.querySelector('input[name="fries"]:checked')?.value;
+        if(!seasonRaw) { alert("Seleccioná cómo querés las papas."); return; }
+        
+        const mapSeason = { con_sazon: "Sazonadas", con_sal: "Con sal", sin_sal: "Sin sal" };
+        const typeName = typeRaw === 'crinkles' ? 'Papas Crinkles' : 'Papas Rejillas';
+        friesStr = `${typeName} (${mapSeason[seasonRaw]})`;
+        friesRawStr = `${typeRaw}_${seasonRaw}`;
+    }
 
     cart.burger[id] = {
       ...b,
-      fries: friesName,
-      friesRaw: friesRaw,
+      sideType: typeRaw,
+      fries: friesStr,
+      friesRaw: friesRawStr,
       extras:{ patty:+$("#patVal").textContent, cheddar:+$("#cheVal").textContent },
       notes: $("#notes").value.trim()
     };
@@ -712,10 +780,14 @@ function editBurger(id){
   };
 }
 
+// 🔥 EDICIÓN DE GUARNICIONES (SOLO PREPARACIÓN)
 function editSide(id){
   const s = cart.side[id];
   if(!s) return;
   currentItem = s.item;
+
+  $("#sideTypeSection").style.display = "none";
+  $("#lblSeasoning").textContent = "Elegí la preparación";
 
   const friesContainer = $("#friesOptions");
   friesContainer.innerHTML = '';
@@ -738,6 +810,8 @@ function editSide(id){
       }
   }
 
+  $("#seasoningSection").style.display = 'block';
+
   $("#patVal").textContent = "0";
   $("#cheVal").textContent = "0";
   $("#notes").value = s.notes || "";
@@ -753,13 +827,15 @@ function editSide(id){
 
   $("#btnAdd").textContent = "GUARDAR CAMBIOS";
   $("#btnAdd").onclick = () => {
-    let friesRaw = document.querySelector("input[name='fries']:checked")?.value;
-    let friesName = getFriesName(friesRaw);
+    const seasonRaw = document.querySelector('input[name="fries"]:checked')?.value;
+    if(!seasonRaw) { alert("Seleccioná la preparación."); return; }
+    
+    const mapSeason = { con_sazon: "Sazonadas", con_sal: "Con sal", sin_sal: "Sin sal" };
 
     cart.side[id] = {
       ...s,
-      fries: friesName,
-      friesRaw: friesRaw,
+      fries: mapSeason[seasonRaw],
+      friesRaw: seasonRaw,
       notes: $("#notes").value.trim()
     };
 
@@ -769,20 +845,49 @@ function editSide(id){
 }
 
 const addItemFromModal = ()=>{
-  let friesRaw = document.querySelector("input[name='fries']:checked")?.value;
-  let friesName = getFriesName(friesRaw);
+  const cat = (currentItem.category || "").toLowerCase();
+  const isBurgerType = cat.includes("burger") || cat.includes("hamburguesa") || cat.includes("sandwich") || cat.includes("sándwich");
+  
+  let friesStr = "";
+  let friesRawStr = "";
+  let sideTypeVal = null;
+
+  if (isBurgerType) {
+      sideTypeVal = document.querySelector('input[name="sideType"]:checked')?.value;
+      if (!sideTypeVal) { alert("Seleccioná una guarnición."); return; }
+      
+      if (sideTypeVal === 'aros') {
+          friesStr = "Aros de Cebolla";
+          friesRawStr = "aros";
+      } else {
+          const seasonRaw = document.querySelector('input[name="fries"]:checked')?.value;
+          if(!seasonRaw) { alert("Seleccioná cómo querés las papas."); return; }
+          
+          const mapSeason = { con_sazon: "Sazonadas", con_sal: "Con sal", sin_sal: "Sin sal" };
+          const typeName = sideTypeVal === 'crinkles' ? 'Papas Crinkles' : 'Papas Rejillas';
+          friesStr = `${typeName} (${mapSeason[seasonRaw]})`;
+          friesRawStr = `${sideTypeVal}_${seasonRaw}`;
+      }
+  } else {
+      const seasonRaw = document.querySelector('input[name="fries"]:checked')?.value;
+      if(!seasonRaw) { alert("Seleccioná la preparación."); return; }
+      const mapSeason = { con_sazon: "Sazonadas", con_sal: "Con sal", sin_sal: "Sin sal" };
+      friesStr = mapSeason[seasonRaw];
+      friesRawStr = seasonRaw;
+  }
 
   const entry = {
     item: currentItem,
     qty: 1,
-    fries: friesName,
-    friesRaw: friesRaw, 
+    sideType: sideTypeVal,
+    fries: friesStr,
+    friesRaw: friesRawStr, 
     extras: { patty:+$("#patVal").textContent, cheddar:+$("#cheVal").textContent },
     notes: $("#notes").value.trim()
   };
 
-  const newId = currentItem.id + "_" + Date.now();
-  const cat = (currentItem.category || "").toLowerCase();
+  // Usar el string exacto de la papa para que se agrupen correctamente
+  const newId = currentItem.id + "_" + friesRawStr + "_" + Date.now();
   
   if (cat.includes("guarnicion") || cat.includes("side") || cat.includes("papas")) {
       cart.side[newId] = entry;
@@ -794,19 +899,18 @@ const addItemFromModal = ()=>{
   renderCart();
 };
 
-function getFriesName(raw){
-    if(!raw) return null; 
-    if(raw==="con_sazon") return "Sazonadas";
-    if(raw==="con_sal") return "Con sal";
-    if(raw==="sin_sal") return "Sin sal";
-    return "";
-}
 
 function updatePreview(){
-  const base=currentItem.price;
-  const patt=Number($("#patVal").textContent);
-  const che=Number($("#cheVal").textContent);
-  $("#unitPreview").textContent = money(base + patt*EXTRA_PRICE_PATTY + che*EXTRA_PRICE_CHEDDAR);
+  let total = Number(currentItem.price);
+  total += Number($("#patVal").textContent) * EXTRA_PRICE_PATTY;
+  total += Number($("#cheVal").textContent) * EXTRA_PRICE_CHEDDAR;
+  
+  const sideType = document.querySelector('input[name="sideType"]:checked')?.value;
+  if (sideType === 'aros') {
+      total += EXTRA_PRICE_ONION;
+  }
+  
+  $("#unitPreview").textContent = money(total);
 }
 
 $("#patInc").onclick=()=>{ let v=+$("#patVal").textContent; if(v<2){ $("#patVal").textContent=v+1; updatePreview(); } }
@@ -942,13 +1046,11 @@ async function sendToFirestore(){
   }
   if(!slot){ alert("Elegí un horario"); return; }
 
-  // 🔥 VALIDACIÓN DE PAPAS EN HAMBURGUESAS/SÁNDWICHES
   for (const id in cart.burger) {
     const burger = cart.burger[id];
     const name = burger.item.name.toLowerCase();
     const cat = (burger.item.category || "").toLowerCase();
     
-    // Solo permitimos saltar el paso de papas si es "simple" (que no sea doble ni de pollo) y no es un sandwich
     const isSimple = !name.includes("doble") && !name.includes("pollo") && !cat.includes("sandwich") && !cat.includes("sándwich");
     
     if (!isSimple && !burger.friesRaw) {
@@ -957,7 +1059,6 @@ async function sendToFirestore(){
     }
   }
 
-  // 🔥 VALIDACIÓN DE PAPAS EN GUARNICIONES
   for (const id in cart.side) {
     const side = cart.side[id];
     if (!side.friesRaw) {
@@ -981,7 +1082,9 @@ async function sendToFirestore(){
 
       for(const id in cart.burger){
         const b=cart.burger[id];
-        const unit = b.item.price + b.extras.patty*EXTRA_PRICE_PATTY + b.extras.cheddar*EXTRA_PRICE_CHEDDAR;
+        let unit = b.item.price + b.extras.patty*EXTRA_PRICE_PATTY + b.extras.cheddar*EXTRA_PRICE_CHEDDAR;
+        if(b.sideType === 'aros') unit += EXTRA_PRICE_ONION;
+
         rawTotal += unit*b.qty;
         
         const cat = (b.item.category || "").toLowerCase();
