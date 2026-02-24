@@ -441,7 +441,6 @@
             initStat(statsKey, p.realName.replace(/simple|doble/gi, '').trim(), p.category);
         });
 
-        // 🔥 NUEVO: Agregar Promos/Combos definidos en Aliases aunque tengan 0 ventas
         if(FIXED_DATA && FIXED_DATA.aliases) {
             FIXED_DATA.aliases.forEach(a => {
                 let statsKey = cleanName(a.external);
@@ -449,9 +448,14 @@
             });
         }
 
+        // 🔥 REGISTRO DE GUARNICIONES 
         if (SIDES_CONFIG.con_sal) initStat("papas fritas con sal", "Porción Papas Fritas (Con Sal)", "guarniciones");
         if (SIDES_CONFIG.con_sazon) initStat("papas fritas sazonadas", "Porción Papas Fritas (Sazonadas)", "guarniciones");
         if (SIDES_CONFIG.sin_sal) initStat("papas fritas sin sal", "Porción Papas Fritas (Sin Sal)", "guarniciones");
+        // Agregamos las nuevas guarniciones manualmente al init por si acaso
+        initStat("papas crinkles", "Papas Crinkles", "guarniciones");
+        initStat("papas rejillas", "Papas Rejillas", "guarniciones");
+        initStat("aros de cebolla", "Aros de Cebolla", "guarniciones");
         
         function getCategory(name) {
             const n = name.toLowerCase();
@@ -459,20 +463,19 @@
             if (burgerNames.some(b => n.includes(b))) return 'hamburguesas';
             if(n.includes('promo') || n.includes('combo')) return 'promos';
             if(n.includes('coca')||n.includes('agua')||n.includes('andes')||n.includes('aquarius')||n.includes('sprite')) return 'bebidas';
-            if(n.includes('papas')||n.includes('nuggets')) return 'guarniciones';
+            if(n.includes('papas')||n.includes('nuggets')||n.includes('aros de cebolla')) return 'guarniciones';
             if(n.includes('adicional')) return 'extras';
             return 'otros';
         }
 
-        // 🔥 FUNCIÓN DE LIMPIEZA MEJORADA PARA EVITAR FALLOS DE MATCHEO
         function cleanName(raw) {
             let n = raw.toLowerCase();
-            n = n.split('[')[0]; // Borrar contenido de corchetes
-            n = n.replace(/[\(\)]/g, ''); // Borrar parentesis
-            n = n.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // Borrar acentos
-            n = n.replace(/doble/g, '').replace(/simple/g, ''); // Borrar modificadores
-            n = n.replace(/[^a-z0-9 ]/g, ''); // Borrar caracteres raros (guiones etc)
-            n = n.replace(/\s+/g, ' ').trim(); // Arreglar espacios
+            n = n.split('[')[0]; 
+            n = n.replace(/[\(\)]/g, ''); 
+            n = n.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); 
+            n = n.replace(/doble/g, '').replace(/simple/g, ''); 
+            n = n.replace(/[^a-z0-9 ]/g, ''); 
+            n = n.replace(/\s+/g, ' ').trim(); 
             return n;
         }
 
@@ -497,7 +500,6 @@
             if(source==='py') grandTotalPY += qty;
         }
 
-        // PASO 2: Procesar Pedidos
         ORDERS.forEach(o => {
             let source = 'local';
             const srcRaw = String(o.source || '').toLowerCase();
@@ -509,19 +511,16 @@
                 let rawName = it.name || "";
                 let n = rawName.toLowerCase().trim();
                 
-                // --- 1. INTERCEPTAR SI EL ITEM ES PURAMENTE UN EXTRA (FETA, ETC) ---
                 if (n.includes("feta de cheddar") || n.includes("feta cheddar")) {
                     addToStats("cheddar adicional", "Cheddar adicional", qty, source, false, 'extras');
                     if (n.replace(/\[|\]/g, '').trim().length < 20) return; 
                 }
 
-                // --- 2. DETECCIÓN DE EXTRAS DENTRO DE CORCHETES ---
                 if (rawName.includes('[')) {
                     try {
                         const parts = rawName.split('[');
                         if (parts.length > 1) {
                             const content = parts[1].toLowerCase();
-                            // Detectar cantidad
                             const extraQtyMatch = content.match(/(\d+)/);
                             const extraMultiplier = extraQtyMatch ? Number(extraQtyMatch[1]) : 1;
                             const totalExtraQty = qty * extraMultiplier; 
@@ -534,28 +533,36 @@
                     } catch(e) { console.log("Error leyendo extras", e); }
                 }
 
-                // --- 3. PAPAS ---
+                // --- 3. PAPAS Y GUARNICIONES 🔥 CORREGIDO 🔥 ---
                 let isSide = false;
                 let sideKey = ""; let sideName = "";
 
+                // Verifica si el producto principal es directamente una porción de papas/aros (PedidosYa / Mostrador)
                 if (n.includes("sazonadas")) { isSide = true; sideKey = "papas fritas sazonadas"; sideName = "Porción Papas Fritas (Sazonadas)"; }
                 else if (n.includes("sin sal")) { isSide = true; sideKey = "papas fritas sin sal"; sideName = "Porción Papas Fritas (Sin Sal)"; }
                 else if (n === "papas" || n === "papas fritas" || n.includes("con sal") || n.includes("bastones")) { isSide = true; sideKey = "papas fritas con sal"; sideName = "Porción Papas Fritas (Con Sal)"; }
+                else if (n.includes("crinkle")) { isSide = true; sideKey = "papas crinkles"; sideName = "Papas Crinkles"; }
+                else if (n.includes("rejilla")) { isSide = true; sideKey = "papas rejillas"; sideName = "Papas Rejillas"; }
+                else if (n.includes("aros") || n.includes("cebolla")) { isSide = true; sideKey = "aros de cebolla"; sideName = "Aros de Cebolla"; }
 
                 if (isSide) { addToStats(sideKey, sideName, qty, source, false, "guarniciones"); return; }
 
-                if (it.fries) {
-                    let fProp = String(it.fries).toLowerCase();
+                // Verifica si el producto tiene una guarnición seleccionada en sus propiedades (Web / App)
+                const fProp = String(it.friesRaw || it.fries || it.sideType || "").toLowerCase();
+                if (fProp) {
                     let fKey = ""; let fName = "";
-                    if (fProp.includes("sazon")) { fKey="papas fritas sazonadas"; fName="Porción Papas Fritas (Sazonadas)"; }
+                    if (fProp.includes("aros")) { fKey = "aros de cebolla"; fName = "Aros de Cebolla"; }
+                    else if (fProp.includes("crinkle")) { fKey = "papas crinkles"; fName = "Papas Crinkles"; }
+                    else if (fProp.includes("rejilla")) { fKey = "papas rejillas"; fName = "Papas Rejillas"; }
+                    else if (fProp.includes("sazon")) { fKey="papas fritas sazonadas"; fName="Porción Papas Fritas (Sazonadas)"; }
                     else if (fProp.includes("sin sal")) { fKey="papas fritas sin sal"; fName="Porción Papas Fritas (Sin Sal)"; }
                     else { fKey="papas fritas con sal"; fName="Porción Papas Fritas (Con Sal)"; }
+                    
                     if(fKey) addToStats(fKey, fName, qty, source, false, "guarniciones");
                 }
 
-                // --- 4. LIMPIEZA Y AGREGADO DE PRODUCTO PRINCIPAL ---
                 const isDouble = rawName.toLowerCase().includes('doble');
-                let baseName = cleanName(rawName); // Limpia todo después del '['
+                let baseName = cleanName(rawName);
 
                 if (!baseName || baseName.length < 2) return;
 
@@ -564,7 +571,6 @@
 
                 addToStats(key, prettyName, qty, source, isDouble, stats[key]?.category);
 
-                // Extras legacy
                 if (it.extras) {
                     let extraMeat = Number(it.extras.patty || it.extras.carne || it.extras.medallon || 0);
                     if (extraMeat > 0) addToStats("medallon adicional", "Medallón adicional", extraMeat * qty, source, false, 'extras');
@@ -592,7 +598,6 @@
         let currentCat = null;
 
         sortedKeys.forEach(s => {
-            // 🔥 FILTRO: Si es un extra y el total es 0, NO mostrarlo.
             if(s.category === 'extras' && s.total === 0) return;
 
             let displayCat = (s.category || 'OTROS').toUpperCase();
@@ -669,9 +674,6 @@
             if(doc.exists) FIXED_DATA = doc.data();
             if(!FIXED_DATA.fixed) FIXED_DATA.fixed=[]; if(!FIXED_DATA.prod) FIXED_DATA.prod=[];
             if(!FIXED_DATA.aliases) FIXED_DATA.aliases = [];
-            
-            // Cargar configuración en inputs (con protección si no existe)
-            // if($('#confPy')) $('#confPy').value = FIXED_DATA.config?.pyPercent || 30; <--- BORRADO PORQUE SACAMOS EL INPUT
             
             $('#confDebit').value = FIXED_DATA.config?.taxDebit||0;
             $('#confTransf').value = FIXED_DATA.config?.taxTransf||0; $('#confQR').value = FIXED_DATA.config?.taxQR||0;
@@ -793,10 +795,7 @@
         if(typeof Chart === 'undefined') return;
         let gross=0, comms=0, taxes=0, theoCMV=0;
         
-        // Obtener porcentaje de PY (Protegido por si no existe el input)
         let pyPct = 30;
-        // if(FIXED_DATA.config && FIXED_DATA.config.pyPercent) pyPct = FIXED_DATA.config.pyPercent;
-        
         const { taxDebit:pctDebit, taxTransf:pctTransf, taxQR:pctQR } = FIXED_DATA.config || {};
         
         let dailySales = {}, productSales = {}, paymentStats = { 'Efectivo':0, 'Transferencia':0, 'MercadoPago/QR':0, 'PedidosYa':0, 'Otros':0 };
@@ -922,8 +921,7 @@
     window.saveFixedData = function() { 
         if(!FIXED_DATA.aliases) FIXED_DATA.aliases=[]; 
         
-        // CORRECCIÓN PRINCIPAL: Protección contra el input faltante
-        let pyVal = 30; // Valor por defecto
+        let pyVal = 30;
         if($('#confPy')) pyVal = Number($('#confPy').value);
         
         FIXED_DATA.config = {
@@ -942,10 +940,9 @@
     window.addEventListener('load', () => {
         const now = new Date();
         $('#monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-        // Inicializar el segundo picker
         $('#monthPickerProp').value = $('#monthPicker').value;
         $('#monthPicker').addEventListener('change', window.loadDashboardData);
-        loadProductsDB(); // 🔥 Carga los productos al iniciar
+        loadProductsDB(); 
         window.loadInventory(); window.loadRecipes(); window.loadFixedData(); window.loadDashboardData();
     });
 </script>
