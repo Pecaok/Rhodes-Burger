@@ -441,15 +441,19 @@
             });
         }
 
-        // Inicializamos los nombres EXACTOS de como se guardaban antes para no perder historial
-        if (SIDES_CONFIG.con_sal) initStat("papas fritas con sal", "Porción Papas Fritas (Con Sal)", "guarniciones");
-        if (SIDES_CONFIG.con_sazon) initStat("papas fritas sazonadas", "Porción Papas Fritas (Sazonadas)", "guarniciones");
-        if (SIDES_CONFIG.sin_sal) initStat("papas fritas sin sal", "Porción Papas Fritas (Sin Sal)", "guarniciones");
+        // 🔥 INICIALIZAMOS LAS GUARNICIONES DE FORMA ORDENADA Y UNIFICADA
+        initStat("rejillas_sal", "Papas Rejillas (Con Sal)", "guarniciones");
+        initStat("rejillas_sazonadas", "Papas Rejillas (Sazonadas)", "guarniciones");
+        initStat("rejillas_sinsal", "Papas Rejillas (Sin Sal)", "guarniciones");
         
-        // Inicializamos las nuevas opciones
-        initStat("papas crinkles", "Papas Crinkles", "guarniciones");
-        initStat("papas rejillas", "Papas Rejillas", "guarniciones");
-        initStat("aros de cebolla", "Aros de Cebolla", "guarniciones");
+        initStat("crinkles_sal", "Papas Crinkles (Con Sal)", "guarniciones");
+        initStat("crinkles_sazonadas", "Papas Crinkles (Sazonadas)", "guarniciones");
+        initStat("crinkles_sinsal", "Papas Crinkles (Sin Sal)", "guarniciones");
+        
+        initStat("aros_cebolla", "Aros de Cebolla", "guarniciones");
+        
+        // Inicializamos genérico por si existe alguna "porcion" en la BD
+        initStat("porcion de papas", "Porcion de papas", "guarniciones");
         
         function getCategory(name) {
             const n = name.toLowerCase();
@@ -457,7 +461,7 @@
             if (burgerNames.some(b => n.includes(b))) return 'hamburguesas';
             if(n.includes('promo') || n.includes('combo')) return 'promos';
             if(n.includes('coca')||n.includes('agua')||n.includes('andes')||n.includes('aquarius')||n.includes('sprite')) return 'bebidas';
-            if(n.includes('papas')||n.includes('nuggets')||n.includes('aros de cebolla')) return 'guarniciones';
+            if(n.includes('papas')||n.includes('nuggets')||n.includes('aros de cebolla')||n.includes('porcion')||n.includes('crinkles')||n.includes('rejillas')) return 'guarniciones';
             if(n.includes('adicional')) return 'extras';
             return 'otros';
         }
@@ -505,11 +509,13 @@
                 let rawName = it.name || "";
                 let n = rawName.toLowerCase().trim();
                 
+                // 1. Extras directos
                 if (n.includes("feta de cheddar") || n.includes("feta cheddar")) {
                     addToStats("cheddar adicional", "Cheddar adicional", qty, source, false, 'extras');
                     if (n.replace(/\[|\]/g, '').trim().length < 20) return; 
                 }
 
+                // 2. Extras en corchetes
                 if (rawName.includes('[')) {
                     try {
                         const parts = rawName.split('[');
@@ -527,40 +533,62 @@
                     } catch(e) { console.log("Error leyendo extras", e); }
                 }
 
-                // --- 3. GUARNICIONES Y PAPAS (COMPATIBILIDAD CON HISTORIAL VIEJO) ---
+                // 3. Guarniciones (Historial viejo y nuevas)
                 let isSide = false;
                 let sideKey = ""; let sideName = "";
 
-                // Esta es la lógica exactamente igual a la versión vieja para que matchee el historial
-                if (n.includes("sazonadas")) { isSide = true; sideKey = "papas fritas sazonadas"; sideName = "Porción Papas Fritas (Sazonadas)"; }
-                else if (n.includes("sin sal")) { isSide = true; sideKey = "papas fritas sin sal"; sideName = "Porción Papas Fritas (Sin Sal)"; }
-                else if (n === "papas" || n === "papas fritas" || n.includes("con sal") || n.includes("bastones")) { isSide = true; sideKey = "papas fritas con sal"; sideName = "Porción Papas Fritas (Con Sal)"; }
-                // Agregamos las nuevas manteniendo el mismo formato
-                else if (n.includes("crinkle")) { isSide = true; sideKey = "papas crinkles"; sideName = "Papas Crinkles"; }
-                else if (n.includes("rejilla")) { isSide = true; sideKey = "papas rejillas"; sideName = "Papas Rejillas"; }
-                else if (n.includes("aros") || n.includes("cebolla")) { isSide = true; sideKey = "aros de cebolla"; sideName = "Aros de Cebolla"; }
+                let nNorm = n.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                
+                // A) REJILLAS DIRECTAS (Historial viejo "Porcion Papas Fritas..." o "rejilla" explícita)
+                if (nNorm.includes("porcion papas fritas") || nNorm === "papas fritas sazonadas" || nNorm === "papas fritas sin sal" || nNorm === "papas fritas con sal" || nNorm.includes("rejilla")) {
+                    isSide = true;
+                    if (nNorm.includes("sazon") || nNorm.includes("dorito")) { sideKey = "rejillas_sazonadas"; sideName = "Papas Rejillas (Sazonadas)"; }
+                    else if (nNorm.includes("sin sal")) { sideKey = "rejillas_sinsal"; sideName = "Papas Rejillas (Sin Sal)"; }
+                    else { sideKey = "rejillas_sal"; sideName = "Papas Rejillas (Con Sal)"; }
+                }
+                // B) CRINKLES DIRECTAS
+                else if (nNorm.includes("crinkle")) {
+                    isSide = true;
+                    if (nNorm.includes("sazon") || nNorm.includes("dorito")) { sideKey = "crinkles_sazonadas"; sideName = "Papas Crinkles (Sazonadas)"; }
+                    else if (nNorm.includes("sin sal")) { sideKey = "crinkles_sinsal"; sideName = "Papas Crinkles (Sin Sal)"; }
+                    else { sideKey = "crinkles_sal"; sideName = "Papas Crinkles (Con Sal)"; }
+                }
+                // C) AROS DIRECTOS
+                else if (nNorm.includes("aros de cebolla") || nNorm === "aros") {
+                    isSide = true; sideKey = "aros_cebolla"; sideName = "Aros de Cebolla";
+                }
+                // D) NUGGETS
+                else if (nNorm.includes("nugget")) {
+                    isSide = true; sideKey = "nuggets"; sideName = "Nuggets de Pollo";
+                }
 
+                // Si detectamos que era una guarnición principal/suelta
                 if (isSide) { addToStats(sideKey, sideName, qty, source, false, "guarniciones"); return; }
 
-                // Papas que vienen de acompañamiento (it.fries, it.friesRaw, it.sideType)
+                // 4. Guarnición que acompaña a un combo/hamburguesa
                 const fProp = String(it.friesRaw || it.fries || it.sideType || "").toLowerCase();
                 if (fProp) {
                     let fKey = ""; let fName = "";
                     
-                    // Nuevas guarniciones
-                    if (fProp.includes("aros") || fProp.includes("cebolla")) { fKey = "aros de cebolla"; fName = "Aros de Cebolla"; }
-                    else if (fProp.includes("crinkle")) { fKey = "papas crinkles"; fName = "Papas Crinkles"; }
-                    else if (fProp.includes("rejilla")) { fKey = "papas rejillas"; fName = "Papas Rejillas"; }
-                    
-                    // Viejas guarniciones (los nombres tienen que ser idénticos a como estaban antes para que sumen)
-                    else if (fProp.includes("sazon")) { fKey="papas fritas sazonadas"; fName="Porción Papas Fritas (Sazonadas)"; }
-                    else if (fProp.includes("sin sal")) { fKey="papas fritas sin sal"; fName="Porción Papas Fritas (Sin Sal)"; }
-                    else { fKey="papas fritas con sal"; fName="Porción Papas Fritas (Con Sal)"; }
+                    if (fProp.includes("aros") || fProp.includes("cebolla")) { 
+                        fKey = "aros_cebolla"; fName = "Aros de Cebolla"; 
+                    }
+                    else if (fProp.includes("crinkle")) { 
+                        if (fProp.includes("sazon")) { fKey = "crinkles_sazonadas"; fName = "Papas Crinkles (Sazonadas)"; }
+                        else if (fProp.includes("sin sal")) { fKey = "crinkles_sinsal"; fName = "Papas Crinkles (Sin Sal)"; }
+                        else { fKey = "crinkles_sal"; fName = "Papas Crinkles (Con Sal)"; }
+                    }
+                    else { 
+                        // FALLBACK: Todo lo que no es Aro o Crinkle, asume Rejilla (incluyendo historial de acompañamientos)
+                        if (fProp.includes("sazon")) { fKey = "rejillas_sazonadas"; fName = "Papas Rejillas (Sazonadas)"; }
+                        else if (fProp.includes("sin sal")) { fKey = "rejillas_sinsal"; fName = "Papas Rejillas (Sin Sal)"; }
+                        else { fKey = "rejillas_sal"; fName = "Papas Rejillas (Con Sal)"; }
+                    }
                     
                     if(fKey) addToStats(fKey, fName, qty, source, false, "guarniciones");
                 }
 
-                // --- 4. PRODUCTO PRINCIPAL ---
+                // 5. Producto principal (incluyendo la "porcion de papas" suelta literal)
                 const isDouble = rawName.toLowerCase().includes('doble');
                 let baseName = cleanName(rawName);
 
@@ -571,6 +599,7 @@
 
                 addToStats(key, prettyName, qty, source, isDouble, stats[key]?.category);
 
+                // 6. Extras nativos del objeto item
                 if (it.extras) {
                     let extraMeat = Number(it.extras.patty || it.extras.carne || it.extras.medallon || 0);
                     if (extraMeat > 0) addToStats("medallon adicional", "Medallón adicional", extraMeat * qty, source, false, 'extras');
