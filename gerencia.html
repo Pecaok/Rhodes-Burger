@@ -372,8 +372,6 @@
     let SIDES_CONFIG = {}; 
     let currentRecipeId = null, currentSubRecipeId = null;
     let chartMain=null, chartDaily=null, chartProds=null, chartPayment=null;
-    let tempAliasList = [];
-    let currentRecipeIngs = [];
 
     function logStatus(msg, isError=false) {
         const el = $('#lastPurchasesList');
@@ -407,6 +405,115 @@
         if(ORDERS.length) window.renderProportions();
     }
 
+    /* ============================================================
+       🔥 IMPORTACIÓN PEDIDOS YA 
+       (Mejorada para no romper los ítems con corchetes [ ])
+    ============================================================ */
+    async function importarPedidosYa() {
+        const input = document.getElementById('excelInput');
+        if (!input.files.length) return;
+        const file = input.files[0];
+        const reader = new FileReader();
+
+        reader.onload = async function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(firstSheet, {range: 1, defval:""});
+
+            let imported = 0; let skipped = 0;
+            const loader = document.getElementById('pageLoader');
+            if(loader) loader.classList.remove("hidden");
+
+            for (const row of rows) {
+                const r = {};
+                Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
+
+                const id = r['nro de pedido']; 
+                if (!id) continue;
+
+                const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
+                if (!existing.empty) { skipped++; continue; }
+
+                let total = r['total del pedido'];    
+                let neto = r['ingreso estimado'];        
+                if(typeof total !== 'number') total = Number(String(total).replace(/\./g, '').replace(',', '.'));
+                if(typeof neto !== 'number') neto = Number(String(neto).replace(/\./g, '').replace(',', '.'));
+                if (!total || total <= 0) continue;
+
+                const dateStr = r['fecha del pedido'];
+                let clientName = r['nombre del cliente'] || "Cliente Py";
+                
+                const statusStr = r['estado del pedido'] || "";
+                let status = 'delivered'; let isCancelled = false;
+                if (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado')) {
+                    status = 'cancelled'; isCancelled = true;
+                }
+
+                const itemsStr = r['artículos'] || "";
+                let itemsList = [];
+
+                if(itemsStr) {
+                    // 🔥 FIX: Reemplaza saltos de línea y signos '+' DENTRO de los corchetes para evitar que el split rompa los extras.
+                    let safeStr = String(itemsStr).replace(/\[(.*?)\]/gs, m => m.replace(/,|\n|\+/g, " "));
+                    let rawItems = safeStr.split(/,|\n|\+/);
+                    
+                    rawItems.forEach(line => {
+                        line = line.trim();
+                        if(!line) return;
+                        let qty = 1; let name = line;
+                        const match = line.match(/^(\d+)\s*[xX]?\s*(.*)$/);
+                        if(match) { qty = Number(match[1]); name = match[2]; }
+                        
+                        let note = "";
+                        if(name.includes('[')) {
+                            const nMatch = name.match(/\[(.*?)\]/);
+                            if(nMatch) { note = nMatch[1]; name = name.replace(/\[.*?\]/, "").trim(); }
+                        }
+
+                        const catCode = window.getCat({name: name});
+                        let type = 'other';
+                        if(catCode === 'b') type='burger'; else if(catCode === 'f') type='side'; else if(catCode === 'd') type='drink';
+
+                        // 🔥 TRUCO MAGICO PARA MANTENER LA COMPATIBILIDAD DE CORCHETES
+                        // En vez de borrar los corchetes al guardar, los mandamos en el nombre para que renderProportions los lea
+                        itemsList.push({ qty, name: line, price: 0, type, notes: note, extras: {} });
+                    });
+                } else {
+                    itemsList = [{ name: 'Pedido Importado', qty: 1, price: total }];
+                }
+                
+                let isoDate = new Date().toISOString();
+                if(dateStr) {
+                    if(typeof dateStr === 'number') {
+                        const excelEpoch = new Date(1899, 11, 30);
+                        isoDate = new Date(excelEpoch.getTime() + dateStr * 86400000).toISOString();
+                    } else { try { isoDate = new Date(dateStr).toISOString(); } catch(e){} }
+                }
+
+                try {
+                    const orderRef = await db.collection('orders').add({
+                        orderNumber: String(id), py_id: String(id), source: 'pedidosya',
+                        status: status, payment_status: 'paid', paid: true, pago: 'pedidosya_online',
+                        entrega: 'delivery', nombre: clientName, total: total, neto_excel: neto,     
+                        createdAt: isoDate, items: itemsList, stockDescontado: false 
+                    });
+
+                    if (!isCancelled) {
+                        const pedidoParaStock = { id: orderRef.id, items: itemsList, stockDescontado: false };
+                        await gestionarStock(pedidoParaStock, -1);
+                    }
+                    imported++;
+                } catch (err) { console.error("Error importando:", err); }
+            }
+
+            if(loader) loader.classList.add("hidden");
+            alert(`✅ IMPORTACIÓN FINALIZADA\n\nSe cargaron ${imported} pedidos correctamente.`);
+            input.value = ""; location.reload();
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
     // ==========================================
     // 🔥 2. LÓGICA DINÁMICA DE PROPORCIONES
     // ==========================================
@@ -432,13 +539,11 @@
             const p = PRODUCTS_DB[key];
             let statsKey = key.replace('simple', '').replace('doble', '').trim();
             
-            // Si el producto que viene de la BD tiene estos nombres viejos, NO creamos la fila por defecto acá,
-            // las agrupamos nosotros manualmente más abajo bajo "Papas Rejillas".
+            // Ignoramos la creacion de filas viejas para controlarlas nosotros a mano y agruparlas bien
             let rnNorm = p.realName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
             if (rnNorm.includes("porcion papas fritas") || rnNorm.includes("porcion de papas")) {
                 return; 
             }
-            
             initStat(statsKey, p.realName.replace(/simple|doble/gi, '').trim(), p.category);
         });
 
@@ -449,16 +554,26 @@
             });
         }
 
-        // 🔥 DECLARAMOS TODAS LAS GUARNICIONES DE FORMA ORDENADA
-        initStat("rejillas_sal", "Papas Rejillas (Con Sal)", "guarniciones");
-        initStat("rejillas_sazonadas", "Papas Rejillas (Sazonadas)", "guarniciones");
-        initStat("rejillas_sinsal", "Papas Rejillas (Sin Sal)", "guarniciones");
+        // 🔥 GUARNICIONES DE ACOMPAÑAMIENTO (Combos) -> Papas Rejillas es la de Defecto
+        initStat("acompañamiento_rejillas_sal", "Acompañamiento: Papas Rejillas (Con Sal)", "guarniciones");
+        initStat("acompañamiento_rejillas_sazonadas", "Acompañamiento: Papas Rejillas (Sazonadas)", "guarniciones");
+        initStat("acompañamiento_rejillas_sinsal", "Acompañamiento: Papas Rejillas (Sin Sal)", "guarniciones");
         
-        initStat("crinkles_sal", "Papas Crinkles (Con Sal)", "guarniciones");
-        initStat("crinkles_sazonadas", "Papas Crinkles (Sazonadas)", "guarniciones");
-        initStat("crinkles_sinsal", "Papas Crinkles (Sin Sal)", "guarniciones");
+        initStat("acompañamiento_crinkles_sal", "Acompañamiento: Papas Crinkles (Con Sal)", "guarniciones");
+        initStat("acompañamiento_crinkles_sazonadas", "Acompañamiento: Papas Crinkles (Sazonadas)", "guarniciones");
+        initStat("acompañamiento_crinkles_sinsal", "Acompañamiento: Papas Crinkles (Sin Sal)", "guarniciones");
         
-        initStat("aros_cebolla", "Aros de Cebolla", "guarniciones");
+        initStat("acompañamiento_aros", "Acompañamiento: Aros de Cebolla", "guarniciones");
+        
+        // 🔥 GUARNICIONES SUELTAS (Porciones) -> La vieja porción y las nuevas crinkles
+        initStat("porcion_papas_sal", "Porción Papas Fritas (Con Sal)", "guarniciones");
+        initStat("porcion_papas_sazonadas", "Porción Papas Fritas (Sazonadas)", "guarniciones");
+        initStat("porcion_papas_sinsal", "Porción Papas Fritas (Sin Sal)", "guarniciones");
+        
+        initStat("porcion_crinkles_sal", "Porción Papas Crinkles", "guarniciones");
+        initStat("porcion_rejillas_sal", "Porción Papas Rejillas", "guarniciones");
+        initStat("porcion_aros", "Porción Aros de Cebolla", "guarniciones");
+        
         initStat("nuggets", "Nuggets de Pollo", "guarniciones");
         
         function getCategory(name) {
@@ -467,7 +582,7 @@
             if (burgerNames.some(b => n.includes(b))) return 'hamburguesas';
             if(n.includes('promo') || n.includes('combo')) return 'promos';
             if(n.includes('coca')||n.includes('agua')||n.includes('andes')||n.includes('aquarius')||n.includes('sprite')) return 'bebidas';
-            if(n.includes('papas')||n.includes('nuggets')||n.includes('aros de cebolla')) return 'guarniciones';
+            if(n.includes('papas')||n.includes('nuggets')||n.includes('aros de cebolla')||n.includes('acompañamiento')||n.includes('porción')) return 'guarniciones';
             if(n.includes('adicional')) return 'extras';
             return 'otros';
         }
@@ -510,39 +625,74 @@
             if (srcRaw.includes('pedidosya')) source = 'py';
             else if (srcRaw === 'web' || srcRaw === 'app') source = 'web';
 
+            // 🔥 PRE-PROCESADOR DE ITEMS HUÉRFANOS DE PEDIDOSYA (Atrapa "Con sal", "Crinkle", etc. y los une a la hamburguesa)
+            let mergedItems = [];
+            let lastBurger = null;
+
             (o.items || []).forEach(it => {
+                let rawN = (it.name || "").toLowerCase().trim();
+                let checkN = rawN.replace(/\]/g, '').replace(/^[0-9x\s]+/, '').trim(); 
+                
+                // Si el item dice literalmente esto, es un modificador suelto por mal parseo de un pedido via excel antiguo
+                let isStrayMod = ["crinkle", "crinkles", "rejilla", "rejillas", "con sal", "sin sal", "sabor queso", "sazonadas", "sazon", "aros de cebolla", "aro de cebolla", "aros"].includes(checkN);
+
+                let copyIt = { ...it, extras: { ...(it.extras || {}) } };
+
+                if (isStrayMod && lastBurger) {
+                    lastBurger.friesRaw = (lastBurger.friesRaw || "") + " " + checkN;
+                } else if (isStrayMod && !lastBurger) {
+                    // Si pidió una papa suelta y no hay hamburguesa arriba, lo forzamos como Porción
+                    copyIt.name = "Porcion de papas " + checkN; 
+                    mergedItems.push(copyIt);
+                } else {
+                    mergedItems.push(copyIt);
+                    if (rawN.includes('hamb') || rawN.includes('burger') || rawN.includes('doble') || rawN.includes('simple') || rawN.includes('royal') || rawN.includes('cheese') || rawN.includes('cuarto') || rawN.includes('big')) {
+                        lastBurger = copyIt;
+                    }
+                }
+            });
+
+            // Ahora procesamos la lista limpia
+            mergedItems.forEach(it => {
                 const qty = Number(it.qty || 1);
                 let rawName = it.name || "";
                 let n = rawName.toLowerCase().trim();
-                let fProp = String(it.friesRaw || it.fries || it.sideType || "").toLowerCase();
                 
-                // 1. Extras directos (feta de cheddar sola)
+                // 1. Extras directos solos
                 if (n.includes("feta de cheddar") || n.includes("feta cheddar")) {
                     addToStats("cheddar adicional", "Cheddar adicional", qty, source, false, 'extras');
                     if (n.replace(/\[|\]/g, '').trim().length < 20) return; 
                 }
 
                 // 2. Extraer notas y modificadores en PedidosYa (Corchetes)
-                if (n.includes('[')) {
-                    const content = n.substring(n.indexOf('[') + 1, n.indexOf(']') > -1 ? n.indexOf(']') : n.length);
-                    fProp += " " + content; // Sumamos el contenido a fProp para que el evaluador de papas lo detecte
+                let fProp = String(it.friesRaw || it.fries || it.sideType || "").toLowerCase();
+                
+                if (rawName.includes('[')) {
+                    const content = rawName.substring(rawName.indexOf('[') + 1).toLowerCase();
+                    fProp += " " + content; // Sumamos a fProp para que el lector de papas evalue TODO el texto junto
                     
                     try {
-                        const extraQtyMatch = content.match(/(\d+)/);
-                        const extraMultiplier = extraQtyMatch ? Number(extraQtyMatch[1]) : 1;
-                        const totalExtraQty = qty * extraMultiplier; 
+                        const countExtra = (keyword) => {
+                            const regex = new RegExp(`(\\d+)?\\s*(?:x\\s*)?${keyword}`);
+                            const match = content.match(regex);
+                            if (match) return (Number(match[1]) || 1) * qty;
+                            if (content.includes(keyword)) return qty;
+                            return 0;
+                        };
 
-                        if (content.includes('cheddar')) addToStats("cheddar adicional", "Cheddar adicional", totalExtraQty, source, false, 'extras');
-                        if (content.includes('carne') || content.includes('medallon') || content.includes('patty')) addToStats("medallon adicional", "Medallón adicional", totalExtraQty, source, false, 'extras');
-                        if (content.includes('bacon') || content.includes('panceta')) addToStats("bacon adicional", "Bacon adicional", totalExtraQty, source, false, 'extras');
-                        if (content.includes('huevo')) addToStats("huevo adicional", "Huevo adicional", totalExtraQty, source, false, 'extras');
+                        const cheddars = countExtra('cheddar');
+                        if (cheddars) addToStats("cheddar adicional", "Cheddar adicional", cheddars, source, false, 'extras');
+                        
+                        const carnes = countExtra('carne') || countExtra('medallon') || countExtra('patty');
+                        if (carnes) addToStats("medallon adicional", "Medallón adicional", carnes, source, false, 'extras');
+                        
+                        const bacons = countExtra('bacon') || countExtra('panceta');
+                        if (bacons) addToStats("bacon adicional", "Bacon adicional", bacons, source, false, 'extras');
                     } catch(e) { console.log("Error leyendo extras", e); }
                 }
 
-                // Nombre base limpio sin corchetes ni basura
-                let baseNameForCheck = n.split('[')[0].normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-
-                // 3. Chequear si es una GUARNICIÓN SUELTA / PRINCIPAL
+                // 3. Chequear si es una GUARNICIÓN SUELTA (Porcion)
+                let baseNameForCheck = cleanName(rawName);
                 let isStandaloneSide = false;
                 
                 if (baseNameForCheck.includes("nugget")) {
@@ -555,40 +705,51 @@
                 }
 
                 if (isStandaloneSide) {
-                    let type = "rejillas"; 
+                    let type = "papas"; 
                     if (n.includes("crinkle")) type = "crinkles";
-                    else if (n.includes("aros") || n.includes("cebolla")) type = "aros_cebolla";
+                    else if (n.includes("rejilla")) type = "rejillas";
+                    else if (n.includes("aros") || n.includes("cebolla")) type = "aros";
 
                     let season = "sal";
-                    if (n.includes("sazon") || n.includes("dorito")) season = "sazonadas";
+                    if (n.includes("sazon") || n.includes("dorito") || n.includes("queso") || n.includes("sabor")) season = "sazonadas";
                     else if (n.includes("sin sal")) season = "sinsal";
 
-                    let sideKey = (type === "aros_cebolla") ? "aros_cebolla" : `${type}_${season}`;
-                    let sideName = stats[sideKey] ? stats[sideKey].name : sideKey;
+                    let sideKey = `porcion_${type}_${season}`;
+                    let sideName = "Porción";
                     
+                    if (type === "aros") { sideKey = "porcion_aros"; sideName = "Porción Aros de Cebolla"; }
+                    else if (type === "crinkles") { sideKey = "porcion_crinkles_sal"; sideName = "Porción Papas Crinkles"; }
+                    else if (type === "rejillas") { sideKey = "porcion_rejillas_sal"; sideName = "Porción Papas Rejillas"; }
+                    else {
+                        // Papas Fritas clásicas
+                        if (season === "sazonadas") { sideKey = "porcion_papas_sazonadas"; sideName = "Porción Papas Fritas (Sazonadas)"; }
+                        else if (season === "sinsal") { sideKey = "porcion_papas_sinsal"; sideName = "Porción Papas Fritas (Sin Sal)"; }
+                        else { sideKey = "porcion_papas_sal"; sideName = "Porción Papas Fritas (Con Sal)"; }
+                    }
+
                     addToStats(sideKey, sideName, qty, source, false, "guarniciones");
-                    return; // Terminamos de procesar este item porque era solo una papa.
+                    return; 
                 }
 
-                // 4. Chequear si la hamburguesa LLEVA GUARNICIÓN
+                // 4. Guarnición que ACOMPAÑA a una hamburguesa
                 const isBurgerType = baseNameForCheck.includes('hamb') || baseNameForCheck.includes('burger') || baseNameForCheck.includes('doble') || baseNameForCheck.includes('simple') || baseNameForCheck.includes('royal') || baseNameForCheck.includes('cheese') || baseNameForCheck.includes('cuarto') || baseNameForCheck.includes('big') || baseNameForCheck.includes('sandwich') || baseNameForCheck.includes('sándwich');
 
                 if (fProp.trim() !== "" || isBurgerType) {
-                    let type = "rejillas"; 
+                    let type = "rejillas"; // 🔥 POR DEFECTO TODA HAMBURGUESA LLEVA REJILLAS AHORA
                     if (fProp.includes("crinkle")) type = "crinkles";
-                    else if (fProp.includes("aros") || fProp.includes("cebolla")) type = "aros_cebolla";
+                    else if (fProp.includes("aros") || fProp.includes("cebolla")) type = "aros";
 
                     let season = "sal";
-                    if (fProp.includes("sazon") || fProp.includes("dorito")) season = "sazonadas";
+                    if (fProp.includes("sazon") || fProp.includes("dorito") || fProp.includes("queso") || fProp.includes("sabor")) season = "sazonadas";
                     else if (fProp.includes("sin sal")) season = "sinsal";
 
-                    let fKey = (type === "aros_cebolla") ? "aros_cebolla" : `${type}_${season}`;
+                    let fKey = (type === "aros") ? "acompañamiento_aros" : `acompañamiento_${type}_${season}`;
                     let fName = stats[fKey] ? stats[fKey].name : fKey;
                     
                     addToStats(fKey, fName, qty, source, false, "guarniciones");
                 }
 
-                // 5. PRODUCTO PRINCIPAL (Añadir la hamburguesa o bebida)
+                // 5. PRODUCTO PRINCIPAL (La hamburguesa en sí)
                 const isDouble = rawName.toLowerCase().includes('doble');
                 let baseName = cleanName(rawName);
 
@@ -898,8 +1059,17 @@
         let totalCost = 0, burgerCount = 0, countSazon = 0;
         items.forEach(i => {
             const n = String(i.name||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); const qty = Math.ceil(Number(i.qty||1));
-            if(n.includes('hamb')||n.includes('burger')||n.includes('doble')||n.includes('simple')||n.includes('royal')||n.includes('cheese')||n.includes('cuarto')||n.includes('big')) {
-                burgerCount += qty; if(n.includes('dorito')) countSazon += qty;
+            if(n.includes('hamb')||n.includes('burger')||n.includes('doble')||n.includes('simple')||n.includes('royal')||n.includes('cheese')||n.includes('cuarto')||n.includes('big')||n.includes('sandwich')) {
+                let fProp = String(i.friesRaw || i.fries || i.sideType || "").toLowerCase();
+                let hasAros = fProp.includes('aros') || fProp.includes('cebolla') || n.includes('aros');
+                
+                // Si la hamburguesa no tiene aros, cuenta como hamburguesa para calcular papas
+                if (!hasAros) {
+                    burgerCount += qty; 
+                }
+                
+                if(n.includes('dorito') || fProp.includes('sazon') || fProp.includes('queso')) countSazon += qty;
+                
                 const unitCost = window.getUnitCost(i.name);
                 if (unitCost === 0) {
                     let patties = 1; if(n.includes('doble')) patties = 2; if(n.includes('triple')) patties = 3;
