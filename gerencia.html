@@ -59,7 +59,7 @@
     .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 15px; }
     
     .badge { padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; display:inline-block; letter-spacing:0.5px; }
-    .bdg-web { background: #e0f2fe; color: #0284c7; }    
+    .bdg-web { background: #e0f2fe; color: #0284c7; }   
     .bdg-local { background: #f1f5f9; color: #475569; } 
     .bdg-py { background: #fee2e2; color: #ef4444; }      
     .bdg-cash { background: #dcfce7; color: #166534; }    
@@ -407,7 +407,6 @@
 
     /* ============================================================
        🔥 IMPORTACIÓN PEDIDOS YA 
-       (Mejorada para no romper los ítems con corchetes [ ])
     ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
@@ -435,7 +434,7 @@
                 const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
                 if (!existing.empty) { skipped++; continue; }
 
-                let total = r['total del pedido'];    
+                let total = r['total del pedido'];   
                 let neto = r['ingreso estimado'];        
                 if(typeof total !== 'number') total = Number(String(total).replace(/\./g, '').replace(',', '.'));
                 if(typeof neto !== 'number') neto = Number(String(neto).replace(/\./g, '').replace(',', '.'));
@@ -454,7 +453,6 @@
                 let itemsList = [];
 
                 if(itemsStr) {
-                    // 🔥 FIX: Reemplaza saltos de línea y signos '+' DENTRO de los corchetes para evitar que el split rompa los extras.
                     let safeStr = String(itemsStr).replace(/\[(.*?)\]/gs, m => m.replace(/,|\n|\+/g, " "));
                     let rawItems = safeStr.split(/,|\n|\+/);
                     
@@ -475,8 +473,6 @@
                         let type = 'other';
                         if(catCode === 'b') type='burger'; else if(catCode === 'f') type='side'; else if(catCode === 'd') type='drink';
 
-                        // 🔥 TRUCO MAGICO PARA MANTENER LA COMPATIBILIDAD DE CORCHETES
-                        // En vez de borrar los corchetes al guardar, los mandamos en el nombre para que renderProportions los lea
                         itemsList.push({ qty, name: line, price: 0, type, notes: note, extras: {} });
                     });
                 } else {
@@ -515,7 +511,7 @@
     }
 
     // ==========================================
-    // 🔥 2. LÓGICA DINÁMICA DE PROPORCIONES
+    // 🔥 2. LÓGICA DINÁMICA DE PROPORCIONES (ACTUALIZADA)
     // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
@@ -524,248 +520,202 @@
 
         const stats = {};
 
+        // 1. Inicializar Estadísticas
         function initStat(key, name, cat) {
             if (!stats[key]) {
                 stats[key] = {
                     name: name,
-                    category: cat || getCategory(name),
+                    category: cat || 'otros',
                     countSimple: 0, countDouble: 0, total: 0, 
                     web: 0, local: 0, py: 0
                 };
             }
         }
 
+        // Precargar productos de la DB
         Object.keys(PRODUCTS_DB).forEach(key => {
             const p = PRODUCTS_DB[key];
-            let statsKey = key.replace('simple', '').replace('doble', '').trim();
-            
-            // Ignoramos la creacion de filas viejas para controlarlas nosotros a mano y agruparlas bien
-            let rnNorm = p.realName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            if (rnNorm.includes("porcion papas fritas") || rnNorm.includes("porcion de papas")) {
-                return; 
-            }
-            initStat(statsKey, p.realName.replace(/simple|doble/gi, '').trim(), p.category);
+            let statsKey = key.replace(/simple|doble/gi, '').trim().toLowerCase();
+            let cleanDisplayName = p.realName.replace(/simple|doble/gi, '').trim();
+            if (statsKey.includes("porcion papas") || statsKey.includes("porcion de papas")) return;
+            initStat(statsKey, cleanDisplayName, p.category);
         });
 
         if(FIXED_DATA && FIXED_DATA.aliases) {
             FIXED_DATA.aliases.forEach(a => {
-                let statsKey = cleanName(a.external);
+                let statsKey = a.external.replace(/simple|doble/gi, '').replace(/[^a-z0-9 ]/g, '').trim().toLowerCase();
                 initStat(statsKey, a.external, 'promos');
             });
         }
 
-        // 🔥 GUARNICIONES DE ACOMPAÑAMIENTO (Combos) -> Papas Rejillas es la de Defecto
+        // Precargar Guarniciones base
         initStat("acompañamiento_rejillas_sal", "Acompañamiento: Papas Rejillas (Con Sal)", "guarniciones");
         initStat("acompañamiento_rejillas_sazonadas", "Acompañamiento: Papas Rejillas (Sazonadas)", "guarniciones");
         initStat("acompañamiento_rejillas_sinsal", "Acompañamiento: Papas Rejillas (Sin Sal)", "guarniciones");
-        
         initStat("acompañamiento_crinkles_sal", "Acompañamiento: Papas Crinkles (Con Sal)", "guarniciones");
         initStat("acompañamiento_crinkles_sazonadas", "Acompañamiento: Papas Crinkles (Sazonadas)", "guarniciones");
         initStat("acompañamiento_crinkles_sinsal", "Acompañamiento: Papas Crinkles (Sin Sal)", "guarniciones");
-        
         initStat("acompañamiento_aros", "Acompañamiento: Aros de Cebolla", "guarniciones");
         
-        // 🔥 GUARNICIONES SUELTAS (Porciones) -> La vieja porción y las nuevas crinkles
         initStat("porcion_papas_sal", "Porción Papas Fritas (Con Sal)", "guarniciones");
         initStat("porcion_papas_sazonadas", "Porción Papas Fritas (Sazonadas)", "guarniciones");
         initStat("porcion_papas_sinsal", "Porción Papas Fritas (Sin Sal)", "guarniciones");
-        
         initStat("porcion_crinkles_sal", "Porción Papas Crinkles", "guarniciones");
         initStat("porcion_rejillas_sal", "Porción Papas Rejillas", "guarniciones");
         initStat("porcion_aros", "Porción Aros de Cebolla", "guarniciones");
-        
         initStat("nuggets", "Nuggets de Pollo", "guarniciones");
-        
-        function getCategory(name) {
-            const n = name.toLowerCase();
-            const burgerNames = ["cheese", "bacon", "egg", "core", "morgan", "big", "john", "buena", "mala", "fea", "rhodes", "burguesa", "pollo", "crispy"];
-            if (burgerNames.some(b => n.includes(b))) return 'hamburguesas';
-            if(n.includes('promo') || n.includes('combo')) return 'promos';
-            if(n.includes('coca')||n.includes('agua')||n.includes('andes')||n.includes('aquarius')||n.includes('sprite')) return 'bebidas';
-            if(n.includes('papas')||n.includes('nuggets')||n.includes('aros de cebolla')||n.includes('acompañamiento')||n.includes('porción')) return 'guarniciones';
-            if(n.includes('adicional')) return 'extras';
-            return 'otros';
-        }
-
-        function cleanName(raw) {
-            let n = raw.toLowerCase();
-            n = n.split('[')[0]; 
-            n = n.replace(/[\(\)]/g, ''); 
-            n = n.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); 
-            n = n.replace(/doble/g, '').replace(/simple/g, ''); 
-            n = n.replace(/[^a-z0-9 ]/g, ''); 
-            n = n.replace(/\s+/g, ' ').trim(); 
-            return n;
-        }
 
         let totalGeneral = 0;
         let grandTotalWeb = 0, grandTotalLocal = 0, grandTotalPY = 0;
 
-        function addToStats(key, niceName, qty, source, isDouble, cat) {
-            initStat(key, niceName, cat);
-            stats[key].total += qty;
-            stats[key][source] += qty;
-            
-            if (stats[key].category === 'hamburguesas' || stats[key].category === 'Hamburguesas') {
-                if (isDouble) stats[key].countDouble += qty;
-                else stats[key].countSimple += qty;
-            } else {
-                stats[key].countSimple += qty;
-            }
-
-            totalGeneral += qty;
-            if(source==='web') grandTotalWeb += qty;
-            if(source==='local') grandTotalLocal += qty;
-            if(source==='py') grandTotalPY += qty;
-        }
-
+        // 2. Procesamiento de Pedidos
         ORDERS.forEach(o => {
             let source = 'local';
             const srcRaw = String(o.source || '').toLowerCase();
             if (srcRaw.includes('pedidosya')) source = 'py';
             else if (srcRaw === 'web' || srcRaw === 'app') source = 'web';
 
-            // 🔥 PRE-PROCESADOR DE ITEMS HUÉRFANOS DE PEDIDOSYA (Atrapa "Con sal", "Crinkle", etc. y los une a la hamburguesa)
-            let mergedItems = [];
-            let lastBurger = null;
-
             (o.items || []).forEach(it => {
-                let rawN = (it.name || "").toLowerCase().trim();
-                let checkN = rawN.replace(/\]/g, '').replace(/^[0-9x\s]+/, '').trim(); 
-                
-                // Si el item dice literalmente esto, es un modificador suelto por mal parseo de un pedido via excel antiguo
-                let isStrayMod = ["crinkle", "crinkles", "rejilla", "rejillas", "con sal", "sin sal", "sabor queso", "sazonadas", "sazon", "aros de cebolla", "aro de cebolla", "aros"].includes(checkN);
-
-                let copyIt = { ...it, extras: { ...(it.extras || {}) } };
-
-                if (isStrayMod && lastBurger) {
-                    lastBurger.friesRaw = (lastBurger.friesRaw || "") + " " + checkN;
-                } else if (isStrayMod && !lastBurger) {
-                    // Si pidió una papa suelta y no hay hamburguesa arriba, lo forzamos como Porción
-                    copyIt.name = "Porcion de papas " + checkN; 
-                    mergedItems.push(copyIt);
-                } else {
-                    mergedItems.push(copyIt);
-                    if (rawN.includes('hamb') || rawN.includes('burger') || rawN.includes('doble') || rawN.includes('simple') || rawN.includes('royal') || rawN.includes('cheese') || rawN.includes('cuarto') || rawN.includes('big')) {
-                        lastBurger = copyIt;
-                    }
-                }
-            });
-
-            // Ahora procesamos la lista limpia
-            mergedItems.forEach(it => {
                 const qty = Number(it.qty || 1);
-                let rawName = it.name || "";
-                let n = rawName.toLowerCase().trim();
+                let rawName = (it.name || "").toLowerCase().trim();
+
+                // --- PASO A: EXTRACTOR DE CORCHETES Y EXTRAS ---
+                let bracketsContent = "";
+                let cleanName = rawName.replace(/\[(.*?)\]/g, (match, inside) => {
+                    bracketsContent += " " + inside;
+                    return ""; 
+                }).trim();
+
+                let modifiers = (bracketsContent + " " + String(it.friesRaw || it.notes || "")).toLowerCase();
                 
-                // 1. Extras directos solos
-                if (n.includes("feta de cheddar") || n.includes("feta cheddar")) {
-                    addToStats("cheddar adicional", "Cheddar adicional", qty, source, false, 'extras');
-                    if (n.replace(/\[|\]/g, '').trim().length < 20) return; 
-                }
-
-                // 2. Extraer notas y modificadores en PedidosYa (Corchetes)
-                let fProp = String(it.friesRaw || it.fries || it.sideType || "").toLowerCase();
-                
-                if (rawName.includes('[')) {
-                    const content = rawName.substring(rawName.indexOf('[') + 1).toLowerCase();
-                    fProp += " " + content; // Sumamos a fProp para que el lector de papas evalue TODO el texto junto
-                    
-                    try {
-                        const countExtra = (keyword) => {
-                            const regex = new RegExp(`(\\d+)?\\s*(?:x\\s*)?${keyword}`);
-                            const match = content.match(regex);
-                            if (match) return (Number(match[1]) || 1) * qty;
-                            if (content.includes(keyword)) return qty;
-                            return 0;
-                        };
-
-                        const cheddars = countExtra('cheddar');
-                        if (cheddars) addToStats("cheddar adicional", "Cheddar adicional", cheddars, source, false, 'extras');
-                        
-                        const carnes = countExtra('carne') || countExtra('medallon') || countExtra('patty');
-                        if (carnes) addToStats("medallon adicional", "Medallón adicional", carnes, source, false, 'extras');
-                        
-                        const bacons = countExtra('bacon') || countExtra('panceta');
-                        if (bacons) addToStats("bacon adicional", "Bacon adicional", bacons, source, false, 'extras');
-                    } catch(e) { console.log("Error leyendo extras", e); }
-                }
-
-                // 3. Chequear si es una GUARNICIÓN SUELTA (Porcion)
-                let baseNameForCheck = cleanName(rawName);
-                let isStandaloneSide = false;
-                
-                if (baseNameForCheck.includes("nugget")) {
-                    addToStats("nuggets", "Nuggets de Pollo", qty, source, false, "guarniciones");
-                    return;
-                }
-
-                if (baseNameForCheck.includes("porcion") || baseNameForCheck === "papas" || baseNameForCheck === "papas fritas" || baseNameForCheck.includes("papas fritas sazonadas") || baseNameForCheck.includes("papas crinkle") || baseNameForCheck.includes("papas rejilla") || baseNameForCheck.includes("aros de cebolla")) {
-                    isStandaloneSide = true;
-                }
-
-                if (isStandaloneSide) {
-                    let type = "papas"; 
-                    if (n.includes("crinkle")) type = "crinkles";
-                    else if (n.includes("rejilla")) type = "rejillas";
-                    else if (n.includes("aros") || n.includes("cebolla")) type = "aros";
-
-                    let season = "sal";
-                    if (n.includes("sazon") || n.includes("dorito") || n.includes("queso") || n.includes("sabor")) season = "sazonadas";
-                    else if (n.includes("sin sal")) season = "sinsal";
-
-                    let sideKey = `porcion_${type}_${season}`;
-                    let sideName = "Porción";
-                    
-                    if (type === "aros") { sideKey = "porcion_aros"; sideName = "Porción Aros de Cebolla"; }
-                    else if (type === "crinkles") { sideKey = "porcion_crinkles_sal"; sideName = "Porción Papas Crinkles"; }
-                    else if (type === "rejillas") { sideKey = "porcion_rejillas_sal"; sideName = "Porción Papas Rejillas"; }
-                    else {
-                        // Papas Fritas clásicas
-                        if (season === "sazonadas") { sideKey = "porcion_papas_sazonadas"; sideName = "Porción Papas Fritas (Sazonadas)"; }
-                        else if (season === "sinsal") { sideKey = "porcion_papas_sinsal"; sideName = "Porción Papas Fritas (Sin Sal)"; }
-                        else { sideKey = "porcion_papas_sal"; sideName = "Porción Papas Fritas (Con Sal)"; }
-                    }
-
-                    addToStats(sideKey, sideName, qty, source, false, "guarniciones");
-                    return; 
-                }
-
-                // 4. Guarnición que ACOMPAÑA a una hamburguesa
-                const isBurgerType = baseNameForCheck.includes('hamb') || baseNameForCheck.includes('burger') || baseNameForCheck.includes('doble') || baseNameForCheck.includes('simple') || baseNameForCheck.includes('royal') || baseNameForCheck.includes('cheese') || baseNameForCheck.includes('cuarto') || baseNameForCheck.includes('big') || baseNameForCheck.includes('sandwich') || baseNameForCheck.includes('sándwich');
-
-                if (fProp.trim() !== "" || isBurgerType) {
-                    let type = "rejillas"; // 🔥 POR DEFECTO TODA HAMBURGUESA LLEVA REJILLAS AHORA
-                    if (fProp.includes("crinkle")) type = "crinkles";
-                    else if (fProp.includes("aros") || fProp.includes("cebolla")) type = "aros";
-
-                    let season = "sal";
-                    if (fProp.includes("sazon") || fProp.includes("dorito") || fProp.includes("queso") || fProp.includes("sabor")) season = "sazonadas";
-                    else if (fProp.includes("sin sal")) season = "sinsal";
-
-                    let fKey = (type === "aros") ? "acompañamiento_aros" : `acompañamiento_${type}_${season}`;
-                    let fName = stats[fKey] ? stats[fKey].name : fKey;
-                    
-                    addToStats(fKey, fName, qty, source, false, "guarniciones");
-                }
-
-                // 5. PRODUCTO PRINCIPAL (La hamburguesa en sí)
-                const isDouble = rawName.toLowerCase().includes('doble');
-                let baseName = cleanName(rawName);
-
-                if (!baseName || baseName.length < 2) return;
-
-                let key = Object.keys(stats).find(k => k === baseName) || baseName;
-                let prettyName = stats[key] ? stats[key].name : (baseName.charAt(0).toUpperCase() + baseName.slice(1));
-
-                addToStats(key, prettyName, qty, source, isDouble, stats[key]?.category);
-
-                // 6. Extras nativos del objeto item
                 if (it.extras) {
                     let extraMeat = Number(it.extras.patty || it.extras.carne || it.extras.medallon || 0);
-                    if (extraMeat > 0) addToStats("medallon adicional", "Medallón adicional", extraMeat * qty, source, false, 'extras');
+                    if (extraMeat > 0) {
+                        initStat("medallon adicional", "Medallón adicional", 'extras');
+                        stats["medallon adicional"].total += extraMeat * qty;
+                        stats["medallon adicional"][source] += extraMeat * qty;
+                    }
                     let extraCheddar = Number(it.extras.cheddar || 0);
-                    if (extraCheddar > 0) addToStats("cheddar adicional", "Cheddar adicional", extraCheddar * qty, source, false, 'extras');
+                    if (extraCheddar > 0) {
+                        initStat("cheddar adicional", "Cheddar adicional", 'extras');
+                        stats["cheddar adicional"].total += extraCheddar * qty;
+                        stats["cheddar adicional"][source] += extraCheddar * qty;
+                    }
+                }
+
+                const countExtra = (keyword) => {
+                    const regex = new RegExp(`(\\d+)?\\s*(?:x\\s*)?${keyword}`);
+                    const match = bracketsContent.match(regex);
+                    if (match) return (Number(match[1]) || 1) * qty;
+                    if (bracketsContent.includes(keyword)) return qty;
+                    return 0;
+                };
+                let txtCheddars = countExtra('cheddar');
+                if (txtCheddars) {
+                    initStat("cheddar adicional", "Cheddar adicional", 'extras');
+                    stats["cheddar adicional"].total += txtCheddars;
+                    stats["cheddar adicional"][source] += txtCheddars;
+                }
+                let txtCarnes = countExtra('carne') || countExtra('medallon') || countExtra('patty');
+                if (txtCarnes) {
+                    initStat("medallon adicional", "Medallón adicional", 'extras');
+                    stats["medallon adicional"].total += txtCarnes;
+                    stats["medallon adicional"][source] += txtCarnes;
+                }
+                let txtBacons = countExtra('bacon') || countExtra('panceta');
+                if (txtBacons) {
+                    initStat("bacon adicional", "Bacon adicional", 'extras');
+                    stats["bacon adicional"].total += txtBacons;
+                    stats["bacon adicional"][source] += txtBacons;
+                }
+
+                // --- PASO B: IDENTIFICAR QUÉ ESTAMOS VENDIENDO ---
+                const isBurger = /(hamb|burger|doble|simple|royal|cheese|cuarto|big|crispy|sandwich|sándwich)/.test(cleanName);
+                const isPortion = /(porcion|porción)/.test(cleanName) || (!isBurger && /(papas|fritas|nuggets|aros)/.test(cleanName));
+
+                // --- PASO C: LÓGICA DE GUARNICIONES ---
+                if (isBurger || isPortion) {
+                    if(cleanName.includes("nugget")) {
+                        initStat("nuggets", "Nuggets de Pollo", "guarniciones");
+                        stats["nuggets"].total += qty;
+                        stats["nuggets"][source] += qty;
+                        totalGeneral += qty;
+                        if(source==='web') grandTotalWeb += qty;
+                        if(source==='local') grandTotalLocal += qty;
+                        if(source==='py') grandTotalPY += qty;
+                        return; 
+                    }
+
+                    let sideType = isBurger ? "rejillas" : "papas"; 
+                    
+                    if (modifiers.includes("crinkle") || cleanName.includes("crinkle")) sideType = "crinkles";
+                    else if (modifiers.includes("aro") || modifiers.includes("cebolla") || cleanName.includes("aro") || cleanName.includes("cebolla")) sideType = "aros";
+                    else if (modifiers.includes("rejilla") || cleanName.includes("rejilla")) sideType = "rejillas";
+
+                    let seasoning = "sal";
+                    if (modifiers.includes("sin sal") || cleanName.includes("sin sal")) seasoning = "sinsal";
+                    else if (modifiers.includes("sazon") || modifiers.includes("dorito") || modifiers.includes("queso") || cleanName.includes("sazon")) seasoning = "sazonadas";
+
+                    let statKey = "";
+                    let statName = "";
+
+                    if (isBurger) { 
+                        if (sideType === "aros") {
+                            statKey = "acompañamiento_aros";
+                            statName = "Acompañamiento: Aros de Cebolla";
+                        } else {
+                            statKey = `acompañamiento_${sideType}_${seasoning}`;
+                            let typeName = sideType.charAt(0).toUpperCase() + sideType.slice(1);
+                            let seaName = seasoning === "sinsal" ? "Sin Sal" : (seasoning === "sazonadas" ? "Sazonadas" : "Con Sal");
+                            statName = `Acompañamiento: Papas ${typeName} (${seaName})`;
+                        }
+                    } else if (isPortion) { 
+                        if (sideType === "aros") {
+                            statKey = "porcion_aros";
+                            statName = "Porción Aros de Cebolla";
+                        } else {
+                            statKey = `porcion_${sideType}_${seasoning}`;
+                            let typeName = sideType === "papas" ? "Fritas" : (sideType.charAt(0).toUpperCase() + sideType.slice(1));
+                            let seaName = seasoning === "sinsal" ? "Sin Sal" : (seasoning === "sazonadas" ? "Sazonadas" : "Con Sal");
+                            statName = `Porción Papas ${typeName} (${seaName})`;
+                        }
+                    }
+
+                    initStat(statKey, statName, "guarniciones");
+                    stats[statKey].total += qty;
+                    stats[statKey][source] += qty;
+                    
+                    if (isPortion) {
+                        totalGeneral += qty;
+                        if(source==='web') grandTotalWeb += qty;
+                        if(source==='local') grandTotalLocal += qty;
+                        if(source==='py') grandTotalPY += qty;
+                        return; 
+                    }
+                }
+
+                // --- PASO D: LÓGICA DEL PRODUCTO PRINCIPAL ---
+                let isDouble = cleanName.includes('doble');
+                let searchKey = cleanName.replace(/simple|doble/gi, '').trim();
+                
+                let matchKey = Object.keys(stats).find(k => searchKey.includes(k) && stats[k].category === 'hamburguesas') || searchKey;
+
+                if (!stats[matchKey]) {
+                    initStat(matchKey, searchKey.charAt(0).toUpperCase() + searchKey.slice(1), isBurger ? 'hamburguesas' : 'otros');
+                }
+
+                stats[matchKey].total += qty;
+                stats[matchKey][source] += qty;
+                totalGeneral += qty;
+                if(source==='web') grandTotalWeb += qty;
+                if(source==='local') grandTotalLocal += qty;
+                if(source==='py') grandTotalPY += qty;
+
+                if (stats[matchKey].category === 'hamburguesas') {
+                    if (isDouble) stats[matchKey].countDouble += qty;
+                    else stats[matchKey].countSimple += qty;
+                } else {
+                    stats[matchKey].countSimple += qty;
                 }
             });
         });
@@ -789,17 +739,13 @@
 
         sortedKeys.forEach(s => {
             if(s.category === 'extras' && s.total === 0) return;
+            if(s.total === 0) return; 
 
             let displayCat = (s.category || 'OTROS').toUpperCase();
             if (displayCat !== currentCat) {
                 currentCat = displayCat;
                 body.insertAdjacentHTML('beforeend', `<tr><td colspan="7" class="cat-header">${currentCat}</td></tr>`);
             }
-
-            const isZero = s.total === 0;
-            const rowStyle = isZero ? 'color:#cbd5e1;' : '';
-            const zeroStyle = 'color:#e2e8f0; font-size:11px;';
-            const pctClass = isZero ? '' : 'pct-tag';
 
             const pctWeb = grandTotalWeb > 0 ? ((s.web / grandTotalWeb) * 100).toFixed(1) + '%' : '-';
             const pctLocal = grandTotalLocal > 0 ? ((s.local / grandTotalLocal) * 100).toFixed(1) + '%' : '-';
@@ -808,28 +754,25 @@
             let simpleCell = `<td style="text-align:center;">${s.countSimple}</td>`;
             let doubleCell = `<td style="text-align:center; color:#b91c1c; font-weight:600; background:#fffafb">${s.countDouble}</td>`;
 
-            if (!displayCat.includes('HAMBURGUESA')) {
+            if (!displayCat.includes('HAMBURGUESAS')) {
                 doubleCell = `<td style="text-align:center; color:#e2e8f0">-</td>`; 
-                simpleCell = `<td style="text-align:center; color:${isZero?'#ccc':'#555'}">${s.total}</td>`; 
-            } else if (isZero) {
-                simpleCell = `<td style="text-align:center;">-</td>`;
-                doubleCell = `<td style="text-align:center;">-</td>`;
+                simpleCell = `<td style="text-align:center;">${s.total}</td>`; 
             }
 
             body.insertAdjacentHTML('beforeend', `
-                <tr style="${rowStyle}">
+                <tr>
                     <td style="font-weight:700; border-right:1px solid #e2e8f0; position:sticky; left:0; background:white; z-index:5">${s.name}</td>
                     ${simpleCell}
                     ${doubleCell}
                     <td style="text-align:center; font-weight:800; background:#fffbeb; border-right:2px solid #e2e8f0; color:#78350f">${s.total}</td>
-                    <td style="text-align:center; background:#eff6ff; ${s.web===0?zeroStyle:''}">
-                        ${s.web > 0 ? `<span style="color:#1e40af; font-weight:700">${s.web}</span> <span class="${pctClass}">(${pctWeb})</span>` : '-'}
+                    <td style="text-align:center; background:#eff6ff;">
+                        ${s.web > 0 ? `<span style="color:#1e40af; font-weight:700">${s.web}</span> <span class="pct-tag">(${pctWeb})</span>` : '-'}
                     </td>
-                    <td style="text-align:center; background:#f8fafc; ${s.local===0?zeroStyle:''}">
-                        ${s.local > 0 ? `<span style="color:#334155; font-weight:700">${s.local}</span> <span class="${pctClass}">(${pctLocal})</span>` : '-'}
+                    <td style="text-align:center; background:#f8fafc;">
+                        ${s.local > 0 ? `<span style="color:#334155; font-weight:700">${s.local}</span> <span class="pct-tag">(${pctLocal})</span>` : '-'}
                     </td>
-                    <td style="text-align:center; background:#fef2f2; ${s.py===0?zeroStyle:''}">
-                        ${s.py > 0 ? `<span style="color:#dc2626; font-weight:700">${s.py}</span> <span class="${pctClass}">(${pctPY})</span>` : '-'}
+                    <td style="text-align:center; background:#fef2f2;">
+                        ${s.py > 0 ? `<span style="color:#dc2626; font-weight:700">${s.py}</span> <span class="pct-tag">(${pctPY})</span>` : '-'}
                     </td>
                 </tr>
             `);
@@ -1063,7 +1006,6 @@
                 let fProp = String(i.friesRaw || i.fries || i.sideType || "").toLowerCase();
                 let hasAros = fProp.includes('aros') || fProp.includes('cebolla') || n.includes('aros');
                 
-                // Si la hamburguesa no tiene aros, cuenta como hamburguesa para calcular papas
                 if (!hasAros) {
                     burgerCount += qty; 
                 }
