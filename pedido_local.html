@@ -94,13 +94,42 @@
     .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
   </style>
 
+  <script>
+    (function checkAuth() {
+        const TTL_HOURS = 20;
+        const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
+        const ok = localStorage.getItem('rb_admin_ok') === 'true';
+        const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+        const live = (Date.now() - ts) < TTL_MS;
+        if (!ok || !live) {
+            localStorage.removeItem('rb_admin_ok');
+            localStorage.removeItem('rb_admin_t');
+            window.location.replace('login.html?next=' + encodeURIComponent(location.pathname + location.search));
+        } else {
+            localStorage.setItem('rb_admin_t', String(Date.now()));
+        }
+    })();
+  </script>
+
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
+    // 🔥 FIX DE CONEXIÓN LENTA Y CACHÉ
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
     try{ firebase.initializeApp(firebaseConfig); }catch(e){ console.error("Error Firebase:", e); }
+    
     const db = firebase.firestore();
+    try {
+        db.settings({
+            experimentalForceLongPolling: true, 
+            experimentalAutoDetectLongPolling: false
+        });
+        db.enablePersistence({synchronizeTabs:true}).catch(err => {
+            console.log("No se pudo activar el caché offline: ", err);
+        });
+    } catch(e) {}
+
     window.idToDoc = new Map();
 
     // DATOS EN MEMORIA
@@ -551,7 +580,7 @@
                 const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
                 if (!existing.empty) { skipped++; continue; }
 
-                let total = r['total del pedido'];    
+                let total = r['total del pedido'];   
                 let neto = r['ingreso estimado'];        
                 if(typeof total !== 'number') total = Number(String(total).replace(/\./g, '').replace(',', '.'));
                 if(typeof neto !== 'number') neto = Number(String(neto).replace(/\./g, '').replace(',', '.'));
@@ -911,8 +940,8 @@
                  </div>
               </div>
               <div style="text-align:right">
-                  <div class="price-tag">${money(total)}</div>
-                  ${netHtml}
+                 <div class="price-tag">${money(total)}</div>
+                 ${netHtml}
               </div>
            </div>
            
