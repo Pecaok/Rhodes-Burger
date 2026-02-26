@@ -14,9 +14,13 @@
     label{display:block;margin:10px 0 6px;font-weight:600}
     input{width:100%;padding:12px;border:1px solid var(--ring);border-radius:12px}
     .muted{color:var(--muted);font-size:13px;margin-top:10px}
-    .btn{width:100%;margin-top:14px;padding:12px;border-radius:999px;border:2px solid var(--primary);background:var(--primary);color:#fff;font-weight:800;cursor:pointer}
-    .err{color:#b00020;margin-top:8px;font-weight:600}
+    .btn{width:100%;margin-top:14px;padding:12px;border-radius:999px;border:2px solid var(--primary);background:var(--primary);color:#fff;font-weight:800;cursor:pointer;transition:0.2s;}
+    .btn:disabled{background:#a7d9b9; border-color:#a7d9b9; cursor:not-allowed;}
+    .err{color:#b00020;margin-top:8px;font-weight:600;font-size:14px;}
   </style>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -27,16 +31,22 @@
       <input id="user" autocomplete="username" placeholder="Usuario" required />
       <label>Clave</label>
       <input id="pass" type="password" autocomplete="current-password" placeholder="Clave" required />
-      <button class="btn">Ingresar</button>
+      <button type="submit" class="btn" id="btnSubmit">Ingresar</button>
       <div id="err" class="err" style="display:none"></div>
       <div class="muted">La sesión permanece activa por 20 horas.</div>
     </form>
   </div>
 
   <script>
+  // ======== FIREBASE INIT ========
+  const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+
   // ======== SESIÓN COMPARTIDA ========
   const TTL_HOURS = 20;
   const TTL_MS    = TTL_HOURS * 60 * 60 * 1000;
+  
   function setSession(){
     const now = Date.now();
     localStorage.setItem('rb_admin_ok','true');
@@ -44,46 +54,83 @@
     localStorage.setItem('rb_auth_v2','ok');
     sessionStorage.setItem('rb_auth_v2','ok');
   }
+  
   function sessionValid(){
     const ok = localStorage.getItem('rb_admin_ok')==='true';
     const ts = Number(localStorage.getItem('rb_admin_t')||0);
     const live = (Date.now()-ts) < TTL_MS;
     return ok && live;
   }
-  function bumpSession(){  // renueva TTL al usar
+  
+  function bumpSession(){ 
     if (sessionValid()) localStorage.setItem('rb_admin_t', String(Date.now()));
   }
+  
   function nextUrl(){
     const qs = new URLSearchParams(location.search);
     return qs.get('next') || 'pedido_local.html';
   }
 
-  // Auto-redirigir sólo si la sesión es válida
+  // Auto-redirigir si ya está logueado
   if (sessionValid()){
     bumpSession();
     location.replace(nextUrl());
   }
 
-  // ======== CREDENCIALES EN CÓDIGO ========
-  const CREDS = { user: "admin", pass: "Arthur2025$" };  // <-- cambiá acá cuando quieras
+  // ======== ENCRIPTACIÓN SHA-256 ========
+  async function hashPassword(message) {
+      const msgBuffer = new TextEncoder().encode(message);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
 
-  // ======== LOGIN ========
+  // ======== LÓGICA DE LOGIN ========
   const $ = s=>document.querySelector(s);
-  $('#form').addEventListener('submit', (e)=>{
+  
+  $('#form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    
     const u = $('#user').value.trim();
     const p = $('#pass').value;
     const err = $('#err');
-    err.style.display='none'; err.textContent='';
-    if (u===CREDS.user && p===CREDS.pass){
-      setSession();
-      location.replace(nextUrl());
-    }else{
-      err.textContent = 'Usuario o clave incorrectos.';
-      err.style.display = 'block';
+    const btn = $('#btnSubmit');
+    
+    err.style.display = 'none'; 
+    err.textContent = '';
+    btn.textContent = 'Verificando...';
+    btn.disabled = true;
+
+    try {
+        // Traer credenciales desde Firebase
+        const doc = await db.collection('config').doc('admin').get();
+        if (!doc.exists) throw new Error("No hay configuración de acceso.");
+        
+        const data = doc.data();
+        
+        // Si no creaste el campo adminUser en la base de datos, usa "admin" por defecto
+        const validUser = data.adminUser || "admin"; 
+        const validHash = data.adminPassHash;
+
+        // Encriptamos la clave que escribió el usuario para compararla
+        const inputHash = await hashPassword(p);
+
+        if (u === validUser && inputHash === validHash) {
+            setSession();
+            location.replace(nextUrl());
+        } else {
+            err.textContent = 'Usuario o clave incorrectos.';
+            err.style.display = 'block';
+        }
+    } catch (error) {
+        console.error(error);
+        err.textContent = 'Error al conectar con la base de datos.';
+        err.style.display = 'block';
+    } finally {
+        btn.textContent = 'Ingresar';
+        btn.disabled = false;
     }
   });
   </script>
 </body>
 </html>
-
