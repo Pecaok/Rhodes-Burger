@@ -98,6 +98,24 @@
     .qty-btn:hover { background: #e2e8f0; color: var(--primary); }
     .qty-btn:active { transform: scale(0.95); }
   </style>
+
+  <script>
+    (function checkAuth() {
+        const TTL_HOURS = 20;
+        const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
+        const ok = localStorage.getItem('rb_admin_ok') === 'true';
+        const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+        const live = (Date.now() - ts) < TTL_MS;
+        if (!ok || !live) {
+            localStorage.removeItem('rb_admin_ok');
+            localStorage.removeItem('rb_admin_t');
+            window.location.replace('login.html?next=' + encodeURIComponent(location.pathname + location.search));
+        } else {
+            localStorage.setItem('rb_admin_t', String(Date.now()));
+        }
+    })();
+  </script>
+
 </head>
 <body>
 
@@ -350,10 +368,22 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
+    // 🔥 FIX DE CONEXIÓN LENTA Y CACHÉ
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
     try { firebase.initializeApp(firebaseConfig); } catch(e) {}
     
     const db = firebase.firestore();
+    try {
+        db.settings({
+            experimentalForceLongPolling: true, 
+            experimentalAutoDetectLongPolling: false
+        });
+        db.enablePersistence({synchronizeTabs:true}).catch(err => {
+            console.log("No se pudo activar el caché offline: ", err);
+        });
+    } catch(e) {}
+
+
     const $ = s => document.querySelector(s);
     const money = n => (Number(n)||0).toLocaleString("es-AR", {style:"currency", currency:"ARS", maximumFractionDigits:2});
     const formatQty = (n) => { let num = Number(n); if(isNaN(num)) return '0'; return parseFloat(num.toFixed(3)); };
@@ -405,113 +435,8 @@
         if(ORDERS.length) window.renderProportions();
     }
 
-    /* ============================================================
-       🔥 IMPORTACIÓN PEDIDOS YA 
-    ============================================================ */
-    async function importarPedidosYa() {
-        const input = document.getElementById('excelInput');
-        if (!input.files.length) return;
-        const file = input.files[0];
-        const reader = new FileReader();
-
-        reader.onload = async function(e) {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, {type: 'array'});
-            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(firstSheet, {range: 1, defval:""});
-
-            let imported = 0; let skipped = 0;
-            const loader = document.getElementById('pageLoader');
-            if(loader) loader.classList.remove("hidden");
-
-            for (const row of rows) {
-                const r = {};
-                Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
-
-                const id = r['nro de pedido']; 
-                if (!id) continue;
-
-                const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
-                if (!existing.empty) { skipped++; continue; }
-
-                let total = r['total del pedido'];   
-                let neto = r['ingreso estimado'];        
-                if(typeof total !== 'number') total = Number(String(total).replace(/\./g, '').replace(',', '.'));
-                if(typeof neto !== 'number') neto = Number(String(neto).replace(/\./g, '').replace(',', '.'));
-                if (!total || total <= 0) continue;
-
-                const dateStr = r['fecha del pedido'];
-                let clientName = r['nombre del cliente'] || "Cliente Py";
-                
-                const statusStr = r['estado del pedido'] || "";
-                let status = 'delivered'; let isCancelled = false;
-                if (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado')) {
-                    status = 'cancelled'; isCancelled = true;
-                }
-
-                const itemsStr = r['artículos'] || "";
-                let itemsList = [];
-
-                if(itemsStr) {
-                    let safeStr = String(itemsStr).replace(/\[(.*?)\]/gs, m => m.replace(/,|\n|\+/g, " "));
-                    let rawItems = safeStr.split(/,|\n|\+/);
-                    
-                    rawItems.forEach(line => {
-                        line = line.trim();
-                        if(!line) return;
-                        let qty = 1; let name = line;
-                        const match = line.match(/^(\d+)\s*[xX]?\s*(.*)$/);
-                        if(match) { qty = Number(match[1]); name = match[2]; }
-                        
-                        let note = "";
-                        if(name.includes('[')) {
-                            const nMatch = name.match(/\[(.*?)\]/);
-                            if(nMatch) { note = nMatch[1]; name = name.replace(/\[.*?\]/, "").trim(); }
-                        }
-
-                        const catCode = window.getCat({name: name});
-                        let type = 'other';
-                        if(catCode === 'b') type='burger'; else if(catCode === 'f') type='side'; else if(catCode === 'd') type='drink';
-
-                        itemsList.push({ qty, name: line, price: 0, type, notes: note, extras: {} });
-                    });
-                } else {
-                    itemsList = [{ name: 'Pedido Importado', qty: 1, price: total }];
-                }
-                
-                let isoDate = new Date().toISOString();
-                if(dateStr) {
-                    if(typeof dateStr === 'number') {
-                        const excelEpoch = new Date(1899, 11, 30);
-                        isoDate = new Date(excelEpoch.getTime() + dateStr * 86400000).toISOString();
-                    } else { try { isoDate = new Date(dateStr).toISOString(); } catch(e){} }
-                }
-
-                try {
-                    const orderRef = await db.collection('orders').add({
-                        orderNumber: String(id), py_id: String(id), source: 'pedidosya',
-                        status: status, payment_status: 'paid', paid: true, pago: 'pedidosya_online',
-                        entrega: 'delivery', nombre: clientName, total: total, neto_excel: neto,     
-                        createdAt: isoDate, items: itemsList, stockDescontado: false 
-                    });
-
-                    if (!isCancelled) {
-                        const pedidoParaStock = { id: orderRef.id, items: itemsList, stockDescontado: false };
-                        await gestionarStock(pedidoParaStock, -1);
-                    }
-                    imported++;
-                } catch (err) { console.error("Error importando:", err); }
-            }
-
-            if(loader) loader.classList.add("hidden");
-            alert(`✅ IMPORTACIÓN FINALIZADA\n\nSe cargaron ${imported} pedidos correctamente.`);
-            input.value = ""; location.reload();
-        };
-        reader.readAsArrayBuffer(file);
-    }
-
     // ==========================================
-    // 🔥 2. LÓGICA DINÁMICA DE PROPORCIONES (ACTUALIZADA)
+    // 🔥 2. LÓGICA DINÁMICA DE PROPORCIONES
     // ==========================================
     window.renderProportions = function() {
         const body = $('#proportionsBody');
@@ -582,8 +507,19 @@
                 // Si es un producto principal
                 let isBurgerType = /(hamb|burger|doble|simple|royal|cheese|cuarto|big|crispy|promo)/.test(rawN) && !rawN.includes('feta');
                 
-                // Si es un texto roto del Excel (ej: "crinkle]", "sabor queso]", "con sal]")
-                let isMod = rawN.includes(']') || rawN.startsWith('[') || /^(crinkle|rejilla|con sal|sin sal|sabor queso|sazon|aros|feta de cheddar|cheddar)/.test(rawN.replace(/[^a-z ]/g, '').trim());
+                // Detectar si NO es un modificador, sino un producto real que vino con corchetes en el nombre
+                let isRealProduct = /(porcion|porción|papas|nuggets|aros|coca|sprite|agua|andes|aquarius)/.test(rawN);
+
+                // Es modificador SI: empieza con [, O tiene ] sin abrir, O es texto suelto conocido (y NO es producto real)
+                let isMod = false;
+                if (rawN.startsWith('[') || (rawN.includes(']') && !rawN.includes('['))) {
+                    isMod = true;
+                } else if (!isBurgerType && !isRealProduct && /(crinkle|rejilla|sal|sazon|queso|feta|cheddar|bacon|panceta|carne|medallon)/.test(rawN)) {
+                    isMod = true;
+                }
+                
+                // Blindaje extra: Si dice 'porcion' o 'promo', nunca puede ser un modificador huérfano
+                if (/(porcion|porción|promo)/.test(rawN)) isMod = false;
 
                 let copyIt = { ...it, extras: { ...(it.extras || {}) } };
 
@@ -593,10 +529,10 @@
                 } else if (isMod && !isBurgerType && !lastBurger) {
                     // Llegó huérfano y no hay hamburguesa. Forzar porción o extra.
                     if (rawN.includes("crinkle") || rawN.includes("rejilla") || rawN.includes("sal") || rawN.includes("sazon") || rawN.includes("aro")) {
-                        copyIt.name = "Porcion de papas " + rawN; 
+                        copyIt.name = "Porcion de papas " + rawN.replace(/[\[\]]/g, '').trim(); 
                         mergedItems.push(copyIt);
-                    } else if (rawN.includes("cheddar") || rawN.includes("feta")) {
-                        copyIt.name = "Extra " + rawN;
+                    } else if (rawN.includes("cheddar") || rawN.includes("feta") || rawN.includes("bacon") || rawN.includes("carne")) {
+                        copyIt.name = "Extra " + rawN.replace(/[\[\]]/g, '').trim();
                         mergedItems.push(copyIt);
                     }
                 } else {
