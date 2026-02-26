@@ -301,6 +301,25 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
   .filter-tabs { overflow-x: auto; padding-bottom: 5px; }
 }
 </style>
+
+<script>
+  (function checkAuth() {
+      const TTL_HOURS = 20;
+      const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
+      const ok = localStorage.getItem('rb_admin_ok') === 'true';
+      const ts = Number(localStorage.getItem('rb_admin_t') || 0);
+      const live = (Date.now() - ts) < TTL_MS;
+      if (!ok || !live) {
+          localStorage.removeItem('rb_admin_ok');
+          localStorage.removeItem('rb_admin_t');
+          window.location.replace('login.html?next=' + encodeURIComponent(location.pathname + location.search));
+      } else {
+          // Renovar sesión por estar activo
+          localStorage.setItem('rb_admin_t', String(Date.now()));
+      }
+  })();
+</script>
+
 </head>
 
 <body>
@@ -616,11 +635,19 @@ const firebaseConfig = {
   appId: "1:951646688091:web:05db5fadb4150d1fa9c07e"
 };
 try{ firebase.initializeApp(firebaseConfig); } catch(e){}
-try{
-  firebase.firestore().settings({ experimentalForceLongPolling:true, useFetchStreams:false });
-}catch(e){}
 
+// 🔥 FIX DE CONEXIÓN LENTA Y CACHÉ
 const db = firebase.firestore();
+try {
+    db.settings({
+        experimentalForceLongPolling: true, 
+        experimentalAutoDetectLongPolling: false
+    });
+    db.enablePersistence({synchronizeTabs:true}).catch(err => {
+        console.log("No se pudo activar el caché offline: ", err);
+    });
+} catch(e) {}
+
 const productsCol = db.collection('products');
 
 /* Helpers */
