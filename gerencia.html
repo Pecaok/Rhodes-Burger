@@ -1241,45 +1241,25 @@
 
                 // --- PASO 1: REAGRUPAR HUÉRFANOS DE PEDIDOSYA ---
                 let mergedItems = [];
-                let lastBurger = null;
 
                 (o.items || []).forEach(it => {
                     let rawN = (it.name || "").toLowerCase().trim();
 
-                    // Si es un producto principal
-                    let isBurgerType = /(hamb|burger|doble|simple|royal|cheese|cuarto|big|crispy|promo)/.test(rawN) && !rawN.includes('feta');
-
-                    // Detectar si NO es un modificador, sino un producto real que vino con corchetes en el nombre
-                    let isRealProduct = /(porcion|porción|papas|nuggets|aros|coca|sprite|agua|andes|aquarius)/.test(rawN);
-
-                    // Es modificador SI: empieza con [, O tiene ] sin abrir, O es texto suelto conocido (y NO es producto real)
                     let isMod = false;
                     if (rawN.startsWith('[') || (rawN.includes(']') && !rawN.includes('['))) {
                         isMod = true;
-                    } else if (!isBurgerType && !isRealProduct && /(crinkle|rejilla|sal|sazon|queso|feta|cheddar|bacon|panceta|carne|medallon)/.test(rawN)) {
+                    }
+                    else if (!/(porcion|porción|promo|hamb|burger|doble|simple|royal|cheese|cuarto|big|crispy|papas|nuggets|aros|coca|sprite|agua|andes|aquarius)/.test(rawN) && /(crinkle|rejilla|sal|sazon|queso|feta|cheddar|bacon|panceta|carne|medallon)/.test(rawN)) {
                         isMod = true;
                     }
 
-                    // Blindaje extra: Si dice 'porcion' o 'promo', nunca puede ser un modificador huérfano
-                    if (/(porcion|porción|promo)/.test(rawN)) isMod = false;
-
                     let copyIt = { ...it, extras: { ...(it.extras || {}) } };
 
-                    if (isMod && !isBurgerType && lastBurger) {
-                        // Se lo pegamos como nota a la hamburguesa anterior
-                        lastBurger.mergedNotes = (lastBurger.mergedNotes || "") + " " + rawN;
-                    } else if (isMod && !isBurgerType && !lastBurger) {
-                        // Llegó huérfano y no hay hamburguesa. Forzar porción o extra.
-                        if (rawN.includes("crinkle") || rawN.includes("rejilla") || rawN.includes("sal") || rawN.includes("sazon") || rawN.includes("aro")) {
-                            copyIt.name = "Porcion de papas " + rawN.replace(/[\[\]]/g, '').trim();
-                            mergedItems.push(copyIt);
-                        } else if (rawN.includes("cheddar") || rawN.includes("feta") || rawN.includes("bacon") || rawN.includes("carne")) {
-                            copyIt.name = "Extra " + rawN.replace(/[\[\]]/g, '').trim();
-                            mergedItems.push(copyIt);
-                        }
+                    if (isMod && mergedItems.length > 0) {
+                        let prevItem = mergedItems[mergedItems.length - 1];
+                        prevItem.mergedNotes = (prevItem.mergedNotes || "") + " " + rawN;
                     } else {
                         mergedItems.push(copyIt);
-                        if (isBurgerType) lastBurger = copyIt;
                     }
                 });
 
@@ -1325,9 +1305,6 @@
 
                     let txtCarnes = countExtra('carne') || countExtra('medallon') || countExtra('patty');
                     if (txtCarnes) { initStat("medallon adicional", "Medallón adicional", 'extras'); stats["medallon adicional"].total += txtCarnes; stats["medallon adicional"][source] += txtCarnes; }
-
-                    let txtBacons = countExtra('bacon') || countExtra('panceta');
-                    if (txtBacons) { initStat("bacon adicional", "Bacon adicional", 'extras'); stats["bacon adicional"].total += txtBacons; stats["bacon adicional"][source] += txtBacons; }
 
                     let countCheddar = countExtra('feta de cheddar') || countExtra('extra cheddar') || countExtra('feta');
                     if (countCheddar || cleanName.includes('extra feta')) {
