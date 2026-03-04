@@ -1533,12 +1533,31 @@
             });
         };
 
-        window.setStockDirect = async (id, val) => {
-            const item = INVENTORY.find(i => i.id === id); if (!item) return;
-            const newQty = Number(val);
-            const col = item.isSub ? 'subrecipes' : 'inventory';
-            await db.collection(col).doc(id).update({ qty: newQty });
-        };
+       window.setStockDirect = async (id, val) => {
+            const item = INVENTORY.find(i => i.id === id); if (!item) return;
+            const newQty = Number(val);
+            const col = item.isSub ? 'subrecipes' : 'inventory';
+            await db.collection(col).doc(id).update({ qty: newQty });
+
+            // --- INICIO ALERTA MAKE ---
+            const limite = Number(item.min) || 5; // Usa el mínimo del producto o 5 por defecto
+            
+            // Evaluamos si el stock cruzó el límite hacia abajo
+            if (newQty <= limite && Number(item.qty) > limite) {
+                const urlMake = "https://hook.us2.make.com/app8uuge9684l284uxoi816t68e3kwnn";
+                
+                fetch(urlMake, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        producto: item.name,
+                        stock: newQty,
+                        limite: limite
+                    })
+                }).catch(err => console.error("Error al enviar alerta a Make:", err));
+            }
+            // --- FIN ALERTA MAKE ---
+        };
 
         window.updStock = (id, v) => {
             const item = INVENTORY.find(i => i.id === id); if (!item) return;
