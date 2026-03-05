@@ -115,7 +115,6 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
   <script>
-    // 🔥 FIX DE CONEXIÓN LENTA Y CACHÉ
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
     try{ firebase.initializeApp(firebaseConfig); }catch(e){ console.error("Error Firebase:", e); }
     
@@ -137,7 +136,7 @@
     let SUB_RECIPES_DB = {}; 
     let INVENTARIO_DB = {}; 
     let ID_TO_COLLECTION = {}; 
-    let STOCK_NAME_TO_ID = {}; // Bolsa Global
+    let STOCK_NAME_TO_ID = {}; 
     let PRODUCT_CATALOG = {}; 
     let PRICES_DB = { patty: 2500, cheddar: 300 }; 
     let ALIASES_DB = []; 
@@ -547,7 +546,7 @@
     }
 
     /* ============================================================
-       🔥 IMPORTACIÓN PEDIDOS YA 
+       🔥 IMPORTACIÓN PEDIDOS YA CON CORRECCIÓN DE FECHAS
     ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
@@ -570,7 +569,8 @@
                 const r = {};
                 Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
 
-                const id = r['nro de pedido']; 
+                // Soporte por si cambia el nombre de la columna
+                const id = r['nro de pedido'] || r['nº de pedido'] || r['id']; 
                 if (!id) continue;
 
                 const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
@@ -578,11 +578,11 @@
 
                 let total = r['total del pedido'];   
                 let neto = r['ingreso estimado'];        
-                if(typeof total !== 'number') total = Number(String(total).replace(/\./g, '').replace(',', '.'));
-                if(typeof neto !== 'number') neto = Number(String(neto).replace(/\./g, '').replace(',', '.'));
+                if(typeof total !== 'number') total = Number(String(total||'0').replace(/\./g, '').replace(',', '.'));
+                if(typeof neto !== 'number') neto = Number(String(neto||'0').replace(/\./g, '').replace(',', '.'));
                 if (!total || total <= 0) continue;
 
-                const dateStr = r['fecha del pedido'];
+                const dateStr = r['fecha del pedido'] || r['fecha'];
                 let clientName = r['nombre del cliente'] || "Cliente Py";
                 
                 const statusStr = r['estado del pedido'] || "";
@@ -592,7 +592,7 @@
                     status = 'cancelled'; isCancelled = true;
                 }
 
-                const itemsStr = r['artículos'] || "";
+                const itemsStr = r['artículos'] || r['articulos'] || "";
                 let itemsList = [];
 
                 if(itemsStr) {
@@ -615,7 +615,6 @@
                         const nameClean = normalize(name); 
                         
                         const explicitExtra = nameClean.includes('extra') || nameClean.includes('adicional');
-                        const isIngredientName = (nameClean === 'medallon' || nameClean === 'panceta' || nameClean === 'bacon' || nameClean === 'cheddar');
 
                         const isExtraCarne = (explicitExtra && (nameClean.includes('carne') || nameClean.includes('medallon') || nameClean.includes('patty'))) || (nameClean.includes('medallon') && !nameClean.includes('hamb'));
                         const isExtraCheddar = (explicitExtra && (nameClean.includes('cheddar') || nameClean.includes('queso'))) || nameClean === 'cheddar';
@@ -644,12 +643,29 @@
                 }
                 if(itemsList.length === 1) itemsList[0].price = total;
 
+                // 🔥 SUPER PARSEO DE FECHAS PARA EXCEL (Evita error en Gerencia)
                 let isoDate = new Date().toISOString();
                 if(dateStr) {
                     if(typeof dateStr === 'number') {
-                        const excelEpoch = new Date(1899, 11, 30);
-                        isoDate = new Date(excelEpoch.getTime() + dateStr * 86400000).toISOString();
-                    } else { try { isoDate = new Date(dateStr).toISOString(); } catch(e){} }
+                        const utcDays = dateStr - 25569;
+                        const dateInfo = new Date(utcDays * 86400 * 1000);
+                        const tzOffset = dateInfo.getTimezoneOffset() * 60000;
+                        isoDate = new Date(dateInfo.getTime() + tzOffset).toISOString();
+                    } else {
+                        let dStr = String(dateStr).trim();
+                        // Formato esperado de PedidosYa en general: DD/MM/YYYY HH:MM
+                        const match = dStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(.*))?$/);
+                        if (match) {
+                            let hhmm = match[4] || "00:00:00";
+                            dStr = `${match[3]}-${match[2].padStart(2,'0')}-${match[1].padStart(2,'0')}T${hhmm}`;
+                        } else {
+                            dStr = dStr.replace(' ', 'T');
+                        }
+                        const parsedD = new Date(dStr);
+                        if (!isNaN(parsedD.getTime())) {
+                            isoDate = parsedD.toISOString();
+                        }
+                    }
                 }
 
                 try {
@@ -1035,12 +1051,12 @@
                 const map = {con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal"};
                 const rawVal = i.friesRaw || i.fries;
                 const displayVal = map[rawVal] || i.fries;
-                h += `<div class="sub">• 🍟 ${displayVal}</div>`;
+                h += `<div class="sub">🍟 ${displayVal}</div>`;
             }
 
             if(!ti.includes("PAPA")){
-               if(i.extras?.patty) h+=`<div class="sub">• +${i.extras.patty} carne</div>`;
-               if(i.extras?.cheddar) h+=`<div class="sub">• +${i.extras.cheddar} cheddar</div>`;
+               if(i.extras?.patty) h+=`<div class="sub">➕ ${i.extras.patty} CARNE</div>`;
+               if(i.extras?.cheddar) h+=`<div class="sub">➕ ${i.extras.cheddar} CHEDDAR</div>`;
             }
             if(i.notes) h+=`<div class="sub">📝 ${esc(i.notes)}</div>`;
             h+=`<div class="sep"></div>`;
@@ -1058,13 +1074,14 @@
            discountRow = `<div class="row"><div class="l">DESC. (${esc(o.coupon||'')})</div><div class="r">-${m(o.discount)}</div></div>`;
        }
 
-       // 🔥 AQUI CAMBIE EL TAMAÑO DE .sub
+       // 🔥 AQUI ESTÁ EL MODO GIGANTE
        const html = `<!doctype html><html><head><style>
        @page{size:58mm auto;margin:0} body{width:58mm;margin:0 auto;padding:5px;font-family:monospace;font-size:14px;font-weight:700;color:#000;line-height:1.2}
-       .c{text-align:center} .hr{border-top:1px dashed #000;margin:6px 0} .row{display:flex;justify-content:space-between}
+       .c{text-align:center} .hr{border-top:2px dashed #000;margin:8px 0} .row{display:flex;justify-content:space-between; align-items:center}
        .lbl{font-size:12px;text-transform:uppercase} 
-       .sub{font-size:18px;margin-left:10px;font-weight:900;padding-top:4px;padding-bottom:4px;text-transform:uppercase;line-height:1.1} 
-       .sep{border-top:1px dotted #999;margin:3px 0}
+       .name{font-size:16px; font-weight:900; margin-top:8px;}
+       .sub{font-size:20px; font-weight:900; padding-top:6px; padding-bottom:6px; text-transform:uppercase; line-height:1.1; border-bottom: 2px solid #000;} 
+       .sep{margin:4px 0}
        .r{text-align:right}
        </style></head><body>
          <div class="c" style="font-size:16px;margin-bottom:4px">Rhodes Burgers</div>
