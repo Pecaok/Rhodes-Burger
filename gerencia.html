@@ -923,7 +923,30 @@
                 else if(pay.includes('debito')||pay.includes('tarjeta')) { taxes += (sale*(pctDebit/100)); finalPayMethod='Otros'; } 
                 else finalPayMethod='Efectivo';
             }
-            (o.items||[]).forEach(item => { theoCMV += (window.getUnitCost(item.name) * Number(item.qty||1)); productSales[item.name] = (productSales[item.name] || 0) + Number(item.qty||1); });
+           (o.items||[]).forEach(item => { 
+                const qty = Number(item.qty||1);
+                theoCMV += (window.getUnitCost(item.name) * qty); 
+                
+                // --- INICIO FILTRO PARA EL GRÁFICO DE PRODUCTOS ---
+                let rawN = String(item.name || "").toLowerCase().trim();
+                let isBurgerType = /(hamb|burger|doble|simple|royal|cheese|cuarto|big|crispy|promo|sandwich)/.test(rawN) && !rawN.includes('feta');
+                let isRealProduct = /(porcion|porción|papas|nuggets|aros|coca|sprite|agua|andes|aquarius)/.test(rawN);
+                let isMod = false;
+                
+                if (rawN.startsWith('[') || (rawN.includes(']') && !rawN.includes('['))) {
+                    isMod = true;
+                } else if (!isBurgerType && !isRealProduct && /(crinkle|rejilla|sal|sazon|queso|feta|cheddar|bacon|panceta|carne|medallon)/.test(rawN)) {
+                    isMod = true;
+                }
+                if (/(porcion|porción|promo)/.test(rawN)) isMod = false;
+
+                if (!isMod && rawN !== "") {
+                    // Limpiamos los corchetes tipo "[1 Con sal]" para agrupar todas las ventas de la misma hamburguesa juntas
+                    let cleanNameForChart = item.name.replace(/\[.*?\]/g, '').replace(/\]/g, '').replace(/-/g, ' ').trim();
+                    productSales[cleanNameForChart] = (productSales[cleanNameForChart] || 0) + qty;
+                }
+                // --- FIN FILTRO PARA EL GRÁFICO ---
+            });
             theoCMV += window.calculateOrderConsumables(o.items||[]);
             const dObj = parseDate(o.createdAt); if(dObj) dailySales[dObj.getDate()] = (dailySales[dObj.getDate()] || 0) + sale;
             paymentStats[finalPayMethod] += sale;
