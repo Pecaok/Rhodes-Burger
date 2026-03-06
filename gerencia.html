@@ -923,30 +923,43 @@
                 else if(pay.includes('debito')||pay.includes('tarjeta')) { taxes += (sale*(pctDebit/100)); finalPayMethod='Otros'; } 
                 else finalPayMethod='Efectivo';
             }
-           (o.items||[]).forEach(item => { 
+           // --- INICIO CÓDIGO NUEVO Y LIMPIO ---
+            (o.items||[]).forEach(item => {
                 const qty = Number(item.qty||1);
-                theoCMV += (window.getUnitCost(item.name) * qty); 
-                
-                // --- INICIO FILTRO PARA EL GRÁFICO DE PRODUCTOS ---
-                let rawN = String(item.name || "").toLowerCase().trim();
-                let isBurgerType = /(hamb|burger|doble|simple|royal|cheese|cuarto|big|crispy|promo|sandwich)/.test(rawN) && !rawN.includes('feta');
-                let isRealProduct = /(porcion|porción|papas|nuggets|aros|coca|sprite|agua|andes|aquarius)/.test(rawN);
-                let isMod = false;
-                
-                if (rawN.startsWith('[') || (rawN.includes(']') && !rawN.includes('['))) {
-                    isMod = true;
-                } else if (!isBurgerType && !isRealProduct && /(crinkle|rejilla|sal|sazon|queso|feta|cheddar|bacon|panceta|carne|medallon)/.test(rawN)) {
-                    isMod = true;
-                }
-                if (/(porcion|porción|promo)/.test(rawN)) isMod = false;
+                theoCMV += (window.getUnitCost(item.name) * qty); // El costo se sigue calculando igual
 
-                if (!isMod && rawN !== "") {
-                    // Limpiamos los corchetes tipo "[1 Con sal]" para agrupar todas las ventas de la misma hamburguesa juntas
-                    let cleanNameForChart = item.name.replace(/\[.*?\]/g, '').replace(/\]/g, '').replace(/-/g, ' ').trim();
-                    productSales[cleanNameForChart] = (productSales[cleanNameForChart] || 0) + qty;
+                // --- LÓGICA DE FILTRO Y LIMPIEZA PARA EL GRÁFICO ---
+                let rawN = String(item.name || "").toLowerCase().trim();
+
+                // 1. Identificamos categorías a EXCLUIR
+                let isBurgerType = /(hamb|burger|doble|simple|royal|cheese|cuarto|big|crispy|promo|sandwich|mila)/.test(rawN);
+                let isSideOrApp = /(porcion|porción|papas|nuggets|aros)/.test(rawN);
+                
+                // EXCLUSIÓN DE BEBIDAS: Regex completa para gaseosas, aguas, cervezas comunes
+                let isDrink = /(coca|sprite|agua|andes|aquarius|gaseosa|fanta|schweppes|quilmes|corona|heineken|pinta|vaso|litro)/.test(rawN);
+
+                // Identificamos "modificadores puros" (ej: solo "Rejilla]" o "[1 Con sal") para sacarlos
+                let isPureMod = false;
+                if (rawN.startsWith('[') || (rawN.includes(']') && !rawN.includes('['))) {
+                    isPureMod = true; // Empieza con [ o tiene ] sin abrir
+                } else if (!isBurgerType && !isSideOrApp && /(crinkle|rejilla|sal|sazon|queso|feta|cheddar|bacon|panceta|carne|medallon)/.test(rawN)) {
+                    isPureMod = true; // Es texto suelto de guarnición/extra sin ser producto principal
                 }
-                // --- FIN FILTRO PARA EL GRÁFICO ---
+
+                // 2. Criterios de Filtro: Queremos Hamburguesas/Guarniciones, pero NO modificadores sueltos, NO bebidas.
+                if (!isPureMod && !isDrink && (isBurgerType || isSideOrApp) && rawN !== "") {
+                    // 3. Limpieza Total del Nombre (sacar corchetes [like this] y colgantes ])
+                    // Usamos item.name (el original con mayúsculas) para limpiar
+                    let cleanNameForChart = item.name.replace(/\[.*?\]/g, '').replace(/\]/g, '').trim();
+
+                    // 4. Sumar al gráfico
+                    if (cleanNameForChart !== "") {
+                        productSales[cleanNameForChart] = (productSales[cleanNameForChart] || 0) + qty;
+                    }
+                }
+                // --- FIN LÓGICA DE FILTRO ---
             });
+            // --- FIN CÓDIGO NUEVO ---
             theoCMV += window.calculateOrderConsumables(o.items||[]);
             const dObj = parseDate(o.createdAt); if(dObj) dailySales[dObj.getDate()] = (dailySales[dObj.getDate()] || 0) + sale;
             paymentStats[finalPayMethod] += sale;
