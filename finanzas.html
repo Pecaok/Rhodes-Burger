@@ -351,6 +351,8 @@
             if(typeof val === 'string') return new Date(val);
             return new Date(val);
         }
+        
+        const normalize = str => String(str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
         // LOGOUT
         if($('btnLogout')){
@@ -379,7 +381,6 @@
         loadData();
 
         function loadData() {
-            // 🔥 AUMENTADO LÍMITE A 1000 PARA VER HISTORIA MES A MES
             db.collection('orders').orderBy('createdAt', 'desc').limit(1000).onSnapshot(snap => {
                 CURRENT_ORDERS = snap.docs.map(d => ({id: d.id, ...d.data()}));
                 loadKPI(); 
@@ -539,7 +540,7 @@
         }
 
         // =========================================
-        // 🔥 NUEVO GRÁFICO MES A MES "PREMIUM"
+        // GRÁFICO MES A MES "PREMIUM"
         // =========================================
         function renderMonthlyChart(orders) {
             const groups = {};
@@ -561,10 +562,9 @@
             const ctx = $('monthlyChart').getContext('2d');
             if(monthlyChartInstance) monthlyChartInstance.destroy();
 
-            // 🔥 DEGRADADO DORADO PARA BARRAS
             let gradGold = ctx.createLinearGradient(0, 0, 0, 400);
-            gradGold.addColorStop(0, '#d97706'); // Dorado oscuro arriba
-            gradGold.addColorStop(1, '#78350f'); // Marrón abajo
+            gradGold.addColorStop(0, '#d97706');
+            gradGold.addColorStop(1, '#78350f');
 
             monthlyChartInstance = new Chart(ctx, {
                 type: 'bar',
@@ -584,7 +584,7 @@
                             label: 'Cant. Pedidos',
                             data: dataCount,
                             type: 'line',
-                            borderColor: '#fbbf24', // Amarillo Brillante
+                            borderColor: '#fbbf24', 
                             backgroundColor: '#fff',
                             borderWidth: 4,
                             pointRadius: 6,
@@ -640,7 +640,7 @@
         }
 
         // =========================================
-        // CALENDARIO E INSUMOS
+        // CALENDARIO E INSUMOS CORREGIDOS
         // =========================================
         async function renderCalendar(){
             const ym = $('calMonth').value;
@@ -666,30 +666,48 @@
                 totals[d]+=Number(o.total||0);
                 
                 (o.items||[]).forEach(item => {
-                    const name = (item.name || '').toLowerCase();
+                    const nameNorm = normalize(item.name);
                     const qty = Number(item.qty || 1);
                     
                     const bebidas = ['agua', 'cola', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 'imperial', 'sprite', 'levite', 'paso de los toros'];
-                    const esBebida = bebidas.some(b => name.includes(b)) || item.type === 'drink';
+                    const esBebida = bebidas.some(b => nameNorm.includes(b)) || item.type === 'drink';
                     
-                    const guarniciones = ['papas', 'fritas', 'nugget', 'aros', 'bastones', 'guarnicion'];
-                    const esPapas = guarniciones.some(g => name.includes(g)) || item.type === 'side';
+                    const guarniciones = ['papas', 'fritas', 'nugget', 'aros', 'bastones', 'guarnicion', 'porcion'];
+                    const esPapas = guarniciones.some(g => nameNorm.includes(g)) || item.type === 'side';
 
-                    const esBurger = !esBebida && !esPapas;
+                    // Detectar extras aislados importados de PedidosYa
+                    const isExtra = nameNorm.includes('extra') || nameNorm.includes('adicional') || nameNorm === 'carne' || nameNorm === 'medallon' || nameNorm === 'cheddar' || nameNorm === 'bacon' || nameNorm.includes('sazon') || nameNorm.includes('sal');
+
+                    const esBurger = !esBebida && !esPapas && !isExtra;
 
                     if (esBurger) {
                         counts[d] += qty; 
 
                         let patties = 1; 
-                        if(name.includes('doble')) patties = 2;
-                        if(name.includes('triple')) patties = 3;
-                        if(name.includes('cuadruple')) patties = 4;
+                        if(nameNorm.includes('doble')) patties = 2;
+                        if(nameNorm.includes('triple')) patties = 3;
+                        if(nameNorm.includes('cuadruple')) patties = 4;
 
                         if(item.extras && item.extras.patty){
                             patties += Number(item.extras.patty);
                         }
                         meatCounts[d] += (patties * qty);
-                        friesKilos[d] += (0.200 * qty);
+                        
+                        const friesRaw = String(item.friesRaw || item.sideType || item.fries || "").toLowerCase();
+                        const pideAros = friesRaw.includes('aros') || nameNorm.includes('aros');
+                        if(!pideAros) friesKilos[d] += (0.200 * qty);
+                    }
+
+                    // Sumar la carne extra importada desde PedidosYa que llega como item suelto
+                    if (isExtra && (nameNorm.includes('carne') || nameNorm.includes('medallon') || nameNorm.includes('patty'))) {
+                        meatCounts[d] += qty;
+                    }
+
+                    // Sumar las porciones de papas independientes
+                    if (esPapas && (nameNorm.includes('papa') || nameNorm.includes('frita') || nameNorm.includes('porcion'))) {
+                        if(!nameNorm.includes('aros')) {
+                            friesKilos[d] += (0.350 * qty);
+                        }
                     }
                 });
             });
