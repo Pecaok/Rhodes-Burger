@@ -62,6 +62,13 @@
       opacity:.028;mix-blend-mode:overlay;
     }
 
+    #burger3d{
+  width:100%;
+  height:420px;
+  display:block;
+  touch-action:none;
+}
+
     /* ════════════ HEADER ════════════ */
     .hdr{
       position:sticky;top:0;z-index:800;
@@ -373,26 +380,19 @@
 
     const ING_COLORS=['#C4A882','#D4A847','#8B5E3C','#5C8A3C','#CC5544','#DDD0B8','#A87840','#4A8A6C','#9B6BB5','#E07840'];
 
-    window.showIngredients=function(e,id){
-      e.stopPropagation();
-      const item=window.STATE.products.find(p=>p.id===id);
-      if(!item)return;
-      const raw=(item.description||'').split(/[,;]/).map(s=>s.trim()).filter(Boolean);
-      if(!raw.length){window.toast('Sin ingredientes listados');return;}
-      const nm=document.getElementById("ingName");
-      nm.innerHTML=item.name.replace(/(\w+)$/,'<span>$1</span>');
-      const stage=document.getElementById("ingStage");
-      stage.innerHTML='';
-      const n=raw.length,sp=Math.min(58,Math.floor(260/n)),center=(n-1)/2;
-      stage.style.height=(n*sp+60)+'px';
-      raw.forEach((ing,i)=>{
-        const ty=(i-center)*sp,color=ING_COLORS[i%ING_COLORS.length];
-        const el=document.createElement('div');
-        el.className='ing-layer';
-        el.style.cssText=`--ty:${ty}px;--d:${i*60}ms;--lc:${color};`;
-        el.innerHTML=`<div class="ing-slab"><div class="ing-dot"></div><div class="ing-label">${ing}</div><div class="ing-idx">${String(i+1).padStart(2,'0')}</div></div>`;
-        stage.appendChild(el);
-      });
+   window.showIngredients = function(e,id){
+  e.stopPropagation();
+
+  const item = window.STATE.products.find(p=>p.id===id);
+  if(!item) return;
+
+  document.getElementById("ingName").innerHTML =
+    item.name.replace(/(\w+)$/,'<span>$1</span>');
+
+  document.getElementById("ingOvl").classList.add("open");
+
+  setTimeout(initBurger3D, 50);
+};
       document.getElementById("ingOvl").classList.add("open");
     };
     window.closeIng=()=>document.getElementById("ingOvl").classList.remove("open");
@@ -645,7 +645,8 @@
     <div class="ing-eyebrow">Composición del producto</div>
     <div id="ingName"></div>
   </div>
-  <div id="ingStage"></div>
+<div id="ingStage">
+  <canvas id="burger3d"></canvas>
 </div>
 
 <!-- ═══ HEADER ═══ -->
@@ -762,7 +763,7 @@
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js" defer></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js" defer></script>
-
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 <script defer>
 let db;
 
@@ -895,6 +896,131 @@ document.getElementById("btnCheckout").onclick=()=>{
   localStorage.setItem("rhodes_cart_legacy_format",JSON.stringify(lc));
   window.location.href="pedido_cliente.html";
 };
+  let scene, camera, renderer, burgerGroup;
+let layers = {};
+let exploded = false;
+let targetRotation = 0;
+let currentRotation = 0;
+
+function initBurger3D(){
+
+  const canvas = document.getElementById("burger3d");
+
+  if(renderer){
+    renderer.dispose();
+  }
+
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(45, canvas.clientWidth/420, 0.1, 100);
+  camera.position.set(0,1.8,6);
+
+  renderer = new THREE.WebGLRenderer({ canvas, alpha:true, antialias:true });
+  renderer.setSize(canvas.clientWidth,420);
+  renderer.shadowMap.enabled = true;
+
+  // luces PRO
+  const key = new THREE.DirectionalLight(0xffffff,1.4);
+  key.position.set(5,6,5);
+  key.castShadow = true;
+  scene.add(key);
+
+  const fill = new THREE.DirectionalLight(0xffd6a0,0.6);
+  fill.position.set(-5,3,2);
+  scene.add(fill);
+
+  const rim = new THREE.PointLight(0xffaa33,1.2,10);
+  rim.position.set(-3,2,-3);
+  scene.add(rim);
+
+  scene.add(new THREE.AmbientLight(0x443322,0.5));
+
+  burgerGroup = new THREE.Group();
+  scene.add(burgerGroup);
+
+  // materiales
+  const breadMat = new THREE.MeshStandardMaterial({
+    color:0xd6a96c,
+    roughness:0.5
+  });
+
+  const meatMat = new THREE.MeshStandardMaterial({
+    color:0x4a2b1b,
+    roughness:0.95
+  });
+
+  const cheeseMat = new THREE.MeshStandardMaterial({
+    color:0xffc400,
+    roughness:0.3
+  });
+
+  function layer(r,h,mat,y){
+    const geo = new THREE.CylinderGeometry(r,r,h,64);
+    const mesh = new THREE.Mesh(geo,mat);
+    mesh.position.y = y;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    burgerGroup.add(mesh);
+    return mesh;
+  }
+
+  // capas burger
+  layers.top = layer(2.2,0.9,breadMat,2);
+  layers.cheese1 = layer(2.3,0.25,cheeseMat,1.2);
+  layers.meat = layer(2,0.7,meatMat,0.4);
+  layers.cheese2 = layer(2.3,0.25,cheeseMat,-0.3);
+  layers.bottom = layer(2.2,0.9,breadMat,-1.2);
+
+  exploded = true;
+
+  // interacción
+  let isDown=false, startX=0;
+
+  canvas.onmousedown = e=>{
+    isDown=true;
+    startX=e.clientX;
+  };
+
+  window.onmouseup = ()=> isDown=false;
+
+  window.onmousemove = e=>{
+    if(!isDown) return;
+    targetRotation += (e.clientX - startX)*0.005;
+    startX = e.clientX;
+  };
+
+  canvas.ontouchstart = e=>{
+    isDown=true;
+    startX=e.touches[0].clientX;
+  };
+
+  canvas.ontouchmove = e=>{
+    if(!isDown) return;
+    targetRotation += (e.touches[0].clientX - startX)*0.005;
+    startX = e.touches[0].clientX;
+  };
+
+  canvas.ontouchend = ()=> isDown=false;
+
+  function animate(){
+    requestAnimationFrame(animate);
+
+    currentRotation += (targetRotation - currentRotation)*0.08;
+    burgerGroup.rotation.y = currentRotation;
+
+    const t = exploded ? 1 : 0;
+
+    layers.top.position.y = 2 + t*1.4;
+    layers.cheese1.position.y = 1.2 + t*0.9;
+    layers.meat.position.y = 0.4;
+    layers.cheese2.position.y = -0.3 - t*0.9;
+    layers.bottom.position.y = -1.2 - t*1.4;
+
+    renderer.render(scene,camera);
+  }
+
+  animate();
+}
 </script>
 </body>
 </html>
