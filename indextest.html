@@ -490,77 +490,32 @@
       return L;
     }
 
-    window.showIngredients=async function(e,id){
+    window.showIngredients=function(e,id){
       e.stopPropagation();
       const item=window.STATE.products.find(p=>p.id===id);
       if(!item)return;
 
-      // Show overlay immediately with loading state
+      const layers=parseDesc(item.description||'',item.name||'');
+
+      // Photo
       const photo=document.getElementById('ingPhoto');
       photo.src=item.img||'images/logo.png';
       photo.classList.remove('pan');
       setTimeout(()=>photo.classList.add('pan'),50);
+
+      // Title
       document.getElementById('ingName').innerHTML=item.name.replace(/([^ ]+)$/,'<span>$1</span>');
-      document.getElementById('ingCount').textContent='Cargando...';
-      document.getElementById('ingList').innerHTML=
-        '<div style="text-align:center;padding:30px 0;color:var(--muted);font-family:var(--fh);letter-spacing:.1em;text-transform:uppercase;font-size:12px">Cargando ingredientes...</div>';
+
+      // Count
+      document.getElementById('ingCount').textContent=layers.length+' ingredientes';
+
+      // Cards
+      _renderIngCards(layers);
+
       document.getElementById('btnToggleBurger').textContent='Agregar al pedido →';
       document.getElementById('btnToggleBurger').onclick=()=>{closeIng();setTimeout(()=>openModal(id),120);};
       document.getElementById('ingOvl').classList.add('open');
-
-      // ── Fetch recipe from Firebase ──
-      try {
-        if(!window.db){throw new Error('DB not ready');}
-
-        // 1. Get recipe doc (named after product name, e.g. "Cheeseburger Simple")
-        const recipeDoc = await window.db.collection('recipes').doc(item.name).get();
-
-        if(!recipeDoc.exists){
-          // Fallback: try by product id
-          const recipeById = await window.db.collection('recipes').doc(id).get();
-          if(!recipeById.exists){ _renderIngFromDesc(item,id); return; }
-          _renderIngFromRecipe(recipeById.data().ingredients||[], id);
-          return;
-        }
-        _renderIngFromRecipe(recipeDoc.data().ingredients||[], id);
-
-      } catch(err){
-        console.warn('Recipe fetch error:', err);
-        _renderIngFromDesc(item, id);
-      }
     };
-
-    // Resolve subrecipe IDs → names, then render cards
-    async function _renderIngFromRecipe(ingredients, productId){
-      if(!ingredients.length){ _renderIngFromDesc(window.STATE.products.find(p=>p.id===productId), productId); return; }
-
-      try {
-        // Fetch all subrecipe docs in parallel
-        const docs = await Promise.all(
-          ingredients.map(ing => window.db.collection('subrecipes').doc(ing.id).get())
-        );
-
-        const layers = ingredients.map((ing,i)=>{
-          const doc  = docs[i];
-          const name = doc.exists ? (doc.data().name || doc.data().nombre || doc.id) : ing.id;
-          const qty  = ing.qty || ing.cantidad || 1;
-          const qtyLabel = qty > 1 ? ` ×${qty}` : '';
-          return {
-            id:    detectIngType(name),
-            name:  name + qtyLabel,
-            sub:   qty > 1 ? `Cantidad: ${qty}` : (doc.exists && doc.data().unit ? doc.data().unit : ''),
-            color: ING_DEF[detectIngType(name)]?.color||'#625A45'
-          };
-        });
-
-        document.getElementById('ingCount').textContent=layers.length+' ingredientes';
-        _renderIngCards(layers);
-
-      } catch(err){
-        console.warn('Subrecipe fetch error:', err);
-        _renderIngFromDesc(window.STATE.products.find(p=>p.id===productId), productId);
-      }
-    }
 
     function _renderIngFromDesc(item, id){
       const layers = parseDesc(item.description||'', item.name||'');
