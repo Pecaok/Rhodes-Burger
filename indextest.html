@@ -490,25 +490,85 @@
       return L;
     }
 
-    window.showIngredients=function(e,id){
+    window.showIngredients=async function(e,id){
       e.stopPropagation();
       const item=window.STATE.products.find(p=>p.id===id);
       if(!item)return;
-      const layers=parseDesc(item.description||'',item.name||'');
 
-      // Photo
+      // Show overlay immediately with loading state
       const photo=document.getElementById('ingPhoto');
       photo.src=item.img||'images/logo.png';
       photo.classList.remove('pan');
       setTimeout(()=>photo.classList.add('pan'),50);
-
-      // Title
       document.getElementById('ingName').innerHTML=item.name.replace(/([^ ]+)$/,'<span>$1</span>');
+      document.getElementById('ingCount').textContent='Cargando...';
+      document.getElementById('ingList').innerHTML=
+        '<div style="text-align:center;padding:30px 0;color:var(--muted);font-family:var(--fh);letter-spacing:.1em;text-transform:uppercase;font-size:12px">Cargando ingredientes...</div>';
+      document.getElementById('btnToggleBurger').textContent='Agregar al pedido →';
+      document.getElementById('btnToggleBurger').onclick=()=>{closeIng();setTimeout(()=>openModal(id),120);};
+      document.getElementById('ingOvl').classList.add('open');
 
-      // Count
+      // ── Fetch recipe from Firebase ──
+      try {
+        if(!window.db){throw new Error('DB not ready');}
+
+        // 1. Get recipe doc (named after product name, e.g. "Cheeseburger Simple")
+        const recipeDoc = await window.db.collection('recipes').doc(item.name).get();
+
+        if(!recipeDoc.exists){
+          // Fallback: try by product id
+          const recipeById = await window.db.collection('recipes').doc(id).get();
+          if(!recipeById.exists){ _renderIngFromDesc(item,id); return; }
+          _renderIngFromRecipe(recipeById.data().ingredients||[], id);
+          return;
+        }
+        _renderIngFromRecipe(recipeDoc.data().ingredients||[], id);
+
+      } catch(err){
+        console.warn('Recipe fetch error:', err);
+        _renderIngFromDesc(item, id);
+      }
+    };
+
+    // Resolve subrecipe IDs → names, then render cards
+    async function _renderIngFromRecipe(ingredients, productId){
+      if(!ingredients.length){ _renderIngFromDesc(window.STATE.products.find(p=>p.id===productId), productId); return; }
+
+      try {
+        // Fetch all subrecipe docs in parallel
+        const docs = await Promise.all(
+          ingredients.map(ing => window.db.collection('subrecipes').doc(ing.id).get())
+        );
+
+        const layers = ingredients.map((ing,i)=>{
+          const doc  = docs[i];
+          const name = doc.exists ? (doc.data().name || doc.data().nombre || doc.id) : ing.id;
+          const qty  = ing.qty || ing.cantidad || 1;
+          const qtyLabel = qty > 1 ? ` ×${qty}` : '';
+          return {
+            id:    detectIngType(name),
+            name:  name + qtyLabel,
+            sub:   qty > 1 ? `Cantidad: ${qty}` : (doc.exists && doc.data().unit ? doc.data().unit : ''),
+            color: ING_DEF[detectIngType(name)]?.color||'#625A45'
+          };
+        });
+
+        document.getElementById('ingCount').textContent=layers.length+' ingredientes';
+        _renderIngCards(layers);
+
+      } catch(err){
+        console.warn('Subrecipe fetch error:', err);
+        _renderIngFromDesc(window.STATE.products.find(p=>p.id===productId), productId);
+      }
+    }
+
+    function _renderIngFromDesc(item, id){
+      const layers = parseDesc(item.description||'', item.name||'');
       document.getElementById('ingCount').textContent=layers.length+' ingredientes';
+      _renderIngCards(layers);
+    }
 
-      // Cards
+    function _renderIngCards(layers){
       const list=document.getElementById('ingList');
       list.innerHTML='';
       layers.forEach((l,i)=>{
@@ -523,18 +583,26 @@
           </div>
           <div class="ing-num">${String(i+1).padStart(2,'0')}</div>`;
         list.appendChild(card);
-        setTimeout(()=>card.classList.add('vis'),80+i*60);
+        setTimeout(()=>card.classList.add('vis'),60+i*55);
       });
+    }
 
-      // Change button to "Agregar al pedido"
-      document.getElementById('btnToggleBurger').textContent='Agregar al pedido →';
-      document.getElementById('btnToggleBurger').onclick=()=>{
-        closeIng();
-        setTimeout(()=>openModal(id),120);
-      };
-
-      document.getElementById('ingOvl').classList.add('open');
-    };
+    // Detect ingredient type from text label
+    function detectIngType(name){
+      const n=name.toLowerCase();
+      if(n.includes('pan')||n.includes('bun')||n.includes('brioche')){
+        return (n.includes('base')||n.includes('inferior')||n.includes('bottom'))?'bun_bot':'bun_top';
+      }
+      if(n.includes('carne')||n.includes('medallón')||n.includes('medallon')||n.includes('patty')||n.includes('carne')) return 'patty';
+      if(n.includes('cheddar')||n.includes('queso')) return 'cheese';
+      if(n.includes('lechuga')) return 'lettuce';
+      if(n.includes('tomate')) return 'tomato';
+      if(n.includes('panceta')||n.includes('bacon')) return 'bacon';
+      if(n.includes('crispy')) return 'crispy';
+      if(n.includes('cebolla')) return 'onion';
+      if(n.includes('ketchup')||n.includes('mayonesa')||n.includes('aderezo')||n.includes('salsa')||n.includes('mostaza')) return 'sauce';
+      return 'sauce';
+    }
 
     window.closeIng=function(){
       document.getElementById('ingOvl').classList.remove('open');
@@ -960,6 +1028,7 @@ function cache(){try{localStorage.setItem(CACHE_KEY,JSON.stringify({products:win
 function initFirebase(){
   firebase.initializeApp({apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"});
   db=firebase.firestore();
+  window.db=db;
   db.settings({experimentalForceLongPolling:true,experimentalAutoDetectLongPolling:false});
   db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
   db.collection("products").onSnapshot(snap=>{window.STATE.products=[];snap.forEach(doc=>{const d=doc.data();if(d.available!==false)window.STATE.products.push({id:doc.id,...d});});document.getElementById('errorMsg').style.display='none';window.fastRender();cache();},e=>console.log("Offline:",e));
