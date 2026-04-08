@@ -490,31 +490,62 @@
       return L;
     }
 
-    window.showIngredients=function(e,id){
+    window.showIngredients=async function(e,id){
       e.stopPropagation();
       const item=window.STATE.products.find(p=>p.id===id);
       if(!item)return;
 
-      const layers=parseDesc(item.description||'',item.name||'');
-
-      // Photo
+      // Show overlay immediately
       const photo=document.getElementById('ingPhoto');
       photo.src=item.img||'images/logo.png';
       photo.classList.remove('pan');
       setTimeout(()=>photo.classList.add('pan'),50);
-
-      // Title
       document.getElementById('ingName').innerHTML=item.name.replace(/([^ ]+)$/,'<span>$1</span>');
-
-      // Count
-      document.getElementById('ingCount').textContent=layers.length+' ingredientes';
-
-      // Cards
-      _renderIngCards(layers);
-
+      document.getElementById('ingCount').textContent='';
+      document.getElementById('ingList').innerHTML=
+        '<div style="text-align:center;padding:28px 0;color:var(--muted);font-family:var(--fh);letter-spacing:.1em;text-transform:uppercase;font-size:11px">Cargando...</div>';
       document.getElementById('btnToggleBurger').textContent='Agregar al pedido →';
       document.getElementById('btnToggleBurger').onclick=()=>{closeIng();setTimeout(()=>openModal(id),120);};
       document.getElementById('ingOvl').classList.add('open');
+
+      // ── Try Firebase recipes collection ──
+      try {
+        if(window.db){
+          const doc = await window.db.collection('recipes').doc(item.name).get();
+          if(doc.exists){
+            const ings = doc.data().ingredients || [];
+            if(ings.length){
+              // Resolve subrecipe names in parallel
+              const subDocs = await Promise.all(
+                ings.map(i => window.db.collection('subrecipes').doc(i.id).get().catch(()=>null))
+              );
+              const layers = ings.map((ing,i)=>{
+                const sub  = subDocs[i];
+                const name = sub && sub.exists
+                  ? (sub.data().name||sub.data().nombre||sub.data().descripcion||sub.data().title||ing.id)
+                  : ing.id;
+                const qty  = ing.qty||1;
+                return {
+                  id:    detectIngType(name),
+                  name:  name+(qty>1?` ×${qty}`:''),
+                  sub:   qty>1?`Cantidad: ${qty}`:'',
+                  color: ING_DEF[detectIngType(name)]?.color||'#625A45'
+                };
+              }).filter(l=>!l.name.match(/^[a-zA-Z0-9]{15,}$/)); // hide unresolved IDs
+              if(layers.length){
+                document.getElementById('ingCount').textContent=layers.length+' ingredientes';
+                _renderIngCards(layers);
+                return;
+              }
+            }
+          }
+        }
+      } catch(err){ console.warn('Recipe fetch:', err); }
+
+      // ── Fallback: parse from description ──
+      const layers=parseDesc(item.description||'',item.name||'');
+      document.getElementById('ingCount').textContent=layers.length+' ingredientes';
+      _renderIngCards(layers);
     };
 
     function _renderIngFromDesc(item, id){
