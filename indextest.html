@@ -10,7 +10,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,300;0,700;0,800;0,900;1,900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
   <style>
     :root{
@@ -226,15 +225,16 @@
     .t-check{color:var(--gold);}
     #toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
 
-    /* ════════════ INGREDIENT 3D OVERLAY ════════════ */
+    /* ════════════ INGREDIENT CSS-ANIMATION OVERLAY ════════════ */
     #ingOvl{
       position:fixed;inset:0;z-index:7000;
-      background:rgba(14,12,8,.96);
+      background:rgba(12,10,7,.97);
       backdrop-filter:blur(18px);
       display:flex;flex-direction:column;align-items:center;
       padding:0;
       opacity:0;pointer-events:none;
       transition:opacity .35s ease;
+      overflow:hidden;
     }
     #ingOvl.open{opacity:1;pointer-events:all;}
 
@@ -249,57 +249,80 @@
     #ingClose:hover{background:rgba(212,168,71,.2);}
 
     .ing-top{
-      width:100%;padding:18px 60px 0;text-align:center;
-      flex-shrink:0;
+      width:100%;padding:16px 60px 0;text-align:center;flex-shrink:0;
     }
     .ing-eyebrow{font-family:var(--fh);font-size:10px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;color:rgba(212,168,71,.5);margin-bottom:5px;}
     #ingName{font-family:var(--fh);font-size:clamp(22px,6vw,42px);font-weight:900;font-style:italic;text-transform:uppercase;color:var(--white);line-height:.95;letter-spacing:-.01em;}
     #ingName span{color:var(--gold);font-style:normal;}
 
-    /* Canvas fills remaining space */
-    #burgerCanvas{
-      display:block;width:100%!important;
+    /* ── Burger stage ── */
+    #burgerStage{
       flex:1;min-height:0;
-      cursor:grab;
+      width:100%;
+      display:flex;align-items:center;justify-content:center;
+      position:relative;
+      perspective:900px;
     }
-    #burgerCanvas:active{cursor:grabbing;}
 
-    /* Labels overlay on top of canvas */
-    #ingLabels{
-      position:absolute;inset:0;pointer-events:none;
-      top:0;left:0;width:100%;height:100%;
+    #burgerGroup{
+      position:relative;
+      width:260px;
+      transform-style:preserve-3d;
+      transform:rotateX(16deg);
+      transition:transform .5s ease;
     }
-    .ing-tag{
+
+    /* Each ingredient layer row */
+    .blayer{
       position:absolute;
-      transform:translate(-50%,-50%);
-      background:rgba(20,18,12,.88);
-      border:1px solid rgba(212,168,71,.35);
-      color:var(--white);
-      font-family:var(--fh);font-size:12px;font-weight:700;
-      text-transform:uppercase;letter-spacing:.06em;
-      padding:4px 11px 4px 8px;border-radius:99px;
-      white-space:nowrap;
+      left:50%;
+      transform:translateX(-50%) translateY(0px);
+      transition:transform .55s cubic-bezier(.34,1.28,.64,1), opacity .4s ease;
+      display:flex;align-items:center;gap:0;
+      will-change:transform;
       opacity:0;
-      transition:opacity .4s ease;
-      display:flex;align-items:center;gap:6px;
+    }
+    .blayer.ready{opacity:1;}
+
+    /* The visual slab */
+    .bslab{
+      position:relative;
+      border-radius:var(--br,6px);
+      box-shadow:0 6px 18px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.12);
+    }
+    .bslab::after{
+      content:'';position:absolute;inset:0;
+      border-radius:var(--br,6px);
+      background:linear-gradient(160deg,rgba(255,255,255,.18) 0%,transparent 55%);
       pointer-events:none;
-      box-shadow:0 4px 16px rgba(0,0,0,.4);
     }
-    .ing-tag.vis{opacity:1;}
-    .ing-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
-    /* line from tag to layer */
-    .ing-line{
-      position:absolute;pointer-events:none;
-      height:1px;background:rgba(212,168,71,.25);
-      transform-origin:left center;
-      opacity:0;transition:opacity .4s ease;
+
+    /* Label to the right */
+    .blabel{
+      position:absolute;
+      right:calc(-50% - 10px);
+      transform:translateX(100%);
+      white-space:nowrap;
+      display:flex;align-items:center;gap:7px;
+      opacity:0;
+      transition:opacity .35s ease var(--ld,0s);
     }
-    .ing-line.vis{opacity:1;}
+    .blabel.vis{opacity:1;}
+    .blabel-line{height:1px;width:28px;background:rgba(212,168,71,.25);}
+    .blabel-text{
+      font-family:var(--fh);font-size:12px;font-weight:700;
+      letter-spacing:.07em;text-transform:uppercase;color:var(--white);
+      background:rgba(20,18,12,.88);
+      border:1px solid rgba(212,168,71,.25);
+      padding:4px 10px 4px 8px;border-radius:99px;
+      display:flex;align-items:center;gap:6px;
+    }
+    .blabel-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 
     /* Bottom controls */
     .ing-controls{
       flex-shrink:0;padding:12px 20px 20px;
-      display:flex;align-items:center;justify-content:center;gap:12px;
+      display:flex;align-items:center;justify-content:center;gap:14px;
     }
     #btnToggleBurger{
       background:var(--gold);color:var(--bg);
@@ -413,310 +436,116 @@
     };
 
     /* ══════════════════════════════════════════
-       3D BURGER VIEWER
+       CSS BURGER VIEWER — zero WebGL, zero lag
     ══════════════════════════════════════════ */
-    let _scene, _cam, _renderer, _group, _rafId;
-    let _assembled = false; // starts disassembled
-    let _layers = [];       // {mesh, targetY, assembledY, disassembledY, name, color}
-    let _tweening = false;
-    let _rotX = 0.18, _rotY = 0, _autoSpin = true;
-    let _drag = {active:false, lastX:0, lastY:0};
-
-    // Ingredient keyword → visual style
-    const ING_MAP = {
-      'pan':     {color:0xC4803A, h:0.46, r:1.0,  seg:32, dome:true},
-      'bun':     {color:0xC4803A, h:0.46, r:1.0,  seg:32, dome:true},
-      'carne':   {color:0x2E1408, h:0.30, r:0.88, seg:32},
-      'patty':   {color:0x2E1408, h:0.30, r:0.88, seg:32},
-      'hamburguesa':{color:0x2E1408, h:0.30, r:0.88, seg:32},
-      'queso':   {color:0xF0B429, h:0.06, r:1.08, seg:4},
-      'cheddar': {color:0xF0B429, h:0.06, r:1.08, seg:4},
-      'lechuga': {color:0x3D7A2F, h:0.07, r:1.18, seg:8},
-      'tomate':  {color:0xCC2211, h:0.07, r:0.96, seg:32},
-      'panceta': {color:0x7B1A0A, h:0.06, r:0.90, seg:6},
-      'bacon':   {color:0x7B1A0A, h:0.06, r:0.90, seg:6},
-      'aderezo': {color:0xF5F0D0, h:0.035,r:0.88, seg:32},
-      'mayonesa':{color:0xF5F0D0, h:0.035,r:0.88, seg:32},
-      'ketchup': {color:0xBB2200, h:0.035,r:0.88, seg:32},
-      'cebolla': {color:0xD0A8C8, h:0.06, r:0.94, seg:32},
+    const LAYER_DEF = {
+      bun_top:{label:'Pan Brioche (tapa)',w:240,h:58,dot:'#C8782A',style:'background:radial-gradient(ellipse at 50% 30%,#E8A040 0%,#B86018 55%,#8B4010 100%);border-radius:50% 50% 12px 12px / 60% 60% 12px 12px;'},
+      bun_bot:{label:'Pan Brioche (base)',w:248,h:32,dot:'#B86820',style:'background:radial-gradient(ellipse at 50% 60%,#D89030 0%,#A05818 65%,#783808 100%);border-radius:12px 12px 50% 50% / 12px 12px 30% 30%;'},
+      patty:  {label:'Medallón de carne',w:224,h:28,dot:'#2E1208',style:'background:radial-gradient(ellipse at 45% 35%,#4A2010 0%,#200C04 60%,#0E0602 100%);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.05);'},
+      cheese: {label:'Queso Cheddar',w:256,h:14,dot:'#F2B200',style:'background:linear-gradient(160deg,#FFD040 0%,#E09800 60%,#C07800 100%);border-radius:4px;box-shadow:0 3px 10px rgba(240,160,0,.3);'},
+      lettuce:{label:'Lechuga',w:268,h:18,dot:'#3A7A28',style:'background:radial-gradient(ellipse at 50% 50%,#4A9A30 0%,#2A6018 60%,#1A4010 100%);border-radius:50%;clip-path:polygon(4% 50%,8% 20%,16% 40%,24% 10%,32% 38%,40% 8%,50% 35%,60% 8%,68% 38%,76% 10%,84% 40%,92% 20%,96% 50%,92% 70%,84% 55%,76% 80%,68% 58%,60% 82%,50% 60%,40% 82%,32% 58%,24% 80%,16% 55%,8% 70%);'},
+      tomato: {label:'Tomate',w:218,h:16,dot:'#CC2211',style:'background:radial-gradient(ellipse at 45% 35%,#EE4433 0%,#CC1100 55%,#880800 100%);border-radius:50%;'},
+      bacon:  {label:'Panceta Ahumada',w:230,h:14,dot:'#7A1A0A',style:'background:repeating-linear-gradient(0deg,#CC3011 0px,#CC3011 4px,#5A0E04 4px,#5A0E04 9px);border-radius:6px;opacity:.92;'},
+      onion:  {label:'Cebolla',w:210,h:16,dot:'#C8A0CC',style:'background:radial-gradient(ellipse,#E0C0E8 0%,#A878B0 55%,#806090 100%);border-radius:50%;opacity:.88;'},
+      crispy: {label:'Cebolla Crispy',w:236,h:16,dot:'#C87820',style:'background:repeating-radial-gradient(circle at 30% 40%,#D08820 0px,#D08820 3px,transparent 3px,transparent 8px),#B06010;border-radius:8px;'},
+      sauce:  {label:'Aderezo especial',w:220,h:10,dot:'#F0EAC8',style:'background:radial-gradient(ellipse,#FFFAEE 0%,#E8D890 55%,#C8B860 100%);border-radius:50%;opacity:.82;'},
     };
-    const ING_DEFAULT = {color:0xA09070, h:0.08, r:0.86, seg:32};
-    const LAYER_COLORS_HEX = [
-      '#C4803A','#F0B429','#3D7A2F','#CC2211','#2E1408',
-      '#7B1A0A','#D0A8C8','#F5F0D0','#BB2200','#A09070'
-    ];
 
-    function getIngStyle(name) {
-      const l = name.toLowerCase();
-      for (const [k, v] of Object.entries(ING_MAP)) {
-        if (l.includes(k)) return v;
+    function parseDesc(desc, name) {
+      const d = (desc+' '+name).toLowerCase();
+      const L = [];
+      L.push({id:'bun_bot'});
+      if (d.includes('ketchup'))                            L.push({id:'sauce',label:'Ketchup',dot:'#CC2211'});
+      else if (d.includes('mayonesa')||d.includes('mayo')) L.push({id:'sauce',label:'Mayonesa'});
+      else if (d.includes('aderezo'))                      L.push({id:'sauce'});
+      if (d.includes('cebolla crispy')||d.includes('crispy')) L.push({id:'crispy'});
+      if (d.includes('panceta')||d.includes('bacon'))      L.push({id:'bacon'});
+      const dbl = d.includes('doble')||d.includes('x2');
+      const ch  = d.includes('cheddar')||d.includes('queso');
+      if (dbl) {
+        L.push({id:'patty',label:'Medallón de carne (1)'});
+        if(ch) L.push({id:'cheese'});
+        L.push({id:'patty',label:'Medallón de carne (2)'});
+        if(ch) L.push({id:'cheese'});
+      } else {
+        L.push({id:'patty'});
+        if(ch) L.push({id:'cheese'});
       }
-      return ING_DEFAULT;
+      if (d.includes('tomate'))  L.push({id:'tomato'});
+      if (d.includes('lechuga')) L.push({id:'lettuce'});
+      if (d.includes('cebolla')&&!d.includes('crispy')) L.push({id:'onion'});
+      L.push({id:'bun_top'});
+      return L;
     }
 
-    function buildBurger3D(ingredients) {
-      // Cleanup previous
-      if (_rafId) cancelAnimationFrame(_rafId);
-      if (_renderer) { _renderer.dispose(); }
-      _layers = [];
+    let _assembled=false, _builtLayers=[];
 
-      const canvas = document.getElementById('burgerCanvas');
-      const W = canvas.clientWidth || window.innerWidth;
-      const H = canvas.clientHeight || (window.innerHeight - 160);
-      canvas.width  = W * devicePixelRatio;
-      canvas.height = H * devicePixelRatio;
-
-      _scene = new THREE.Scene();
-      _cam   = new THREE.PerspectiveCamera(40, W / H, 0.1, 100);
-      _cam.position.set(0, 0.4, 5.8);
-
-      _renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
-      _renderer.setPixelRatio(devicePixelRatio);
-      _renderer.setSize(W, H, false);
-      _renderer.shadowMap.enabled = true;
-
-      // Lights
-      const ambient = new THREE.AmbientLight(0xFFE8C0, 0.55);
-      _scene.add(ambient);
-      const key = new THREE.DirectionalLight(0xFFD580, 1.4);
-      key.position.set(4, 6, 5); key.castShadow = true;
-      _scene.add(key);
-      const fill = new THREE.DirectionalLight(0xC4A060, 0.5);
-      fill.position.set(-5, 2, -3);
-      _scene.add(fill);
-      const rim = new THREE.PointLight(0xFF9900, 0.6, 20);
-      rim.position.set(0, -3, 4);
-      _scene.add(rim);
-
-      _group = new THREE.Group();
-      _scene.add(_group);
-
-      // Build ingredient layers bottom → top
-      const n = ingredients.length;
-      // Assembled: tight stacking
-      let stackY = 0;
-      const assembledYs = [];
-      // Bottom bun always first, top bun always last if "pan" in any ingredient
-      // Just use order as given
-      ingredients.forEach((name, i) => {
-        const style = getIngStyle(name);
-        assembledYs.push(stackY + style.h / 2);
-        stackY += style.h + 0.01;
+    function buildBurgerCSS(parsedLayers) {
+      const group = document.getElementById('burgerGroup');
+      const stage = document.getElementById('burgerStage');
+      group.innerHTML=''; _builtLayers=[];
+      const n=parsedLayers.length;
+      const stageH = stage.clientHeight||420;
+      let cumH=0; const GAP=3;
+      const heights = parsedLayers.map(l=>(LAYER_DEF[l.id]||LAYER_DEF.sauce).h);
+      const totalH  = heights.reduce((a,b)=>a+b+GAP,0);
+      const stackTop= (stageH-totalH)/2;
+      const spread  = Math.min(stageH*0.84, n*52);
+      const sTop    = (stageH-spread)/2;
+      const sStep   = spread/Math.max(n-1,1);
+      group.style.cssText='position:relative;width:100%;height:'+stageH+'px;';
+      let cumStack=0;
+      parsedLayers.forEach((l,i)=>{
+        const def = {...(LAYER_DEF[l.id]||LAYER_DEF.sauce), ...(l.label?{label:l.label}:{}), ...(l.dot?{dot:l.dot}:{})};
+        const h   = def.h;
+        const aY  = stackTop+cumStack;
+        const dY  = sTop+i*sStep;
+        cumStack  += h+GAP;
+        const wrap=document.createElement('div');
+        wrap.className='blayer';
+        wrap.style.cssText='width:'+def.w+'px;top:'+dY+'px;';
+        const slab=document.createElement('div');
+        slab.className='bslab';
+        slab.style.cssText='width:'+def.w+'px;height:'+h+'px;'+def.style;
+        const lbl=document.createElement('div');
+        lbl.className='blabel';
+        lbl.style.setProperty('--ld',(i*55+120)+'ms');
+        lbl.innerHTML='<div class="blabel-line"></div><div class="blabel-text"><div class="blabel-dot" style="background:'+(def.dot||'#A09070')+'"></div>'+def.label+'</div>';
+        wrap.appendChild(slab); wrap.appendChild(lbl);
+        group.appendChild(wrap);
+        _builtLayers.push({wrap,lbl,aY,dY});
+        setTimeout(()=>{wrap.classList.add('ready'); wrap.style.top=dY+'px';},30+i*55);
+        setTimeout(()=>lbl.classList.add('vis'),220+i*55);
       });
-      // Center assembled stack
-      const totalH = stackY;
-      const centerOff = totalH / 2;
+      _assembled=false;
+      document.getElementById('btnToggleBurger').textContent='🍔 Ver Armada';
+    }
 
-      // Disassembled: spread out
-      const spread = Math.max(0.72, 4.2 / n);
-      const disassembledYs = ingredients.map((_, i) => (i - (n - 1) / 2) * spread);
-
-      ingredients.forEach((name, i) => {
-        const style = getIngStyle(name);
-        const color = style.color;
-
-        let geo;
-        if (style.dome) {
-          // Bun: cylinder + hemisphere cap
-          const g1 = new THREE.CylinderGeometry(style.r, style.r * 1.05, style.h * 0.5, style.seg);
-          const g2 = new THREE.SphereGeometry(style.r, style.seg, 16, 0, Math.PI * 2, 0, Math.PI * 0.5);
-          // Merge manually via group
-          const mat = new THREE.MeshStandardMaterial({color, roughness:0.65, metalness:0.05});
-          const mesh1 = new THREE.Mesh(g1, mat);
-          const mesh2 = new THREE.Mesh(g2, mat);
-          // If top bun (last ingredient or name includes "pan")
-          const isTopBun = i === n - 1 || name.toLowerCase().includes('pan') && i > n / 2;
-          if (isTopBun) {
-            mesh2.position.y = style.h * 0.25;
-            mesh2.rotation.x = 0;
-          } else {
-            mesh2.rotation.x = Math.PI;
-            mesh2.position.y = -style.h * 0.25;
-          }
-          mesh1.castShadow = mesh1.receiveShadow = true;
-          mesh2.castShadow = true;
-          const bun = new THREE.Group();
-          bun.add(mesh1); bun.add(mesh2);
-          bun.position.y = assembledYs[i] - centerOff;
-          _group.add(bun);
-          _layers.push({
-            mesh: bun, name,
-            assembledY: assembledYs[i] - centerOff,
-            disassembledY: disassembledYs[i],
-            currentY: disassembledYs[i],
-            color: '#' + color.toString(16).padStart(6,'0')
-          });
-          bun.position.y = disassembledYs[i];
-          return;
-        }
-
-        // Flat layers with slight edge variation
-        if (style.seg <= 8) {
-          // Cheese: square-ish, rotated 45deg
-          geo = new THREE.BoxGeometry(style.r * 1.6, style.h, style.r * 1.6);
-        } else if (style.seg <= 6) {
-          geo = new THREE.CylinderGeometry(style.r * 0.5, style.r, style.h, style.seg);
-        } else {
-          // Add slight irregular top for organic layers
-          geo = new THREE.CylinderGeometry(style.r, style.r * 1.02, style.h, style.seg);
-        }
-
-        const mat = new THREE.MeshStandardMaterial({
-          color,
-          roughness: name.toLowerCase().includes('lechuga') ? 0.9 : 0.55,
-          metalness: name.toLowerCase().includes('queso') || name.toLowerCase().includes('cheddar') ? 0.1 : 0.02,
-        });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.castShadow = mesh.receiveShadow = true;
-        mesh.rotation.y = (i * 0.4); // slight rotation variation per layer
-        if (style.seg === 4) mesh.rotation.y = Math.PI / 4 + i * 0.1;
-        mesh.position.y = disassembledYs[i];
-        _group.add(mesh);
-        _layers.push({
-          mesh, name,
-          assembledY: assembledYs[i] - centerOff,
-          disassembledY: disassembledYs[i],
-          currentY: disassembledYs[i],
-          color: '#' + color.toString(16).padStart(6,'0')
-        });
+    window.toggleBurger=function(){
+      _assembled=!_assembled;
+      document.getElementById('btnToggleBurger').textContent=_assembled?'💥 Ver Ingredientes':'🍔 Ver Armada';
+      _builtLayers.forEach((l,i)=>{
+        l.wrap.style.transitionDelay=_assembled?(i*35)+'ms':((_builtLayers.length-1-i)*35)+'ms';
+        l.wrap.style.top=(_assembled?l.aY:l.dY)+'px';
+        l.lbl.classList.toggle('vis',!_assembled);
       });
-
-      // Start disassembled
-      _assembled = false;
-      document.getElementById('btnToggleBurger').textContent = '🍔 Ver Armada';
-      _rotX = 0.18; _rotY = 0; _autoSpin = true;
-      _group.rotation.x = _rotX;
-
-      renderLoop();
-      updateLabels();
-    }
-
-    function renderLoop() {
-      _rafId = requestAnimationFrame(renderLoop);
-      if (_autoSpin) { _rotY += 0.008; }
-      _group.rotation.y = _rotY;
-      _group.rotation.x = _rotX;
-
-      // Tween layers
-      let stillTweening = false;
-      _layers.forEach(l => {
-        const target = _assembled ? l.assembledY : l.disassembledY;
-        const diff = target - l.currentY;
-        if (Math.abs(diff) > 0.001) {
-          l.currentY += diff * 0.09;
-          l.mesh.position.y = l.currentY;
-          stillTweening = true;
-        } else {
-          l.mesh.position.y = target;
-          l.currentY = target;
-        }
-      });
-      _tweening = stillTweening;
-
-      _renderer.render(_scene, _cam);
-      updateLabels();
-    }
-
-    function updateLabels() {
-      const container = document.getElementById('ingLabels');
-      if (!container || !_renderer) return;
-      const canvas = document.getElementById('burgerCanvas');
-      const W = canvas.clientWidth;
-      const H = canvas.clientHeight;
-      const tags = container.querySelectorAll('.ing-tag');
-      const showLabels = !_assembled || _tweening;
-
-      _layers.forEach((l, i) => {
-        const tag = tags[i];
-        if (!tag) return;
-        // Project 3D position to 2D
-        const pos = new THREE.Vector3(0, l.mesh.position.y, 0);
-        pos.applyEuler(new THREE.Euler(_rotX, _rotY, 0));
-        pos.project(_cam);
-        const x = (pos.x * 0.5 + 0.5) * W;
-        const y = (-pos.y * 0.5 + 0.5) * H + (canvas.getBoundingClientRect().top - document.getElementById('ingOvl').getBoundingClientRect().top);
-        // Alternate tags left/right
-        const side = i % 2 === 0 ? 1 : -1;
-        const tagX = x + side * (W * 0.28);
-        tag.style.left = tagX + 'px';
-        tag.style.top  = y + 'px';
-        tag.classList.toggle('vis', showLabels);
-        // Update connecting line
-        const line = container.querySelectorAll('.ing-line')[i];
-        if (line) {
-          const dx = x - tagX;
-          const len = Math.abs(dx);
-          line.style.width  = len + 'px';
-          line.style.left   = (dx > 0 ? tagX : x) + 'px';
-          line.style.top    = y + 'px';
-          line.classList.toggle('vis', showLabels);
-        }
-      });
-    }
-
-    // Drag to rotate
-    function initDrag() {
-      const canvas = document.getElementById('burgerCanvas');
-      canvas.addEventListener('mousedown',  e=>{ _drag.active=true; _drag.lastX=e.clientX; _drag.lastY=e.clientY; _autoSpin=false; });
-      canvas.addEventListener('touchstart', e=>{ _drag.active=true; _drag.lastX=e.touches[0].clientX; _drag.lastY=e.touches[0].clientY; _autoSpin=false; },{passive:true});
-      const move = (cx, cy) => {
-        if (!_drag.active) return;
-        const dx = cx - _drag.lastX, dy = cy - _drag.lastY;
-        _rotY += dx * 0.012;
-        _rotX = Math.max(-0.5, Math.min(0.7, _rotX + dy * 0.009));
-        _drag.lastX = cx; _drag.lastY = cy;
-      };
-      window.addEventListener('mousemove',  e=>move(e.clientX, e.clientY));
-      window.addEventListener('touchmove',  e=>move(e.touches[0].clientX, e.touches[0].clientY),{passive:true});
-      const end = ()=>{ _drag.active=false; };
-      window.addEventListener('mouseup',  end);
-      window.addEventListener('touchend', end);
-    }
-    // Init drag after DOM ready
-    document.addEventListener('DOMContentLoaded', initDrag);
-
-    window.toggleBurger = function() {
-      _assembled = !_assembled;
-      document.getElementById('btnToggleBurger').textContent = _assembled ? '💥 Ver Ingredientes' : '🍔 Ver Armada';
     };
 
-    window.showIngredients = function(e, id) {
+    window.showIngredients=function(e,id){
       e.stopPropagation();
-      const item = window.STATE.products.find(p => p.id === id);
-      if (!item) return;
-      const raw = (item.description || '').split(/[,;]/).map(s => s.trim()).filter(Boolean);
-      if (!raw.length) { window.toast('Sin ingredientes listados'); return; }
-
-      // Title
-      document.getElementById('ingName').innerHTML = item.name.replace(/(\S+)$/, '<span>$1</span>');
-
-      // Build labels HTML (before 3D so they exist when updateLabels runs)
-      const labelsEl = document.getElementById('ingLabels');
-      labelsEl.innerHTML = raw.map((name, i) => {
-        const colorHex = LAYER_COLORS_HEX[i % LAYER_COLORS_HEX.length];
-        return `
-          <div class="ing-line"></div>
-          <div class="ing-tag">
-            <div class="ing-dot" style="background:${colorHex}"></div>
-            ${name}
-          </div>`;
-      }).join('');
-
-      // Open overlay first so canvas has dimensions
+      const item=window.STATE.products.find(p=>p.id===id);
+      if(!item)return;
+      const layers=parseDesc(item.description||'',item.name||'');
+      document.getElementById('ingName').innerHTML=item.name.replace(/(\S+)$/,'<span>$1</span>');
       document.getElementById('ingOvl').classList.add('open');
-      document.getElementById('btnToggleBurger').textContent = '🍔 Ver Armada';
-
-      // Build 3D on next frame (so canvas is visible/sized)
-      requestAnimationFrame(() => {
-        const canvas = document.getElementById('burgerCanvas');
-        canvas.style.height = '';
-        buildBurger3D(raw);
-      });
+      document.getElementById('btnToggleBurger').textContent='🍔 Ver Armada';
+      requestAnimationFrame(()=>buildBurgerCSS(layers));
     };
 
-    window.closeIng = function() {
+    window.closeIng=function(){
       document.getElementById('ingOvl').classList.remove('open');
-      if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+      document.getElementById('burgerGroup').innerHTML='';
+      _builtLayers=[];
     };
 
     const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -960,17 +789,18 @@
   <p id="blkMsg" style="color:var(--muted);margin-top:12px;font-size:14px">Volvemos pronto.</p>
 </div>
 
-<!-- ═══ INGREDIENT 3D OVERLAY ═══ -->
+<!-- ═══ INGREDIENT CSS-ANIMATION OVERLAY ═══ -->
 <div id="ingOvl">
   <div id="ingClose" onclick="closeIng()">×</div>
   <div class="ing-top">
     <div class="ing-eyebrow">Composición del producto</div>
     <div id="ingName"></div>
   </div>
-  <canvas id="burgerCanvas"></canvas>
-  <div id="ingLabels"></div>
+  <div id="burgerStage">
+    <div id="burgerGroup"></div>
+  </div>
   <div class="ing-controls">
-    <span class="ing-hint">Arrastrá para rotar</span>
+    <span class="ing-hint">Ver ingredientes en detalle</span>
     <button id="btnToggleBurger" onclick="toggleBurger()">🍔 Ver Armada</button>
   </div>
 </div>
