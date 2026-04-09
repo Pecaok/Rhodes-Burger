@@ -627,17 +627,39 @@ function loadProductIntoForm(data, id){
   const extras=data.allowedExtras||{}; $('#prdExPatty').checked=!!extras.patty; $('#prdExCheddar').checked=!!extras.cheddar;
   const pOpts=data.potatoOptions||{}; $('#prdOptSazon').checked=!!pOpts.sazon; $('#prdOptSal').checked=!!pOpts.sal; $('#prdOptSinSal').checked=!!pOpts.sinSal;
   $('#potatoOptionsGroup').style.display=cat==='guarniciones'?'block':'none';
-  // Cargar ingredientes existentes
+
+  // Limpiar y mostrar estado de carga
   PRD_INGREDIENTS=[];
   renderPrdIngList();
-  db.collection('recipes').doc(data.name||'').get().then(doc=>{
-    if(doc.exists){
-      const d = doc.data();
-      const list = d.items || (d.ingredients ? d.ingredients.map(i=>i.name||i.id) : []);
-      PRD_INGREDIENTS = list.filter(Boolean).map(n=>({name:String(n)}));
-      renderPrdIngList();
+  document.getElementById('prdIngEmpty').textContent = 'Cargando ingredientes...';
+
+  const productName = (data.name||'').trim();
+
+  async function loadRecipe(){
+    // Intento 1: por nombre exacto
+    let doc = await db.collection('recipes').doc(productName).get();
+    if(doc.exists) return doc.data();
+
+    // Intento 2: query por productId
+    const q = await db.collection('recipes').where('productId','==', id).limit(1).get();
+    if(!q.empty) return q.docs[0].data();
+
+    return null;
+  }
+
+  loadRecipe().then(d=>{
+    if(d){
+      const list = d.items || (d.ingredients ? d.ingredients.map(i=>i.name||i.id||'') : []);
+      PRD_INGREDIENTS = list.map(n=>String(n||'').trim()).filter(Boolean).map(n=>({name:n}));
     }
-  }).catch(()=>{});
+    document.getElementById('prdIngEmpty').textContent = 'Sin ingredientes.';
+    renderPrdIngList();
+  }).catch(err=>{
+    console.error('Error cargando receta:', err);
+    document.getElementById('prdIngEmpty').textContent = 'Sin ingredientes.';
+    renderPrdIngList();
+  });
+
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
