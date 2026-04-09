@@ -424,20 +424,14 @@ h2 { font-size: 20px; margin: 0 0 10px 0; color: var(--text); }
 
         <!-- Current ingredient list -->
         <div id="prdIngList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;min-height:32px;">
-          <div style="color:#bbb;font-size:13px;text-align:center;padding:8px 0" id="prdIngEmpty">Sin ingredientes. Agregá desde abajo.</div>
+          <div style="color:#bbb;font-size:13px;text-align:center;padding:8px 0" id="prdIngEmpty">Sin ingredientes.</div>
         </div>
 
-        <!-- Search + add row -->
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid #eee;padding-top:10px;">
-          <div style="flex:1;min-width:180px;position:relative;">
-            <input id="prdIngSearch" type="text" placeholder="🔍 Buscar subreceta..." autocomplete="off" style="width:100%;font-size:13px;">
-            <div id="prdSubDrop" style="display:none;position:absolute;top:calc(100% + 3px);left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:10px;max-height:200px;overflow-y:auto;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.1);"></div>
-          </div>
-          <select id="prdIngQty" style="width:68px;font-size:13px;">
-            <option value="1">×1</option><option value="2">×2</option>
-            <option value="3">×3</option><option value="4">×4</option><option value="5">×5</option>
-          </select>
-          <button type="button" class="btn primary" id="btnPrdAddIng" style="padding:10px 16px;font-size:13px;white-space:nowrap;">+ Agregar</button>
+        <!-- Manual input row -->
+        <div style="display:flex;gap:8px;align-items:center;border-top:1px solid #eee;padding-top:10px;">
+          <input id="prdIngText" type="text" placeholder="Ej: Medallón 100g, Cheddar..." style="flex:1;font-size:13px;"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();addPrdIng();}">
+          <button type="button" class="btn primary" onclick="addPrdIng()" style="padding:10px 16px;font-size:13px;white-space:nowrap;">+ Agregar</button>
         </div>
       </div>
     </div>
@@ -554,96 +548,95 @@ async function fileToBase64(file){
   return new Promise((resolve, reject)=>{ const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); });
 }
 
-/* ── SUBRECIPES ── */
-let ALL_SUBRECIPES = [];
-let PRD_INGREDIENTS = []; // [{id, qty, name, desc}]
-let _prdSubId = null, _prdSubName = null;
+/* ── INGREDIENTES MANUALES ── */
+let PRD_INGREDIENTS = []; // [{name}]
 
-db.collection('subrecipes').get().then(snap => {
-  ALL_SUBRECIPES = snap.docs.map(d => {
-    const data = d.data();
-    return {
-      id: d.id,
-      name: data.name || data.nombre || data.title || d.id,
-      desc: data.descripcion || data.description || data.detalle || ''
-    };
-  }).filter(s => s.name !== s.id); // skip items with no readable name
-}).catch(e => console.warn('subrecipes load:', e));
-
-/* ── INGREDIENT LIST UI ── */
 function renderPrdIngList() {
   const container = document.getElementById('prdIngList');
   const empty     = document.getElementById('prdIngEmpty');
   if (!container) return;
-  // Remove existing rows (not the empty msg)
   container.querySelectorAll('.prd-ing-row').forEach(el => el.remove());
   empty.style.display = PRD_INGREDIENTS.length ? 'none' : 'block';
-
   PRD_INGREDIENTS.forEach((ing, i) => {
     const row = document.createElement('div');
     row.className = 'prd-ing-row';
-    row.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #eee;border-radius:8px;padding:8px 10px;';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #eee;border-radius:8px;padding:8px 12px;';
     row.innerHTML = `
-      <div style="flex:1;min-width:0;">
-        <div style="font-weight:700;font-size:13px;color:#222;">${ing.name}</div>
-        ${ing.desc ? `<div style="font-size:11px;color:#888;margin-top:1px;">${ing.desc}</div>` : ''}
-      </div>
-      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
-        <button type="button" onclick="prdIngQty(${i},-1)" style="width:24px;height:24px;border:1px solid #ddd;border-radius:5px;cursor:pointer;background:#fff;font-weight:800;font-size:14px;">-</button>
-        <span style="font-weight:800;min-width:24px;text-align:center;font-size:13px;">×${ing.qty}</span>
-        <button type="button" onclick="prdIngQty(${i},1)"  style="width:24px;height:24px;border:1px solid #ddd;border-radius:5px;cursor:pointer;background:#fff;font-weight:800;font-size:14px;">+</button>
-      </div>
+      <div style="flex:1;font-size:13px;font-weight:600;color:#222;">${ing.name}</div>
       <button type="button" onclick="prdIngRemove(${i})" style="width:24px;height:24px;border:1px solid #ffcdd2;border-radius:5px;cursor:pointer;background:#ffebee;color:#d32f2f;font-weight:800;font-size:13px;flex-shrink:0;">✕</button>`;
     container.appendChild(row);
   });
 }
 
-window.prdIngQty    = (i, d) => { PRD_INGREDIENTS[i].qty = Math.max(1, (PRD_INGREDIENTS[i].qty||1)+d); renderPrdIngList(); };
-window.prdIngRemove = (i)    => { PRD_INGREDIENTS.splice(i,1); renderPrdIngList(); };
+window.prdIngRemove = (i) => { PRD_INGREDIENTS.splice(i,1); renderPrdIngList(); };
 
-/* Subrecipe search dropdown */
-const prdIngSearch = document.getElementById('prdIngSearch');
-const prdSubDrop   = document.getElementById('prdSubDrop');
-
-prdIngSearch?.addEventListener('input', e => {
-  const q = e.target.value.trim().toLowerCase();
-  _prdSubId = null; _prdSubName = null;
-  if (!q) { prdSubDrop.style.display='none'; return; }
-  const res = ALL_SUBRECIPES.filter(s => s.name.toLowerCase().includes(q)).slice(0, 16);
-  if (!res.length) { prdSubDrop.style.display='none'; return; }
-  prdSubDrop.style.display = 'block';
-  prdSubDrop.innerHTML = res.map(s => `
-    <div style="padding:9px 13px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:1px solid #f5f5f5;"
-         onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background=''"
-         onclick="pickPrdSub('${s.id}','${s.name.replace(/'/g,"\\'")}','${(s.desc||'').replace(/'/g,"\\'")}')">
-      <div style="font-weight:700">${s.name}</div>
-      ${s.desc?`<div style="font-size:11px;color:#888">${s.desc}</div>`:''}
-    </div>`).join('');
-});
-
-window.pickPrdSub = (id, name, desc) => {
-  _prdSubId = id; _prdSubName = name; _prdSubDesc = desc;
-  prdIngSearch.value = name;
-  prdSubDrop.style.display = 'none';
+window.addPrdIng = () => {
+  const input = document.getElementById('prdIngText');
+  const val = (input?.value||'').trim();
+  if (!val) return;
+  PRD_INGREDIENTS.push({name: val});
+  input.value = '';
+  input.focus();
+  renderPrdIngList();
 };
 
-document.addEventListener('click', e => {
-  if (!prdIngSearch?.contains(e.target) && !prdSubDrop?.contains(e.target))
-    prdSubDrop && (prdSubDrop.style.display = 'none');
-});
+async function saveProduct(){
+  const id = $('#prdId').value.trim(); const name = $('#prdName').value.trim();
+  const category = $('#prdCategory').value.trim(); const price = Number($('#prdPrice').value || 0);
+  const urlImg = $('#prdImg').value.trim();
+  const exPatty = $('#prdExPatty').checked; const exCheddar = $('#prdExCheddar').checked;
+  const optSazon = $('#prdOptSazon').checked; const optSal = $('#prdOptSal').checked; const optSinSal = $('#prdOptSinSal').checked;
+  const file = $('#prdImgFile').files[0];
+  if(!id){ alert("Ingresá un ID"); return; } if(!name){ alert("Ingresá un nombre"); return; } if(!(price>0)){ alert("Precio inválido"); return; }
+  let finalImg = urlImg;
+  if(file){ finalImg = await fileToBase64(file); } else if(!finalImg && editingProductImg){ finalImg = editingProductImg; }
+  const payload = { name, category, price, img: finalImg, available: true,
+    allowedExtras: { patty: exPatty, cheddar: exCheddar }, potatoOptions: { sazon: optSazon, sal: optSal, sinSal: optSinSal },
+    kind: autoDetectKind(id, name, ''), updatedAt: firebase.firestore.FieldValue.serverTimestamp(), createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+  try{
+    await productsCol.doc(id).set(payload, {merge:true});
+    // Guardar ingredientes como lista simple en recipes
+    if(PRD_INGREDIENTS.length > 0){
+      await db.collection('recipes').doc(name).set({
+        items: PRD_INGREDIENTS.map(i => i.name),
+        productId: id,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true});
+    }
+    alert("Producto guardado correctamente."); clearProductForm();
+  }catch(e){ console.error(e); alert("Error al guardar."); }
+}
 
-document.getElementById('btnPrdAddIng')?.addEventListener('click', () => {
-  const id   = _prdSubId   || prdIngSearch?.value.trim();
-  const name = _prdSubName || prdIngSearch?.value.trim();
-  const desc = _prdSubDesc || '';
-  const qty  = Number(document.getElementById('prdIngQty')?.value || 1);
-  if (!id) { alert('Seleccioná un ingrediente del buscador'); return; }
-  const existing = PRD_INGREDIENTS.findIndex(i => i.id === id);
-  if (existing >= 0) { PRD_INGREDIENTS[existing].qty += qty; }
-  else               { PRD_INGREDIENTS.push({id, qty, name, desc}); }
-  prdIngSearch.value=''; _prdSubId=null; _prdSubName=null; _prdSubDesc=null;
-  renderPrdIngList();
-});
+function clearProductForm(){
+  $('#prdId').value=''; $('#prdName').value=''; $('#prdCategory').value='hamburguesas'; $('#prdPrice').value='';
+  $('#prdImg').value=''; $('#prdImgFile').value='';
+  $('#prdExPatty').checked=false; $('#prdExCheddar').checked=false;
+  $('#prdOptSazon').checked=false; $('#prdOptSal').checked=false; $('#prdOptSinSal').checked=false;
+  $('#potatoOptionsGroup').style.display='none'; editingProductImg=null;
+  PRD_INGREDIENTS=[]; renderPrdIngList();
+}
+
+function loadProductIntoForm(data, id){
+  $('#prdId').value=id; $('#prdName').value=data.name||''; const cat=data.category||'hamburguesas';
+  $('#prdCategory').value=cat; $('#prdPrice').value=data.price||'';
+  editingProductImg=data.img||null; $('#prdImg').value=(data.img&&!data.img.startsWith("data:"))?data.img:'';
+  $('#prdImgFile').value='';
+  const extras=data.allowedExtras||{}; $('#prdExPatty').checked=!!extras.patty; $('#prdExCheddar').checked=!!extras.cheddar;
+  const pOpts=data.potatoOptions||{}; $('#prdOptSazon').checked=!!pOpts.sazon; $('#prdOptSal').checked=!!pOpts.sal; $('#prdOptSinSal').checked=!!pOpts.sinSal;
+  $('#potatoOptionsGroup').style.display=cat==='guarniciones'?'block':'none';
+  // Cargar ingredientes existentes
+  PRD_INGREDIENTS=[];
+  db.collection('recipes').doc(data.name||'').get().then(doc=>{
+    if(doc.exists){
+      const d = doc.data();
+      const list = d.items || (d.ingredients ? d.ingredients.map(i=>i.name||i.id) : []);
+      PRD_INGREDIENTS = list.filter(Boolean).map(n=>({name:n}));
+      renderPrdIngList();
+    }
+  }).catch(()=>{});
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
 
 async function saveProduct(){
   const id = $('#prdId').value.trim(); const name = $('#prdName').value.trim();
