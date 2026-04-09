@@ -488,31 +488,31 @@
       document.getElementById('btnIngAdd').onclick=()=>{closeIng();setTimeout(()=>openModal(id),120);};
       document.getElementById('ingOvl').classList.add('open');
 
-      // ── Fetch from recipes → subrecipes ──
+      // ── Fetch from recipes → items list ──
       try {
         if(window.db){
           const doc = await window.db.collection('recipes').doc(item.name).get();
           if(doc.exists){
-            const ings = doc.data().ingredients||[];
-            if(ings.length){
+            const d = doc.data();
+            // Support both new format (items: string[]) and old format (ingredients: [{id,qty}])
+            let nameList = [];
+            if(Array.isArray(d.items) && d.items.length){
+              nameList = d.items.filter(Boolean);
+            } else if(Array.isArray(d.ingredients) && d.ingredients.length){
+              // Old format — try resolving subrecipe names
               const subDocs = await Promise.all(
-                ings.map(i=>window.db.collection('subrecipes').doc(i.id).get().catch(()=>null))
+                d.ingredients.map(i=>window.db.collection('subrecipes').doc(i.id).get().catch(()=>null))
               );
-              const layers = ings.map((ing,i)=>{
-                const sub  = subDocs[i];
+              nameList = d.ingredients.map((ing,i)=>{
+                const sub = subDocs[i];
                 const data = sub&&sub.exists ? sub.data() : {};
-                const name = data.name||data.nombre||data.title||data.descripcion||ing.id;
-                const desc = data.descripcion||data.description||data.detalle||data.detail||'';
-                const qty  = ing.qty||1;
-                // Skip if name looks like a raw Firebase ID (long alphanumeric)
-                if(!data.name && !data.nombre && !data.title && !data.descripcion && name===ing.id) return null;
-                return {name, desc, qty};
+                const n = data.name||data.nombre||data.title||data.descripcion||'';
+                return n || null;
               }).filter(Boolean);
-
-              if(layers.length){
-                _renderIngItems(layers);
-                return;
-              }
+            }
+            if(nameList.length){
+              _renderIngItems(nameList.map(n=>({name:n, desc:'', qty:1})));
+              return;
             }
           }
         }
