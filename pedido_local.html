@@ -131,7 +131,6 @@
 
     window.idToDoc = new Map();
 
-    // DATOS EN MEMORIA
     let RECETAS_DB = {}; 
     let SUB_RECIPES_DB = {}; 
     let INVENTARIO_DB = {}; 
@@ -145,7 +144,6 @@
         return String(str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     }
 
-    // CARGAS
     db.collection('products').onSnapshot(snap => {
         PRODUCT_CATALOG = {};
         snap.forEach(doc => { 
@@ -191,7 +189,6 @@
         if(doc.exists) { PRICES_DB = doc.data(); if(window.lastSnap) renderList(window.lastSnap); }
     });
 
-    // BUSQUEDA INTELIGENTE
     function findSmartId(keywords) {
         for (const key of keywords) {
             const norm = normalize(key);
@@ -208,7 +205,7 @@
     }
 
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK 
+    // 🔥 GESTIÓN DE STOCK — FIXED: batch.set merge instead of batch.update
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido.items) return;
@@ -256,11 +253,13 @@
         let saltCount = 0;
         let onionRingsCount = 0; 
 
+        // ✅ FIX: usar batch.set con merge:true en lugar de batch.update
+        // Esto evita el error "No document to update" cuando el doc no existe
         const applyDecrement = (targetID, amount, logName) => {
             if(!targetID) return false;
             let collectionName = ID_TO_COLLECTION[targetID] || 'inventory'; 
             const ref = db.collection(collectionName).doc(targetID);
-            batch.update(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) });
+            batch.set(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) }, {merge:true});
             huboCambios = true;
             logs.push(`   - ${logName || 'Item'}: ${amount} (en ${collectionName})`);
             return true;
@@ -402,7 +401,8 @@
 
         if (huboCambios) {
             const pedidoRef = db.collection('orders').doc(pedido.id);
-            batch.update(pedidoRef, { stockDescontado: (factor === -1) });
+            // ✅ FIX: set+merge para evitar error si el pedido no existe aún
+            batch.set(pedidoRef, { stockDescontado: (factor === -1) }, {merge:true});
             await batch.commit();
             alert("✅ STOCK ACTUALIZADO\n\n" + logs.join("\n"));
         } else {
@@ -410,7 +410,6 @@
         }
     }
 
-    // GLOBALES
     window.setOrderStatus = async (id, next, isPaid) => {
         if(next==='delivered' && !isPaid){ alert("⚠️ COBRAR PRIMERO: El pedido figura pendiente."); return; }
         try{ 
@@ -471,7 +470,6 @@
     
     window.cleanFries = (raw) => { if(!raw) return ""; const s = String(raw).toLowerCase().replace(/[_-]/g,' ').trim(); if(s.includes('sazon')) return "Sazonadas"; if(s.includes('sin sal')) return "Sin sal"; if(s.includes('con sal')||s.includes('sal')) return "Con Sal"; return s.charAt(0).toUpperCase() + s.slice(1); };
     
-    // CATEGORIZACIÓN
     window.getCat = (item) => {
         const n = String(item.name || "").trim().toLowerCase();
         const t = String(item.type || "").toLowerCase();
@@ -495,18 +493,9 @@
             if (catItem.includes('guarnicion')) return 'f';
         }
 
-        const drinks = [
-            'coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 
-            'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 
-            'imperial', 'sprite', 'levite', 'paso de los toros', 'vino', 'fanta', 
-            'gaseosa', 'lata', 'botella', 'ml', '1.5', 'schweppes', 'mirinda', 
-            'jugo', 'baggio', 'monster', 'speed', 'red bull', 'energizante', 
-            'manaos', 'secuko', 'limonada', 'exprimido'
-        ];
+        const drinks = ['coca', 'agua', 'cerveza', 'andes', 'aquarius', 'pepsi', '7up', 'heineken', 'corona', 'patagonia', 'brahma', 'quilmes', 'stella', 'imperial', 'sprite', 'levite', 'paso de los toros', 'vino', 'fanta', 'gaseosa', 'lata', 'botella', 'ml', '1.5', 'schweppes', 'mirinda', 'jugo', 'baggio', 'monster', 'speed', 'red bull', 'energizante', 'manaos', 'secuko', 'limonada', 'exprimido'];
         if (drinks.some(k => n.includes(k))) return 'd';
-
         if (n.includes('papas') || n.includes('fritas') || n.includes('aros') || n.includes('nugget')) return 'f';
-
         return 'b'; 
     };
 
@@ -514,20 +503,12 @@
         const map = new Map();
         list.forEach(it => {
             let exKey = "";
-            if(it.extras) {
-                 const keys = Object.keys(it.extras).sort();
-                 exKey = keys.map(k => `${k}:${it.extras[k]}`).join("-");
-            }
+            if(it.extras) { const keys = Object.keys(it.extras).sort(); exKey = keys.map(k => `${k}:${it.extras[k]}`).join("-"); }
             const noteKey = String(it.notes || "").trim().toLowerCase();
             const nameKey = String(it.name || "").trim();
             const friesKey = String(it.friesRaw || it.fries || "").trim().toLowerCase(); 
             const key = `${nameKey}_${exKey}_${noteKey}_${friesKey}`; 
-            
-            if(map.has(key)){
-                map.get(key).qty += (Number(it.qty)||1);
-            } else {
-                map.set(key, { ...it, qty: (Number(it.qty)||1) });
-            }
+            if(map.has(key)){ map.get(key).qty += (Number(it.qty)||1); } else { map.set(key, { ...it, qty: (Number(it.qty)||1) }); }
         });
         return Array.from(map.values());
     }
@@ -536,18 +517,12 @@
         if (o.pickup_slot && typeof o.pickup_slot === 'string' && o.pickup_slot.includes(':')) return o.pickup_slot;
         let raw = o.pickup_time_pretty || o.pickup_time;
         if (raw && typeof raw === 'string') {
-            if (raw.includes('_')) {
-                const parts = raw.split('_'); const timePart = parts[parts.length - 1]; 
-                if (timePart.length === 4 && !isNaN(timePart)) return timePart.substring(0, 2) + ':' + timePart.substring(2, 4);
-            }
+            if (raw.includes('_')) { const parts = raw.split('_'); const timePart = parts[parts.length - 1]; if (timePart.length === 4 && !isNaN(timePart)) return timePart.substring(0, 2) + ':' + timePart.substring(2, 4); }
             if (raw.includes(':') && raw.length <= 5) return raw;
         }
         return defaultTime;
     }
 
-    /* ============================================================
-       🔥 IMPORTACIÓN PEDIDOS YA CON CORRECCIÓN DE FECHAS
-    ============================================================ */
     async function importarPedidosYa() {
         const input = document.getElementById('excelInput');
         if (!input.files.length) return;
@@ -560,132 +535,80 @@
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(firstSheet, {range: 1, defval:""});
 
-            let imported = 0;
-            let skipped = 0;
+            let imported = 0; let skipped = 0;
             const loader = document.getElementById('pageLoader');
             if(loader) loader.classList.remove("hidden");
 
             for (const row of rows) {
                 const r = {};
                 Object.keys(row).forEach(k => r[k.toLowerCase().trim()] = row[k]);
-
                 const id = r['nro de pedido'] || r['nº de pedido'] || r['id']; 
                 if (!id) continue;
-
                 const existing = await db.collection('orders').where('py_id', '==', String(id)).get();
                 if (!existing.empty) { skipped++; continue; }
-
-                let total = r['total del pedido'];   
-                let neto = r['ingreso estimado'];        
+                let total = r['total del pedido']; let neto = r['ingreso estimado'];        
                 if(typeof total !== 'number') total = Number(String(total||'0').replace(/\./g, '').replace(',', '.'));
                 if(typeof neto !== 'number') neto = Number(String(neto||'0').replace(/\./g, '').replace(',', '.'));
                 if (!total || total <= 0) continue;
-
                 const dateStr = r['fecha del pedido'] || r['fecha'];
                 let clientName = r['nombre del cliente'] || "Cliente Py";
-                
                 const statusStr = r['estado del pedido'] || "";
-                let status = 'delivered'; 
-                let isCancelled = false;
-                if (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado')) {
-                    status = 'cancelled'; isCancelled = true;
-                }
-
+                let status = 'delivered'; let isCancelled = false;
+                if (statusStr.toLowerCase().includes('cancelado') || statusStr.toLowerCase().includes('rechazado')) { status = 'cancelled'; isCancelled = true; }
                 const itemsStr = r['artículos'] || r['articulos'] || "";
                 let itemsList = [];
-
                 if(itemsStr) {
                     let rawItems = String(itemsStr).split(/,(?![^\[]*\])|\n|\+/); 
-                    
                     rawItems.forEach(line => {
-                        line = line.trim();
-                        if(!line) return;
-                        let qty = 1;
-                        let name = line;
+                        line = line.trim(); if(!line) return;
+                        let qty = 1; let name = line;
                         const match = line.match(/^(\d+)\s*[xX]?\s*(.*)$/);
                         if(match) { qty = Number(match[1]); name = match[2]; }
-                        
                         let note = "";
-                        if(name.includes('[')) {
-                            const nMatch = name.match(/\[(.*?)\]/);
-                            if(nMatch) { note = nMatch[1]; name = name.replace(/\[.*?\]/, "").trim(); }
-                        }
-
+                        if(name.includes('[')) { const nMatch = name.match(/\[(.*?)\]/); if(nMatch) { note = nMatch[1]; name = name.replace(/\[.*?\]/, "").trim(); } }
                         const nameClean = normalize(name); 
-                        
                         const explicitExtra = nameClean.includes('extra') || nameClean.includes('adicional');
-
                         const isExtraCarne = (explicitExtra && (nameClean.includes('carne') || nameClean.includes('medallon') || nameClean.includes('patty'))) || (nameClean.includes('medallon') && !nameClean.includes('hamb'));
                         const isExtraCheddar = (explicitExtra && (nameClean.includes('cheddar') || nameClean.includes('queso'))) || nameClean === 'cheddar';
                         const isExtraBacon = (explicitExtra && (nameClean.includes('bacon') || nameClean.includes('panceta'))) || nameClean === 'bacon' || nameClean === 'panceta';
-
                         if ((isExtraCarne || isExtraCheddar || isExtraBacon) && itemsList.length > 0) {
                             let lastItem = itemsList[itemsList.length - 1];
                             if(!lastItem.extras) lastItem.extras = {};
-
                             if(isExtraCarne) lastItem.extras.patty = (lastItem.extras.patty || 0) + qty;
                             if(isExtraCheddar) lastItem.extras.cheddar = (lastItem.extras.cheddar || 0) + qty;
                             if(isExtraBacon) lastItem.extras.bacon = (lastItem.extras.bacon || 0) + qty;
                             return; 
                         }
-
                         const catCode = window.getCat({name: name});
                         let type = 'other';
-                        if(catCode === 'b') type='burger';
-                        else if(catCode === 'f') type='side';
-                        else if(catCode === 'd') type='drink';
-
+                        if(catCode === 'b') type='burger'; else if(catCode === 'f') type='side'; else if(catCode === 'd') type='drink';
                         itemsList.push({ qty, name, price: 0, type, notes: note, extras: {} });
                     });
-                } else {
-                    itemsList = [{ name: 'Pedido Importado', qty: 1, price: total }];
-                }
+                } else { itemsList = [{ name: 'Pedido Importado', qty: 1, price: total }]; }
                 if(itemsList.length === 1) itemsList[0].price = total;
 
-                // 🔥 SUPER PARSEO DE FECHAS PARA EXCEL (Evita error en Gerencia)
                 let isoDate = new Date().toISOString();
                 if(dateStr) {
                     if(typeof dateStr === 'number') {
-                        const utcDays = dateStr - 25569;
-                        const dateInfo = new Date(utcDays * 86400 * 1000);
-                        const tzOffset = dateInfo.getTimezoneOffset() * 60000;
-                        isoDate = new Date(dateInfo.getTime() + tzOffset).toISOString();
+                        const utcDays = dateStr - 25569; const dateInfo = new Date(utcDays * 86400 * 1000); const tzOffset = dateInfo.getTimezoneOffset() * 60000; isoDate = new Date(dateInfo.getTime() + tzOffset).toISOString();
                     } else {
                         let dStr = String(dateStr).trim();
                         const match = dStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(.*))?$/);
-                        if (match) {
-                            let hhmm = match[4] || "00:00:00";
-                            dStr = `${match[3]}-${match[2].padStart(2,'0')}-${match[1].padStart(2,'0')}T${hhmm}`;
-                        } else {
-                            dStr = dStr.replace(' ', 'T');
-                        }
-                        const parsedD = new Date(dStr);
-                        if (!isNaN(parsedD.getTime())) {
-                            isoDate = parsedD.toISOString();
-                        }
+                        if (match) { let hhmm = match[4] || "00:00:00"; dStr = `${match[3]}-${match[2].padStart(2,'0')}-${match[1].padStart(2,'0')}T${hhmm}`; } else { dStr = dStr.replace(' ', 'T'); }
+                        const parsedD = new Date(dStr); if (!isNaN(parsedD.getTime())) { isoDate = parsedD.toISOString(); }
                     }
                 }
 
                 try {
-                    const orderRef = await db.collection('orders').add({
-                        orderNumber: String(id), py_id: String(id), source: 'pedidosya',
-                        status: status, payment_status: 'paid', paid: true, pago: 'pedidosya_online',
-                        entrega: 'delivery', nombre: clientName, total: total, neto_excel: neto,     
-                        createdAt: isoDate, items: itemsList, stockDescontado: false 
-                    });
-
-                    if (!isCancelled) {
-                        const pedidoParaStock = { id: orderRef.id, items: itemsList, stockDescontado: false };
-                        await gestionarStock(pedidoParaStock, -1);
-                    }
+                    const orderRef = await db.collection('orders').add({ orderNumber: String(id), py_id: String(id), source: 'pedidosya', status: status, payment_status: 'paid', paid: true, pago: 'pedidosya_online', entrega: 'delivery', nombre: clientName, total: total, neto_excel: neto, createdAt: isoDate, items: itemsList, stockDescontado: false });
+                    if (!isCancelled) { const pedidoParaStock = { id: orderRef.id, items: itemsList, stockDescontado: false }; await gestionarStock(pedidoParaStock, -1); }
                     imported++;
                 } catch (err) { console.error("Error importando:", err); }
             }
 
             if(loader) loader.classList.add("hidden");
             alert(`✅ IMPORTACIÓN FINALIZADA\n\nSe cargaron ${imported} pedidos correctamente.`);
-            input.value = ""; 
-            location.reload();
+            input.value = ""; location.reload();
         };
         reader.readAsArrayBuffer(file);
     }
@@ -706,19 +629,12 @@
     <div class="topbar">
       <a class="brand" href="#"><img src="images/logo.png" alt=""><span>Pedidos</span></a>
       <div class="spacer"></div>
-      
-      <button onclick="document.getElementById('excelInput').click()" class="nav-btn" style="background:#f97316; color:white; border:none; margin-right:8px;">
-        📥 Importar Excel
-      </button>
-
+      <button onclick="document.getElementById('excelInput').click()" class="nav-btn" style="background:#f97316; color:white; border:none; margin-right:8px;">📥 Importar Excel</button>
       <a href="pedido_local.html" class="nav-btn active">📦 Pedidos</a>
       <a href="finanzas.html" class="nav-btn">📈 Finanzas</a>
       <div class="dropdown">
             <button onclick="document.querySelector('.dropdown').classList.toggle('show')" class="nav-btn">📋 Stock ▾</button>
-            <div class="dropdown-content">
-                <a href="stock.html">📦 Stock</a>
-                <a href="ingresos.html">📥 Ingresos</a>
-            </div>
+            <div class="dropdown-content"><a href="stock.html">📦 Stock</a><a href="ingresos.html">📥 Ingresos</a></div>
       </div>
       <a href="mostrador.html" class="nav-btn">🧾 Mostrador</a>
       <a href="admin.html" class="nav-btn">⚙️ Admin</a>
@@ -740,48 +656,23 @@
 
  <script>
   window.addEventListener('DOMContentLoaded', () => {
-    // AUDIO
     let audioCtx = null;
-    const initAudio = () => {
-        if (!audioCtx) {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            audioCtx = new AudioContext();
-        }
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-    };
+    const initAudio = () => { if (!audioCtx) { const AudioContext = window.AudioContext || window.webkitAudioContext; audioCtx = new AudioContext(); } if (audioCtx.state === 'suspended') audioCtx.resume(); };
     document.body.addEventListener('click', initAudio, { once: true });
     document.body.addEventListener('touchstart', initAudio, { once: true });
 
     const playBeep = () => {
-        let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
-        if(!soundOn) return;
-        initAudio();
-        if (!audioCtx) return;
+        let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true"); if(!soundOn) return;
+        initAudio(); if (!audioCtx) return;
         const now = audioCtx.currentTime;
-        const createBeep = (startTime) => {
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = 'square'; osc.frequency.setValueAtTime(1000, startTime); 
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            osc.start(startTime);
-            gain.gain.setValueAtTime(0.5, startTime); 
-            gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15);
-            osc.stop(startTime + 0.15);
-        };
+        const createBeep = (startTime) => { const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain(); osc.type = 'square'; osc.frequency.setValueAtTime(1000, startTime); osc.connect(gain); gain.connect(audioCtx.destination); osc.start(startTime); gain.gain.setValueAtTime(0.5, startTime); gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15); osc.stop(startTime + 0.15); };
         createBeep(now); createBeep(now + 0.25); createBeep(now + 0.50); createBeep(now + 0.75);
     };
 
-    // INTERFAZ
     const money = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
     let currentFilter = "recibidos"; let lastSnap = null;
     
-    document.getElementById("tabs").addEventListener("click", (e)=>{
-        const btn = e.target.closest(".tab"); if(!btn) return;
-        document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active"));
-        btn.classList.add("active");
-        currentFilter = btn.dataset.f;
-        if(window.lastSnap) renderList(window.lastSnap);
-    });
+    document.getElementById("tabs").addEventListener("click", (e)=>{ const btn = e.target.closest(".tab"); if(!btn) return; document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active")); btn.classList.add("active"); currentFilter = btn.dataset.f; if(window.lastSnap) renderList(window.lastSnap); });
 
     const btnBell = document.getElementById("btnBell");
     let soundOn = JSON.parse(localStorage.getItem("rb_sound")||"true");
@@ -795,47 +686,28 @@
     updAP();
     btnAP.onclick = ()=>{ autoP = !autoP; localStorage.setItem("rb_autop", autoP); updAP(); };
 
-    // FIREBASE
     let isInit=true; setTimeout(()=>isInit=false, 3000);
-    // 🔥 EL CAMBIO ESTÁ ACÁ
     db.collection("orders").orderBy("createdAt", "desc").limit(300).onSnapshot(snap => {
         window.lastSnap = snap;
         renderList(snap);
         const loader = document.getElementById('pageLoader');
         if(loader) loader.classList.add("hidden");
-
         snap.docChanges().forEach(ch => {
             if(ch.type === 'added' && !isInit){
                 const data = ch.doc.data();
                 const fechaPedido = window.pickDate(data);
                 const ahora = new Date();
                 const diferenciaMinutos = (ahora - fechaPedido) / 1000 / 60; 
-                if(diferenciaMinutos < 20) {
-                    if(navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); 
-                    playBeep(); 
-                    if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id));
-                }
+                if(diferenciaMinutos < 20) { if(navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]); playBeep(); if(autoP) window.trySilentPrint(window.idToDoc.get(ch.doc.id)); }
             }
         });
-    }, err => {
-        document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`;
-        const loader = document.getElementById('pageLoader');
-        if(loader) loader.classList.add("hidden");
-    });
+    }, err => { document.getElementById("orders").innerHTML = `<div class="empty-state" style="color:red">Error: ${err.message}</div>`; const loader = document.getElementById('pageLoader'); if(loader) loader.classList.add("hidden"); });
 
     function renderList(snap){
         let docs = snap.docs.map(d => ({ data: d.data(), id: d.id, ref: d }));
         window.idToDoc = new Map(snap.docs.map(d=>[d.id,d]));
         docs.sort((a,b) => window.pickDate(b.data) - window.pickDate(a.data));
-
-        const filtered = docs.filter(o => {
-            const s = o.data.status || 'accepted';
-            if(currentFilter === 'recibidos') return ['accepted','in_prep','ready','pending_payment'].includes(s);
-            if(currentFilter === 'entregados') return s === 'delivered';
-            if(currentFilter === 'cancelled') return s === 'cancelled';
-            return true;
-        });
-
+        const filtered = docs.filter(o => { const s = o.data.status || 'accepted'; if(currentFilter === 'recibidos') return ['accepted','in_prep','ready','pending_payment'].includes(s); if(currentFilter === 'entregados') return s === 'delivered'; if(currentFilter === 'cancelled') return s === 'cancelled'; return true; });
         const cont = document.getElementById("orders");
         if(filtered.length===0){ cont.innerHTML = '<div class="empty-state">No hay pedidos.</div>'; return; }
         cont.innerHTML = filtered.map(x => buildOrderHTML(x.ref)).join("");
@@ -848,18 +720,11 @@
         const timeStr = dt.toLocaleTimeString("es-AR", {hour:'2-digit', minute:'2-digit'});
         const st = o.status || 'accepted';
         const isPaid = (o.payment_status==='paid') || !!o.paid;
-        
         const displayTime = getCleanTime(o, ""); 
-        
         const LABELS = {accepted:'Recibido', in_prep:'Cocina', ready:'Listo', delivered:'Entregado'};
-        const btns = ['accepted','in_prep','ready','delivered'].map(k => {
-            const isOn = (k === st) ? 'on' : '';
-            const opacity = (k==='delivered' && !isPaid) ? 'opacity:0.5' : '';
-            return `<div class="state-btn ${isOn} state-${k}" style="${opacity}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})"><span>${LABELS[k]}</span></div>`;
-        }).join('');
+        const btns = ['accepted','in_prep','ready','delivered'].map(k => { const isOn = (k === st) ? 'on' : ''; const opacity = (k==='delivered' && !isPaid) ? 'opacity:0.5' : ''; return `<div class="state-btn ${isOn} state-${k}" style="${opacity}" onclick="setOrderStatus('${doc.id}', '${k}', ${isPaid})"><span>${LABELS[k]}</span></div>`; }).join('');
 
-        let payVal = o.pago;
-        if(payVal === 'mostrador_sin_especificar') payVal = "";
+        let payVal = o.pago; if(payVal === 'mostrador_sin_especificar') payVal = "";
         let srcVal = o.source || 'web'; 
 
         let items = Array.isArray(o.items) ? [...o.items] : [];
@@ -867,18 +732,8 @@
         if(Array.isArray(o.drinks)) items = items.concat(o.drinks);
 
         let cats = { b:[], f:[], d:[], o:[] };
-        items.forEach(it => {
-            const cat = window.getCat(it);
-            if(cat==='b') cats.b.push(it);
-            else if(cat==='f') cats.f.push(it);
-            else if(cat==='d') cats.d.push(it);
-            else cats.o.push(it);
-        });
-
-        cats.b = consolidateItems(cats.b);
-        cats.f = consolidateItems(cats.f);
-        cats.d = consolidateItems(cats.d);
-        cats.o = consolidateItems(cats.o);
+        items.forEach(it => { const cat = window.getCat(it); if(cat==='b') cats.b.push(it); else if(cat==='f') cats.f.push(it); else if(cat==='d') cats.d.push(it); else cats.o.push(it); });
+        cats.b = consolidateItems(cats.b); cats.f = consolidateItems(cats.f); cats.d = consolidateItems(cats.d); cats.o = consolidateItems(cats.o);
 
         const renderSec = (list, icon, title) => {
             if(!list.length) return "";
@@ -889,32 +744,14 @@
                 let extraCheddar = (it.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300);
                 let unitFinal = basePrice + extraPatty + extraCheddar;
                 let lineTotal = unitFinal * (it.qty || 1);
-
                 if(it.extras?.patty) ex.push(`+${it.extras.patty} carne`);
                 if(it.extras?.cheddar) ex.push(`+${it.extras.cheddar} cheddar`);
-                
-                if (it.fries || it.friesRaw) {
-                    const map = {con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal"};
-                    const rawVal = it.friesRaw || it.fries;
-                    const displayVal = map[rawVal] || it.fries;
-                    ex.push(`🍟 ${displayVal}`);
-                }
-
+                if (it.fries || it.friesRaw) { const map = {con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal"}; const rawVal = it.friesRaw || it.fries; const displayVal = map[rawVal] || it.fries; ex.push(`🍟 ${displayVal}`); }
                 let dName = esc(it.name);
-                
                 const extrasHtml = ex.map(e => `<div class="it-sub" style="color:#d97706; font-weight:600">• ${e}</div>`).join('');
                 let displayPrice = money(lineTotal);
                 if(title.includes("PAPAS")) displayPrice = "";
-                
-                return `<div class="it-row">
-                    <div class="it-qty">${it.qty||1}</div>
-                    <div class="it-det">
-                      <div class="it-name">${dName}</div>
-                      ${extrasHtml}
-                      ${it.notes ? `<div class="it-note">${esc(it.notes)}</div>` : ''}
-                    </div>
-                    <div class="it-price">${displayPrice}</div>
-                </div>`;
+                return `<div class="it-row"><div class="it-qty">${it.qty||1}</div><div class="it-det"><div class="it-name">${dName}</div>${extrasHtml}${it.notes ? `<div class="it-note">${esc(it.notes)}</div>` : ''}</div><div class="it-price">${displayPrice}</div></div>`;
             }).join("");
             return `<div class="cat-group"><div class="cat-title">${icon} ${title}</div>${rows}</div>`;
         };
@@ -924,40 +761,20 @@
         const total = o.total || items.reduce((a,i)=>a+((i.price||0)*(i.qty||1)),0);
 
         let discountHTML = "";
-        if (o.discount > 0) {
-            discountHTML = `<div style="display:flex;justify-content:space-between;color:#16a34a;font-weight:700;padding:0 16px;margin-bottom:8px">
-                <span>🏷️ Descuento (${esc(o.coupon||'')}):</span>
-                <span>-${money(o.discount)}</span>
-            </div>`;
-        }
+        if (o.discount > 0) { discountHTML = `<div style="display:flex;justify-content:space-between;color:#16a34a;font-weight:700;padding:0 16px;margin-bottom:8px"><span>🏷️ Descuento (${esc(o.coupon||'')}):</span><span>-${money(o.discount)}</span></div>`; }
 
         let netHtml = "";
-        if(o.neto_excel && o.neto_excel > 0) {
-            netHtml = `<div style="font-size:12px; color:#15803d; text-align:right; font-weight:700;">Neto: ${money(o.neto_excel)}</div>`;
-        }
+        if(o.neto_excel && o.neto_excel > 0) { netHtml = `<div style="font-size:12px; color:#15803d; text-align:right; font-weight:700;">Neto: ${money(o.neto_excel)}</div>`; }
 
         const telHtml = o.telefono ? `<div style="margin-top:4px; font-size:13px; font-weight:600; color:#4b5563;">📞 <a href="https://wa.me/${o.telefono.replace(/\D/g,'')}" target="_blank" style="text-decoration:none; color:inherit;">${esc(o.telefono)}</a></div>` : '';
 
-        return `
-        <div class="order ${st==='cancelled'?'cancelled':''}">
+        return `<div class="order ${st==='cancelled'?'cancelled':''}">
            <div class="order-head">
-              <div>
-                 <div class="order-title">#${o.orderNumber||'--'} — ${o.source==='mostrador'?esc(o.nombre)+' (Local)':esc(o.nombre)}</div>
-                 ${telHtml}
-                 <div class="order-meta">
-                    <span>${dateStr} ${timeStr}</span> 
-                    <span class="chip ${srcVal}">${esc(srcVal)}</span> ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}
-                 </div>
-              </div>
-              <div style="text-align:right">
-                 <div class="price-tag">${money(total)}</div>
-                 ${netHtml}
-              </div>
+              <div><div class="order-title">#${o.orderNumber||'--'} — ${o.source==='mostrador'?esc(o.nombre)+' (Local)':esc(o.nombre)}</div>${telHtml}<div class="order-meta"><span>${dateStr} ${timeStr}</span> <span class="chip ${srcVal}">${esc(srcVal)}</span> ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}</div></div>
+              <div style="text-align:right"><div class="price-tag">${money(total)}</div>${netHtml}</div>
            </div>
-           
            <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
            ${discountHTML}
-
            <div class="actions-area">
               <div class="control-row">
                  <select class="pay-select" onchange="updatePago('${doc.id}', this.value)">
@@ -967,7 +784,6 @@
                     <option value="debito" ${payVal==='debito'?'selected':''}>Débito</option>
                     <option value="transferencia" ${payVal==='transferencia'?'selected':''}>Transferencia</option>
                  </select>
-
                  <select class="source-select" onchange="updateSource('${doc.id}', this.value)">
                     <option value="web" ${srcVal==='web'?'selected':''}>Web</option>
                     <option value="mostrador" ${srcVal==='mostrador'?'selected':''}>Local</option>
@@ -975,114 +791,57 @@
                     <option value="rappi" ${srcVal==='rappi'?'selected':''}>Rappi</option>
                  </select>
               </div>
-
               <div class="control-row">
-                 <button class="pay-btn ${isPaid?'paid':'pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal}')">
-                    ${isPaid ? 'PAGADO' : 'COBRAR'}
-                 </button>
+                 <button class="pay-btn ${isPaid?'paid':'pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal}')">${isPaid ? 'PAGADO' : 'COBRAR'}</button>
                  <div class="icon-btn-lg" onclick="printOrder('${doc.id}')">🖨️</div>
                  <div class="icon-btn-lg" style="color:#d32f2f; border-color:#ffcdd2; background:#ffebee;" onclick="deleteOrder('${doc.id}')">🗑️</div>
               </div>
-
-              <div class="stateBtns">
-                 ${btns}
-                 <div class="state-btn cancelled" onclick="setOrderStatus('${doc.id}', 'cancelled', ${isPaid})">CANCELAR</div>
-              </div>
+              <div class="stateBtns">${btns}<div class="state-btn cancelled" onclick="setOrderStatus('${doc.id}', 'cancelled', ${isPaid})">CANCELAR</div></div>
            </div>
         </div>`;
     }
 
-    // --- IMPRESIÓN ---
     window.trySilentPrint = function(docSnap){
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
        const m = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
-       
        const dt = window.pickDate(o);
        const dateStr = dt.toLocaleDateString("es-AR");
        const timeStr = dt.toLocaleTimeString("es-AR",{hour12:false});
-
        const horarioRetiro = getCleanTime(o, timeStr.substring(0, 5));
-
        let payTxt = o.pago;
        if(!payTxt || payTxt==='mostrador_sin_especificar' || payTxt==="") payTxt="A COBRAR EN CAJA";
        else if(payTxt==='mercado_pago') payTxt="QR (MP)";
        else payTxt = payTxt.toUpperCase();
-
        const isPaid = (o.payment_status === 'paid') || o.paid;
        const stPay = isPaid ? "PAGADO" : "PENDIENTE";
-       
        let items = Array.isArray(o.items) ? [...o.items] : [];
        if(Array.isArray(o.bebidas)) items = items.concat(o.bebidas);
        if(Array.isArray(o.drinks)) items = items.concat(o.drinks);
-
        let cats = { b:[], f:[], d:[], o:[] };
-       items.forEach(it => {
-          const cat = window.getCat(it);
-          if(cat==='b') cats.b.push(it);
-          else if(cat==='f') cats.f.push(it);
-          else if(cat==='d') cats.d.push(it);
-          else cats.o.push(it);
-       });
-
-       cats.b = consolidateItems(cats.b);
-       cats.f = consolidateItems(cats.f);
-       cats.d = consolidateItems(cats.d);
-       cats.o = consolidateItems(cats.o);
-       
+       items.forEach(it => { const cat = window.getCat(it); if(cat==='b') cats.b.push(it); else if(cat==='f') cats.f.push(it); else if(cat==='d') cats.d.push(it); else cats.o.push(it); });
+       cats.b = consolidateItems(cats.b); cats.f = consolidateItems(cats.f); cats.d = consolidateItems(cats.d); cats.o = consolidateItems(cats.o);
        const rSec = (l, ti) => {
          if(!l.length) return "";
          const r = l.map(i => {
             let dName = esc(i.name);
-            
-            let basePrice = Number(i.price) || 0;
-            let extraPatty = (i.extras?.patty || 0) * (PRICES_DB.patty || 2500);
-            let extraCheddar = (i.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300);
-            let unitFinal = basePrice + extraPatty + extraCheddar;
-            let lineTotal = unitFinal * (i.qty || 1);
-
-            let displayPrice = m(lineTotal);
-            if(ti.includes("PAPA")) displayPrice = "";
-            
+            let basePrice = Number(i.price) || 0; let extraPatty = (i.extras?.patty || 0) * (PRICES_DB.patty || 2500); let extraCheddar = (i.extras?.cheddar || 0) * (PRICES_DB.cheddar || 300); let unitFinal = basePrice + extraPatty + extraCheddar; let lineTotal = unitFinal * (i.qty || 1);
+            let displayPrice = m(lineTotal); if(ti.includes("PAPA")) displayPrice = "";
             let h = `<div class="row name"><div class="l">${i.qty||1} × ${dName}</div><div class="r">${displayPrice}</div></div>`;
-            
-            if (i.fries || i.friesRaw) {
-                const map = {con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal"};
-                const rawVal = i.friesRaw || i.fries;
-                const displayVal = map[rawVal] || i.fries;
-                h += `<div class="sub">🍟 ${displayVal}</div>`;
-            }
-
-            if(!ti.includes("PAPA")){
-               if(i.extras?.patty) h+=`<div class="sub">➕ ${i.extras.patty} CARNE</div>`;
-               if(i.extras?.cheddar) h+=`<div class="sub">➕ ${i.extras.cheddar} CHEDDAR</div>`;
-            }
+            if (i.fries || i.friesRaw) { const map = {con_sazon:"Sazonadas", con_sal:"Con Sal", sin_sal:"Sin Sal"}; const rawVal = i.friesRaw || i.fries; const displayVal = map[rawVal] || i.fries; h += `<div class="sub">🍟 ${displayVal}</div>`; }
+            if(!ti.includes("PAPA")){ if(i.extras?.patty) h+=`<div class="sub">➕ ${i.extras.patty} CARNE</div>`; if(i.extras?.cheddar) h+=`<div class="sub">➕ ${i.extras.cheddar} CHEDDAR</div>`; }
             if(i.notes) h+=`<div class="sub">📝 ${esc(i.notes)}</div>`;
             h+=`<div class="sep"></div>`;
             return h;
          }).join("");
          return `<div class="blk"><div class="lbl" style="border-bottom:1px solid #000;display:inline-block;margin-top:6px">${ti}</div></div>${r}`;
        };
-
        const body = rSec(cats.b,'HAMBURGUESAS') + rSec(cats.f,'PAPAS') + rSec(cats.d,'BEBIDAS') + rSec(cats.o,'OTROS');
        const total = o.total || items.reduce((a,i)=>a+((i.price||0)*(i.qty||1)),0);
        const name = o.source==='mostrador' ? (o.nombre+' (Local)') : o.nombre;
-
        let discountRow = "";
-       if (o.discount > 0) {
-           discountRow = `<div class="row"><div class="l">DESC. (${esc(o.coupon||'')})</div><div class="r">-${m(o.discount)}</div></div>`;
-       }
-
-       // 🔥 MODO GIGANTE INCLUIDO
-       const html = `<!doctype html><html><head><style>
-       @page{size:58mm auto;margin:0} body{width:58mm;margin:0 auto;padding:5px;font-family:monospace;font-size:14px;font-weight:700;color:#000;line-height:1.2}
-       .c{text-align:center} .hr{border-top:2px dashed #000;margin:8px 0} .row{display:flex;justify-content:space-between; align-items:center}
-       .lbl{font-size:12px;text-transform:uppercase} 
-       .name{font-size:16px; font-weight:900; margin-top:8px;}
-       .sub{font-size:20px; font-weight:900; padding-top:6px; padding-bottom:6px; text-transform:uppercase; line-height:1.1; border-bottom: 2px solid #000;} 
-       .sep{margin:4px 0}
-       .r{text-align:right}
-       </style></head><body>
+       if (o.discount > 0) { discountRow = `<div class="row"><div class="l">DESC. (${esc(o.coupon||'')})</div><div class="r">-${m(o.discount)}</div></div>`; }
+       const html = `<!doctype html><html><head><style>@page{size:58mm auto;margin:0} body{width:58mm;margin:0 auto;padding:5px;font-family:monospace;font-size:14px;font-weight:700;color:#000;line-height:1.2}.c{text-align:center} .hr{border-top:2px dashed #000;margin:8px 0} .row{display:flex;justify-content:space-between; align-items:center}.lbl{font-size:12px;text-transform:uppercase} .name{font-size:16px; font-weight:900; margin-top:8px;}.sub{font-size:20px; font-weight:900; padding-top:6px; padding-bottom:6px; text-transform:uppercase; line-height:1.1; border-bottom: 2px solid #000;} .sep{margin:4px 0}.r{text-align:right}</style></head><body>
          <div class="c" style="font-size:16px;margin-bottom:4px">Rhodes Burgers</div>
          <div class="c" style="font-size:14px">#${o.orderNumber||'--'}</div>
          <div class="c" style="font-size:18px;margin:5px 0">[ ${stPay} ]</div>
@@ -1099,7 +858,6 @@
          <div class="c" style="margin-top:10px;font-size:10px">${dateStr} ${timeStr}</div>
          <script>window.onload=()=>{setTimeout(()=>{window.print()},200)}<\/script>
        </body></html>`;
-       
        const f = document.createElement('iframe'); f.style.cssText='position:fixed;left:0;top:0;width:0;height:0;border:0';
        document.body.append(f); const d=f.contentWindow.document; d.open();d.write(html);d.close();
        setTimeout(()=>f.remove(), 10000);
