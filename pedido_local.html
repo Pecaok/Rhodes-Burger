@@ -158,7 +158,11 @@
 
     db.collection('recipes').onSnapshot(snap => {
         RECETAS_DB = {};
-        snap.forEach(doc => { RECETAS_DB[doc.id] = doc.data().ingredients; });
+        snap.forEach(doc => {
+            const d = doc.data();
+            // Store whichever array format exists
+            RECETAS_DB[doc.id] = d.ingredients || d.items || [];
+        });
     });
 
     db.collection('subrecipes').onSnapshot(snap => {
@@ -223,6 +227,7 @@
         let itemsCalc = [];
         
         rawItems.forEach(item => {
+            if(!item || !item.name) return;
             const nameNorm = normalize(item.name || "");
             const foundAlias = ALIASES_DB.find(a => normalize(a.external) === nameNorm);
             
@@ -320,17 +325,22 @@
 
             if (recipeName) {
                 const ingredientes = RECETAS_DB[recipeName];
-                logs.push(`   ✅ Receta encontrada: "${recipeName}"`);
-                recipeFound = true;
-                ingredientes.forEach(ing => {
-                    let targetID = ing.id;
-                    let targetQty = Number(ing.qty);
-                    if (!targetID && ing.ingrediente) {
-                        targetID = findSmartId([ing.ingrediente]);
-                        targetQty = Number(ing.cantidad);
-                    }
-                    if (targetID) applyDecrement(targetID, targetQty * qty, "Item Receta");
-                });
+                if(Array.isArray(ingredientes) && ingredientes.length) {
+                    logs.push(`   ✅ Receta encontrada: "${recipeName}"`);
+                    recipeFound = true;
+                    ingredientes.forEach(ing => {
+                        // New format: ing is a string (ingredient name only, no stock ID)
+                        if(typeof ing === 'string') return;
+                        // Old format: ing is {id, qty}
+                        let targetID = ing.id;
+                        let targetQty = Number(ing.qty);
+                        if (!targetID && ing.ingrediente) {
+                            targetID = findSmartId([ing.ingrediente]);
+                            targetQty = Number(ing.cantidad);
+                        }
+                        if (targetID) applyDecrement(targetID, targetQty * qty, "Item Receta");
+                    });
+                }
             } 
             
             if (!recipeFound && (isBurger || isSandwich)) {
