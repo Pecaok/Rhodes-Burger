@@ -220,20 +220,28 @@
         arosUndPerBurger: 10,
         salGPerBurger: 2,
         doritoGPerBurger: 5,
-        bolsasRatioBurger: 0.5,   // 1 bolsa cada 2 burgers
+        bolsasRatioBurger: 0.5,
         ganchitosPerBolsa: 3,
         tintaPerUnidad: 0.25,
         burgerKeywords: 'hamb,burger,doble,simple,royal,cheese,cuarto,big',
         packagingKeywords: JSON.stringify({
-            papas:    'papas fritas,papa frita,papas,papa,bastones,congelada,fritas',
-            carton:   'carton,caja papa,caja,cajita',
-            papel:    'parafinado,papel',
-            bolsas:   'bolsa,packaging,kraft',
-            ganchito: 'ganchito,grampa,broche',
-            tinta:    'tinta,sello',
-            aros:     'aros de cebolla,aros,cebolla aro',
-            sal:      'sal,sal fina,sodio',
-            sazon:    'sazonador doritos,doritos,dorito,sazonador'
+            papas_crinkles: 'crinkles,papas crinkles',
+            papas_rejillas: 'rejillas,papas rejillas',
+            papas:          'papas fritas,papa frita,papas,papa,bastones,congelada,fritas',
+            carton:         'carton,caja papa,caja,cajita',
+            papel:          'parafinado,papel',
+            bolsas:         'bolsa,packaging,kraft',
+            ganchito:       'ganchito,grampa,broche',
+            tinta:          'tinta,sello',
+            aros:           'aros de cebolla,aros,cebolla aro',
+            sal:            'sal,sal fina,sodio',
+            sazon:          'sazonador doritos,doritos,dorito,sazonador',
+            cheddar:        'cheddar feteado,cheddar,queso cheddar',
+            pan_brioche:    'pan brioche,brioche',
+            pan_baguetin:   'baguetin,baguette',
+            pan_sesamo:     'pan sesamo,sesamo',
+            pan_burgerluna: 'burgerluna,burger luna',
+            nuggets:        'nuggets,nugget,nuggets de pollo'
         })
     };
 
@@ -241,257 +249,249 @@
         if(doc.exists) STOCK_RULES = { ...STOCK_RULES, ...doc.data() };
     });
 
-    // Helper: parse keywords string or array → array
     function ruleKeys(str) {
         if(Array.isArray(str)) return str;
         return String(str||'').split(',').map(s=>s.trim()).filter(Boolean);
     }
 
+    // Obtener pkgKeys parseado (cached helper)
+    function getPkgKeys() {
+        try {
+            return typeof STOCK_RULES.packagingKeywords === 'string'
+                ? JSON.parse(STOCK_RULES.packagingKeywords)
+                : (STOCK_RULES.packagingKeywords || {});
+        } catch(e) { return {}; }
+    }
+
     // =================================================================
-    // 🔥 GESTIÓN DE STOCK — FIXED: batch.set merge instead of batch.update
+    // 🔥 GESTIÓN DE STOCK
     // =================================================================
     async function gestionarStock(pedido, factor) {
         if (!pedido || !pedido.items) return;
-        if(factor === -1 && pedido.stockDescontado) return; 
-        if(factor === 1 && !pedido.stockDescontado) return; 
+        if(factor === -1 && pedido.stockDescontado) return;
+        if(factor === 1 && !pedido.stockDescontado) return;
 
         const batch = db.batch();
         let huboCambios = false;
-        let logs = []; 
+        let logs = [];
 
         let rawItems = Array.isArray(pedido.items) ? [...pedido.items] : [];
         if(Array.isArray(pedido.bebidas)) rawItems = rawItems.concat(pedido.bebidas);
-        if(Array.isArray(pedido.drinks)) rawItems = rawItems.concat(pedido.drinks);
+        if(Array.isArray(pedido.drinks))  rawItems = rawItems.concat(pedido.drinks);
 
+        // Expandir aliases/promos
         let itemsCalc = [];
-        
         rawItems.forEach(item => {
             if(!item || !item.name) return;
-            const nameNorm = normalize(item.name || "");
+            const nameNorm = normalize(item.name);
             const foundAlias = ALIASES_DB.find(a => normalize(a.external) === nameNorm);
-            
-            if (foundAlias && foundAlias.items && foundAlias.items.length > 0) {
-                logs.push(`✨ Promo Detectada: "${item.name}" -> Desglosando...`);
+            if (foundAlias && foundAlias.items?.length) {
                 const qtyPromo = Math.ceil(Number(item.qty || 1));
-                
-                foundAlias.items.forEach(subItem => {
-                    itemsCalc.push({
-                        name: subItem.id, 
-                        qty: (Number(subItem.qty) * qtyPromo),
-                        notes: item.notes, 
-                        fries: item.fries,
-                        friesRaw: item.friesRaw,
-                        sideType: item.sideType,
-                        extras: item.extras 
-                    });
-                    logs.push(`   ↳ +${Number(subItem.qty) * qtyPromo} x ${subItem.id}`);
+                foundAlias.items.forEach(sub => {
+                    itemsCalc.push({ name: sub.id, qty: Number(sub.qty) * qtyPromo,
+                        notes: item.notes, fries: item.fries, friesRaw: item.friesRaw,
+                        sideType: item.sideType, extras: item.extras });
                 });
             } else {
                 itemsCalc.push(item);
             }
         });
 
-        let totalBurgers = 0;
-        let doritosCount = 0; 
-        let portionsCount = 0; 
-        let saltCount = 0;
-        let onionRingsCount = 0; 
-
-        // ✅ FIX: usar batch.set con merge:true en lugar de batch.update
-        // Esto evita el error "No document to update" cuando el doc no existe
         const applyDecrement = (targetID, amount, logName) => {
-            if(!targetID) return false;
-            let collectionName = ID_TO_COLLECTION[targetID] || 'inventory'; 
-            const ref = db.collection(collectionName).doc(targetID);
-            batch.set(ref, { qty: firebase.firestore.FieldValue.increment(amount * factor) }, {merge:true});
+            if(!targetID || !amount) return false;
+            const col = ID_TO_COLLECTION[targetID] || 'inventory';
+            batch.set(db.collection(col).doc(targetID),
+                { qty: firebase.firestore.FieldValue.increment(amount * factor) }, {merge:true});
             huboCambios = true;
-            logs.push(`   - ${logName || 'Item'}: ${amount} (en ${collectionName})`);
+            logs.push(`   ↳ ${logName}: ${amount}`);
             return true;
         };
 
+        const pkg = getPkgKeys();
+        const desc = (ruleKey, amount, label) => {
+            const id = findSmartId(ruleKeys(pkg[ruleKey] || ''));
+            if(id) applyDecrement(id, amount, label || ruleKey);
+        };
+
+        // Contadores para packaging (se resuelven al final)
+        let packagingBurgers = 0; // burgers con papas normales
+        let arosComboCount   = 0; // burgers con aros como guarnición
+
         itemsCalc.forEach(item => {
-            const rawName = item.name || "Item sin nombre";
-            const nameNorm = normalize(rawName);
-            const notesNorm = normalize(item.notes||"");
-            const fullText = nameNorm + " " + notesNorm; 
-            const qty = Math.ceil(Number(item.qty || 1));
-            const friesOpt = String(item.fries || "").toLowerCase(); 
-            const friesRawOpt = String(item.friesRaw || item.sideType || "").toLowerCase();
+            const rawName     = item.name || '';
+            const nameNorm    = normalize(rawName);
+            const notesNorm   = normalize(item.notes || '');
+            const qty         = Math.ceil(Number(item.qty || 1));
+            // friesRaw puede ser: "crinkles_con_sazon", "rejillas_sin_sal", "aros", "con_sazon", etc.
+            const friesRaw    = String(item.friesRaw || item.sideType || '').toLowerCase();
+            const friesLabel  = String(item.fries || '').toLowerCase();
+            const allText     = nameNorm + ' ' + notesNorm + ' ' + friesRaw + ' ' + friesLabel;
 
-            logs.push(`📦 Procesando: ${rawName} (x${qty})`);
+            logs.push(`📦 ${rawName} (x${qty}) | fries: ${friesRaw || '-'}`);
 
-            // Burger detection — keywords from Firebase config
-            const burgerKW = ruleKeys(STOCK_RULES.burgerKeywords);
-            const isBurger   = burgerKW.some(k => nameNorm.includes(k));
-            const isSandwich = nameNorm.includes('sandwich') || nameNorm.includes('sándwich');
+            const burgerKW  = ruleKeys(STOCK_RULES.burgerKeywords);
+            const isBurger  = burgerKW.some(k => nameNorm.includes(k));
+            const isSandwich= nameNorm.includes('sandwich') || nameNorm.includes('sándwich');
+            const isMain    = isBurger || isSandwich;
 
-            const pideAros = friesRawOpt.includes('aros') || friesOpt.includes('aros') || nameNorm.includes('aros');
+            // ── Tipo de guarnición ───────────────────────────────────
+            const pideAros      = friesRaw.includes('aros')    || friesLabel.includes('aros');
+            const pideCrinkles  = friesRaw.includes('crinkle') || friesLabel.includes('crinkle') || nameNorm.includes('crinkle');
+            const pideRejillas  = friesRaw.includes('rejilla') || friesLabel.includes('rejilla') || nameNorm.includes('rejilla');
+            // ── Tipo de sazón ────────────────────────────────────────
+            const pidesSazon    = allText.includes('sazon') || allText.includes('dorito');
+            const pideSinSal    = allText.includes('sin sal') || allText.includes('sin_sal');
+            // ── Con sal = ni sazonada, ni sin sal ────────────────────
+            const pideConSal    = !pidesSazon && !pideSinSal;
 
-            // Packaging keywords from Firebase config
-            let pkgKeys = {};
-            try { pkgKeys = typeof STOCK_RULES.packagingKeywords === 'string'
-                ? JSON.parse(STOCK_RULES.packagingKeywords)
-                : (STOCK_RULES.packagingKeywords || {}); } catch(e) {}
-
-            const autoDescPkg = (ruleKey, qtyToDeduct, logName) => {
-                const keys = ruleKeys(pkgKeys[ruleKey] || '');
-                if(!keys.length) return;
-                const id = findSmartId(keys);
-                if(id) applyDecrement(id, qtyToDeduct, logName);
-            };
-
-            if(isBurger || isSandwich) {
-                if (!pideAros) {
-                    totalBurgers += qty;
-                } else {
-                    onionRingsCount += (qty * Number(STOCK_RULES.arosUndPerBurger||10));
-                    autoDescPkg('carton',   Math.ceil(qty),                        "Cartón Combo Aros");
-                    autoDescPkg('papel',    Math.ceil(qty),                        "Papel");
-                    const bolsas = Math.ceil(qty * Number(STOCK_RULES.bolsasRatioBurger||0.5));
-                    autoDescPkg('bolsas',   bolsas,                                "Bolsas");
-                    autoDescPkg('ganchito', bolsas * Number(STOCK_RULES.ganchitosPerBolsa||3), "Ganchitos");
-                    autoDescPkg('tinta',    (qty + bolsas) * Number(STOCK_RULES.tintaPerUnidad||0.25), "Tinta");
-                }
-            }
-
-            if(nameNorm.includes("porcion") && nameNorm.includes("aros")) {
-                onionRingsCount += (qty * Number(STOCK_RULES.arosUndPerBurger||10));
-            } else if(nameNorm.includes("porcion") && (nameNorm.includes("papa") || nameNorm.includes("frita"))) {
-                portionsCount += qty;
-            } else if(nameNorm.includes("nugget")) {
-                // Nuggets — descontar del inventario directamente por nombre
-                const nuggetId = findSmartId(['nugget', 'nuggets', 'medallones pollo', 'pollo frito']);
-                if(nuggetId) applyDecrement(nuggetId, qty, `Nuggets (${qty}u)`);
-                logs.push(`   🍗 Nuggets detectados: ${qty}u`);
-            }
-
-            // Sal y sazonador son mutuamente excluyentes — depende de lo que pidió el cliente
-            const hasSazon = friesOpt.includes('sazon') || friesRawOpt.includes('sazon') || nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon");
-            const hasNoSalt = (friesOpt.includes('sin') && (friesOpt.includes('sal') || friesOpt.includes('sodio'))) || nameNorm.includes("sin sal") || notesNorm.includes("sin sal");
-            const isPotatoItem = isBurger || isSandwich || nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones");
-
-            if (!pideAros && isPotatoItem) {
-                if (hasSazon) {
-                    // Solo sazonador, sin sal
-                    doritosCount += qty;
-                    logs.push(`   🌶️ Sazonador detectado (x${qty})`);
-                } else if (!hasNoSalt) {
-                    // Solo sal (si no pidió sin sal ni sazonado)
-                    saltCount += qty;
-                    logs.push(`   🧂 Sal detectada (x${qty})`);
-                }
-                // Sin sal → no descuenta nada
-            }
-
-            let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
-            if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
-
+            // ── 1. RECETA DESDE FIREBASE (medallón, pan, salsas...) ──
+            let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm)
+                          || Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
             let recipeFound = false;
 
             if (recipeName) {
-                const ingredientes = RECETAS_DB[recipeName];
-                if(Array.isArray(ingredientes) && ingredientes.length) {
-                    logs.push(`   ✅ Receta encontrada: "${recipeName}"`);
+                const ings = RECETAS_DB[recipeName];
+                if(Array.isArray(ings) && ings.length) {
+                    logs.push(`   ✅ Receta: "${recipeName}"`);
                     recipeFound = true;
-                    ingredientes.forEach(ing => {
-                        if(typeof ing === 'string') return;
-                        let targetID = ing.id;
+                    ings.forEach(ing => {
+                        if(typeof ing === 'string') return; // strings son solo display
+                        let targetID  = ing.id;
                         let targetQty = Number(ing.qty);
-                        if (!targetID && ing.ingrediente) {
-                            targetID = findSmartId([ing.ingrediente]);
+                        if(!targetID && ing.ingrediente) {
+                            targetID  = findSmartId([ing.ingrediente]);
                             targetQty = Number(ing.cantidad);
                         }
-                        if (targetID) applyDecrement(targetID, targetQty * qty, "Item Receta");
+                        if(targetID) applyDecrement(targetID, targetQty * qty, 'Receta');
                     });
                 }
             }
 
-            if (!recipeFound && (isBurger || isSandwich)) {
+            // ── 2. FALLBACK AUTO si no hay receta ────────────────────
+            if(!recipeFound && isMain) {
+                // Medallones
                 let patties = 1;
-                if(nameNorm.includes('doble')) patties = 2;
-                if(nameNorm.includes('triple')) patties = 3;
-                if(nameNorm.includes('cuadruple')) patties = 4;
-                const pattyId = findSmartId(['medallon', 'carne', 'patty']);
-                if(pattyId && !isSandwich) applyDecrement(pattyId, patties * qty, `Auto-Medallones (${patties})`);
-            }
+                if(nameNorm.includes('doble'))      patties = 2;
+                if(nameNorm.includes('triple'))     patties = 3;
+                if(nameNorm.includes('cuadruple'))  patties = 4;
+                const pattyId = findSmartId(['medallon','carne','patty']);
+                if(pattyId) applyDecrement(pattyId, patties * qty, `Auto-Medallón x${patties}`);
 
-            if (fullText.includes('extra') || fullText.includes('adicional') || !isBurger) { 
-                if (fullText.includes('carne') || fullText.includes('medallon') || fullText.includes('patty')) {
-                    if (fullText.includes('extra') || fullText.includes('adicional') || (!isBurger && !isSandwich)) {
-                        const id = findSmartId(['medallon', 'carne', 'patty']);
-                        if(id) applyDecrement(id, 1 * qty, "Extra Medallón/Carne");
-                    }
+                // Cheddar si el nombre indica cheese
+                if(nameNorm.includes('cheese') || nameNorm.includes('cheddar')) {
+                    desc('cheddar', qty, 'Auto-Cheddar');
+                }
+
+                // Pan según tipo de producto
+                if(nameNorm.includes('baguetin') || nameNorm.includes('baguet')) {
+                    desc('pan_baguetin', qty, 'Auto-Baguetín');
+                } else if(nameNorm.includes('sesamo')) {
+                    desc('pan_sesamo', qty, 'Auto-Pan Sésamo');
+                } else if(nameNorm.includes('burgerluna') || nameNorm.includes('burger luna')) {
+                    desc('pan_burgerluna', qty, 'Auto-BurgerLuna');
+                } else {
+                    desc('pan_brioche', qty, 'Auto-Brioche');
                 }
             }
 
-            if (fullText.includes('extra cheddar') || fullText.includes('adicional cheddar') || fullText.includes('cheddar extra')) {
-                const id = findSmartId(['cheddar', 'queso']);
-                if(id) applyDecrement(id, 1 * qty, "Extra Cheddar");
-            }
-
-            if (fullText.includes('extra bacon') || fullText.includes('panceta') || fullText.includes('tocino')) {
-                const id = findSmartId(['bacon', 'panceta']);
-                if(id) applyDecrement(id, 0.03 * qty, "Extra Bacon");
-            }
-
-            if(item.extras){
-                for (const [key, valRaw] of Object.entries(item.extras)) {
-                    const val = Number(valRaw);
-                    if (val > 0) {
-                        let searchKeys = [key];
-                        if(key==='patty') searchKeys = ['medallon', 'carne', 'patty'];
-                        if(key==='bacon') searchKeys = ['panceta', 'bacon', 'tocino'];
-                        if(key==='cheddar') searchKeys = ['cheddar', 'queso'];
-                        const ingID = findSmartId(searchKeys);
-                        if(ingID) applyDecrement(ingID, (key==='bacon' ? 0.03 : 1) * val, `Extra Estructurado (${key})`);
-                    }
+            // ── 3. EXTRAS (carne/cheddar adicionales) ───────────────
+            if(item.extras) {
+                const extras = item.extras;
+                const extraPatty   = Number(extras.patty   || extras.carne   || 0);
+                const extraCheddar = Number(extras.cheddar || 0);
+                const extraBacon   = Number(extras.bacon   || extras.panceta || 0);
+                if(extraPatty > 0) {
+                    const id = findSmartId(['medallon','carne','patty']);
+                    if(id) applyDecrement(id, extraPatty * qty, `Extra carne x${extraPatty}`);
                 }
+                if(extraCheddar > 0) {
+                    desc('cheddar', extraCheddar * qty, `Extra cheddar x${extraCheddar}`);
+                }
+                if(extraBacon > 0) {
+                    const id = findSmartId(['bacon','panceta','tocino']);
+                    if(id) applyDecrement(id, extraBacon * qty, `Extra bacon x${extraBacon}`);
+                }
+            }
+
+            // ── 4. GUARNICIÓN del burger ─────────────────────────────
+            if(isMain) {
+                if(pideAros) {
+                    // Burger con aros: descontar aros + packaging aros
+                    arosComboCount += qty;
+                    desc('aros', qty * Number(STOCK_RULES.arosUndPerBurger||10),
+                        `Aros combo (${qty * Number(STOCK_RULES.arosUndPerBurger||10)}u)`);
+                } else {
+                    // Burger con papas: acumular para descontar al final
+                    packagingBurgers += qty;
+
+                    // Tipo de papas
+                    if(pideCrinkles) {
+                        desc('papas_crinkles', qty * Number(STOCK_RULES.papasGrPerBurger||200),
+                            `Crinkles (${qty * Number(STOCK_RULES.papasGrPerBurger||200)}g)`);
+                    } else if(pideRejillas) {
+                        desc('papas_rejillas', qty * Number(STOCK_RULES.papasGrPerBurger||200),
+                            `Rejillas (${qty * Number(STOCK_RULES.papasGrPerBurger||200)}g)`);
+                    } else {
+                        desc('papas', qty * Number(STOCK_RULES.papasGrPerBurger||200),
+                            `Papas (${qty * Number(STOCK_RULES.papasGrPerBurger||200)}g)`);
+                    }
+
+                    // Sal o sazonador — mutuamente excluyentes
+                    if(pidesSazon) {
+                        desc('sazon', qty * Number(STOCK_RULES.doritoGPerBurger||5),
+                            `Sazonador (${qty * Number(STOCK_RULES.doritoGPerBurger||5)}g)`);
+                    } else if(pideConSal) {
+                        desc('sal', qty * Number(STOCK_RULES.salGPerBurger||2),
+                            `Sal (${qty * Number(STOCK_RULES.salGPerBurger||2)}g)`);
+                    }
+                    // sin sal → no descuenta
+                }
+            }
+
+            // ── 5. PORCIONES INDEPENDIENTES ──────────────────────────
+            if(!isMain && nameNorm.includes('porcion')) {
+                if(nameNorm.includes('aros') || friesRaw.includes('aros')) {
+                    const arosU = qty * Number(STOCK_RULES.arosUndPerBurger||10);
+                    desc('aros', arosU, `Porción Aros (${arosU}u)`);
+                } else if(nameNorm.includes('papa') || nameNorm.includes('frita')) {
+                    const grPorcion = Number(STOCK_RULES.papasGrPerPorcion||350);
+                    if(pideCrinkles)      desc('papas_crinkles', qty * grPorcion, `Porción Crinkles`);
+                    else if(pideRejillas) desc('papas_rejillas', qty * grPorcion, `Porción Rejillas`);
+                    else                  desc('papas',          qty * grPorcion, `Porción Papas`);
+
+                    if(pidesSazon)       desc('sazon', qty * Number(STOCK_RULES.doritoGPerBurger||5), 'Sazonador Porción');
+                    else if(pideConSal)  desc('sal',   qty * Number(STOCK_RULES.salGPerBurger||2),    'Sal Porción');
+                }
+            }
+
+            // ── 6. NUGGETS ───────────────────────────────────────────
+            if(nameNorm.includes('nugget')) {
+                desc('nuggets', qty, `Nuggets (${qty}u)`);
             }
         });
 
-        // Packaging & consumables usando reglas de Firebase
-        let pkgKeys = {};
-        try { pkgKeys = typeof STOCK_RULES.packagingKeywords === 'string'
-            ? JSON.parse(STOCK_RULES.packagingKeywords)
-            : (STOCK_RULES.packagingKeywords || {}); } catch(e) {}
-
-        const autoDescFinal = (ruleKey, qtyToDeduct, logName) => {
-            const keys = ruleKeys(pkgKeys[ruleKey] || '');
-            if(!keys.length) return;
-            const id = findSmartId(keys);
-            if(id) applyDecrement(id, qtyToDeduct, logName);
-        };
-
-        if(totalBurgers > 0) {
-            const papasGr = Number(STOCK_RULES.papasGrPerBurger||200);
-            const bolsasRatio = Number(STOCK_RULES.bolsasRatioBurger||0.5);
-            const bolsas = Math.ceil(totalBurgers * bolsasRatio);
-            autoDescFinal('papas',    totalBurgers * papasGr,     `Papas (${papasGr}g/burger)`);
-            autoDescFinal('carton',   Math.ceil(totalBurgers),    "Cartón Papa");
-            autoDescFinal('papel',    Math.ceil(totalBurgers),    "Papel");
-            autoDescFinal('bolsas',   bolsas,                     "Bolsas");
-            autoDescFinal('ganchito', bolsas * Number(STOCK_RULES.ganchitosPerBolsa||3), "Ganchitos");
-            autoDescFinal('tinta',    (totalBurgers + bolsas) * Number(STOCK_RULES.tintaPerUnidad||0.25), "Tinta");
+        // ── 7. PACKAGING (cartón, bolsas, papel, ganchitos, tinta) ──
+        const totalConPapas = packagingBurgers;
+        if(totalConPapas > 0) {
+            const bolsas = Math.ceil(totalConPapas * Number(STOCK_RULES.bolsasRatioBurger||0.5));
+            desc('carton',   Math.ceil(totalConPapas),                         'Cartón');
+            desc('papel',    Math.ceil(totalConPapas),                         'Papel');
+            desc('bolsas',   bolsas,                                           'Bolsas');
+            desc('ganchito', bolsas * Number(STOCK_RULES.ganchitosPerBolsa||3),'Ganchitos');
+            desc('tinta',    (totalConPapas + bolsas) * Number(STOCK_RULES.tintaPerUnidad||0.25), 'Tinta');
         }
-
-        if(portionsCount > 0) {
-            const papasGrPorcion = Number(STOCK_RULES.papasGrPerPorcion||350);
-            autoDescFinal('papas', portionsCount * papasGrPorcion, `Papas Porción (${papasGrPorcion}g)`);
-        }
-        if(onionRingsCount > 0) autoDescFinal('aros', onionRingsCount, `Aros de Cebolla (${onionRingsCount}u)`);
-        if(saltCount > 0) {
-            const salG = Number(STOCK_RULES.salGPerBurger||2);
-            autoDescFinal('sal', saltCount * salG, `Sal (${saltCount*salG}g)`);
-        }
-        if(doritosCount > 0) {
-            const doritoG = Number(STOCK_RULES.doritoGPerBurger||5);
-            autoDescFinal('sazon', doritosCount * doritoG, `Sazonador Doritos (${doritosCount*doritoG}g)`);
+        if(arosComboCount > 0) {
+            const bolsasAros = Math.ceil(arosComboCount * Number(STOCK_RULES.bolsasRatioBurger||0.5));
+            desc('carton',   Math.ceil(arosComboCount),                             'Cartón Aros');
+            desc('papel',    Math.ceil(arosComboCount),                             'Papel Aros');
+            desc('bolsas',   bolsasAros,                                            'Bolsas Aros');
+            desc('ganchito', bolsasAros * Number(STOCK_RULES.ganchitosPerBolsa||3), 'Ganchitos Aros');
+            desc('tinta',    (arosComboCount + bolsasAros) * Number(STOCK_RULES.tintaPerUnidad||0.25), 'Tinta Aros');
         }
 
         if (huboCambios) {
-            const pedidoRef = db.collection('orders').doc(pedido.id);
-            // ✅ FIX: set+merge para evitar error si el pedido no existe aún
-            batch.set(pedidoRef, { stockDescontado: (factor === -1) }, {merge:true});
+            batch.set(db.collection('orders').doc(pedido.id),
+                { stockDescontado: (factor === -1) }, {merge:true});
             await batch.commit();
             alert("✅ STOCK ACTUALIZADO\n\n" + logs.join("\n"));
         } else {
