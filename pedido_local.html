@@ -459,13 +459,52 @@
         if(huboCambios) {
             batch.set(db.collection('orders').doc(pedido.id), { stockDescontado: (factor===-1) }, {merge:true});
             await batch.commit();
-            alert("✅ STOCK ACTUALIZADO\n\n" + logs.join("\n"));
+
+            // Guardar movimiento en Firestore para historial en gerencia
+            const accion = factor === -1 ? 'descuento' : 'reposicion';
+            await db.collection('stock_movements').add({
+                orderId:    pedido.id,
+                orderNum:   pedido.orderNumber || pedido.number || '',
+                accion,
+                log:        logs,
+                createdAt:  firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            showStockToast(factor === -1 ? '📦 Stock descontado' : '♻️ Stock repuesto', logs, 'success');
         } else {
             const inv = Object.keys(STOCK_NAME_TO_ID);
-            alert("⚠️ NO SE DESCONTÓ NADA\n\n" + logs.join("\n") +
-                "\n\n── Inventario cargado (" + inv.length + ") ──\n" +
-                (inv.length ? inv.join(", ") : "VACÍO — verificá que el inventario cargó"));
+            const msg = inv.length
+                ? `Inventario cargado (${inv.length} items) pero ningún keyword coincidió`
+                : 'Inventario VACÍO — verificá que cargó correctamente';
+            showStockToast('⚠️ Stock sin cambios', [...logs, '', msg], 'warn');
         }
+    }
+
+    // Toast no bloqueante para feedback de stock
+    function showStockToast(title, lines, type) {
+        let toast = document.getElementById('stockToast');
+        if(!toast) {
+            toast = document.createElement('div');
+            toast.id = 'stockToast';
+            toast.style.cssText = `
+                position:fixed; bottom:20px; right:20px; z-index:9999;
+                background:#1f2937; color:#fff; border-radius:12px;
+                padding:14px 18px; max-width:380px; font-family:var(--font);
+                box-shadow:0 10px 30px rgba(0,0,0,0.3); font-size:13px;
+                border-left:4px solid #22c55e; transition:opacity 0.3s;
+            `;
+            document.body.appendChild(toast);
+        }
+        toast.style.borderLeftColor = type === 'warn' ? '#f97316' : '#22c55e';
+        const preview = lines.slice(0, 8).join('\n');
+        const more = lines.length > 8 ? `\n+${lines.length - 8} más...` : '';
+        toast.innerHTML = `
+            <div style="font-weight:800;font-size:14px;margin-bottom:6px">${title}</div>
+            <pre style="margin:0;font-size:11px;opacity:0.8;white-space:pre-wrap;max-height:150px;overflow-y:auto">${preview}${more}</pre>
+        `;
+        toast.style.opacity = '1';
+        clearTimeout(toast._timeout);
+        toast._timeout = setTimeout(() => { toast.style.opacity = '0'; }, 6000);
     }
 
     window.setOrderStatus = async (id, next, isPaid) => {
