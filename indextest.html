@@ -498,21 +498,24 @@
 
         // ── Formato gerencia: ingredients: [{id, qty}] con IDs de inventario ──
         if(Array.isArray(d.ingredients) && d.ingredients.length && d.ingredients[0]?.id) {
-          // Traer todos los docs en paralelo (inventory + subrecipes)
-          const fetches = d.ingredients.map(ing =>
-            Promise.any([
-              window.db.collection('inventory').doc(ing.id).get(),
-              window.db.collection('subrecipes').doc(ing.id).get()
-            ]).catch(() => null)
-          );
-          const docs = await Promise.all(fetches);
+          // Buscar nombre: primero en inventory, luego en subrecipes
+          const resolved = await Promise.all(d.ingredients.map(async ing => {
+            // Intentar inventory
+            const invDoc = await window.db.collection('inventory').doc(ing.id).get().catch(()=>null);
+            if(invDoc && invDoc.exists) {
+              return { name: invDoc.data().name || ing.id, qty: Number(ing.qty) || 1 };
+            }
+            // Intentar subrecipes
+            const subDoc = await window.db.collection('subrecipes').doc(ing.id).get().catch(()=>null);
+            if(subDoc && subDoc.exists) {
+              const sd = subDoc.data();
+              return { name: sd.name || sd.nombre || ing.id, qty: Number(ing.qty) || 1 };
+            }
+            // No encontrado — devolver el ID como fallback (no debería pasar)
+            return { name: ing.id, qty: Number(ing.qty) || 1 };
+          }));
 
-          layers = d.ingredients.map((ing, i) => {
-            const snap = docs[i];
-            const data = snap && snap.exists ? snap.data() : {};
-            const name = data.name || data.nombre || ing.id;
-            return { name, qty: Number(ing.qty) || 1 };
-          }).filter(l => l.name);
+          layers = resolved.filter(l => l.name && !l.name.match(/^[A-Z0-9]{15,}$/)); // filtrar IDs crudos
 
         // ── Formato admin: items: ["Pan Brioche", "Medallón", ...] ──
         } else if(Array.isArray(d.items) && d.items.length) {
