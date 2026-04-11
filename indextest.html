@@ -480,7 +480,6 @@
       const item=window.STATE.products.find(p=>p.id===id);
       if(!item)return;
 
-      // Title
       document.getElementById('ingName').innerHTML=item.name.replace(/([^ ]+)$/,'<span>$1</span>');
       document.getElementById('ingCount').textContent='';
       document.getElementById('ingList').innerHTML=
@@ -488,37 +487,45 @@
       document.getElementById('btnIngAdd').onclick=()=>{closeIng();setTimeout(()=>openModal(id),120);};
       document.getElementById('ingOvl').classList.add('open');
 
-      // ── Fetch from recipes → items list ──
       try {
-        if(window.db){
-          const doc = await window.db.collection('recipes').doc(item.name).get();
-          if(doc.exists){
-            const d = doc.data();
-            // Support both new format (items: string[]) and old format (ingredients: [{id,qty}])
-            let nameList = [];
-            if(Array.isArray(d.items) && d.items.length){
-              nameList = d.items.filter(Boolean);
-            } else if(Array.isArray(d.ingredients) && d.ingredients.length){
-              // Old format — try resolving subrecipe names
-              const subDocs = await Promise.all(
-                d.ingredients.map(i=>window.db.collection('subrecipes').doc(i.id).get().catch(()=>null))
-              );
-              nameList = d.ingredients.map((ing,i)=>{
-                const sub = subDocs[i];
-                const data = sub&&sub.exists ? sub.data() : {};
-                const n = data.name||data.nombre||data.title||data.descripcion||'';
-                return n || null;
-              }).filter(Boolean);
-            }
-            if(nameList.length){
-              _renderIngItems(nameList.map(n=>({name:n, desc:'', qty:1})));
-              return;
-            }
-          }
-        }
-      }catch(err){ console.warn('Recipe fetch:', err); }
+        if(!window.db) throw new Error('no db');
 
-      // Fallback: parse description
+        const doc = await window.db.collection('recipes').doc(item.name).get();
+        if(!doc.exists) throw new Error('no recipe');
+
+        const d = doc.data();
+        let layers = [];
+
+        // ── Formato gerencia: ingredients: [{id, qty}] con IDs de inventario ──
+        if(Array.isArray(d.ingredients) && d.ingredients.length && d.ingredients[0]?.id) {
+          // Traer todos los docs en paralelo (inventory + subrecipes)
+          const fetches = d.ingredients.map(ing =>
+            Promise.any([
+              window.db.collection('inventory').doc(ing.id).get(),
+              window.db.collection('subrecipes').doc(ing.id).get()
+            ]).catch(() => null)
+          );
+          const docs = await Promise.all(fetches);
+
+          layers = d.ingredients.map((ing, i) => {
+            const snap = docs[i];
+            const data = snap && snap.exists ? snap.data() : {};
+            const name = data.name || data.nombre || ing.id;
+            return { name, qty: Number(ing.qty) || 1 };
+          }).filter(l => l.name);
+
+        // ── Formato admin: items: ["Pan Brioche", "Medallón", ...] ──
+        } else if(Array.isArray(d.items) && d.items.length) {
+          layers = d.items.filter(Boolean).map(n => ({ name: n, qty: 1 }));
+        }
+
+        if(layers.length){
+          _renderIngItems(layers);
+          return;
+        }
+      } catch(err){ console.warn('Recipe fetch:', err); }
+
+      // Fallback: parsear descripción del producto
       const fallback = parseDesc(item.description||'', item.name||'');
       _renderIngItems(fallback.map(l=>({
         name: l.name || (ING_DEF[l.id]||{}).name || l.id,
