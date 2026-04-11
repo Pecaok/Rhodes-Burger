@@ -358,14 +358,30 @@
                 onionRingsCount += (qty * Number(STOCK_RULES.arosUndPerBurger||10));
             } else if(nameNorm.includes("porcion") && (nameNorm.includes("papa") || nameNorm.includes("frita"))) {
                 portionsCount += qty;
+            } else if(nameNorm.includes("nugget")) {
+                // Nuggets — descontar del inventario directamente por nombre
+                const nuggetId = findSmartId(['nugget', 'nuggets', 'medallones pollo', 'pollo frito']);
+                if(nuggetId) applyDecrement(nuggetId, qty, `Nuggets (${qty}u)`);
+                logs.push(`   🍗 Nuggets detectados: ${qty}u`);
             }
 
-            const hasSazon = friesOpt.includes('sazon') || nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon");
-            if (hasSazon && !pideAros) doritosCount += qty;
-
+            // Sal y sazonador son mutuamente excluyentes — depende de lo que pidió el cliente
+            const hasSazon = friesOpt.includes('sazon') || friesRawOpt.includes('sazon') || nameNorm.includes("dorito") || nameNorm.includes("sazon") || notesNorm.includes("sazon");
             const hasNoSalt = (friesOpt.includes('sin') && (friesOpt.includes('sal') || friesOpt.includes('sodio'))) || nameNorm.includes("sin sal") || notesNorm.includes("sin sal");
             const isPotatoItem = isBurger || isSandwich || nameNorm.includes("papa") || nameNorm.includes("frita") || nameNorm.includes("bastones");
-            if (isPotatoItem && !hasNoSalt && !hasSazon && !pideAros) saltCount += qty;
+
+            if (!pideAros && isPotatoItem) {
+                if (hasSazon) {
+                    // Solo sazonador, sin sal
+                    doritosCount += qty;
+                    logs.push(`   🌶️ Sazonador detectado (x${qty})`);
+                } else if (!hasNoSalt) {
+                    // Solo sal (si no pidió sin sal ni sazonado)
+                    saltCount += qty;
+                    logs.push(`   🧂 Sal detectada (x${qty})`);
+                }
+                // Sin sal → no descuenta nada
+            }
 
             let recipeName = Object.keys(RECETAS_DB).find(k => normalize(k) === nameNorm);
             if (!recipeName) recipeName = Object.keys(RECETAS_DB).find(k => nameNorm.includes(normalize(k)));
