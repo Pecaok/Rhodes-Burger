@@ -118,6 +118,7 @@
     <div class="tab-btn" onclick="showTab('stockrules')">⚙️ Reglas de Stock</div>
     <div class="section-title">Historial</div>
     <div class="tab-btn" onclick="showTab('orders')">🧾 Lista de Pedidos</div>
+    <div class="tab-btn" onclick="showTab('stock_movements')">📋 Movimientos Stock</div>
   </aside>
   <main class="content">
 
@@ -276,7 +277,32 @@
       </div>
     </div>
 
-    <div id="tab-fixed" style="display:none">
+    <div id="tab-stock_movements" style="display:none">
+      <div class="card">
+        <h2>
+          <span>📋 Movimientos de Stock</span>
+          <button class="btn btn-primary" onclick="loadStockMovements()">🔄 Actualizar</button>
+        </h2>
+        <p style="font-size:12px;color:#666;margin-bottom:15px">
+          Registro automático de cada descuento/reposición de stock por pedido entregado o cancelado.
+        </p>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th width="140">Fecha</th>
+                <th width="80">Pedido</th>
+                <th width="100">Acción</th>
+                <th>Detalle</th>
+              </tr>
+            </thead>
+            <tbody id="stockMovementsBody">
+              <tr><td colspan="4" style="text-align:center;color:#999;padding:20px">Hacé clic en Actualizar para cargar</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
       <div class="card"><h2><span>💡 Gastos Fijos</span> <button class="btn btn-primary" onclick="addFixedRow()">+ Agregar</button></h2><table id="tableFixed"><thead><tr><th>Concepto</th><th width="150">Monto Mensual ($)</th><th width="50"></th></tr></thead><tbody></tbody></table><div style="margin-top:10px; text-align:right"><button class="btn btn-blue" onclick="saveFixedData()">💾 Guardar Cambios</button></div></div>
     </div>
     <div id="tab-production" style="display:none">
@@ -594,6 +620,44 @@
     window.saveConfig=window.saveFixedData;
     window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions(); };
 
+
+    window.loadStockMovements = function() {
+        const tbody = document.getElementById('stockMovementsBody');
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">Cargando...</td></tr>';
+
+        db.collection('stock_movements')
+            .orderBy('createdAt', 'desc')
+            .limit(100)
+            .get()
+            .then(snap => {
+                if(snap.empty) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">Sin movimientos registrados todavía.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = snap.docs.map(doc => {
+                    const d = doc.data();
+                    const dt = d.createdAt?.toDate ? d.createdAt.toDate() : new Date();
+                    const dateStr = dt.toLocaleString('es-AR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+                    const accion = d.accion === 'descuento'
+                        ? '<span style="background:#dcfce7;color:#166534;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700">📦 DESCUENTO</span>'
+                        : '<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700">♻️ REPOSICIÓN</span>';
+                    // Filtrar del log solo las líneas de descuento real (las que empiezan con "   -")
+                    const detalleLines = (d.log || [])
+                        .filter(l => l.trim().startsWith('-') || l.startsWith('📦') || l.startsWith('✅'))
+                        .map(l => `<div style="font-size:11px;color:#374151">${l}</div>`)
+                        .join('');
+                    return `<tr>
+                        <td style="font-size:13px">${dateStr}</td>
+                        <td style="font-weight:700">#${d.orderNum || '-'}</td>
+                        <td>${accion}</td>
+                        <td><div style="max-height:80px;overflow-y:auto">${detalleLines || '<span style="color:#999;font-size:11px">Sin detalle</span>'}</div></td>
+                    </tr>`;
+                }).join('');
+            })
+            .catch(err => {
+                tbody.innerHTML = `<tr><td colspan="4" style="color:red;padding:20px">Error: ${err.message}</td></tr>`;
+            });
+    };
 
     window.addEventListener('load', () => {
         const now = new Date();
