@@ -513,30 +513,15 @@
         const d = doc.data();
         let layers = [];
 
-        // ── Formato gerencia: ingredients: [{id, qty}] con IDs de inventario ──
-        if(Array.isArray(d.ingredients) && d.ingredients.length && d.ingredients[0]?.id) {
-          // Buscar nombre: primero en inventory, luego en subrecipes
-          const resolved = await Promise.all(d.ingredients.map(async ing => {
-            // Intentar inventory
-            const invDoc = await window.db.collection('inventory').doc(ing.id).get().catch(()=>null);
-            if(invDoc && invDoc.exists) {
-              return { name: invDoc.data().name || ing.id, qty: Number(ing.qty) || 1 };
-            }
-            // Intentar subrecipes
-            const subDoc = await window.db.collection('subrecipes').doc(ing.id).get().catch(()=>null);
-            if(subDoc && subDoc.exists) {
-              const sd = subDoc.data();
-              return { name: sd.name || sd.nombre || ing.id, qty: Number(ing.qty) || 1 };
-            }
-            // No encontrado — devolver el ID como fallback (no debería pasar)
-            return { name: ing.id, qty: Number(ing.qty) || 1 };
-          }));
-
-          layers = resolved.filter(l => l.name && !l.name.match(/^[A-Z0-9]{15,}$/)); // filtrar IDs crudos
-
-        // ── Formato admin: items: ["Pan Brioche", "Medallón", ...] ──
-        } else if(Array.isArray(d.items) && d.items.length) {
-          layers = d.items.filter(Boolean).map(n => ({ name: n, qty: 1 }));
+        // ── Solo usar formato admin: items: ["Medallón", "Cheddar", ...] ──
+        if(Array.isArray(d.items) && d.items.length) {
+          // Contar repetidos para mostrar cantidad
+          const counts = {};
+          d.items.filter(Boolean).forEach(n => {
+            const key = String(n).trim();
+            counts[key] = (counts[key] || 0) + 1;
+          });
+          layers = Object.entries(counts).map(([name, qty]) => ({ name, qty }));
         }
 
         if(layers.length){
@@ -559,6 +544,11 @@
       const list = document.getElementById('ingList');
       list.innerHTML='';
       layers.forEach((l,i)=>{
+        const n = String(l.name).toLowerCase();
+        const isMedallon = n.includes('medal') || n.includes('patty') || n.includes('carne');
+        const isCheddar  = n.includes('cheddar') || n.includes('feta') || n.includes('queso');
+        const showQty    = (isMedallon || isCheddar) && l.qty > 1;
+        const qtyLabel   = isMedallon ? `×${l.qty} medallones` : `×${l.qty} fetas`;
         const card=document.createElement('div');
         card.className='ing-item';
         card.style.setProperty('--ic', ingColor(l.name));
@@ -568,7 +558,7 @@
             <div class="ing-item-name">${l.name}</div>
             ${l.desc?`<div class="ing-item-desc">${l.desc}</div>`:''}
           </div>
-          ${l.qty>1?`<div class="ing-qty">×${l.qty}</div>`:''}`;
+          ${showQty?`<div class="ing-qty">${qtyLabel}</div>`:''}`;
         list.appendChild(card);
         setTimeout(()=>card.classList.add('vis'), 60+i*50);
       });
