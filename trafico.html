@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Rhodes Burgers — Panel en vivo</title>
+<title>Rhodes Burgers — Panel de Tráfico</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -408,7 +408,7 @@
     <div class="brand-mark">R</div>
     <div>
       <h1>Rhodes Burgers</h1>
-      <div class="brand-sub"><span class="live-dot"></span>Panel en vivo</div>
+      <div class="brand-sub"><span class="live-dot"></span>Tráfico en vivo</div>
     </div>
   </div>
   <div id="stats">
@@ -458,13 +458,8 @@
 
 <script type="module">
 
-// ============================================================
-// CONFIGURACIÓN ACTUALIZADA CON TU FIREBASE REAL
-// ============================================================
-
 const CONFIG = {
   mode: 'firestore',
-
   firebase: {
     apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
     authDomain: "rhodes-burguers.firebaseapp.com",
@@ -474,9 +469,7 @@ const CONFIG = {
     appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
     measurementId: "G-LQVYTJWHSM"
   },
-
   collectionName: 'orders',
-
   fieldMap: {
     estado:     'estado',     
     canal:      'canal',      
@@ -486,7 +479,6 @@ const CONFIG = {
     itemPrecio: 'precio',     
     createdAt:  'createdAt'   
   },
-
   stateMap: {
     'browsing':  'browsing',
     'building':  'building',
@@ -496,8 +488,6 @@ const CONFIG = {
     'delivered': 'delivered'
   }
 };
-
-// ============================================================
 
 const STATES = {
   browsing:  { color: '#5DCAA5', name: 'Navegando' },
@@ -512,10 +502,8 @@ let width = window.innerWidth;
 let height = window.innerHeight;
 
 const svg = d3.select('#graph').attr('viewBox', `0 0 ${width} ${height}`);
-
 const defs = svg.append('defs');
 
-// Glow filter
 const glowFilter = defs.append('filter')
   .attr('id', 'glow')
   .attr('x', '-50%').attr('y', '-50%')
@@ -525,7 +513,6 @@ const feMerge = glowFilter.append('feMerge');
 feMerge.append('feMergeNode').attr('in', 'coloredBlur');
 feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
-// Radial gradients
 Object.keys(STATES).forEach(s => {
   const c = STATES[s].color;
   const grad = defs.append('radialGradient').attr('id', `grad-${s}`).attr('cx', '35%').attr('cy', '35%');
@@ -533,7 +520,6 @@ Object.keys(STATES).forEach(s => {
   grad.append('stop').attr('offset', '100%').attr('stop-color', c).attr('stop-opacity', 0.72);
 });
 
-// Zoom layer
 const zoomG = svg.append('g').attr('class', 'zoom-layer');
 const linkGroup = zoomG.append('g').attr('class', 'links');
 const nodeGroup = zoomG.append('g').attr('class', 'nodes');
@@ -694,22 +680,6 @@ function selectUser(user) {
   document.getElementById('detail-items').innerHTML = itemsHtml;
 }
 
-setInterval(() => {
-  if (selectedUserId) {
-    const user = nodes.find(n => n.id === selectedUserId);
-    if (user) selectUser(user);
-    else {
-      selectedUserId = null;
-      document.getElementById('detail').classList.remove('visible');
-    }
-  }
-}, 1000);
-
-svg.on('click', () => {
-  selectedUserId = null;
-  document.getElementById('detail').classList.remove('visible');
-});
-
 function changeState(user, newState) {
   user.state = newState;
   user.color = STATES[newState].color;
@@ -731,10 +701,6 @@ function removeUser(user) {
   update(); updateStats();
 }
 
-// ============================================================
-// FIREBASE INTEGRATION
-// ============================================================
-
 function mapIncomingData(raw) {
   const f = CONFIG.fieldMap;
   const rawState = raw[f.estado] || 'browsing';
@@ -750,16 +716,22 @@ function mapIncomingData(raw) {
         name: it[f.itemNombre] || 'Item',
         price: it[f.itemPrecio] || 0
       }
-    }))
+    })),
+    createdAtRaw: raw[f.createdAt]
   };
 }
 
 function handleRemoteChange(type, id, raw) {
   const data = mapIncomingData(raw);
   const existing = nodes.find(n => n.id === id && n.type === 'user');
+  
+  // Extraemos la fecha de creación real de Firebase si existe, si no usamos Date.now()
+  let realCreatedAt = Date.now();
+  if (data.createdAtRaw && data.createdAtRaw.seconds) {
+      realCreatedAt = data.createdAtRaw.seconds * 1000;
+  }
 
   if (type === 'added' || (!existing && type === 'modified')) {
-    // Evitar renderizar nodos que ya están entregados al abrir el panel
     if (data.state === 'delivered') return;
 
     const user = {
@@ -772,7 +744,7 @@ function handleRemoteChange(type, id, raw) {
       channel: data.channel,
       items: [],
       total: data.total,
-      createdAt: Date.now(),
+      createdAt: realCreatedAt, // <-- Fecha real guardada para calcular los 15 min
       x: width/2 + (Math.random() - 0.5) * 120,
       y: height/2 + (Math.random() - 0.5) * 120
     };
@@ -800,7 +772,6 @@ function handleRemoteChange(type, id, raw) {
       changeState(existing, data.state);
       logActivity(`${existing.label} → <b>${STATES[data.state].name}</b>`);
       
-      // Si el pedido pasó a entregado, lo animamos y luego lo borramos de la pantalla
       if (data.state === 'delivered') {
         totalDelivered++;
         totalRevenue += data.total;
@@ -836,146 +807,76 @@ function handleRemoteChange(type, id, raw) {
 }
 
 async function initFirebase() {
-  if (CONFIG.mode === 'demo') {
-    startDemoMode();
-    return;
-  }
-
   try {
+    // 1. Importamos la versión moderna de Firebase
     const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js');
+    const { getFirestore, collection, onSnapshot, query, where, doc, deleteDoc } =
+        await import('https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js');
+        
     const app = initializeApp(CONFIG.firebase);
     logActivity('✓ Conectado a Firebase');
 
-    if (CONFIG.mode === 'firestore') {
-      // 1. Importamos 'query' y 'where' para hacer el filtro
-      const { getFirestore, collection, onSnapshot, query, where } =
-        await import('https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js');
-      
-      const db = getFirestore(app);
-      const ref = collection(db, CONFIG.collectionName);
+    const db = getFirestore(app);
+    const ref = collection(db, CONFIG.collectionName);
 
-      // 2. EL FILTRO PERFECTO: Traer a cualquiera que NO esté "entregado"
-      const q = query(ref, where('estado', '!=', 'delivered'));
+    // 2. Guardamos las funciones en 'window' para que el Camión de Basura pueda usarlas
+    window.db = db;
+    window.doc = doc;
+    window.deleteDoc = deleteDoc;
 
-      // 3. Escuchamos solo a los que pasan el filtro
-      onSnapshot(q, (snap) => {
-        snap.docChanges().forEach(change => {
-          handleRemoteChange(change.type, change.doc.id, change.doc.data());
-        });
-      }, (err) => {
-        console.error('Firestore error:', err);
-        logActivity(`<b>Error:</b> ${err.message}`);
+    const q = query(ref, where('estado', '!=', 'delivered'));
+
+    onSnapshot(q, (snap) => {
+      snap.docChanges().forEach(change => {
+        handleRemoteChange(change.type, change.doc.id, change.doc.data());
       });
-    }
+    }, (err) => {
+      console.error('Firestore error:', err);
+      logActivity(`<b>Error:</b> ${err.message}`);
+    });
+    
   } catch (err) {
     console.error('Error inicializando Firebase:', err);
-    logActivity(`<b>Error Firebase:</b> ${err.message} — usando modo demo`);
-    startDemoMode();
+    logActivity(`<b>Error Firebase:</b> ${err.message}`);
   }
-}
-
-// ============================================================
-// MODO DEMO (fallback)
-// ============================================================
-
-const MENU_DEMO = [
-  { name: 'Rhodes Classic',     price: 3500 },
-  { name: 'Doble Cheddar',      price: 4200 },
-  { name: 'Papas fritas',       price: 1500 }
-];
-
-const CHANNELS_DEMO = ['Salón', 'Delivery', 'Take away'];
-
-function createDemoUser() {
-  const id = `user_${++userIdCounter}`;
-  const channel = CHANNELS_DEMO[Math.floor(Math.random() * CHANNELS_DEMO.length)];
-  const user = {
-    id, type: 'user', state: 'browsing', color: STATES.browsing.color,
-    radius: 14, label: `#${userIdCounter}`, channel, items: [], total: 0,
-    createdAt: Date.now(),
-    x: width/2 + (Math.random() - 0.5) * 120,
-    y: height/2 + (Math.random() - 0.5) * 120
-  };
-  nodes.push(user);
-  logActivity(`<b>Usuario ${user.label}</b> se conectó · ${channel}`);
-  update(); updateStats();
-  setTimeout(() => demoAddItem(user), 1800 + Math.random() * 2500);
-}
-
-function demoAddItem(user) {
-  if (user.state === 'delivered' || !nodes.includes(user)) return;
-  if (user.state === 'browsing') changeState(user, 'building');
-
-  const menuItem = MENU_DEMO[Math.floor(Math.random() * MENU_DEMO.length)];
-  const itemId = `${user.id}_item_${user.items.length}`;
-  const item = {
-    id: itemId, type: 'item', parentId: user.id,
-    color: 'rgba(255,255,255,0.55)', radius: 4, menuItem,
-    x: user.x + (Math.random() - 0.5) * 20,
-    y: user.y + (Math.random() - 0.5) * 20
-  };
-  nodes.push(item);
-  links.push({ source: user.id, target: itemId, type: 'user-item' });
-  user.items.push(item);
-  user.total += menuItem.price;
-  logActivity(`${user.label} · <b>${menuItem.name}</b>`);
-  update(); updateStats();
-
-  if (user.items.length < 5 && Math.random() > 0.35) {
-    setTimeout(() => demoAddItem(user), 1500 + Math.random() * 2500);
-  } else {
-    setTimeout(() => demoGoToCheckout(user), 2000 + Math.random() * 3000);
-  }
-}
-
-function demoGoToCheckout(user) {
-  if (user.state === 'delivered' || !nodes.includes(user)) return;
-  changeState(user, 'paying');
-  logActivity(`${user.label} está <b>pagando</b> · $${user.total.toLocaleString('es-AR')}`);
-  update(); updateStats();
-  setTimeout(() => demoGoToKitchen(user), 2500 + Math.random() * 2000);
-}
-
-function demoGoToKitchen(user) {
-  if (!nodes.includes(user)) return;
-  changeState(user, 'kitchen');
-  logActivity(`Orden ${user.label} <b>en cocina</b>`);
-  update(); updateStats();
-  setTimeout(() => demoGoToDelivery(user), 5000 + Math.random() * 5000);
-}
-
-function demoGoToDelivery(user) {
-  if (!nodes.includes(user)) return;
-  if (user.channel === 'Salón') { demoDeliver(user); return; }
-  changeState(user, 'delivery');
-  logActivity(`Pedido ${user.label} <b>en camino</b>`);
-  update(); updateStats();
-  setTimeout(() => demoDeliver(user), 4000 + Math.random() * 5000);
-}
-
-function demoDeliver(user) {
-  if (!nodes.includes(user)) return;
-  changeState(user, 'delivered');
-  totalDelivered++;
-  totalRevenue += user.total;
-  logActivity(`✓ Pedido ${user.label} <b>entregado</b>`);
-  update(); updateStats();
-  setTimeout(() => removeUser(user), 4500);
-}
-
-function startDemoMode() {
-  logActivity('Modo demo activo · datos simulados');
-  function spawnLoop() {
-    createDemoUser();
-    setTimeout(spawnLoop, 2500 + Math.random() * 4000);
-  }
-  setTimeout(() => createDemoUser(), 300);
-  setTimeout(() => createDemoUser(), 1200);
-  setTimeout(() => createDemoUser(), 2400);
-  setTimeout(spawnLoop, 4000);
 }
 
 initFirebase();
+
+// ════ RUTINA DE ACTUALIZACIÓN Y LIMPIEZA DE FANTASMAS (El Camión de Basura) ════
+setInterval(() => {
+  // 1. Actualizar el panel lateral si hay alguien seleccionado
+  if (selectedUserId) {
+    const user = nodes.find(n => n.id === selectedUserId);
+    if (user) selectUser(user);
+    else {
+      selectedUserId = null;
+      document.getElementById('detail').classList.remove('visible');
+    }
+  }
+
+  // 2. El camión de basura: Limpiar nodos abandonados (> 15 minutos inactivos)
+  const ahora = Date.now();
+  const limiteInactividad = 15 * 60 * 1000; // 15 minutos en milisegundos
+
+  nodes.filter(n => n.type === 'user').forEach(user => {
+    // Si está navegando o armando pedido y se pasó de tiempo...
+    if (['browsing', 'building'].includes(user.state)) {
+      if (ahora - user.createdAt > limiteInactividad) {
+        logActivity(`🧹 Limpiando fantasma: <b>${user.label}</b>`);
+        
+        // Lo borramos de la pantalla visualmente
+        removeUser(user);
+        
+        // Lo detonamos de Firebase (usando la sintaxis moderna v10)
+        if (window.db && window.deleteDoc && window.doc) {
+          window.deleteDoc(window.doc(window.db, CONFIG.collectionName, user.id)).catch(()=>{});
+        }
+      }
+    }
+  });
+}, 1000);
+
 
 window.addEventListener('resize', () => {
   width = window.innerWidth;
