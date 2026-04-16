@@ -459,45 +459,37 @@
 <script type="module">
 
 // ============================================================
-// CONFIGURACIÓN — Editá esta sección para conectar con Firebase
+// CONFIGURACIÓN ACTUALIZADA CON TU FIREBASE REAL
 // ============================================================
 
 const CONFIG = {
 
-  // Cambiá a 'firestore' o 'rtdb' cuando tengas Firebase listo.
-  // Dejá 'demo' para seguir viendo datos simulados.
+  // Activamos firestore para que deje de simular y lea la base de datos
   mode: 'firestore',
 
-  // Config de Firebase (la sacás de Firebase Console → Configuración → General)
-  // Es público, no es un secreto, lo que importa son las reglas de seguridad.
+  // Tu Configuración exacta
   firebase: {
-    apiKey:            "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
-    authDomain:        "rhodes-burguers.firebaseapp.com",
-    projectId:         "rhodes-burguers",
-    storageBucket:     "rhodes-burguers.firebasestorage.app",
+    apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
+    authDomain: "rhodes-burguers.firebaseapp.com",
+    projectId: "rhodes-burguers",
+    storageBucket: "rhodes-burguers.firebasestorage.app",
     messagingSenderId: "951646688091",
-    appId:             "1:951646688091:web:05db5fadb4150d1fa9c07e",
-    measurementId:     "G-LQVYTJWHSM"
+    appId: "1:951646688091:web:05db5fadb4150d1fa9c07e",
+    measurementId: "G-LQVYTJWHSM"
   },
 
-  // Nombre de la colección donde están las órdenes activas.
-  // Posibles: 'orders', 'pedidos_clientes', 'order_public'
   collectionName: 'orders',
 
-  // Mapeá los nombres de TUS campos a los que usa el panel.
-  // Si en tu DB usás 'status' en vez de 'estado', cambialo acá.
   fieldMap: {
-    estado:     'estado',     // string con el estado actual
-    canal:      'canal',      // 'Salón' | 'Delivery' | 'Take away'
-    items:      'items',      // array de items
-    total:      'total',      // number, total acumulado
-    itemNombre: 'nombre',     // dentro de cada item
-    itemPrecio: 'precio',     // dentro de cada item
-    createdAt:  'createdAt'   // timestamp
+    estado:     'estado',     
+    canal:      'canal',      
+    items:      'items',      
+    total:      'total',      
+    itemNombre: 'nombre',     
+    itemPrecio: 'precio',     
+    createdAt:  'createdAt'   
   },
 
-  // Mapeá TUS valores de estado a los que usa el panel.
-  // Si en tu DB usás 'navegando' en vez de 'browsing', cambialo acá.
   stateMap: {
     'browsing':  'browsing',
     'building':  'building',
@@ -536,7 +528,7 @@ const feMerge = glowFilter.append('feMerge');
 feMerge.append('feMergeNode').attr('in', 'coloredBlur');
 feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
-// Radial gradients (lighter center for depth)
+// Radial gradients
 Object.keys(STATES).forEach(s => {
   const c = STATES[s].color;
   const grad = defs.append('radialGradient').attr('id', `grad-${s}`).attr('cx', '35%').attr('cy', '35%');
@@ -575,7 +567,6 @@ let userIdCounter = 0;
 let totalDelivered = 0;
 let totalRevenue = 0;
 
-// Force simulation — tuned to cluster tighter
 const simulation = d3.forceSimulation(nodes)
   .force('charge', d3.forceManyBody()
     .strength(d => d.type === 'user' ? -180 : -25)
@@ -644,7 +635,6 @@ function update() {
     .transition().duration(500).ease(d3.easeCubicOut)
     .attr('fill', d => d.type === 'user' ? `url(#grad-${d.state})` : d.color);
 
-  // Ripple effect on state change
   node.filter(d => d.stateChanged).each(function(d) {
     d.stateChanged = false;
     const ring = d3.select(this).select('circle.ring')
@@ -788,7 +778,6 @@ function handleRemoteChange(type, id, raw) {
     };
     nodes.push(user);
 
-    // Crear items como nodos
     data.items.forEach((item, idx) => {
       const itemId = `${id}_item_${idx}`;
       const itemNode = {
@@ -807,7 +796,6 @@ function handleRemoteChange(type, id, raw) {
     update(); updateStats();
 
   } else if (type === 'modified' && existing) {
-    // Cambio de estado
     if (existing.state !== data.state) {
       changeState(existing, data.state);
       logActivity(`${existing.label} → <b>${STATES[data.state].name}</b>`);
@@ -818,7 +806,6 @@ function handleRemoteChange(type, id, raw) {
       }
     }
 
-    // Items nuevos
     const currentItemCount = existing.items.length;
     if (data.items.length > currentItemCount) {
       for (let i = currentItemCount; i < data.items.length; i++) {
@@ -871,18 +858,7 @@ async function initFirebase() {
         console.error('Firestore error:', err);
         logActivity(`<b>Error:</b> ${err.message}`);
       });
-
-    } else if (CONFIG.mode === 'rtdb') {
-      const { getDatabase, ref, onChildAdded, onChildChanged, onChildRemoved } =
-        await import('https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js');
-      const db = getDatabase(app);
-      const sessionsRef = ref(db, CONFIG.collectionName);
-
-      onChildAdded(sessionsRef,   (snap) => handleRemoteChange('added',    snap.key, snap.val() || {}));
-      onChildChanged(sessionsRef, (snap) => handleRemoteChange('modified', snap.key, snap.val() || {}));
-      onChildRemoved(sessionsRef, (snap) => handleRemoteChange('removed',  snap.key, snap.val() || {}));
     }
-
   } catch (err) {
     console.error('Error inicializando Firebase:', err);
     logActivity(`<b>Error Firebase:</b> ${err.message} — usando modo demo`);
@@ -891,22 +867,13 @@ async function initFirebase() {
 }
 
 // ============================================================
-// MODO DEMO (fallback) — datos simulados
+// MODO DEMO (fallback)
 // ============================================================
 
 const MENU_DEMO = [
   { name: 'Rhodes Classic',     price: 3500 },
   { name: 'Doble Cheddar',      price: 4200 },
-  { name: 'BBQ Bacon',          price: 4800 },
-  { name: 'Veggie Burger',      price: 3800 },
-  { name: 'Smash Triple',       price: 5500 },
-  { name: 'Papas fritas',       price: 1500 },
-  { name: 'Aros de cebolla',    price: 1800 },
-  { name: 'Nuggets x6',         price: 2200 },
-  { name: 'Coca-Cola',          price: 900  },
-  { name: 'Cerveza IPA',        price: 1600 },
-  { name: 'Limonada',           price: 1200 },
-  { name: 'Brownie con helado', price: 2400 }
+  { name: 'Papas fritas',       price: 1500 }
 ];
 
 const CHANNELS_DEMO = ['Salón', 'Delivery', 'Take away'];
@@ -1000,7 +967,6 @@ function startDemoMode() {
   setTimeout(spawnLoop, 4000);
 }
 
-// Arrancar todo
 initFirebase();
 
 window.addEventListener('resize', () => {
