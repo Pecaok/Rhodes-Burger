@@ -632,11 +632,12 @@
       }
     };
 
-    // Mantenemos tu lógica intacta para ocultar el cartel gigante SIEMPRE.
+    // ════ LA LÓGICA DE HORARIOS INTACTA (EL CARTEL NEGRO YA NO SE MUESTRA) ════
     window.checkStatus=function(){
       const conf=window.STATE.config.store,now=new Date();
+      
       const blocker=document.getElementById("blocker");
-      if(blocker) blocker.classList.add("hidden"); // <-- Saltea la pantalla negra
+      if(blocker) blocker.classList.add("hidden"); 
       
       let isOpen=false,label="CERRADO";
       if(conf.forceOpen===true){isOpen=true;label="ABIERTO";}
@@ -669,6 +670,7 @@
     <line class="rd" stroke-width="1.5" x1="440" y1="420" x2="620" y2="520"/>
     <line class="rd" stroke-width="1.5" x1="200" y1="280" x2="140" y2="440"/>
     <line class="rd" stroke-width="2" x1="440" y1="280" x2="500" y2="0"/>
+
     <line class="rd" stroke-width="2" stroke-dasharray="10,4" x1="0" y1="180" x2="900" y2="220"/>
     <g stroke="rgba(255,255,255,0.6)" stroke-width="1.2">
       <line x1="30"  y1="179" x2="32"  y2="183"/>
@@ -704,6 +706,7 @@
     <rect class="rb" stroke-width="1.5" x="390" y="220" width="70" height="40" rx="1"/>
     <line class="rd" stroke-width="1" x1="390" y1="235" x2="460" y2="235"/>
     <text class="rt" x="395" y="232" fill="rgba(255,255,255,0.6)">RHODES STN.</text>
+
     <rect class="rb" stroke-width="2" x="400" y="285" width="55" height="38" rx="1"/>
     <line class="rd" stroke-width="1" x1="400" y1="295" x2="455" y2="295"/>
     <rect class="rb" stroke-width="1" x="418" y="295" width="20" height="28" rx="0"/>
@@ -1027,6 +1030,7 @@ document.getElementById("btnAddCart").onclick=()=>{
   saveCart();document.getElementById("modalOvl").classList.remove("open");window.toast(`${item.name} agregado`);
 };
 
+// ════ INTEGRACIÓN RADAR: Actualiza el radar en cada cambio de carrito ════
 function saveCart(){
   localStorage.setItem(CART_KEY,JSON.stringify(window.STATE.cart));
   updateCartUI();
@@ -1065,45 +1069,54 @@ window.toggleDrawer=(open)=>{const d=document.getElementById("drawer");if(open){
 document.getElementById("modalOvl").onclick=(e)=>{if(e.target.id==="modalOvl")document.getElementById("modalOvl").classList.remove("open");};
 document.getElementById("ingOvl").addEventListener('click',e=>{if(e.target.id==="ingOvl")window.closeIng();});
 
-// ════ LIMPIEZA AUTOMÁTICA DE NODOS FANTASMAS (El antibasura) ════
+// ════ LIMPIEZA AUTOMÁTICA DE NODOS FANTASMAS (El antibasura para celulares) ════
 let pedidoEnviado = false;
 
-// 1. Interceptamos el botón de checkout para que no borre el nodo cuando confirmás la compra
-const btnCheck = document.getElementById("btnCheckout");
-if(btnCheck) {
-    btnCheck.addEventListener('click', async () => {
-        const ic = Object.keys(window.STATE.cart.burger).length + Object.keys(window.STATE.cart.drink).length + Object.keys(window.STATE.cart.side).length;
-        if(ic === 0) return alert("Tu carrito está vacío");
-        
-        pedidoEnviado = true; // Avisamos que no hay que borrarlo al salir
-        
-        let lc = {items:[]};
-        const cv = (id,obj,t) => lc.items.push({id:obj.item.id,name:obj.item.name,price:Number(obj.item.price),category:obj.item.category,qty:obj.qty,fries:obj.fries,friesRaw:obj.friesRaw,sideType:obj.sideType,extras:obj.extras,notes:obj.notes,finalPrice:obj.finalPrice,type:t});
-        for(let id in window.STATE.cart.burger) cv(id,window.STATE.cart.burger[id],'burger');
-        for(let id in window.STATE.cart.side) cv(id,window.STATE.cart.side[id],'side');
-        for(let id in window.STATE.cart.drink) cv(id,window.STATE.cart.drink[id],'drink');
-        localStorage.setItem("rhodes_cart_legacy_format",JSON.stringify(lc));
-        
-        if(window.actualizarRadar && window.miPedidoId && window.db){
-            btnCheck.innerText = "Procesando...";
-            try { await window.db.collection("orders").doc(window.miPedidoId).update({estado:"paying"}); } catch(e){}
-        }
-        window.location.href = "pedido_cliente.html";
-    });
+document.getElementById("btnCheckout").onclick=async ()=>{
+  const ic=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.drink).length+Object.keys(window.STATE.cart.side).length;
+  if(!ic)return alert("Tu carrito está vacío");
+
+  pedidoEnviado = true; // IMPORTANTÍSIMO: Avisamos que la compra es real para que no borre el nodo al salir de la página
+
+  let lc={items:[]};
+  const cv=(id,obj,t)=>lc.items.push({id:obj.item.id,name:obj.item.name,price:Number(obj.item.price),category:obj.item.category,qty:obj.qty,fries:obj.fries,friesRaw:obj.friesRaw,sideType:obj.sideType,extras:obj.extras,notes:obj.notes,finalPrice:obj.finalPrice,type:t});
+  for(let id in window.STATE.cart.burger)cv(id,window.STATE.cart.burger[id],'burger');
+  for(let id in window.STATE.cart.side)cv(id,window.STATE.cart.side[id],'side');
+  for(let id in window.STATE.cart.drink)cv(id,window.STATE.cart.drink[id],'drink');
+  localStorage.setItem("rhodes_cart_legacy_format",JSON.stringify(lc));
+  
+  if(window.actualizarRadar && window.miPedidoId && window.db){
+    document.getElementById("btnCheckout").innerText="Procesando...";
+    try{ await window.db.collection("orders").doc(window.miPedidoId).update({estado:"paying"}); }catch(e){}
+  }
+  window.location.href="pedido_cliente.html";
+};
+
+// Esta es la función mágica que dispara el misil de borrado a Firebase
+function matarNodoFantasma() {
+    if (window.miPedidoId && !pedidoEnviado) {
+        const url = `https://firestore.googleapis.com/v1/projects/rhodes-burguers/databases/(default)/documents/orders/${window.miPedidoId}`;
+        // keepalive: true hace que el celular siga enviando el mensaje de borrado aunque la app de Chrome/Safari se cierre en la cara.
+        fetch(url, { method: 'DELETE', keepalive: true }).catch(()=>{});
+    }
 }
 
-// 2. Si cierra la pestaña o retrocede y NO confirmó el pedido, lo detonamos de Firebase
-window.addEventListener('pagehide', () => {
-    if (window.miPedidoId && window.db && !pedidoEnviado) {
-        window.db.collection("orders").doc(window.miPedidoId).delete();
-    }
+// visibilitychange atrapa cuando el usuario minimiza o cierra la pestaña en celulares iOS/Android
+window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') matarNodoFantasma();
 });
 
+// pagehide / unload atrapan cuando se cierra la pestaña en la PC
+window.addEventListener('pagehide', matarNodoFantasma);
+window.addEventListener('unload', matarNodoFantasma);
+
+
+// ════ ANULACIÓN DEL CARTEL NEGRO DE BLOQUEO ════
 window.checkStatus=function(){
   const conf=window.STATE.config.store,now=new Date();
   
   const blocker=document.getElementById("blocker");
-  if(blocker) blocker.classList.add("hidden");
+  if(blocker) blocker.classList.add("hidden"); 
   
   let isOpen=false,label="CERRADO";
   if(conf.forceOpen===true){isOpen=true;label="ABIERTO";}
