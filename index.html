@@ -38,7 +38,6 @@
     #rdr-map svg{width:100%;height:100%;object-fit:cover;}
 
     /* ════════════ DUST TUMBLEWEED ════════════ */
-    /* Rolling dust across the bottom — western feel */
     #dust{position:fixed;bottom:0;left:0;width:100%;height:80px;z-index:1;pointer-events:none;overflow:hidden;}
     .tumb{
       position:absolute;bottom:10px;
@@ -55,7 +54,6 @@
       90% {opacity:.4;}
     100%{opacity:0;transform:translateX(110vw) rotate(720deg);}
     }
-    /* Film grain — like a sepia old photo */
     #grain{
       position:fixed;inset:0;z-index:1;pointer-events:none;
       background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -975,8 +973,26 @@ function initFirebase(){
   db.collection("config").doc("menuOrder").onSnapshot(doc=>{window.STATE.menuOrder=doc.exists?doc.data():{};window.fastRender();cache();},()=>{});
   db.collection("config").doc("prices").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.prices={patty:Number(d.patty)||2500,cheddar:Number(d.cheddar)||300,onionRings:Number(d.onionRings)||1600};cache();if(window.MODAL?.item){const p=window.STATE.config.prices;document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;updateModalPrice();}},()=>{});
 
-  // ════ INTEGRACIÓN RADAR (Se activa apenas carga) ════
-  db.collection("orders").add({estado:"browsing",canal:"Web / Celular",items:[],total:0,createdAt:firebase.firestore.FieldValue.serverTimestamp()}).then(r=>{window.miPedidoId=r.id;}).catch(()=>{});
+  // ════ INTEGRACIÓN RADAR (Con memoria de sesión para no duplicar nodos) ════
+  const savedOrderId = sessionStorage.getItem("rhodes_live_order_id");
+  
+  function crearNuevoNodo() {
+    db.collection("orders").add({estado:"browsing",canal:"Web / Celular",items:[],total:0,createdAt:firebase.firestore.FieldValue.serverTimestamp()}).then(r=>{
+      window.miPedidoId=r.id;
+      sessionStorage.setItem("rhodes_live_order_id", r.id);
+    }).catch(()=>{});
+  }
+
+  if(savedOrderId) {
+    window.miPedidoId = savedOrderId;
+    const cnt = Object.keys(window.STATE.cart.burger).length + Object.keys(window.STATE.cart.side).length + Object.keys(window.STATE.cart.drink).length;
+    db.collection("orders").doc(savedOrderId).update({
+      estado: cnt > 0 ? "building" : "browsing"
+    }).catch(()=>{ crearNuevoNodo(); }); // Si tiró error (porque se borró en Firebase) creamos uno nuevo
+  } else {
+    crearNuevoNodo();
+  }
+
   window.actualizarRadar = function(st){
     if(!window.miPedidoId)return;
     let itms=[], tot=0;
@@ -1030,7 +1046,6 @@ document.getElementById("btnAddCart").onclick=()=>{
   saveCart();document.getElementById("modalOvl").classList.remove("open");window.toast(`${item.name} agregado`);
 };
 
-// ════ INTEGRACIÓN RADAR: Actualiza el radar en cada cambio de carrito ════
 function saveCart(){
   localStorage.setItem(CART_KEY,JSON.stringify(window.STATE.cart));
   updateCartUI();
@@ -1069,14 +1084,13 @@ window.toggleDrawer=(open)=>{const d=document.getElementById("drawer");if(open){
 document.getElementById("modalOvl").onclick=(e)=>{if(e.target.id==="modalOvl")document.getElementById("modalOvl").classList.remove("open");};
 document.getElementById("ingOvl").addEventListener('click',e=>{if(e.target.id==="ingOvl")window.closeIng();});
 
-// ════ LIMPIEZA AUTOMÁTICA DE NODOS FANTASMAS (El antibasura para celulares) ════
 let pedidoEnviado = false;
 
 document.getElementById("btnCheckout").onclick=async ()=>{
   const ic=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.drink).length+Object.keys(window.STATE.cart.side).length;
   if(!ic)return alert("Tu carrito está vacío");
 
-  pedidoEnviado = true; // IMPORTANTÍSIMO: Avisamos que la compra es real para que no borre el nodo al salir de la página
+  pedidoEnviado = true; // Avisamos que no borre el nodo
 
   let lc={items:[]};
   const cv=(id,obj,t)=>lc.items.push({id:obj.item.id,name:obj.item.name,price:Number(obj.item.price),category:obj.item.category,qty:obj.qty,fries:obj.fries,friesRaw:obj.friesRaw,sideType:obj.sideType,extras:obj.extras,notes:obj.notes,finalPrice:obj.finalPrice,type:t});
@@ -1092,26 +1106,19 @@ document.getElementById("btnCheckout").onclick=async ()=>{
   window.location.href="pedido_cliente.html";
 };
 
-// Esta es la función mágica que dispara el misil de borrado a Firebase
+// Misil antibasura que limpia todo al salir
 function matarNodoFantasma() {
     if (window.miPedidoId && !pedidoEnviado) {
         const url = `https://firestore.googleapis.com/v1/projects/rhodes-burguers/databases/(default)/documents/orders/${window.miPedidoId}`;
-        // keepalive: true hace que el celular siga enviando el mensaje de borrado aunque la app de Chrome/Safari se cierre en la cara.
         fetch(url, { method: 'DELETE', keepalive: true }).catch(()=>{});
+        sessionStorage.removeItem("rhodes_live_order_id");
     }
 }
-
-// visibilitychange atrapa cuando el usuario minimiza o cierra la pestaña en celulares iOS/Android
-window.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') matarNodoFantasma();
-});
-
-// pagehide / unload atrapan cuando se cierra la pestaña en la PC
+window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') matarNodoFantasma(); });
 window.addEventListener('pagehide', matarNodoFantasma);
 window.addEventListener('unload', matarNodoFantasma);
 
-
-// ════ ANULACIÓN DEL CARTEL NEGRO DE BLOQUEO ════
+// ════ LÓGICA ORIGINAL DE HORARIOS SIN PANTALLA NEGRA ════
 window.checkStatus=function(){
   const conf=window.STATE.config.store,now=new Date();
   
