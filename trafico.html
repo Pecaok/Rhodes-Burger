@@ -463,11 +463,8 @@
 // ============================================================
 
 const CONFIG = {
-
-  // Activamos firestore para que deje de simular y lea la base de datos
   mode: 'firestore',
 
-  // Tu Configuración exacta
   firebase: {
     apiKey: "AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",
     authDomain: "rhodes-burguers.firebaseapp.com",
@@ -762,6 +759,9 @@ function handleRemoteChange(type, id, raw) {
   const existing = nodes.find(n => n.id === id && n.type === 'user');
 
   if (type === 'added' || (!existing && type === 'modified')) {
+    // Evitar renderizar nodos que ya están entregados al abrir el panel
+    if (data.state === 'delivered') return;
+
     const user = {
       id,
       type: 'user',
@@ -799,6 +799,8 @@ function handleRemoteChange(type, id, raw) {
     if (existing.state !== data.state) {
       changeState(existing, data.state);
       logActivity(`${existing.label} → <b>${STATES[data.state].name}</b>`);
+      
+      // Si el pedido pasó a entregado, lo animamos y luego lo borramos de la pantalla
       if (data.state === 'delivered') {
         totalDelivered++;
         totalRevenue += data.total;
@@ -845,12 +847,18 @@ async function initFirebase() {
     logActivity('✓ Conectado a Firebase');
 
     if (CONFIG.mode === 'firestore') {
-      const { getFirestore, collection, onSnapshot } =
+      // 1. Importamos 'query' y 'where' para hacer el filtro
+      const { getFirestore, collection, onSnapshot, query, where } =
         await import('https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js');
+      
       const db = getFirestore(app);
       const ref = collection(db, CONFIG.collectionName);
 
-      onSnapshot(ref, (snap) => {
+      // 2. EL FILTRO PERFECTO: Traer a cualquiera que NO esté "entregado"
+      const q = query(ref, where('estado', '!=', 'delivered'));
+
+      // 3. Escuchamos solo a los que pasan el filtro
+      onSnapshot(q, (snap) => {
         snap.docChanges().forEach(change => {
           handleRemoteChange(change.type, change.doc.id, change.doc.data());
         });
