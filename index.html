@@ -924,6 +924,17 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js" defer></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js" defer></script>
 
+<!-- ════════════════════════════════════════════════════════════════════════
+     BLOQUE FIXEADO — Reemplazar el último <script defer> de index.html
+     (el que empieza con "let db;" y termina con el cierre de </script>)
+     
+     CAMBIOS vs el original:
+     1. Radar usa localStorage + sessionStorage (más robusto)
+     2. Verifica con .get() que el doc exista en Firestore antes de reutilizar
+     3. matarNodoFantasma ya NO se dispara con visibilitychange
+     4. Flag navegandoInterno evita borrar al ir a pedido_cliente
+     ════════════════════════════════════════════════════════════════════════ -->
+
 <script defer>
 let db;
 
@@ -973,35 +984,105 @@ function initFirebase(){
   db.collection("config").doc("menuOrder").onSnapshot(doc=>{window.STATE.menuOrder=doc.exists?doc.data():{};window.fastRender();cache();},()=>{});
   db.collection("config").doc("prices").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.prices={patty:Number(d.patty)||2500,cheddar:Number(d.cheddar)||300,onionRings:Number(d.onionRings)||1600};cache();if(window.MODAL?.item){const p=window.STATE.config.prices;document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;updateModalPrice();}},()=>{});
 
-  // ════ INTEGRACIÓN RADAR (Con memoria de sesión para no duplicar nodos) ════
-  const savedOrderId = sessionStorage.getItem("rhodes_live_order_id");
-  
-  function crearNuevoNodo() {
-    db.collection("orders").add({estado:"browsing",canal:"Web / Celular",items:[],total:0,createdAt:firebase.firestore.FieldValue.serverTimestamp()}).then(r=>{
-      window.miPedidoId=r.id;
-      sessionStorage.setItem("rhodes_live_order_id", r.id);
-    }).catch(()=>{});
+  // ════ FIX: INTEGRACIÓN RADAR CORREGIDA ════
+  const RADAR_KEY = "rhodes_live_order_id";
+  const savedOrderId = sessionStorage.getItem(RADAR_KEY) || localStorage.getItem(RADAR_KEY);
+  let navegandoInterno = false;
+  window._navegandoInterno = false; // Expuesto para el checkout
+
+  function registrarNodoId(id) {
+    window.miPedidoId = id;
+    sessionStorage.setItem(RADAR_KEY, id);
+    localStorage.setItem(RADAR_KEY, id);
   }
 
-  if(savedOrderId) {
-    window.miPedidoId = savedOrderId;
-    const cnt = Object.keys(window.STATE.cart.burger).length + Object.keys(window.STATE.cart.side).length + Object.keys(window.STATE.cart.drink).length;
-    db.collection("orders").doc(savedOrderId).update({
-      estado: cnt > 0 ? "building" : "browsing"
-    }).catch(()=>{ crearNuevoNodo(); }); // Si tiró error (porque se borró en Firebase) creamos uno nuevo
-  } else {
+  function limpiarNodoId() {
+    sessionStorage.removeItem(RADAR_KEY);
+    localStorage.removeItem(RADAR_KEY);
+    window.miPedidoId = null;
+  }
+  window._limpiarNodoId = limpiarNodoId; // Expuesto
+
+  function crearNuevoNodo() {
+    db.collection("orders").add({
+      estado: "browsing",
+      canal: "Web / Celular",
+      items: [],
+      total: 0,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    }).then(r => {
+      registrarNodoId(r.id);
+    }).catch(() => {});
+  }
+
+  // Verificar si el nodo guardado existe y es reutilizable
+  async function recuperarOCrearNodo() {
+    if (savedOrderId) {
+      try {
+        const docSnap = await db.collection("orders").doc(savedOrderId).get();
+        if (docSnap.exists) {
+          const data = docSnap.data();
+          const estado = data.estado;
+
+          // Si ya se entregó, crear nuevo
+          if (estado === 'delivered') {
+            crearNuevoNodo();
+            return;
+          }
+
+          // Reutilizar el nodo existente
+          registrarNodoId(savedOrderId);
+
+          // Calcular estado según el carrito actual
+          const cnt = Object.keys(window.STATE.cart.burger).length
+                    + Object.keys(window.STATE.cart.side).length
+                    + Object.keys(window.STATE.cart.drink).length;
+          const nuevoEstado = cnt > 0 ? "building" : "browsing";
+
+          // Solo actualizar si cambió
+          if (estado !== nuevoEstado) {
+            await db.collection("orders").doc(savedOrderId).update({ estado: nuevoEstado });
+          }
+          return;
+        }
+      } catch (e) {
+        console.warn("No se pudo recuperar el nodo anterior:", e);
+      }
+    }
+    // Si no había ID o el doc no existe → crear nuevo
     crearNuevoNodo();
   }
 
-  window.actualizarRadar = function(st){
-    if(!window.miPedidoId)return;
-    let itms=[], tot=0;
-    const p=o=>{itms.push({nombre:o.item.name,precio:o.finalPrice}); tot+=o.finalPrice*o.qty;};
-    Object.values(window.STATE.cart.burger||{}).forEach(p);
-    Object.values(window.STATE.cart.side||{}).forEach(p);
-    Object.values(window.STATE.cart.drink||{}).forEach(p);
-    db.collection("orders").doc(window.miPedidoId).update({estado:st,items:itms,total:tot}).catch(()=>{});
+  recuperarOCrearNodo();
+
+  window.actualizarRadar = function(st) {
+    if (!window.miPedidoId) return;
+    let itms = [], tot = 0;
+    const p = o => { itms.push({ nombre: o.item.name, precio: o.finalPrice }); tot += o.finalPrice * o.qty; };
+    Object.values(window.STATE.cart.burger || {}).forEach(p);
+    Object.values(window.STATE.cart.side || {}).forEach(p);
+    Object.values(window.STATE.cart.drink || {}).forEach(p);
+    db.collection("orders").doc(window.miPedidoId).update({ estado: st, items: itms, total: tot }).catch(() => {});
   };
+
+  // ════ FIX: matarNodoFantasma corregido ════
+  // Ya NO usa visibilitychange. Solo se dispara al cerrar la pestaña.
+  window._matarNodoFantasma = function() {
+    if (window._navegandoInterno) return;
+    if (!window.miPedidoId) return;
+
+    const url = `https://firestore.googleapis.com/v1/projects/rhodes-burguers/databases/(default)/documents/orders/${window.miPedidoId}`;
+    fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
+    limpiarNodoId();
+  };
+
+  window.addEventListener('pagehide', (e) => {
+    if (window._navegandoInterno) return;
+    window._matarNodoFantasma();
+  });
+
+  // REMOVIDO: window.addEventListener('visibilitychange', ...) ← este era el bug
+  // REMOVIDO: window.addEventListener('unload', ...) ← redundante con pagehide
 }
 
 window.toggleSeasoning=function(){
@@ -1084,39 +1165,29 @@ window.toggleDrawer=(open)=>{const d=document.getElementById("drawer");if(open){
 document.getElementById("modalOvl").onclick=(e)=>{if(e.target.id==="modalOvl")document.getElementById("modalOvl").classList.remove("open");};
 document.getElementById("ingOvl").addEventListener('click',e=>{if(e.target.id==="ingOvl")window.closeIng();});
 
+// ════ FIX: CHECKOUT CORREGIDO ════
 let pedidoEnviado = false;
 
-document.getElementById("btnCheckout").onclick=async ()=>{
-  const ic=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.drink).length+Object.keys(window.STATE.cart.side).length;
-  if(!ic)return alert("Tu carrito está vacío");
+document.getElementById("btnCheckout").onclick = async () => {
+  const ic = Object.keys(window.STATE.cart.burger).length + Object.keys(window.STATE.cart.drink).length + Object.keys(window.STATE.cart.side).length;
+  if (!ic) return alert("Tu carrito está vacío");
 
-  pedidoEnviado = true; // Avisamos que no borre el nodo
+  pedidoEnviado = true;
+  window._navegandoInterno = true; // ← FIX: Bloquea matarNodoFantasma
 
-  let lc={items:[]};
-  const cv=(id,obj,t)=>lc.items.push({id:obj.item.id,name:obj.item.name,price:Number(obj.item.price),category:obj.item.category,qty:obj.qty,fries:obj.fries,friesRaw:obj.friesRaw,sideType:obj.sideType,extras:obj.extras,notes:obj.notes,finalPrice:obj.finalPrice,type:t});
-  for(let id in window.STATE.cart.burger)cv(id,window.STATE.cart.burger[id],'burger');
-  for(let id in window.STATE.cart.side)cv(id,window.STATE.cart.side[id],'side');
-  for(let id in window.STATE.cart.drink)cv(id,window.STATE.cart.drink[id],'drink');
-  localStorage.setItem("rhodes_cart_legacy_format",JSON.stringify(lc));
-  
-  if(window.actualizarRadar && window.miPedidoId && window.db){
-    document.getElementById("btnCheckout").innerText="Procesando...";
-    try{ await window.db.collection("orders").doc(window.miPedidoId).update({estado:"paying"}); }catch(e){}
+  let lc = { items: [] };
+  const cv = (id, obj, t) => lc.items.push({ id: obj.item.id, name: obj.item.name, price: Number(obj.item.price), category: obj.item.category, qty: obj.qty, fries: obj.fries, friesRaw: obj.friesRaw, sideType: obj.sideType, extras: obj.extras, notes: obj.notes, finalPrice: obj.finalPrice, type: t });
+  for (let id in window.STATE.cart.burger) cv(id, window.STATE.cart.burger[id], 'burger');
+  for (let id in window.STATE.cart.side) cv(id, window.STATE.cart.side[id], 'side');
+  for (let id in window.STATE.cart.drink) cv(id, window.STATE.cart.drink[id], 'drink');
+  localStorage.setItem("rhodes_cart_legacy_format", JSON.stringify(lc));
+
+  if (window.actualizarRadar && window.miPedidoId && window.db) {
+    document.getElementById("btnCheckout").innerText = "Procesando...";
+    try { await window.db.collection("orders").doc(window.miPedidoId).update({ estado: "paying" }); } catch (e) {}
   }
-  window.location.href="pedido_cliente.html";
+  window.location.href = "pedido_cliente.html";
 };
-
-// Misil antibasura que limpia todo al salir
-function matarNodoFantasma() {
-    if (window.miPedidoId && !pedidoEnviado) {
-        const url = `https://firestore.googleapis.com/v1/projects/rhodes-burguers/databases/(default)/documents/orders/${window.miPedidoId}`;
-        fetch(url, { method: 'DELETE', keepalive: true }).catch(()=>{});
-        sessionStorage.removeItem("rhodes_live_order_id");
-    }
-}
-window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') matarNodoFantasma(); });
-window.addEventListener('pagehide', matarNodoFantasma);
-window.addEventListener('unload', matarNodoFantasma);
 
 // ════ LÓGICA ORIGINAL DE HORARIOS SIN PANTALLA NEGRA ════
 window.checkStatus=function(){
