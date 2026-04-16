@@ -471,13 +471,13 @@ const CONFIG = {
   },
   collectionName: 'orders',
   fieldMap: {
-    estado:     'estado',     
-    canal:      'canal',      
-    items:      'items',      
-    total:      'total',      
-    itemNombre: 'nombre',     
-    itemPrecio: 'precio',     
-    createdAt:  'createdAt'   
+    estado:     'estado',
+    canal:      'canal',
+    items:      'items',
+    total:      'total',
+    itemNombre: 'nombre',
+    itemPrecio: 'precio',
+    createdAt:  'createdAt'
   },
   stateMap: {
     'browsing':  'browsing',
@@ -724,11 +724,10 @@ function mapIncomingData(raw) {
 function handleRemoteChange(type, id, raw) {
   const data = mapIncomingData(raw);
   const existing = nodes.find(n => n.id === id && n.type === 'user');
-  
-  // Extraemos la fecha de creación real de Firebase si existe, si no usamos Date.now()
+
   let realCreatedAt = Date.now();
   if (data.createdAtRaw && data.createdAtRaw.seconds) {
-      realCreatedAt = data.createdAtRaw.seconds * 1000;
+    realCreatedAt = data.createdAtRaw.seconds * 1000;
   }
 
   if (type === 'added' || (!existing && type === 'modified')) {
@@ -744,7 +743,7 @@ function handleRemoteChange(type, id, raw) {
       channel: data.channel,
       items: [],
       total: data.total,
-      createdAt: realCreatedAt, // <-- Fecha real guardada para calcular los 15 min
+      createdAt: realCreatedAt,
       x: width/2 + (Math.random() - 0.5) * 120,
       y: height/2 + (Math.random() - 0.5) * 120
     };
@@ -771,7 +770,7 @@ function handleRemoteChange(type, id, raw) {
     if (existing.state !== data.state) {
       changeState(existing, data.state);
       logActivity(`${existing.label} → <b>${STATES[data.state].name}</b>`);
-      
+
       if (data.state === 'delivered') {
         totalDelivered++;
         totalRevenue += data.total;
@@ -808,21 +807,23 @@ function handleRemoteChange(type, id, raw) {
 
 async function initFirebase() {
   try {
-    // 1. Importamos la versión moderna de Firebase
     const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js');
-    const { getFirestore, collection, onSnapshot, query, where, doc, deleteDoc } =
+    const { getFirestore, collection, onSnapshot, query, where, doc, deleteDoc, getDocs } =
         await import('https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js');
-        
+
     const app = initializeApp(CONFIG.firebase);
     logActivity('✓ Conectado a Firebase');
 
     const db = getFirestore(app);
     const ref = collection(db, CONFIG.collectionName);
 
-    // 2. Guardamos las funciones en 'window' para que el Camión de Basura pueda usarlas
     window.db = db;
     window.doc = doc;
     window.deleteDoc = deleteDoc;
+    window.getDocs = getDocs;
+    window.collection = collection;
+    window.query = query;
+    window.where = where;
 
     const q = query(ref, where('estado', '!=', 'delivered'));
 
@@ -834,7 +835,7 @@ async function initFirebase() {
       console.error('Firestore error:', err);
       logActivity(`<b>Error:</b> ${err.message}`);
     });
-    
+
   } catch (err) {
     console.error('Error inicializando Firebase:', err);
     logActivity(`<b>Error Firebase:</b> ${err.message}`);
@@ -843,9 +844,21 @@ async function initFirebase() {
 
 initFirebase();
 
-// ════ RUTINA DE ACTUALIZACIÓN Y LIMPIEZA DE FANTASMAS (El Camión de Basura) ════
+// ════════════════════════════════════════════════════════════════
+// FIX: CAMIÓN DE BASURA MEJORADO
+// Ahora limpia TODOS los estados con distintos timeouts
+// ════════════════════════════════════════════════════════════════
+
+const TIMEOUT_POR_ESTADO = {
+  browsing: 15 * 60 * 1000,   // 15 min — se fue sin comprar
+  building: 15 * 60 * 1000,   // 15 min — abandonó el carrito
+  paying:   10 * 60 * 1000,   // 10 min — se trabó en el checkout
+  kitchen:  60 * 60 * 1000,   // 60 min — algo falló en cocina
+  delivery: 60 * 60 * 1000,   // 60 min — delivery fantasma
+};
+
 setInterval(() => {
-  // 1. Actualizar el panel lateral si hay alguien seleccionado
+  // 1. Actualizar panel lateral si hay alguien seleccionado
   if (selectedUserId) {
     const user = nodes.find(n => n.id === selectedUserId);
     if (user) selectUser(user);
@@ -855,28 +868,67 @@ setInterval(() => {
     }
   }
 
-  // 2. El camión de basura: Limpiar nodos abandonados (> 15 minutos inactivos)
+  // 2. Limpiar nodos vencidos según su estado
   const ahora = Date.now();
-  const limiteInactividad = 15 * 60 * 1000; // 15 minutos en milisegundos
 
-  nodes.filter(n => n.type === 'user').forEach(user => {
-    // Si está navegando o armando pedido y se pasó de tiempo...
-    if (['browsing', 'building'].includes(user.state)) {
-      if (ahora - user.createdAt > limiteInactividad) {
-        logActivity(`🧹 Limpiando fantasma: <b>${user.label}</b>`);
-        
-        // Lo borramos de la pantalla visualmente
-        removeUser(user);
-        
-        // Lo detonamos de Firebase (usando la sintaxis moderna v10)
-        if (window.db && window.deleteDoc && window.doc) {
-          window.deleteDoc(window.doc(window.db, CONFIG.collectionName, user.id)).catch(()=>{});
-        }
+  // Hacemos copia del array porque removeUser modifica nodes[]
+  const usuarios = nodes.filter(n => n.type === 'user').slice();
+
+  usuarios.forEach(user => {
+    const timeout = TIMEOUT_POR_ESTADO[user.state];
+    if (!timeout) return; // delivered no tiene timeout
+
+    if (ahora - user.createdAt > timeout) {
+      logActivity(`🧹 Limpiando: <b>${user.label}</b> (${STATES[user.state]?.name || user.state})`);
+      removeUser(user);
+
+      if (window.db && window.deleteDoc && window.doc) {
+        window.deleteDoc(window.doc(window.db, CONFIG.collectionName, user.id)).catch(() => {});
       }
     }
   });
 }, 1000);
 
+// ── Limpieza única al cargar: borrar fantasmas viejos de Firestore ──
+async function limpiarFantasmasViejos() {
+  if (!window.db || !window.getDocs || !window.collection || !window.query || !window.where) return;
+
+  try {
+    const ref = window.collection(window.db, CONFIG.collectionName);
+    const hace2h = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+    // Traer todas las órdenes que NO son delivered
+    const q = window.query(ref, window.where('estado', '!=', 'delivered'));
+    const snap = await window.getDocs(q);
+
+    let borrados = 0;
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      const createdAt = data.createdAt?.toDate ? data.createdAt.toDate() : null;
+
+      if (createdAt && createdAt < hace2h) {
+        await window.deleteDoc(window.doc(window.db, CONFIG.collectionName, docSnap.id));
+        borrados++;
+      }
+    }
+
+    if (borrados > 0) {
+      logActivity(`🧹 Limpieza inicial: <b>${borrados}</b> fantasmas eliminados`);
+    }
+  } catch (e) {
+    console.warn('Error en limpieza inicial:', e);
+  }
+}
+
+// Ejecutar 3 segundos después de conectar
+setTimeout(limpiarFantasmasViejos, 3000);
+
+// ════════════════════════════════════════════════════════════════
+
+svg.on('click', () => {
+  selectedUserId = null;
+  document.getElementById('detail').classList.remove('visible');
+});
 
 window.addEventListener('resize', () => {
   width = window.innerWidth;
