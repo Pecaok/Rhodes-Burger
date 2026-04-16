@@ -436,7 +436,6 @@
     /* ══════════════════════════════════════════
        CSS BURGER VIEWER — zero WebGL, zero lag
     ══════════════════════════════════════════ */
-    /* ── Ingredient definitions ── */
     const ING_DEF = {
       bun_top: {emoji:'🍞', name:'Pan Brioche (tapa)',  sub:'Tapa del sándwich',           color:'#C8782A'},
       bun_bot: {emoji:'🍞', name:'Pan Brioche (base)',  sub:'Base del sándwich',            color:'#C8782A'},
@@ -477,7 +476,6 @@
       return L;
     }
 
-    /* ── Ingredient colors by keyword ── */
     const ING_COLORS_MAP = {
       pan:'#C8782A', brioche:'#C8782A', medallón:'#2E1208', carne:'#2E1208',
       cheddar:'#F2B200', queso:'#F2B200', lechuga:'#3A7A28', tomate:'#CC2211',
@@ -513,9 +511,7 @@
         const d = doc.data();
         let layers = [];
 
-        // ── Solo usar formato admin: items: ["Medallón", "Cheddar", ...] ──
         if(Array.isArray(d.items) && d.items.length) {
-          // Contar repetidos para mostrar cantidad
           const counts = {};
           d.items.filter(Boolean).forEach(n => {
             const key = String(n).trim();
@@ -530,7 +526,6 @@
         }
       } catch(err){ console.warn('Recipe fetch:', err); }
 
-      // Fallback: parsear descripción del producto
       const fallback = parseDesc(item.description||'', item.name||'');
       _renderIngItems(fallback.map(l=>({
         name: l.name || (ING_DEF[l.id]||{}).name || l.id,
@@ -567,7 +562,6 @@
     window.closeIng=function(){
       document.getElementById('ingOvl').classList.remove('open');
     };
-
 
     const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
@@ -638,13 +632,12 @@
       }
     };
 
+    // Mantenemos tu lógica intacta para ocultar el cartel gigante SIEMPRE.
     window.checkStatus=function(){
       const conf=window.STATE.config.store,now=new Date();
-      // ¡ESTO ARREGLA LA PANTALLA NEGRA GIGANTE! Forzamos a que siempre esté oculta.
       const blocker=document.getElementById("blocker");
-      if(blocker) blocker.classList.add("hidden");
+      if(blocker) blocker.classList.add("hidden"); // <-- Saltea la pantalla negra
       
-      // Acá abajo mantenemos exactamente tu misma lógica de horario de siempre
       let isOpen=false,label="CERRADO";
       if(conf.forceOpen===true){isOpen=true;label="ABIERTO";}
       else if(conf.forceOpen===false){isOpen=false;label="CERRADO";}
@@ -676,7 +669,6 @@
     <line class="rd" stroke-width="1.5" x1="440" y1="420" x2="620" y2="520"/>
     <line class="rd" stroke-width="1.5" x1="200" y1="280" x2="140" y2="440"/>
     <line class="rd" stroke-width="2" x1="440" y1="280" x2="500" y2="0"/>
-
     <line class="rd" stroke-width="2" stroke-dasharray="10,4" x1="0" y1="180" x2="900" y2="220"/>
     <g stroke="rgba(255,255,255,0.6)" stroke-width="1.2">
       <line x1="30"  y1="179" x2="32"  y2="183"/>
@@ -712,7 +704,6 @@
     <rect class="rb" stroke-width="1.5" x="390" y="220" width="70" height="40" rx="1"/>
     <line class="rd" stroke-width="1" x1="390" y1="235" x2="460" y2="235"/>
     <text class="rt" x="395" y="232" fill="rgba(255,255,255,0.6)">RHODES STN.</text>
-
     <rect class="rb" stroke-width="2" x="400" y="285" width="55" height="38" rx="1"/>
     <line class="rd" stroke-width="1" x1="400" y1="295" x2="455" y2="295"/>
     <rect class="rb" stroke-width="1" x="418" y="295" width="20" height="28" rx="0"/>
@@ -1036,7 +1027,6 @@ document.getElementById("btnAddCart").onclick=()=>{
   saveCart();document.getElementById("modalOvl").classList.remove("open");window.toast(`${item.name} agregado`);
 };
 
-// ════ INTEGRACIÓN RADAR: Actualiza el radar en cada cambio de carrito ════
 function saveCart(){
   localStorage.setItem(CART_KEY,JSON.stringify(window.STATE.cart));
   updateCartUI();
@@ -1075,29 +1065,43 @@ window.toggleDrawer=(open)=>{const d=document.getElementById("drawer");if(open){
 document.getElementById("modalOvl").onclick=(e)=>{if(e.target.id==="modalOvl")document.getElementById("modalOvl").classList.remove("open");};
 document.getElementById("ingOvl").addEventListener('click',e=>{if(e.target.id==="ingOvl")window.closeIng();});
 
-// ════ INTEGRACIÓN RADAR: Avisa que están pagando antes de salir ════
-document.getElementById("btnCheckout").onclick=async ()=>{
-  const ic=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.drink).length+Object.keys(window.STATE.cart.side).length;
-  if(!ic)return alert("Tu carrito está vacío");
-  let lc={items:[]};
-  const cv=(id,obj,t)=>lc.items.push({id:obj.item.id,name:obj.item.name,price:Number(obj.item.price),category:obj.item.category,qty:obj.qty,fries:obj.fries,friesRaw:obj.friesRaw,sideType:obj.sideType,extras:obj.extras,notes:obj.notes,finalPrice:obj.finalPrice,type:t});
-  for(let id in window.STATE.cart.burger)cv(id,window.STATE.cart.burger[id],'burger');
-  for(let id in window.STATE.cart.side)cv(id,window.STATE.cart.side[id],'side');
-  for(let id in window.STATE.cart.drink)cv(id,window.STATE.cart.drink[id],'drink');
-  localStorage.setItem("rhodes_cart_legacy_format",JSON.stringify(lc));
-  
-  if(window.actualizarRadar && window.miPedidoId && window.db){
-    document.getElementById("btnCheckout").innerText="Procesando...";
-    try{ await window.db.collection("orders").doc(window.miPedidoId).update({estado:"paying"}); }catch(e){}
-  }
-  window.location.href="pedido_cliente.html";
-};
+// ════ LIMPIEZA AUTOMÁTICA DE NODOS FANTASMAS (El antibasura) ════
+let pedidoEnviado = false;
 
-// ACÁ ESTÁ EL CAMBIO PARA DEJAR LA LÓGICA DE HORARIOS INTACTA PERO ELIMINAR LA PANTALLA NEGRA
+// 1. Interceptamos el botón de checkout para que no borre el nodo cuando confirmás la compra
+const btnCheck = document.getElementById("btnCheckout");
+if(btnCheck) {
+    btnCheck.addEventListener('click', async () => {
+        const ic = Object.keys(window.STATE.cart.burger).length + Object.keys(window.STATE.cart.drink).length + Object.keys(window.STATE.cart.side).length;
+        if(ic === 0) return alert("Tu carrito está vacío");
+        
+        pedidoEnviado = true; // Avisamos que no hay que borrarlo al salir
+        
+        let lc = {items:[]};
+        const cv = (id,obj,t) => lc.items.push({id:obj.item.id,name:obj.item.name,price:Number(obj.item.price),category:obj.item.category,qty:obj.qty,fries:obj.fries,friesRaw:obj.friesRaw,sideType:obj.sideType,extras:obj.extras,notes:obj.notes,finalPrice:obj.finalPrice,type:t});
+        for(let id in window.STATE.cart.burger) cv(id,window.STATE.cart.burger[id],'burger');
+        for(let id in window.STATE.cart.side) cv(id,window.STATE.cart.side[id],'side');
+        for(let id in window.STATE.cart.drink) cv(id,window.STATE.cart.drink[id],'drink');
+        localStorage.setItem("rhodes_cart_legacy_format",JSON.stringify(lc));
+        
+        if(window.actualizarRadar && window.miPedidoId && window.db){
+            btnCheck.innerText = "Procesando...";
+            try { await window.db.collection("orders").doc(window.miPedidoId).update({estado:"paying"}); } catch(e){}
+        }
+        window.location.href = "pedido_cliente.html";
+    });
+}
+
+// 2. Si cierra la pestaña o retrocede y NO confirmó el pedido, lo detonamos de Firebase
+window.addEventListener('pagehide', () => {
+    if (window.miPedidoId && window.db && !pedidoEnviado) {
+        window.db.collection("orders").doc(window.miPedidoId).delete();
+    }
+});
+
 window.checkStatus=function(){
   const conf=window.STATE.config.store,now=new Date();
   
-  // Forzamos a que el cartel negro de mantenimiento NUNCA tape el menú
   const blocker=document.getElementById("blocker");
   if(blocker) blocker.classList.add("hidden");
   
@@ -1110,21 +1114,6 @@ window.checkStatus=function(){
   const pill=document.getElementById("statusPill");
   if(pill){pill.className=`pill ${isOpen?'pill-open':'pill-closed'}`;pill.innerHTML=`<span>${isOpen?'● Abierto':'● Cerrado'}</span><span style="font-size:9px;opacity:.75">${isOpen?label.replace('ABIERTO ',''):'19:00–00:00'}</span>`;}
 };
-  // ════ LIMPIEZA AUTOMÁTICA DE NODOS FANTASMAS ════
-let pedidoEnviado = false;
-
-// Detectamos si hizo clic en pagar para NO borrar su pedido cuando se vaya
-document.getElementById("btnCheckout").addEventListener('click', () => {
-    pedidoEnviado = true; 
-});
-
-// El evento 'pagehide' se dispara en el milisegundo que cierran la pestaña o cambian de página
-window.addEventListener('pagehide', () => {
-    if (window.miPedidoId && window.db && !pedidoEnviado) {
-        // Borra su registro de la base de datos instantáneamente
-        window.db.collection("orders").doc(window.miPedidoId).delete();
-    }
-});
 </script>
 </body>
 </html>
