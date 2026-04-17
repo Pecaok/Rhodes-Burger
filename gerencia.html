@@ -613,15 +613,28 @@ div[id^="tab-"]{display:none;}
                     if(isPortion){totalGeneral+=qty;if(source==='web')grandTotalWeb+=qty;if(source==='local')grandTotalLocal+=qty;if(source==='py')grandTotalPY+=qty;return;}
                 }
                 if(cleanName.includes('extra feta')||cleanName.includes('extra cheddar'))return;
+                // Saltar items sin nombre
+                if(!cleanName.trim()) return;
                 let isDouble=cleanName.includes('doble');
                 let searchKey=cleanName.replace(/simple|doble/gi,'').trim().replace(/\s+/g,' ');
                 let matchKey=searchKey;
                 const validCats=['hamburguesas','promos','bebidas'];
                 const sKeys=Object.keys(stats).filter(k=>validCats.includes(stats[k].category));
                 if(!sKeys.includes(searchKey)){let found=sKeys.find(k=>searchKey.length>3&&searchKey.includes(k));if(found)matchKey=found;}
-                if(!stats[matchKey])initStat(matchKey,searchKey.charAt(0).toUpperCase()+searchKey.slice(1),isBurger?'hamburguesas':'otros');
-                stats[matchKey].total+=qty;stats[matchKey][source]+=qty;totalGeneral+=qty;
-                if(source==='web')grandTotalWeb+=qty;if(source==='local')grandTotalLocal+=qty;if(source==='py')grandTotalPY+=qty;
+                // Detectar categoría correcta desde PRODUCTS_DB
+                const dbCat = (()=>{
+                    const dbEntry = PRODUCTS_DB[searchKey] || PRODUCTS_DB[matchKey];
+                    if(dbEntry) return dbEntry.category || 'otros';
+                    if(/(coca|sprite|agua|andes|aquarius|gaseosa|cerveza|heineken|corona|quilmes|fanta|pepsi|7up|brahma|stella|schweppes|jugo|baggio|monster|speed|red bull|levite|manaos|limonada|ades|pinta|vaso|litro)/.test(cleanName)) return 'bebidas';
+                    return isBurger ? 'hamburguesas' : 'otros';
+                })();
+                if(!stats[matchKey])initStat(matchKey,searchKey.charAt(0).toUpperCase()+searchKey.slice(1),dbCat);
+                stats[matchKey].total+=qty;stats[matchKey][source]+=qty;
+                // Solo contar en totalGeneral si NO es bebida
+                if(dbCat !== 'bebidas'){
+                    totalGeneral+=qty;
+                    if(source==='web')grandTotalWeb+=qty;if(source==='local')grandTotalLocal+=qty;if(source==='py')grandTotalPY+=qty;
+                }
                 if(stats[matchKey].category==='hamburguesas'||stats[matchKey].category==='promos'){if(isDouble)stats[matchKey].countDouble+=qty;else stats[matchKey].countSimple+=qty;}
                 else stats[matchKey].countSimple+=qty;
             });
