@@ -183,6 +183,7 @@ div[id^="tab-"]{display:none;}
     <div class="tab-btn" onclick="showTab('proportions')">📈 Proporción Ventas</div>
     <div class="tab-btn" onclick="showTab('rentabilidad')">💡 Rentabilidad</div>
     <div class="tab-btn" onclick="showTab('simulador')">📐 Simulador Precios</div>
+    <div class="tab-btn" onclick="showTab('equilibrio')">⚖️ Punto de Equilibrio</div>
     <div class="section-title">Gestión</div>
     <div class="tab-btn" onclick="showTab('stock')">📦 Control de Stock</div>
     <div class="tab-btn" onclick="showTab('subrecipes')">🧩 Armado de Items</div>
@@ -423,8 +424,82 @@ div[id^="tab-"]{display:none;}
         </p>
       </div>
     </div>
-    <!-- SIMULADOR DE PRECIOS -->
-    <div id="tab-simulador" style="display:none">
+    <!-- PUNTO DE EQUILIBRIO -->
+    <div id="tab-equilibrio" style="display:none">
+
+      <!-- KPIs principales -->
+      <div id="eqKpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:20px"></div>
+
+      <!-- Barra de progreso grande -->
+      <div class="card card-accent" id="eqProgressCard" style="margin-bottom:20px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:18px">
+          <div>
+            <div style="font-family:var(--fh);font-size:26px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;color:var(--white)" id="eqProgressTitle">Progreso del mes</div>
+            <div style="font-size:13px;color:var(--muted);margin-top:3px" id="eqProgressSub"></div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-family:var(--fh);font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">Faltan vender</div>
+            <div style="font-family:var(--fh);font-size:36px;font-weight:900;color:var(--gold)" id="eqRemaining">—</div>
+          </div>
+        </div>
+
+        <!-- Barra -->
+        <div style="background:rgba(255,255,255,.06);border-radius:99px;height:22px;overflow:hidden;margin-bottom:8px;border:1px solid var(--border)">
+          <div id="eqBar" style="height:100%;border-radius:99px;transition:width 1s ease;background:var(--green);min-width:4px;display:flex;align-items:center;justify-content:flex-end;padding-right:10px"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted)">
+          <span>0</span>
+          <span id="eqBarLabel"></span>
+        </div>
+
+        <!-- Proyección -->
+        <div id="eqProjection" style="margin-top:16px;padding:14px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--border);font-size:13px;color:var(--muted)"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+        <!-- Desglose de costos fijos -->
+        <div class="card">
+          <h2>💡 Costos Fijos del Mes</h2>
+          <div id="eqFixedList"></div>
+          <div style="display:flex;justify-content:space-between;padding-top:12px;margin-top:12px;border-top:1px solid var(--border);font-family:var(--fh);font-size:18px;font-weight:800;color:var(--white)">
+            <span>TOTAL FIJOS</span><span id="eqTotalFixed" style="color:var(--red)">—</span>
+          </div>
+        </div>
+
+        <!-- Margen de contribución por producto -->
+        <div class="card">
+          <h2>🍔 Margen de Contribución</h2>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Cuánto aporta cada burger vendida a cubrir los fijos.</p>
+          <div id="eqContribList"></div>
+          <div style="display:flex;justify-content:space-between;padding-top:12px;margin-top:12px;border-top:1px solid var(--border);font-family:var(--fh);font-size:16px;font-weight:800;color:var(--white)">
+            <span>MARGEN PROM.</span><span id="eqAvgContrib" style="color:var(--gold)">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabla de equilibrio por producto -->
+      <div class="card" style="margin-top:16px">
+        <h2>📊 Punto de Equilibrio por Producto</h2>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Cuántas unidades de cada producto se necesitan vender para cubrir todos los gastos fijos proporcionalmente.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Producto</th>
+              <th style="text-align:right">Precio</th>
+              <th style="text-align:right">Costo</th>
+              <th style="text-align:right">Margen Unit.</th>
+              <th style="text-align:center">Margen %</th>
+              <th style="text-align:right">Unid. para PE</th>
+              <th style="text-align:right">Vendidos</th>
+              <th style="text-align:center">Estado</th>
+            </tr></thead>
+            <tbody id="eqTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
       <div class="card card-accent" style="margin-bottom:16px">
         <h2 style="border:0;padding:0;margin:0 0 16px;font-size:20px">📐 Simulador de Aumento de Precios</h2>
         <p style="font-size:12px;color:var(--muted);margin:0 0 18px">Simulá cómo quedarían los precios y los márgenes antes de aplicar el cambio.</p>
@@ -827,7 +902,7 @@ div[id^="tab-"]{display:none;}
     window.renderFixedTables=function(){ $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join('');$('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
     window.saveFixedData=function(){ if(!FIXED_DATA.aliases)FIXED_DATA.aliases=[];let pyVal=30;if($('#confPy'))pyVal=Number($('#confPy').value);FIXED_DATA.config={pyPercent:pyVal,taxDebit:Number($('#confDebit').value),taxTransf:Number($('#confTransf').value),taxQR:Number($('#confQR').value)};db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("✅ Guardado"));window.calculateAll();window.renderOrdersTab(); };
     window.saveConfig=window.saveFixedData;
-    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad();if(id==='simulador')window.runSimulator(); };
+    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad();if(id==='simulador')window.runSimulator();if(id==='equilibrio')window.renderEquilibrio(); };
 
     window.loadStockMovements = function() {
         const tbody = document.getElementById('stockMovementsBody');
@@ -865,7 +940,171 @@ div[id^="tab-"]{display:none;}
         pkgFields.forEach(k=>{const el=document.getElementById('sr_pkg_'+k);if(el&&pkg[k])el.value=pkg[k];});
     });
 
-    // ── SIMULADOR DE PRECIOS ──
+    // ── PUNTO DE EQUILIBRIO ──
+    window.renderEquilibrio = function() {
+        // 1. Gastos fijos totales
+        const totalFixed   = (FIXED_DATA.fixed||[]).reduce((s,i)=>s+Number(i.cost||0),0);
+        const totalSalary  = (FIXED_DATA.prod||[]).reduce((s,i)=>s+Number(i.cost||0),0);
+        const totalFijos   = totalFixed + totalSalary;
+
+        // 2. Ventas actuales del mes (ORDERS ya está filtrado por mes en loadDashboardData)
+        const totalRevenue = ORDERS.reduce((s,o)=>s+Number(o.total||0),0);
+        const totalOrders  = ORDERS.length;
+
+        // Contar unidades vendidas por producto
+        const soldMap = {};
+        ORDERS.forEach(o=>{
+            if(o.status==='cancelled') return;
+            (o.items||[]).forEach(it=>{
+                const k=(it.name||'').toLowerCase().trim();
+                soldMap[k]=(soldMap[k]||0)+Number(it.qty||1);
+            });
+        });
+
+        // 3. Calcular margen de contribución por producto (solo burgers con receta)
+        const burgerProducts = PRODUCTS_LIST.filter(p=>
+            p.category==='hamburguesas'||p.category==='sandwiches'
+        );
+
+        const contribs = [];
+        burgerProducts.forEach(prod=>{
+            const recipe=RECIPES.find(r=>r.id.toLowerCase().trim()===prod.name.toLowerCase().trim());
+            const cost=recipe?window.calculateRecipeTotal(recipe):0;
+            if(!prod.price) return;
+            const margin=prod.price-cost;
+            const marginPct=prod.price>0?(margin/prod.price*100):0;
+            const sold=soldMap[prod.name.toLowerCase().trim()]||0;
+            contribs.push({id:prod.id,name:prod.name,price:prod.price,cost,margin,marginPct,sold});
+        });
+
+        // 4. Margen promedio ponderado
+        const totalSold = contribs.reduce((s,c)=>s+c.sold,0);
+        let avgMargin = 0;
+        if(totalSold>0){
+            avgMargin = contribs.reduce((s,c)=>s+(c.margin*(c.sold/totalSold)),0);
+        } else if(contribs.length) {
+            avgMargin = contribs.reduce((s,c)=>s+c.margin,0)/contribs.length;
+        }
+
+        // 5. Punto de equilibrio en unidades (total)
+        const peUnits = avgMargin>0 ? Math.ceil(totalFijos/avgMargin) : 0;
+        // En $
+        const peMoney = totalFijos>0 ? totalFijos/(avgMargin>0?avgMargin/((contribs.reduce((s,c)=>s+c.price,0)/contribs.length)||1):1) : 0;
+
+        // 6. Progreso actual
+        const burgersVendidas=totalSold;
+        const pct=peUnits>0?Math.min(100,(burgersVendidas/peUnits)*100):0;
+        const faltan=Math.max(0,peUnits-burgersVendidas);
+        const superavit=burgersVendidas-peUnits;
+
+        // Días del mes
+        const now=new Date();
+        const diasMes=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+        const diaActual=now.getDate();
+        const diasRestantes=diasMes-diaActual;
+        const burgersXDia=diasRestantes>0?Math.ceil(faltan/diasRestantes):0;
+
+        // ── RENDER KPIs ──
+        const alcanzado=burgersVendidas>=peUnits;
+        document.getElementById('eqKpis').innerHTML=`
+          <div class="kpi"><div class="kpi-lbl">Gastos Fijos Totales</div><div class="kpi-val text-red">${money(totalFijos)}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Punto de Equilibrio</div><div class="kpi-val" style="color:var(--gold)">${peUnits} burgers</div></div>
+          <div class="kpi"><div class="kpi-lbl">Burgers Vendidas</div><div class="kpi-val" style="color:${alcanzado?'var(--green)':'var(--txt)'}">${burgersVendidas}</div></div>
+          <div class="kpi"><div class="kpi-lbl">${alcanzado?'Superávit 🎉':'Faltan vender'}</div><div class="kpi-val" style="color:${alcanzado?'var(--green)':'var(--orange)'}">${alcanzado?'+'+superavit+' burgers':faltan+' burgers'}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Ventas del Mes</div><div class="kpi-val text-green">${money(totalRevenue)}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Margen Prom. Contrib.</div><div class="kpi-val" style="color:var(--gold)">${money(avgMargin)}/burger</div></div>
+        `;
+
+        // ── BARRA DE PROGRESO ──
+        const card=document.getElementById('eqProgressCard');card.style.display='block';
+        const barColor=pct>=100?'var(--green)':pct>=70?'#eab308':'var(--orange)';
+        document.getElementById('eqBar').style.width=pct+'%';
+        document.getElementById('eqBar').style.background=barColor;
+        document.getElementById('eqBar').innerHTML=pct>15?`<span style="font-family:var(--fh);font-size:13px;font-weight:800;color:#1a1710">${pct.toFixed(0)}%</span>`:'';
+        document.getElementById('eqBarLabel').textContent=`Meta: ${peUnits} burgers`;
+        document.getElementById('eqProgressTitle').textContent=alcanzado?'✅ Punto de equilibrio alcanzado':'Progreso hacia el punto de equilibrio';
+        document.getElementById('eqProgressSub').textContent=`Día ${diaActual} de ${diasMes} — ${burgersVendidas} de ${peUnits} burgers vendidas`;
+        document.getElementById('eqRemaining').textContent=alcanzado?'¡Superado!':faltan+' burgers';
+        document.getElementById('eqRemaining').style.color=alcanzado?'var(--green)':'var(--gold)';
+
+        // Proyección
+        let proyeccion='';
+        if(!alcanzado && diasRestantes>0){
+            proyeccion=`📅 Para llegar al punto de equilibrio antes de fin de mes necesitás vender <strong style="color:var(--gold)">${burgersXDia} burgers por día</strong> durante los próximos ${diasRestantes} días.`;
+            const proyFin=burgersVendidas+Math.round((burgersVendidas/diaActual)*diasRestantes);
+            if(proyFin>=peUnits){
+                proyeccion+=` — <span style="color:var(--green)">📈 Al ritmo actual lo alcanzás.</span>`;
+            } else {
+                const deficit=peUnits-proyFin;
+                proyeccion+=` — <span style="color:var(--red)">⚠️ Al ritmo actual te quedarías ${deficit} burgers corto.</span>`;
+            }
+        } else if(alcanzado){
+            proyeccion=`🎉 <strong style="color:var(--green)">¡Superaste el punto de equilibrio!</strong> Todo lo que vendas de acá en adelante es ganancia neta. Superávit actual: <strong style="color:var(--gold)">${money(superavit*avgMargin)}</strong>`;
+        }
+        document.getElementById('eqProjection').innerHTML=proyeccion;
+
+        // ── COSTOS FIJOS ──
+        let fixedHTML='';
+        if((FIXED_DATA.fixed||[]).length){
+            fixedHTML+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;font-family:var(--fh)">Gastos Fijos</div>`;
+            FIXED_DATA.fixed.forEach(f=>{fixedHTML+=`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border2);font-size:13px"><span style="color:var(--muted)">${f.name||'—'}</span><span style="font-weight:700;color:var(--red)">${money(f.cost)}</span></div>`;});
+        }
+        if((FIXED_DATA.prod||[]).length){
+            fixedHTML+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 8px;font-family:var(--fh)">Sueldos</div>`;
+            FIXED_DATA.prod.forEach(f=>{fixedHTML+=`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border2);font-size:13px"><span style="color:var(--muted)">${f.name||'—'}</span><span style="font-weight:700;color:var(--red)">${money(f.cost)}</span></div>`;});
+        }
+        if(!fixedHTML) fixedHTML=`<div style="color:var(--muted);font-size:13px">Sin gastos fijos cargados. Cargalos en las secciones "Gastos Fijos" y "Sueldos".</div>`;
+        document.getElementById('eqFixedList').innerHTML=fixedHTML;
+        document.getElementById('eqTotalFixed').textContent=money(totalFijos);
+
+        // ── MARGEN DE CONTRIBUCIÓN ──
+        const contribHTML=contribs.sort((a,b)=>b.margin-a.margin).map(c=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border2)">
+            <div>
+              <div style="font-weight:600;font-size:13px;color:var(--white)">${c.name}</div>
+              <div style="font-size:11px;color:var(--muted)">${money(c.price)} - ${money(c.cost)} costo</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-family:var(--fh);font-size:16px;font-weight:800;color:${c.margin>=0?'var(--green)':'var(--red)'}">${money(c.margin)}</div>
+              <div style="font-size:11px;color:var(--muted)">${c.marginPct.toFixed(0)}% margen</div>
+            </div>
+          </div>`).join('');
+        document.getElementById('eqContribList').innerHTML=contribHTML||`<div style="color:var(--muted);font-size:13px">Sin recetas cargadas.</div>`;
+        const avgPct=contribs.length?contribs.reduce((s,c)=>s+c.marginPct,0)/contribs.length:0;
+        document.getElementById('eqAvgContrib').textContent=`${money(avgMargin)} (${avgPct.toFixed(0)}%)`;
+
+        // ── TABLA POR PRODUCTO ──
+        const tbody=document.getElementById('eqTableBody');tbody.innerHTML='';
+        if(!totalFijos){tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Cargá los gastos fijos primero.</td></tr>`;return;}
+        const sharePerProd=contribs.length?1/contribs.length:1;
+        contribs.sort((a,b)=>a.name.localeCompare(b.name)).forEach(c=>{
+            const peProduct=c.margin>0?Math.ceil((totalFijos*sharePerProd)/c.margin):0;
+            const alcanzadoProd=c.sold>=peProduct;
+            const pctProd=peProduct>0?Math.min(100,(c.sold/peProduct)*100):0;
+            const barC=pctProd>=100?'var(--green)':pctProd>=70?'#eab308':'var(--orange)';
+            tbody.insertAdjacentHTML('beforeend',`
+              <tr>
+                <td style="font-weight:700;color:var(--white)">${c.name}</td>
+                <td style="text-align:right;color:var(--gold);font-weight:700">${money(c.price)}</td>
+                <td style="text-align:right;color:var(--red)">${money(c.cost)}</td>
+                <td style="text-align:right;font-weight:700;color:${c.margin>=0?'var(--green)':'var(--red)'}">${money(c.margin)}</td>
+                <td style="text-align:center">
+                  <span style="font-family:var(--fh);font-weight:800;font-size:14px;color:${c.marginPct>=50?'var(--green)':c.marginPct>=30?'#eab308':'var(--red)'}">${c.marginPct.toFixed(0)}%</span>
+                </td>
+                <td style="text-align:right;font-family:var(--fh);font-size:16px;font-weight:800;color:var(--gold)">${peProduct}</td>
+                <td style="text-align:right;font-weight:600;color:${alcanzadoProd?'var(--green)':'var(--txt)'}">${c.sold}</td>
+                <td style="text-align:center">
+                  <div style="display:flex;align-items:center;gap:6px;justify-content:center">
+                    <div style="width:60px;height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+                      <div style="width:${pctProd}%;height:100%;background:${barC};border-radius:3px"></div>
+                    </div>
+                    <span style="font-size:11px;color:${barC};font-weight:700">${alcanzadoProd?'✅':pctProd.toFixed(0)+'%'}</span>
+                  </div>
+                </td>
+              </tr>`);
+        });
+        if(!contribs.length)tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Sin recetas cargadas con costos.</td></tr>`;
+    };
     let SIM_RESULTS = [];
 
     function getPctForCat(cat) {
