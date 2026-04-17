@@ -181,6 +181,7 @@ div[id^="tab-"]{display:none;}
     <div class="tab-btn active" onclick="showTab('dashboard')">📊 Rendimiento</div>
     <div class="section-title">Análisis</div>
     <div class="tab-btn" onclick="showTab('proportions')">📈 Proporción Ventas</div>
+    <div class="tab-btn" onclick="showTab('rentabilidad')">💡 Rentabilidad</div>
     <div class="section-title">Gestión</div>
     <div class="tab-btn" onclick="showTab('stock')">📦 Control de Stock</div>
     <div class="tab-btn" onclick="showTab('subrecipes')">🧩 Armado de Items</div>
@@ -373,7 +374,54 @@ div[id^="tab-"]{display:none;}
       </div>
     </div>
 
-    <!-- GASTOS FIJOS -->
+    <!-- RENTABILIDAD -->
+    <div id="tab-rentabilidad" style="display:none">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:18px">
+          <div>
+            <h2 style="border:0;padding:0;margin:0;font-size:20px">💡 Detector de Rentabilidad</h2>
+            <p style="font-size:12px;color:var(--muted);margin:4px 0 0">Cruza el costo real de cada receta con el precio de venta y las unidades vendidas.</p>
+          </div>
+          <button class="btn btn-primary" onclick="renderRentabilidad()">🔄 Actualizar</button>
+        </div>
+
+        <!-- KPIs resumen -->
+        <div id="rentKpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px"></div>
+
+        <!-- Filtro -->
+        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <input type="text" id="rentSearch" placeholder="🔍 Buscar producto..." oninput="filterRentTable()" style="flex:1;min-width:160px;padding:8px 12px;border-radius:9px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--txt);font-family:var(--fb);font-size:13px;outline:none;">
+          <select id="rentSort" onchange="filterRentTable()" style="padding:8px 12px;border-radius:9px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--txt);font-family:var(--fb);font-size:13px;outline:none;">
+            <option value="margin_asc">Margen ↑ (peores primero)</option>
+            <option value="margin_desc">Margen ↓ (mejores primero)</option>
+            <option value="profit_desc">Ganancia total ↓</option>
+            <option value="sold_desc">Más vendidos</option>
+          </select>
+        </div>
+
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th style="text-align:right">Precio Venta</th>
+                <th style="text-align:right">Costo Receta</th>
+                <th style="text-align:right">Ganancia Unit.</th>
+                <th style="text-align:center">Margen %</th>
+                <th style="text-align:right">Vendidos</th>
+                <th style="text-align:right">Ganancia Total</th>
+                <th style="text-align:center">Estado</th>
+              </tr>
+            </thead>
+            <tbody id="rentTableBody"></tbody>
+          </table>
+        </div>
+
+        <p id="rentNoData" style="display:none;text-align:center;padding:30px;color:var(--muted);font-size:13px">
+          Sin datos — asegurate de tener recetas cargadas en la sección "Recetas Finales" con sus ingredientes.
+        </p>
+      </div>
+    </div>
     <div id="tab-fixed" style="display:none">
       <div class="card"><h2><span>💡 Gastos Fijos</span><button class="btn btn-primary" onclick="addFixedRow()">+ Agregar</button></h2><table id="tableFixed"><thead><tr><th>Concepto</th><th width="150">Monto Mensual ($)</th><th width="50"></th></tr></thead><tbody></tbody></table><div style="margin-top:12px;text-align:right"><button class="btn btn-blue" onclick="saveFixedData()">💾 Guardar Cambios</button></div></div>
     </div>
@@ -490,14 +538,22 @@ div[id^="tab-"]{display:none;}
 
     let INVENTORY=[], RAW_STOCK=[], PREMADE_STOCK=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
     let FIXED_DATA={fixed:[],prod:[],config:{taxDebit:0,taxTransf:0,taxQR:0},aliases:[]};
-    let PRODUCTS_DB={}, SIDES_CONFIG={}, currentRecipeId=null, currentSubRecipeId=null, currentRecipeIngs=[];
+    let PRODUCTS_DB={}, PRODUCTS_LIST=[], SIDES_CONFIG={}, currentRecipeId=null, currentSubRecipeId=null, currentRecipeIngs=[];
     let tempAliasList=[];
     let chartMain=null, chartDaily=null, chartProds=null, chartPayment=null;
 
     function logStatus(msg, isError=false) { const el=$('#lastPurchasesList'); if(el) el.innerHTML=`<div style="padding:10px;color:${isError?'var(--red)':'var(--muted)'};font-weight:600">${msg}</div>`; }
 
     function loadProductsDB() {
-        db.collection('products').get().then(snap => { PRODUCTS_DB={}; snap.forEach(doc => { const d=doc.data(); PRODUCTS_DB[d.name.toLowerCase().trim()]={realName:d.name,category:d.category||'otros'}; }); checkLoadComplete(); });
+        db.collection('products').get().then(snap => {
+            PRODUCTS_DB={};PRODUCTS_LIST=[];
+            snap.forEach(doc => {
+                const d=doc.data();
+                PRODUCTS_DB[d.name.toLowerCase().trim()]={realName:d.name,category:d.category||'otros'};
+                PRODUCTS_LIST.push({id:doc.id,name:d.name,price:Number(d.price||0),category:d.category||'otros'});
+            });
+            checkLoadComplete();
+        });
         db.collection('config').doc('sides').get().then(doc => { if(doc.exists) SIDES_CONFIG=doc.data(); checkLoadComplete(); });
     }
     function checkLoadComplete() { if(ORDERS.length) window.renderProportions(); }
@@ -695,7 +751,7 @@ div[id^="tab-"]{display:none;}
     window.renderFixedTables=function(){ $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join('');$('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
     window.saveFixedData=function(){ if(!FIXED_DATA.aliases)FIXED_DATA.aliases=[];let pyVal=30;if($('#confPy'))pyVal=Number($('#confPy').value);FIXED_DATA.config={pyPercent:pyVal,taxDebit:Number($('#confDebit').value),taxTransf:Number($('#confTransf').value),taxQR:Number($('#confQR').value)};db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("✅ Guardado"));window.calculateAll();window.renderOrdersTab(); };
     window.saveConfig=window.saveFixedData;
-    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions(); };
+    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad(); };
 
     window.loadStockMovements = function() {
         const tbody = document.getElementById('stockMovementsBody');
@@ -733,7 +789,115 @@ div[id^="tab-"]{display:none;}
         pkgFields.forEach(k=>{const el=document.getElementById('sr_pkg_'+k);if(el&&pkg[k])el.value=pkg[k];});
     });
 
-    window.saveStockRules=async function(){
+    // ── RENTABILIDAD ──
+    let RENT_DATA = [];
+
+    window.renderRentabilidad = function() {
+        RENT_DATA = [];
+        if(!RECIPES.length){ document.getElementById('rentNoData').style.display='block'; document.getElementById('rentTableBody').innerHTML=''; return; }
+
+        // Contar ventas por producto desde ORDERS
+        const soldMap = {};
+        ORDERS.forEach(o => {
+            if(o.status === 'cancelled') return;
+            (o.items||[]).forEach(it => {
+                const key = (it.name||'').toLowerCase().trim();
+                soldMap[key] = (soldMap[key]||0) + Number(it.qty||1);
+            });
+        });
+
+        RECIPES.forEach(r => {
+            const recipeName = r.id;
+            const cost = window.calculateRecipeTotal(r);
+
+            // Buscar precio del producto
+            const prod = PRODUCTS_LIST.find(p =>
+                p.name.toLowerCase().trim() === recipeName.toLowerCase().trim()
+            );
+            if(!prod || !prod.price) return; // sin precio en products, saltar
+
+            const price     = prod.price;
+            const unitProfit= price - cost;
+            const margin    = price > 0 ? (unitProfit / price) * 100 : 0;
+            const sold      = soldMap[recipeName.toLowerCase().trim()] || 0;
+            const totalProfit = unitProfit * sold;
+
+            RENT_DATA.push({ name: recipeName, category: prod.category, price, cost, unitProfit, margin, sold, totalProfit });
+        });
+
+        filterRentTable();
+
+        // KPIs
+        const avg = RENT_DATA.length ? RENT_DATA.reduce((s,r)=>s+r.margin,0)/RENT_DATA.length : 0;
+        const poor = RENT_DATA.filter(r=>r.margin<30).length;
+        const best = RENT_DATA.reduce((a,b)=>a.totalProfit>b.totalProfit?a:b, {name:'—',totalProfit:0});
+        const worst = RENT_DATA.filter(r=>r.cost>0).reduce((a,b)=>a.margin<b.margin?a:b, {name:'—',margin:100});
+
+        document.getElementById('rentKpis').innerHTML = `
+          <div class="kpi"><div class="kpi-lbl">Margen Promedio</div><div class="kpi-val" style="color:${avg>=50?'var(--green)':avg>=30?'var(--orange)':'var(--red)'}">${avg.toFixed(1)}%</div></div>
+          <div class="kpi"><div class="kpi-lbl">Productos Bajo 30%</div><div class="kpi-val" style="color:${poor>0?'var(--red)':'var(--green)'}">${poor}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Mayor Ganancia Total</div><div class="kpi-val" style="font-size:16px;color:var(--green)">${best.name}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Menor Margen</div><div class="kpi-val" style="font-size:16px;color:var(--red)">${worst.name}</div></div>
+        `;
+
+        document.getElementById('rentNoData').style.display = RENT_DATA.length ? 'none' : 'block';
+    };
+
+    window.filterRentTable = function() {
+        const search = (document.getElementById('rentSearch')?.value||'').toLowerCase();
+        const sortBy = document.getElementById('rentSort')?.value || 'margin_asc';
+        let data = RENT_DATA.filter(r => r.name.toLowerCase().includes(search));
+
+        if(sortBy==='margin_asc')   data.sort((a,b)=>a.margin-b.margin);
+        if(sortBy==='margin_desc')  data.sort((a,b)=>b.margin-a.margin);
+        if(sortBy==='profit_desc')  data.sort((a,b)=>b.totalProfit-a.totalProfit);
+        if(sortBy==='sold_desc')    data.sort((a,b)=>b.sold-a.sold);
+
+        const tbody = document.getElementById('rentTableBody');
+        tbody.innerHTML = '';
+
+        data.forEach(r => {
+            const m = r.margin;
+            let estado, estadoColor, bgColor;
+            if(m >= 60)      { estado='🟢 Excelente'; estadoColor='var(--green)';  bgColor='rgba(34,197,94,.08)'; }
+            else if(m >= 40) { estado='🟡 Bueno';     estadoColor='#eab308';       bgColor='rgba(234,179,8,.08)'; }
+            else if(m >= 25) { estado='🟠 Regular';   estadoColor='var(--orange)'; bgColor='rgba(249,115,22,.08)'; }
+            else             { estado='🔴 Bajo';       estadoColor='var(--red)';    bgColor='rgba(239,68,68,.08)'; }
+
+            // Barra de margen visual
+            const barW = Math.min(100, Math.max(0, m));
+            const barColor = m>=60?'var(--green)':m>=40?'#eab308':m>=25?'var(--orange)':'var(--red)';
+
+            tbody.insertAdjacentHTML('beforeend', `
+              <tr style="background:${bgColor}">
+                <td>
+                  <div style="font-weight:700;color:var(--white)">${r.name}</div>
+                  <div style="font-size:11px;color:var(--muted)">${r.category}</div>
+                </td>
+                <td style="text-align:right;font-weight:700;color:var(--gold)">${money(r.price)}</td>
+                <td style="text-align:right;color:var(--red)">${money(r.cost)}</td>
+                <td style="text-align:right;font-weight:700;color:${r.unitProfit>=0?'var(--green)':'var(--red)'}">${money(r.unitProfit)}</td>
+                <td style="text-align:center;min-width:100px">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <div style="flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+                      <div style="width:${barW}%;height:100%;background:${barColor};border-radius:3px;transition:width .3s"></div>
+                    </div>
+                    <span style="font-family:var(--fh);font-weight:800;font-size:14px;color:${estadoColor};min-width:38px">${m.toFixed(1)}%</span>
+                  </div>
+                </td>
+                <td style="text-align:right;font-weight:600">${r.sold > 0 ? r.sold : '<span style="color:var(--muted)">—</span>'}</td>
+                <td style="text-align:right;font-weight:700;color:${r.totalProfit>=0?'var(--green)':'var(--red)'}">
+                  ${r.sold > 0 ? money(r.totalProfit) : '<span style="color:var(--muted)">—</span>'}
+                </td>
+                <td style="text-align:center">
+                  <span style="font-size:13px;color:${estadoColor};font-weight:700">${estado}</span>
+                </td>
+              </tr>
+            `);
+        });
+
+        if(!data.length) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Sin resultados.</td></tr>`;
+    };
         const get=id=>(document.getElementById(id)?.value||'').trim();
         const pkgFields=['papas','papas_crinkles','papas_rejillas','carton','papel','bolsas','ganchito','tinta','aros','sal','sazon','cheddar','pan_brioche','pan_baguetin','pan_sesamo','pan_burgerluna','nuggets'];
         const pkg={};pkgFields.forEach(k=>{const v=get('sr_pkg_'+k);if(v)pkg[k]=v;});
