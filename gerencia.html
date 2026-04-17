@@ -182,6 +182,7 @@ div[id^="tab-"]{display:none;}
     <div class="section-title">Análisis</div>
     <div class="tab-btn" onclick="showTab('proportions')">📈 Proporción Ventas</div>
     <div class="tab-btn" onclick="showTab('rentabilidad')">💡 Rentabilidad</div>
+    <div class="tab-btn" onclick="showTab('simulador')">📐 Simulador Precios</div>
     <div class="section-title">Gestión</div>
     <div class="tab-btn" onclick="showTab('stock')">📦 Control de Stock</div>
     <div class="tab-btn" onclick="showTab('subrecipes')">🧩 Armado de Items</div>
@@ -422,6 +423,68 @@ div[id^="tab-"]{display:none;}
         </p>
       </div>
     </div>
+    <!-- SIMULADOR DE PRECIOS -->
+    <div id="tab-simulador" style="display:none">
+      <div class="card card-accent" style="margin-bottom:16px">
+        <h2 style="border:0;padding:0;margin:0 0 16px;font-size:20px">📐 Simulador de Aumento de Precios</h2>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 18px">Simulá cómo quedarían los precios y los márgenes antes de aplicar el cambio.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px">
+          <div class="field"><label>Aumento Global (%)</label><input type="number" id="simGlobal" min="0" max="200" step="1" placeholder="Ej: 15" oninput="runSimulator()"></div>
+          <div class="field"><label>Redondeo</label>
+            <select id="simRound" onchange="runSimulator()">
+              <option value="0">Sin redondeo</option>
+              <option value="50">Al 50 más cercano</option>
+              <option value="100" selected>Al 100 más cercano</option>
+              <option value="500">Al 500 más cercano</option>
+            </select>
+          </div>
+          <div class="field"><label>Filtrar categoría</label>
+            <select id="simCat" onchange="runSimulator()">
+              <option value="all">Todas</option>
+              <option value="hamburguesas">Hamburguesas</option>
+              <option value="sandwiches">Sándwiches</option>
+              <option value="guarniciones">Guarniciones</option>
+              <option value="bebidas">Bebidas</option>
+            </select>
+          </div>
+        </div>
+        <div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px">
+          <div style="font-family:var(--fh);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">O por categoría (sobreescribe el global)</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+            <div class="field"><label>Hamburguesas %</label><input type="number" id="simCatBurger" min="0" max="200" step="1" placeholder="—" oninput="runSimulator()"></div>
+            <div class="field"><label>Sándwiches %</label><input type="number" id="simCatSandwich" min="0" max="200" step="1" placeholder="—" oninput="runSimulator()"></div>
+            <div class="field"><label>Guarniciones %</label><input type="number" id="simCatSide" min="0" max="200" step="1" placeholder="—" oninput="runSimulator()"></div>
+            <div class="field"><label>Bebidas %</label><input type="number" id="simCatDrink" min="0" max="200" step="1" placeholder="—" oninput="runSimulator()"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-primary" onclick="runSimulator()">🔄 Simular</button>
+          <button class="btn btn-ghost" onclick="clearSimulator()">✕ Limpiar</button>
+          <button class="btn" id="btnApplyPrices" onclick="applyPrices()" style="background:rgba(239,68,68,.1);color:var(--red);border-color:rgba(239,68,68,.3);display:none">⚠️ Aplicar a Firebase</button>
+          <span id="simStatus" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>
+      <div id="simKpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Producto</th><th style="text-align:center">Cat.</th>
+              <th style="text-align:right">Precio Actual</th>
+              <th style="text-align:right">Aumento</th>
+              <th style="text-align:right">Precio Nuevo</th>
+              <th style="text-align:center">Margen Actual</th>
+              <th style="text-align:center">Margen Nuevo</th>
+              <th style="text-align:right">Δ Ganancia/u</th>
+            </tr></thead>
+            <tbody id="simTableBody">
+              <tr><td colspan="8" style="text-align:center;padding:30px;color:var(--muted)">Cargá un porcentaje arriba para simular.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-fixed" style="display:none">
       <div class="card"><h2><span>💡 Gastos Fijos</span><button class="btn btn-primary" onclick="addFixedRow()">+ Agregar</button></h2><table id="tableFixed"><thead><tr><th>Concepto</th><th width="150">Monto Mensual ($)</th><th width="50"></th></tr></thead><tbody></tbody></table><div style="margin-top:12px;text-align:right"><button class="btn btn-blue" onclick="saveFixedData()">💾 Guardar Cambios</button></div></div>
     </div>
@@ -764,7 +827,7 @@ div[id^="tab-"]{display:none;}
     window.renderFixedTables=function(){ $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join('');$('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
     window.saveFixedData=function(){ if(!FIXED_DATA.aliases)FIXED_DATA.aliases=[];let pyVal=30;if($('#confPy'))pyVal=Number($('#confPy').value);FIXED_DATA.config={pyPercent:pyVal,taxDebit:Number($('#confDebit').value),taxTransf:Number($('#confTransf').value),taxQR:Number($('#confQR').value)};db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("✅ Guardado"));window.calculateAll();window.renderOrdersTab(); };
     window.saveConfig=window.saveFixedData;
-    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad(); };
+    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad();if(id==='simulador')window.runSimulator(); };
 
     window.loadStockMovements = function() {
         const tbody = document.getElementById('stockMovementsBody');
@@ -802,7 +865,146 @@ div[id^="tab-"]{display:none;}
         pkgFields.forEach(k=>{const el=document.getElementById('sr_pkg_'+k);if(el&&pkg[k])el.value=pkg[k];});
     });
 
-    // ── RENTABILIDAD ──
+    // ── SIMULADOR DE PRECIOS ──
+    let SIM_RESULTS = [];
+
+    function getPctForCat(cat) {
+        const catMap = {
+            hamburguesas: document.getElementById('simCatBurger')?.value,
+            sandwiches:   document.getElementById('simCatSandwich')?.value,
+            guarniciones: document.getElementById('simCatSide')?.value,
+            bebidas:      document.getElementById('simCatDrink')?.value,
+        };
+        const specific = catMap[cat];
+        if(specific !== '' && specific !== undefined && specific !== null && !isNaN(Number(specific)) && String(specific).trim() !== '') return Number(specific);
+        return Number(document.getElementById('simGlobal')?.value || 0);
+    }
+
+    function roundPrice(price, step) {
+        if(!step || step === 0) return Math.round(price);
+        return Math.round(price / step) * step;
+    }
+
+    window.runSimulator = function() {
+        SIM_RESULTS = [];
+        const roundStep = Number(document.getElementById('simRound')?.value || 100);
+        const filterCat = document.getElementById('simCat')?.value || 'all';
+
+        let products = [...PRODUCTS_LIST];
+        if(filterCat !== 'all') products = products.filter(p => p.category === filterCat);
+        if(!products.length) {
+            document.getElementById('simTableBody').innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Sin productos para mostrar.</td></tr>`;
+            return;
+        }
+
+        products.forEach(prod => {
+            const pct = getPctForCat(prod.category);
+            if(pct <= 0) return;
+
+            const recipe = RECIPES.find(r => r.id.toLowerCase().trim() === prod.name.toLowerCase().trim());
+            const cost   = recipe ? window.calculateRecipeTotal(recipe) : 0;
+
+            const oldPrice    = prod.price;
+            const rawNew      = oldPrice * (1 + pct / 100);
+            const newPrice    = roundPrice(rawNew, roundStep);
+            const diff        = newPrice - oldPrice;
+            const oldMargin   = oldPrice > 0 ? ((oldPrice - cost) / oldPrice * 100) : 0;
+            const newMargin   = newPrice > 0 ? ((newPrice - cost) / newPrice * 100) : 0;
+            const deltaProfit = (newPrice - cost) - (oldPrice - cost);
+
+            SIM_RESULTS.push({ id: prod.id, name: prod.name, category: prod.category, cost, oldPrice, newPrice, diff, pct, oldMargin, newMargin, deltaProfit });
+        });
+
+        // KPIs
+        if(SIM_RESULTS.length) {
+            const avgOldMargin = SIM_RESULTS.reduce((s,r) => s + r.oldMargin, 0) / SIM_RESULTS.length;
+            const avgNewMargin = SIM_RESULTS.reduce((s,r) => s + r.newMargin, 0) / SIM_RESULTS.length;
+            const totalDiff    = SIM_RESULTS.reduce((s,r) => s + r.diff, 0);
+            const maxInc       = SIM_RESULTS.reduce((a,b) => a.diff > b.diff ? a : b);
+
+            document.getElementById('simKpis').innerHTML = `
+              <div class="kpi"><div class="kpi-lbl">Productos a modificar</div><div class="kpi-val">${SIM_RESULTS.length}</div></div>
+              <div class="kpi"><div class="kpi-lbl">Margen promedio actual</div><div class="kpi-val" style="color:var(--muted)">${avgOldMargin.toFixed(1)}%</div></div>
+              <div class="kpi"><div class="kpi-lbl">Margen promedio nuevo</div><div class="kpi-val" style="color:var(--green)">${avgNewMargin.toFixed(1)}%</div></div>
+              <div class="kpi"><div class="kpi-lbl">Mayor aumento $</div><div class="kpi-val" style="font-size:16px;color:var(--gold)">${maxInc.name} (+${money(maxInc.diff)})</div></div>
+            `;
+            document.getElementById('btnApplyPrices').style.display = 'inline-flex';
+            document.getElementById('simStatus').textContent = `${SIM_RESULTS.length} productos simulados`;
+        }
+
+        // Tabla
+        const tbody = document.getElementById('simTableBody');
+        tbody.innerHTML = '';
+        SIM_RESULTS.sort((a,b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+        SIM_RESULTS.forEach(r => {
+            const marginDir = r.newMargin > r.oldMargin ? '▲' : r.newMargin < r.oldMargin ? '▼' : '=';
+            const marginColor = r.newMargin >= r.oldMargin ? 'var(--green)' : 'var(--red)';
+            const barOld = Math.min(100, Math.max(0, r.oldMargin));
+            const barNew = Math.min(100, Math.max(0, r.newMargin));
+            const barColorOld = r.oldMargin>=50?'var(--green)':r.oldMargin>=30?'#eab308':'var(--red)';
+            const barColorNew = r.newMargin>=50?'var(--green)':r.newMargin>=30?'#eab308':'var(--red)';
+
+            tbody.insertAdjacentHTML('beforeend', `
+              <tr>
+                <td style="font-weight:700;color:var(--white)">${r.name}</td>
+                <td style="text-align:center"><span style="font-size:10px;background:rgba(255,255,255,.06);padding:2px 7px;border-radius:4px;color:var(--muted);font-family:var(--fh)">${r.category}</span></td>
+                <td style="text-align:right;color:var(--muted)">${money(r.oldPrice)}</td>
+                <td style="text-align:right;color:var(--orange);font-weight:700">+${r.pct}% → +${money(r.diff)}</td>
+                <td style="text-align:right;font-family:var(--fh);font-size:16px;font-weight:900;color:var(--gold)">${money(r.newPrice)}</td>
+                <td style="text-align:center;min-width:90px">
+                  <div style="display:flex;align-items:center;gap:5px">
+                    <div style="flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="width:${barOld}%;height:100%;background:${barColorOld};border-radius:3px"></div></div>
+                    <span style="font-family:var(--fh);font-size:13px;font-weight:800;color:${barColorOld};min-width:34px">${r.oldMargin.toFixed(0)}%</span>
+                  </div>
+                </td>
+                <td style="text-align:center;min-width:90px">
+                  <div style="display:flex;align-items:center;gap:5px">
+                    <div style="flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="width:${barNew}%;height:100%;background:${barColorNew};border-radius:3px"></div></div>
+                    <span style="font-family:var(--fh);font-size:13px;font-weight:800;color:${marginColor};min-width:34px">${r.newMargin.toFixed(0)}%</span>
+                  </div>
+                </td>
+                <td style="text-align:right;font-weight:700;color:${marginColor}">${marginDir} ${money(r.deltaProfit)}</td>
+              </tr>
+            `);
+        });
+    };
+
+    window.clearSimulator = function() {
+        ['simGlobal','simCatBurger','simCatSandwich','simCatSide','simCatDrink'].forEach(id => {
+            const el = document.getElementById(id); if(el) el.value = '';
+        });
+        document.getElementById('simTableBody').innerHTML = `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--muted)">Cargá un porcentaje arriba para simular.</td></tr>`;
+        document.getElementById('simKpis').innerHTML = '';
+        document.getElementById('btnApplyPrices').style.display = 'none';
+        document.getElementById('simStatus').textContent = '';
+        SIM_RESULTS = [];
+    };
+
+    window.applyPrices = async function() {
+        if(!SIM_RESULTS.length) return;
+        const confirm1 = confirm(`⚠️ ATENCIÓN\n\nEstás a punto de modificar el precio de ${SIM_RESULTS.length} productos en Firebase.\n\nEsta acción no se puede deshacer automáticamente.\n\n¿Confirmar?`);
+        if(!confirm1) return;
+        document.getElementById('simStatus').textContent = 'Aplicando...';
+        const batch = db.batch();
+        SIM_RESULTS.forEach(r => {
+            const ref = db.collection('products').doc(r.id);
+            batch.update(ref, { price: r.newPrice, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        });
+        try {
+            await batch.commit();
+            // Actualizar PRODUCTS_LIST local
+            SIM_RESULTS.forEach(r => {
+                const p = PRODUCTS_LIST.find(x => x.id === r.id);
+                if(p) p.price = r.newPrice;
+            });
+            document.getElementById('simStatus').textContent = `✅ ${SIM_RESULTS.length} precios actualizados.`;
+            document.getElementById('btnApplyPrices').style.display = 'none';
+            SIM_RESULTS = [];
+        } catch(e) {
+            document.getElementById('simStatus').textContent = '❌ Error al aplicar.';
+            console.error(e);
+        }
+    };
     let RENT_DATA = [];
 
     window.renderRentabilidad = function() {
