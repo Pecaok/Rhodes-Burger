@@ -74,7 +74,10 @@
     gap:16px;
     opacity:0;pointer-events:none;
     transition:opacity .6s ease;
+    overflow-y:auto;
+    scrollbar-width:none;
   }
+  .tv-panel::-webkit-scrollbar{display:none;}
   .tv-panel.active{opacity:1;pointer-events:auto;}
 
   /* GRID */
@@ -319,6 +322,8 @@ function startRotation(cats){
   }, ROTATE_SEC*1000);
 }
 
+let scrollAnim=null;
+
 function showCat(cats,idx){
   // Tabs
   cats.forEach((c,i)=>{
@@ -328,8 +333,38 @@ function showCat(cats,idx){
   // Panels
   cats.forEach((c,i)=>{
     const p=document.getElementById('panel-'+c.key);
-    if(p) p.classList.toggle('active',i===idx);
+    if(!p) return;
+    p.classList.toggle('active',i===idx);
+    if(i===idx){
+      // Reset scroll to top al entrar
+      p.scrollTop=0;
+      // Si el contenido es más alto que el panel, hacer auto-scroll
+      if(scrollAnim) cancelAnimationFrame(scrollAnim);
+      setTimeout(()=>startAutoScroll(p), 1200); // esperar 1.2s antes de arrancar
+    }
   });
+}
+
+function startAutoScroll(panel){
+  if(scrollAnim) cancelAnimationFrame(scrollAnim);
+  const maxScroll = panel.scrollHeight - panel.clientHeight;
+  if(maxScroll <= 0) return; // no necesita scroll
+
+  // Velocidad: recorrer todo el contenido en el tiempo disponible menos 2s de pausa
+  const scrollTime = (ROTATE_SEC - 2.4) * 1000; // ms disponibles para scrollear
+  const pixelsPerMs = maxScroll / scrollTime;
+  let lastTs = null;
+
+  function step(ts){
+    if(!lastTs) lastTs = ts;
+    const delta = ts - lastTs;
+    lastTs = ts;
+    panel.scrollTop += pixelsPerMs * delta;
+    if(panel.scrollTop < maxScroll && panel.classList.contains('active')){
+      scrollAnim = requestAnimationFrame(step);
+    }
+  }
+  scrollAnim = requestAnimationFrame(step);
 }
 
 // Barra de progreso animada
