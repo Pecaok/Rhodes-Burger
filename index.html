@@ -573,17 +573,6 @@
 
     window.STATE.promos=[];
 
-    // Cargar promos activas en tiempo real
-    window.db.collection('promos').where('active','==',true).onSnapshot(snap=>{
-      const now=new Date();
-      window.STATE.promos=snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>{
-        const from=p.from?.toDate?.()||new Date(0);
-        const to=p.to?.toDate?.()||new Date(0);
-        return now>=from&&now<=to;
-      });
-      window.fastRender();
-    });
-
     window.fastRender=function(){
       const cont=document.getElementById("menuContainer");
       if(!cont||!window.STATE.products.length)return;
@@ -1077,7 +1066,19 @@ document.addEventListener("DOMContentLoaded",()=>{
   const chk=setInterval(()=>{if(window.firebase){clearInterval(chk);initFirebase();}},100);
 });
 
-function cache(){try{localStorage.setItem(CACHE_KEY,JSON.stringify({products:window.STATE.products,menuOrder:window.STATE.menuOrder,config:window.STATE.config,timestamp:Date.now()}));}catch(e){console.warn('Cache full, clearing:',e);try{localStorage.removeItem(CACHE_KEY);}catch(_){}}}
+function cache(){
+  try{
+    // Sacar imágenes base64 antes de guardar para no llenar el storage
+    const prods=window.STATE.products.map(p=>({
+      ...p,
+      img: p.img&&p.img.startsWith('data:') ? '' : (p.img||'')
+    }));
+    localStorage.setItem(CACHE_KEY,JSON.stringify({products:prods,menuOrder:window.STATE.menuOrder,config:window.STATE.config,timestamp:Date.now()}));
+  }catch(e){
+    console.warn('Cache full, clearing:',e);
+    try{localStorage.removeItem(CACHE_KEY);}catch(_){}
+  }
+}
 
 function initFirebase(){
   firebase.initializeApp({apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"});
@@ -1090,6 +1091,17 @@ function initFirebase(){
   db.collection("config").doc("sides").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.sides={con_sazon:d.con_sazon!==false,con_sal:d.con_sal!==false,sin_sal:d.sin_sal!==false};cache();window.fastRender();},()=>{});
   db.collection("config").doc("menuOrder").onSnapshot(doc=>{window.STATE.menuOrder=doc.exists?doc.data():{};window.fastRender();cache();},()=>{});
   db.collection("config").doc("prices").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.prices={patty:Number(d.patty)||2500,cheddar:Number(d.cheddar)||300,onionRings:Number(d.onionRings)||1600};cache();if(window.MODAL?.item){const p=window.STATE.config.prices;document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;updateModalPrice();}},()=>{});
+
+  // Promos activas en tiempo real
+  db.collection('promos').where('active','==',true).onSnapshot(snap=>{
+    const now=new Date();
+    window.STATE.promos=snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>{
+      const from=p.from?.toDate?.()||new Date(0);
+      const to=p.to?.toDate?.()||new Date(0);
+      return now>=from&&now<=to;
+    });
+    window.fastRender();
+  },()=>{});
 }
 
 window.toggleSeasoning=function(){
