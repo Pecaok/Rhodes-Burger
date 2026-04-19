@@ -38,6 +38,7 @@
     #rdr-map svg{width:100%;height:100%;object-fit:cover;}
 
     /* ════════════ DUST TUMBLEWEED ════════════ */
+    /* Rolling dust across the bottom — western feel */
     #dust{position:fixed;bottom:0;left:0;width:100%;height:80px;z-index:1;pointer-events:none;overflow:hidden;}
     .tumb{
       position:absolute;bottom:10px;
@@ -52,8 +53,9 @@
       0%  {opacity:0;transform:translateX(-80px) rotate(0deg);}
       5%  {opacity:.55;}
       90% {opacity:.4;}
-    100%{opacity:0;transform:translateX(110vw) rotate(720deg);}
+      100%{opacity:0;transform:translateX(110vw) rotate(720deg);}
     }
+    /* Film grain — like a sepia old photo */
     #grain{
       position:fixed;inset:0;z-index:1;pointer-events:none;
       background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -434,6 +436,7 @@
     /* ══════════════════════════════════════════
        CSS BURGER VIEWER — zero WebGL, zero lag
     ══════════════════════════════════════════ */
+    /* ── Ingredient definitions ── */
     const ING_DEF = {
       bun_top: {emoji:'🍞', name:'Pan Brioche (tapa)',  sub:'Tapa del sándwich',           color:'#C8782A'},
       bun_bot: {emoji:'🍞', name:'Pan Brioche (base)',  sub:'Base del sándwich',            color:'#C8782A'},
@@ -474,6 +477,7 @@
       return L;
     }
 
+    /* ── Ingredient colors by keyword ── */
     const ING_COLORS_MAP = {
       pan:'#C8782A', brioche:'#C8782A', medallón:'#2E1208', carne:'#2E1208',
       cheddar:'#F2B200', queso:'#F2B200', lechuga:'#3A7A28', tomate:'#CC2211',
@@ -509,7 +513,9 @@
         const d = doc.data();
         let layers = [];
 
+        // ── Solo usar formato admin: items: ["Medallón", "Cheddar", ...] ──
         if(Array.isArray(d.items) && d.items.length) {
+          // Contar repetidos para mostrar cantidad
           const counts = {};
           d.items.filter(Boolean).forEach(n => {
             const key = String(n).trim();
@@ -524,6 +530,7 @@
         }
       } catch(err){ console.warn('Recipe fetch:', err); }
 
+      // Fallback: parsear descripción del producto
       const fallback = parseDesc(item.description||'', item.name||'');
       _renderIngItems(fallback.map(l=>({
         name: l.name || (ING_DEF[l.id]||{}).name || l.id,
@@ -561,7 +568,21 @@
       document.getElementById('ingOvl').classList.remove('open');
     };
 
+
     const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+    window.STATE.promos=[];
+
+    // Cargar promos activas en tiempo real
+    window.db.collection('promos').where('active','==',true).onSnapshot(snap=>{
+      const now=new Date();
+      window.STATE.promos=snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>{
+        const from=p.from?.toDate?.()||new Date(0);
+        const to=p.to?.toDate?.()||new Date(0);
+        return now>=from&&now<=to;
+      });
+      window.fastRender();
+    });
 
     window.fastRender=function(){
       const cont=document.getElementById("menuContainer");
@@ -572,8 +593,33 @@
       const sides  =sort(window.STATE.products.filter(p=>p.category==='guarniciones'),'guarniciones');
       const drinks =sort(window.STATE.products.filter(p=>p.category==='bebidas'),'bebidas');
       const card=p=>{const isDrink=p.category==='bebidas';const soldout=p.available===false;return`<div class="card" data-soldout="${soldout}">${soldout?'<div class="soldout-lbl">Agotado</div>':''}<img class="card-img" src="${esc(p.img||'images/logo.png')}" loading="lazy" alt="${esc(p.name)}" onload="this.classList.add('loaded')"><div class="card-grad"></div><div class="card-body"><div class="card-name">${esc(p.name)}</div><div class="card-price">$${p.price}</div><div class="card-btns">${isDrink?'':'<button class="btn-ing" onclick="showIngredients(event,\''+p.id+'\')"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Ingredientes</button>'}<button class="btn-add" onclick="openModal('${p.id}')">+</button></div></div></div>`;};
+
+      // PROMO CARD
+      const promoCard=p=>`<div class="card" style="border-color:rgba(212,168,71,.4);position:relative">
+        <div style="position:absolute;top:10px;left:10px;z-index:2;background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;border-radius:99px">🔥 Promo</div>
+        <img class="card-img loaded" src="${esc(p.img||'images/logo.png')}" alt="${esc(p.name)}">
+        <div class="card-grad"></div>
+        <div class="card-body">
+          <div class="card-name">${esc(p.name)}</div>
+          ${p.description?`<div style="font-size:11px;color:rgba(240,234,224,.6);margin-bottom:4px">${esc(p.description)}</div>`:''}
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="card-price" style="color:var(--gold)">$${(p.price||0).toLocaleString('es-AR')}</div>
+            ${p.originalPrice?`<div style="font-size:13px;color:var(--muted);text-decoration:line-through">$${p.originalPrice.toLocaleString('es-AR')}</div>`:''}
+          </div>
+          <div class="card-btns" style="margin-top:8px">
+            <button class="btn-add" onclick="addPromoToCart('${p.id}')">+</button>
+          </div>
+        </div>
+      </div>`;
+
       const section=(title,list,num)=>{if(!list.length)return'';return`<div class="sec-head"><span class="sec-num">0${num}</span><h2 class="sec-title">${title}</h2></div><div class="grid">${list.map(card).join('')}</div>`;};
       let n=1,html='';
+
+      // Promos primero
+      if(window.STATE.promos&&window.STATE.promos.length){
+        html+=`<div class="sec-head" id="sec-promos"><span class="sec-num" style="color:var(--gold)">🔥</span><h2 class="sec-title">Promos</h2></div><div class="grid">${window.STATE.promos.map(promoCard).join('')}</div>`;
+      }
+
       if(burgers.length)html+=section('Hamburguesas',burgers,n++);
       if(sands.length)  html+=section('Sándwiches',sands,n++);
       if(sides.length)  html+=section('Guarniciones',sides,n++);
@@ -591,7 +637,9 @@
     function buildNavSections(burgers, sands, sides, drinks) {
       const nav = document.getElementById('navSections');
       if(!nav) return;
+      const promos = window.STATE.promos||[];
       const items = [
+        ...(promos.length ? [{ label:'Promos', ico:'🔥', count:promos.length }] : []),
         { label:'Hamburguesas', ico:'🍔', count:burgers.length },
         { label:'Sándwiches',   ico:'🥪', count:sands.length   },
         { label:'Guarniciones', ico:'🍟', count:sides.length   },
@@ -619,10 +667,11 @@
 
     window.scrollToSection = function(title) {
       toggleNavDrawer(false);
+      // Buscar el h2 con el texto de la sección
       const heads = document.querySelectorAll('.sec-title');
       for(const h of heads) {
         if(h.textContent.trim().toLowerCase().includes(title.toLowerCase().slice(0,5))) {
-          const offset = 70;
+          const offset = 70; // altura del header
           const top = h.closest('.sec-head').getBoundingClientRect().top + window.scrollY - offset;
           window.scrollTo({ top, behavior: 'smooth' });
           return;
@@ -630,18 +679,14 @@
       }
     };
 
-    // ════ LA LÓGICA DE HORARIOS INTACTA (EL CARTEL NEGRO YA NO SE MUESTRA) ════
     window.checkStatus=function(){
       const conf=window.STATE.config.store,now=new Date();
-      
       const blocker=document.getElementById("blocker");
-      if(blocker) blocker.classList.add("hidden"); 
-      
+      if(conf.maintenance?.active){blocker.classList.remove("hidden");document.getElementById("blkTitle").innerText=conf.maintenance.title||"EN MANTENIMIENTO";document.getElementById("blkMsg").innerText=conf.maintenance.message||"Volvemos pronto.";return;}else{blocker.classList.add("hidden");}
       let isOpen=false,label="CERRADO";
       if(conf.forceOpen===true){isOpen=true;label="ABIERTO";}
       else if(conf.forceOpen===false){isOpen=false;label="CERRADO";}
       else{const H={0:[[19,0,24,0]],1:[],2:[],3:[[19,0,24,0]],4:[[19,0,24,0]],5:[[19,0,24,0]],6:[[19,0,24,0]]};const day=now.getDay(),min=now.getHours()*60+now.getMinutes();for(let s of(H[day]||[])){if(min>=(s[0]*60+s[1])&&min<(s[2]*60+s[3])){isOpen=true;label=`ABIERTO hasta ${s[2]}:${String(s[3]).padStart(2,'0')}`;break;}}}
-      
       window.STATE.isOpen=isOpen;
       const pill=document.getElementById("statusPill");
       if(pill){pill.className=`pill ${isOpen?'pill-open':'pill-closed'}`;pill.innerHTML=`<span>${isOpen?'● Abierto':'● Cerrado'}</span><span style="font-size:9px;opacity:.75">${isOpen?label.replace('ABIERTO ',''):'19:00–00:00'}</span>`;}
@@ -650,6 +695,7 @@
 </head>
 <body>
 
+<!-- ═══ RDR2 RHODES MAP BACKGROUND ═══ -->
 <div id="rdr-map">
   <svg viewBox="0 0 900 600" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
     <defs>
@@ -659,17 +705,29 @@
         .rt{fill:rgba(255,255,255,0.9);font-size:6px;font-family:serif;letter-spacing:1px;}
       </style>
     </defs>
+    <!-- === MAIN ROADS === -->
+    <!-- Flat Iron Lake Road (main north-south artery) -->
     <line class="rd" stroke-width="3.5" x1="440" y1="0" x2="440" y2="600"/>
+    <!-- East-west main street (Rhodes Main St) -->
     <line class="rd" stroke-width="3.5" x1="100" y1="280" x2="800" y2="280"/>
+    <!-- Secondary east road -->
     <line class="rd" stroke-width="2" x1="440" y1="320" x2="800" y2="420"/>
+    <!-- North fork road -->
     <line class="rd" stroke-width="2" x1="340" y1="0" x2="440" y2="280"/>
+    <!-- West road -->
     <line class="rd" stroke-width="2" x1="100" y1="280" x2="0" y2="200"/>
+    <!-- South-west road -->
     <line class="rd" stroke-width="2" x1="100" y1="280" x2="0" y2="370"/>
+    <!-- Braithwaite road east -->
     <line class="rd" stroke-width="1.5" x1="440" y1="420" x2="620" y2="520"/>
+    <!-- Scarlett meadows fork -->
     <line class="rd" stroke-width="1.5" x1="200" y1="280" x2="140" y2="440"/>
+    <!-- Rhodes north exit -->
     <line class="rd" stroke-width="2" x1="440" y1="280" x2="500" y2="0"/>
 
+    <!-- === RAILROAD TRACKS === -->
     <line class="rd" stroke-width="2" stroke-dasharray="10,4" x1="0" y1="180" x2="900" y2="220"/>
+    <!-- Rail ties -->
     <g stroke="rgba(255,255,255,0.6)" stroke-width="1.2">
       <line x1="30"  y1="179" x2="32"  y2="183"/>
       <line x1="60"  y1="181" x2="62"  y2="185"/>
@@ -701,65 +759,109 @@
       <line x1="840" y1="201" x2="842" y2="205"/>
       <line x1="870" y1="202" x2="872" y2="206"/>
     </g>
+    <!-- Train station building -->
     <rect class="rb" stroke-width="1.5" x="390" y="220" width="70" height="40" rx="1"/>
     <line class="rd" stroke-width="1" x1="390" y1="235" x2="460" y2="235"/>
     <text class="rt" x="395" y="232" fill="rgba(255,255,255,0.6)">RHODES STN.</text>
 
+    <!-- === TOWN BUILDINGS (Main Block) === -->
+    <!-- Saloon (large, central) -->
     <rect class="rb" stroke-width="2" x="400" y="285" width="55" height="38" rx="1"/>
     <line class="rd" stroke-width="1" x1="400" y1="295" x2="455" y2="295"/>
     <rect class="rb" stroke-width="1" x="418" y="295" width="20" height="28" rx="0"/>
+
+    <!-- Sheriff's Office -->
     <rect class="rb" stroke-width="2" x="462" y="285" width="45" height="35" rx="1"/>
     <line class="rd" stroke-width="1" x1="462" y1="298" x2="507" y2="298"/>
     <rect class="rb" stroke-width="1" x="476" y="298" width="10" height="22" rx="0"/>
+
+    <!-- General Store -->
     <rect class="rb" stroke-width="1.5" x="350" y="285" width="42" height="32" rx="1"/>
     <line class="rd" stroke-width="1" x1="350" y1="295" x2="392" y2="295"/>
+
+    <!-- Doctor / Barber row -->
     <rect class="rb" stroke-width="1.5" x="515" y="285" width="36" height="30" rx="1"/>
     <rect class="rb" stroke-width="1.5" x="558" y="285" width="36" height="30" rx="1"/>
+
+    <!-- Gunsmith -->
     <rect class="rb" stroke-width="1.5" x="305" y="285" width="38" height="30" rx="1"/>
+
+    <!-- Hotel -->
     <rect class="rb" stroke-width="2" x="400" y="245" width="55" height="32" rx="1"/>
     <line class="rd" stroke-width="1" x1="400" y1="256" x2="455" y2="256"/>
+
+    <!-- Across street buildings (north side) -->
     <rect class="rb" stroke-width="1.5" x="305" y="248" width="38" height="28" rx="1"/>
     <rect class="rb" stroke-width="1.5" x="350" y="248" width="42" height="28" rx="1"/>
     <rect class="rb" stroke-width="1.5" x="462" y="248" width="45" height="28" rx="1"/>
     <rect class="rb" stroke-width="1.5" x="515" y="248" width="36" height="28" rx="1"/>
     <rect class="rb" stroke-width="1.5" x="558" y="248" width="36" height="28" rx="1"/>
+
+    <!-- Church (east side, larger) -->
     <rect class="rb" stroke-width="2" x="605" y="255" width="50" height="60" rx="1"/>
+    <!-- Church steeple -->
     <line class="rd" stroke-width="2" x1="630" y1="255" x2="630" y2="235"/>
     <polygon class="rb" stroke-width="1.5" points="622,255 630,235 638,255"/>
+
+    <!-- Barn / livery -->
     <rect class="rb" stroke-width="1.5" x="260" y="290" width="38" height="25" rx="1"/>
     <path class="rb" stroke-width="1.5" d="M260,290 L279,278 L298,290"/>
+
+    <!-- Water tower -->
     <rect class="rb" stroke-width="1.5" x="594" y="295" width="8" height="4"/>
     <polygon class="rb" stroke-width="1.5" points="592,299 606,299 604,320 594,320"/>
     <line class="rd" stroke-width="1" x1="595" y1="320" x2="593" y2="330"/>
     <line class="rd" stroke-width="1" x1="605" y1="320" x2="607" y2="330"/>
+
+    <!-- Fence lines -->
     <line class="rd" stroke-width="1" stroke-dasharray="4,3" x1="280" y1="280" x2="650" y2="280"/>
     <line class="rd" stroke-width="1" stroke-dasharray="4,3" x1="280" y1="325" x2="650" y2="325"/>
+
+    <!-- Side alley buildings -->
     <rect class="rb" stroke-width="1.2" x="440" y="335" width="28" height="22" rx="1"/>
     <rect class="rb" stroke-width="1.2" x="474" y="335" width="28" height="22" rx="1"/>
     <rect class="rb" stroke-width="1.2" x="508" y="335" width="28" height="22" rx="1"/>
     <rect class="rb" stroke-width="1.2" x="350" y="335" width="28" height="22" rx="1"/>
     <rect class="rb" stroke-width="1.2" x="314" y="335" width="28" height="22" rx="1"/>
+
+    <!-- Outlying farm cluster south-west -->
     <rect class="rb" stroke-width="1.2" x="160" y="370" width="30" height="22" rx="1"/>
     <rect class="rb" stroke-width="1.2" x="200" y="365" width="22" height="18" rx="1"/>
     <rect class="rb" stroke-width="1.2" x="140" y="395" width="45" height="18" rx="1"/>
+    <!-- Farm fence -->
     <rect class="rb" stroke-width="1" x="130" y="360" width="100" height="65" rx="2"/>
+
+    <!-- Braithwaite Manor hint (south-east, distant) -->
     <rect class="rb" stroke-width="1.5" x="660" y="440" width="80" height="55" rx="1"/>
     <line class="rd" stroke-width="1" x1="660" y1="455" x2="740" y2="455"/>
     <rect class="rb" stroke-width="1" x="695" y="440" width="10" height="55"/>
+    <!-- Manor grounds -->
     <rect class="rb" stroke-width="1" stroke-dasharray="3,3" x="645" y="425" width="110" height="85" rx="3"/>
+
+    <!-- Caliga Hall hint west -->
     <rect class="rb" stroke-width="1.2" x="60" y="390" width="55" height="38" rx="1"/>
     <line class="rd" stroke-width="1" x1="60" y1="402" x2="115" y2="402"/>
+
+    <!-- North cluster (small ranch) -->
     <rect class="rb" stroke-width="1.2" x="500" y="60" width="35" height="25" rx="1"/>
     <rect class="rb" stroke-width="1.2" x="545" y="65" width="25" height="18" rx="1"/>
     <rect class="rb" stroke-width="1" stroke-dasharray="3,3" x="490" y="50" width="90" height="55" rx="2"/>
+
+    <!-- Cornrows township hint east -->
     <rect class="rb" stroke-width="1.2" x="750" y="275" width="28" height="20" rx="1"/>
     <rect class="rb" stroke-width="1.2" x="785" y="270" width="22" height="18" rx="1"/>
     <rect class="rb" stroke-width="1.2" x="760" y="300" width="40" height="16" rx="1"/>
+
+    <!-- Label dots (points of interest) -->
     <circle cx="430" cy="304" r="4" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5"/>
     <circle cx="484" cy="302" r="3.5" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5"/>
     <circle cx="630" cy="285" r="3" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.2"/>
     <circle cx="700" cy="467" r="4.5" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.2"/>
+
+    <!-- RHODES text label -->
     <text fill="rgba(255,255,255,0.55)" font-size="22" font-family="Georgia, serif" font-weight="bold" letter-spacing="6" x="330" y="395" text-anchor="middle" transform="rotate(-2, 330, 395)">R H O D E S</text>
+
+    <!-- Compass rose (top right) -->
     <g transform="translate(840,60)" stroke="rgba(255,255,255,0.5)" fill="none">
       <circle r="22" stroke-width="1"/>
       <line x1="0" y1="-18" x2="0" y2="18" stroke-width="1.5"/>
@@ -767,6 +869,8 @@
       <polygon points="0,-18 -4,-8 0,-10 4,-8" fill="rgba(255,255,255,0.5)" stroke="none"/>
       <text fill="rgba(255,255,255,0.6)" font-size="7" font-family="serif" text-anchor="middle" x="0" y="-24">N</text>
     </g>
+
+    <!-- Scale bar -->
     <g transform="translate(30,570)" stroke="rgba(255,255,255,0.4)" fill="rgba(255,255,255,0.4)">
       <line x1="0" y1="0" x2="80" y2="0" stroke-width="1.5"/>
       <line x1="0" y1="-4" x2="0" y2="4" stroke-width="1.5"/>
@@ -776,17 +880,21 @@
   </svg>
 </div>
 
+<!-- ═══ GRAIN + DUST ═══ -->
 <div id="grain"></div>
 <div id="dust"></div>
 
+<!-- TOAST -->
 <div id="toast"><span class="t-check">✓</span><span class="t-msg">Agregado</span></div>
 
+<!-- BLOCKER -->
 <div id="blocker" class="hidden" style="position:fixed;inset:0;background:rgba(18,16,10,.97);z-index:99999;color:white;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;">
   <div style="font-size:48px;margin-bottom:18px">🔒</div>
   <h2 id="blkTitle" style="margin:0;font-family:'Barlow Condensed',sans-serif;font-size:38px;font-weight:900;text-transform:uppercase;letter-spacing:.03em;color:var(--white)">LOCAL CERRADO</h2>
   <p id="blkMsg" style="color:var(--muted);margin-top:12px;font-size:14px">Volvemos pronto.</p>
 </div>
 
+<!-- ═══ INGREDIENT PANEL ═══ -->
 <div id="ingOvl">
   <div class="ing-panel">
     <div class="ing-panel-head">
@@ -804,10 +912,11 @@
     </div>
   </div>
 </div>
+<!-- ═══ HEADER ═══ -->
 <header class="hdr">
   <div class="topbar">
     <button class="menu-btn" onclick="toggleNavDrawer(true)" aria-label="Menú">
-      <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="18"/></svg>
+      <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
     <a href="index.html" class="brand">
       <img src="images/logo.png" alt="Rhodes" width="30" height="30">
@@ -824,6 +933,7 @@
   </div>
 </header>
 
+<!-- ═══ NAV DRAWER ═══ -->
 <div class="nav-drawer-ovl" id="navOvl" onclick="toggleNavDrawer(false)"></div>
 <nav class="nav-drawer" id="navDrawer">
   <div class="nav-drawer-head">
@@ -831,9 +941,11 @@
     <span>Rhodes<em>.</em></span>
   </div>
   <div class="nav-sections" id="navSections">
+    <!-- Se llena dinámicamente según las secciones del menú -->
   </div>
 </nav>
 
+<!-- ═══ HERO ═══ -->
 <section class="hero" style="z-index:10;position:relative;">
   <img src="images/logo.png" class="hero-logo" alt="Rhodes">
   <div class="hero-tag">Escobar · Buenos Aires</div>
@@ -844,11 +956,14 @@
   </div>
 </section>
 
+<!-- ═══ TICKER ═══ -->
 <div class="ticker-wrap" style="z-index:10;position:relative;">
   <div class="ticker" id="ticker">
+    <!-- filled by JS -->
   </div>
 </div>
 
+<!-- ═══ MENU ═══ -->
 <main class="container">
   <div id="errorMsg">⚠️ Conexión lenta. <a href="#" onclick="location.reload()" style="color:var(--gold)">Reintentar</a></div>
   <div id="menuContainer">
@@ -865,6 +980,7 @@
   <p>Escobar, Buenos Aires &mdash; Todos los derechos reservados</p>
 </footer>
 
+<!-- CACHE -->
 <script>
 (function(){
   try{
@@ -879,6 +995,7 @@
 })();
 </script>
 
+<!-- ═══ DRAWER ═══ -->
 <aside class="drawer" id="drawer">
   <div class="drw-head">
     <span class="drw-title">Tu Pedido</span>
@@ -894,6 +1011,7 @@
   </div>
 </aside>
 
+<!-- ═══ MODAL ═══ -->
 <div class="ovl" id="modalOvl">
   <div class="modal">
     <h3 id="modTitle">Personalizar</h3>
@@ -923,17 +1041,6 @@
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js" defer></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js" defer></script>
-
-<!-- ════════════════════════════════════════════════════════════════════════
-     BLOQUE FIXEADO — Reemplazar el último <script defer> de index.html
-     (el que empieza con "let db;" y termina con el cierre de </script>)
-     
-     CAMBIOS vs el original:
-     1. Radar usa localStorage + sessionStorage (más robusto)
-     2. Verifica con .get() que el doc exista en Firestore antes de reutilizar
-     3. matarNodoFantasma ya NO se dispara con visibilitychange
-     4. Flag navegandoInterno evita borrar al ir a pedido_cliente
-     ════════════════════════════════════════════════════════════════════════ -->
 
 <script defer>
 let db;
@@ -983,106 +1090,6 @@ function initFirebase(){
   db.collection("config").doc("sides").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.sides={con_sazon:d.con_sazon!==false,con_sal:d.con_sal!==false,sin_sal:d.sin_sal!==false};cache();window.fastRender();},()=>{});
   db.collection("config").doc("menuOrder").onSnapshot(doc=>{window.STATE.menuOrder=doc.exists?doc.data():{};window.fastRender();cache();},()=>{});
   db.collection("config").doc("prices").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.prices={patty:Number(d.patty)||2500,cheddar:Number(d.cheddar)||300,onionRings:Number(d.onionRings)||1600};cache();if(window.MODAL?.item){const p=window.STATE.config.prices;document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;updateModalPrice();}},()=>{});
-
-  // ════ FIX: INTEGRACIÓN RADAR CORREGIDA ════
-  const RADAR_KEY = "rhodes_live_order_id";
-  const savedOrderId = sessionStorage.getItem(RADAR_KEY) || localStorage.getItem(RADAR_KEY);
-  let navegandoInterno = false;
-  window._navegandoInterno = false; // Expuesto para el checkout
-
-  function registrarNodoId(id) {
-    window.miPedidoId = id;
-    sessionStorage.setItem(RADAR_KEY, id);
-    localStorage.setItem(RADAR_KEY, id);
-  }
-
-  function limpiarNodoId() {
-    sessionStorage.removeItem(RADAR_KEY);
-    localStorage.removeItem(RADAR_KEY);
-    window.miPedidoId = null;
-  }
-  window._limpiarNodoId = limpiarNodoId; // Expuesto
-
-  function crearNuevoNodo() {
-    db.collection("orders").add({
-      estado: "browsing",
-      canal: "Web / Celular",
-      items: [],
-      total: 0,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    }).then(r => {
-      registrarNodoId(r.id);
-    }).catch(() => {});
-  }
-
-  // Verificar si el nodo guardado existe y es reutilizable
-  async function recuperarOCrearNodo() {
-    if (savedOrderId) {
-      try {
-        const docSnap = await db.collection("orders").doc(savedOrderId).get();
-        if (docSnap.exists) {
-          const data = docSnap.data();
-          const estado = data.estado;
-
-          // Si ya se entregó, crear nuevo
-          if (estado === 'delivered') {
-            crearNuevoNodo();
-            return;
-          }
-
-          // Reutilizar el nodo existente
-          registrarNodoId(savedOrderId);
-
-          // Calcular estado según el carrito actual
-          const cnt = Object.keys(window.STATE.cart.burger).length
-                    + Object.keys(window.STATE.cart.side).length
-                    + Object.keys(window.STATE.cart.drink).length;
-          const nuevoEstado = cnt > 0 ? "building" : "browsing";
-
-          // Solo actualizar si cambió
-          if (estado !== nuevoEstado) {
-            await db.collection("orders").doc(savedOrderId).update({ estado: nuevoEstado });
-          }
-          return;
-        }
-      } catch (e) {
-        console.warn("No se pudo recuperar el nodo anterior:", e);
-      }
-    }
-    // Si no había ID o el doc no existe → crear nuevo
-    crearNuevoNodo();
-  }
-
-  recuperarOCrearNodo();
-
-  window.actualizarRadar = function(st) {
-    if (!window.miPedidoId) return;
-    let itms = [], tot = 0;
-    const p = o => { itms.push({ nombre: o.item.name, precio: o.finalPrice }); tot += o.finalPrice * o.qty; };
-    Object.values(window.STATE.cart.burger || {}).forEach(p);
-    Object.values(window.STATE.cart.side || {}).forEach(p);
-    Object.values(window.STATE.cart.drink || {}).forEach(p);
-    db.collection("orders").doc(window.miPedidoId).update({ estado: st, items: itms, total: tot }).catch(() => {});
-  };
-
-  // ════ FIX: matarNodoFantasma corregido ════
-  // Ya NO usa visibilitychange. Solo se dispara al cerrar la pestaña.
-  window._matarNodoFantasma = function() {
-    if (window._navegandoInterno) return;
-    if (!window.miPedidoId) return;
-
-    const url = `https://firestore.googleapis.com/v1/projects/rhodes-burguers/databases/(default)/documents/orders/${window.miPedidoId}`;
-    fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
-    limpiarNodoId();
-  };
-
-  window.addEventListener('pagehide', (e) => {
-    if (window._navegandoInterno) return;
-    window._matarNodoFantasma();
-  });
-
-  // REMOVIDO: window.addEventListener('visibilitychange', ...) ← este era el bug
-  // REMOVIDO: window.addEventListener('unload', ...) ← redundante con pagehide
 }
 
 window.toggleSeasoning=function(){
@@ -1091,6 +1098,26 @@ window.toggleSeasoning=function(){
   if(t==='crinkles'||t==='rejillas')ss.style.display='block';
   else{ss.style.display='none';document.querySelectorAll("input[name='fries']").forEach(x=>x.checked=false);}
   updateModalPrice();
+};
+
+window.addPromoToCart=(id)=>{
+  const p=window.STATE.promos.find(x=>x.id===id);if(!p)return;
+  const nId='promo_'+id+'_'+Date.now();
+  // Descripción de los items del combo para mostrar en el carrito
+  const comboDesc = p.type==='combo'&&p.items?.length
+    ? p.items.map(i=>`${i.qty}× ${i.name}`).join(', ')
+    : (p.description||'');
+  window.STATE.cart.burger[nId]={
+    item:{id:p.id,name:p.name,price:p.price,img:p.img,category:'promos'},
+    qty:1,type:'promo',
+    fries:null,friesRaw:null,sideType:null,
+    extras:{patty:0,cheddar:0},
+    notes:comboDesc,
+    finalPrice:Number(p.price),
+    isPromo:true,
+    comboItems:p.items||[]
+  };
+  saveCart();window.toast(`${p.name} agregado 🔥`);
 };
 
 window.openModal=(id)=>{
@@ -1127,14 +1154,7 @@ document.getElementById("btnAddCart").onclick=()=>{
   saveCart();document.getElementById("modalOvl").classList.remove("open");window.toast(`${item.name} agregado`);
 };
 
-function saveCart(){
-  localStorage.setItem(CART_KEY,JSON.stringify(window.STATE.cart));
-  updateCartUI();
-  if(window.actualizarRadar){
-    const cnt=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.side).length+Object.keys(window.STATE.cart.drink).length;
-    window.actualizarRadar(cnt>0?"building":"browsing");
-  }
-}
+function saveCart(){localStorage.setItem(CART_KEY,JSON.stringify(window.STATE.cart));updateCartUI();}
 
 function renderUpsell(){
   const cnt=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.side).length+Object.keys(window.STATE.cart.drink).length;
@@ -1150,7 +1170,21 @@ window.upsellSide=(id)=>{toggleDrawer(false);setTimeout(()=>openModal(id),260);}
 
 function updateCartUI(){
   let count=0,total=0;const c=document.getElementById("cartItems");c.innerHTML='';
-  const ri=(id,obj,t)=>{count+=obj.qty;total+=obj.finalPrice*obj.qty;let d=[];if(obj.fries)d.push("🍟 "+obj.fries);if(obj.extras?.patty)d.push(`+${obj.extras.patty} Carne`);if(obj.extras?.cheddar)d.push(`+${obj.extras.cheddar} Cheddar`);if(obj.notes)d.push(`📝 ${obj.notes}`);return`<div class="ci"><div style="flex:1"><div class="ci-name">${obj.item.name}</div><div class="ci-det">${d.join(" · ")}</div><div class="ci-price">$${obj.finalPrice}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('${t}','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${obj.qty}</span><button class="qbtn" onclick="cartQty('${t}','${id}',1)">+</button></div></div>`;};
+  const ri=(id,obj,t)=>{
+    count+=obj.qty;total+=obj.finalPrice*obj.qty;
+    let d=[];
+    if(obj.isPromo&&obj.comboItems?.length){
+      // Combo: mostrar items del combo
+      d=obj.comboItems.map(i=>`${i.qty}× ${i.name}`);
+    } else {
+      if(obj.fries)d.push("🍟 "+obj.fries);
+      if(obj.extras?.patty)d.push(`+${obj.extras.patty} Carne`);
+      if(obj.extras?.cheddar)d.push(`+${obj.extras.cheddar} Cheddar`);
+      if(obj.notes&&!obj.isPromo)d.push(`📝 ${obj.notes}`);
+    }
+    const promoBadge=obj.isPromo?`<span style="background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:99px;margin-left:6px">🔥 PROMO</span>`:'';
+    return`<div class="ci"><div style="flex:1"><div class="ci-name">${obj.item.name}${promoBadge}</div><div class="ci-det">${d.join(" · ")}</div><div class="ci-price">$${obj.finalPrice}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('${t}','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${obj.qty}</span><button class="qbtn" onclick="cartQty('${t}','${id}',1)">+</button></div></div>`;
+  };
   for(let id in window.STATE.cart.burger)c.innerHTML+=ri(id,window.STATE.cart.burger[id],'burger');
   for(let id in window.STATE.cart.side)c.innerHTML+=ri(id,window.STATE.cart.side[id],'side');
   for(let id in window.STATE.cart.drink){const d=window.STATE.cart.drink[id];count+=d.qty;total+=d.finalPrice*d.qty;c.innerHTML+=`<div class="ci"><div style="flex:1"><div class="ci-name">${d.item.name}</div><div class="ci-det">Bebida</div><div class="ci-price">$${d.finalPrice}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('drink','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${d.qty}</span><button class="qbtn" onclick="cartQty('drink','${id}',1)">+</button></div></div>`;}
@@ -1164,46 +1198,16 @@ window.emptyCart=()=>{if(confirm("¿Vaciar carrito?")){window.STATE.cart={burger
 window.toggleDrawer=(open)=>{const d=document.getElementById("drawer");if(open){d.classList.add("open");updateCartUI();}else d.classList.remove("open");};
 document.getElementById("modalOvl").onclick=(e)=>{if(e.target.id==="modalOvl")document.getElementById("modalOvl").classList.remove("open");};
 document.getElementById("ingOvl").addEventListener('click',e=>{if(e.target.id==="ingOvl")window.closeIng();});
-
-// ════ FIX: CHECKOUT CORREGIDO ════
-let pedidoEnviado = false;
-
-document.getElementById("btnCheckout").onclick = async () => {
-  const ic = Object.keys(window.STATE.cart.burger).length + Object.keys(window.STATE.cart.drink).length + Object.keys(window.STATE.cart.side).length;
-  if (!ic) return alert("Tu carrito está vacío");
-
-  pedidoEnviado = true;
-  window._navegandoInterno = true; // ← FIX: Bloquea matarNodoFantasma
-
-  let lc = { items: [] };
-  const cv = (id, obj, t) => lc.items.push({ id: obj.item.id, name: obj.item.name, price: Number(obj.item.price), category: obj.item.category, qty: obj.qty, fries: obj.fries, friesRaw: obj.friesRaw, sideType: obj.sideType, extras: obj.extras, notes: obj.notes, finalPrice: obj.finalPrice, type: t });
-  for (let id in window.STATE.cart.burger) cv(id, window.STATE.cart.burger[id], 'burger');
-  for (let id in window.STATE.cart.side) cv(id, window.STATE.cart.side[id], 'side');
-  for (let id in window.STATE.cart.drink) cv(id, window.STATE.cart.drink[id], 'drink');
-  localStorage.setItem("rhodes_cart_legacy_format", JSON.stringify(lc));
-
-  if (window.actualizarRadar && window.miPedidoId && window.db) {
-    document.getElementById("btnCheckout").innerText = "Procesando...";
-    try { await window.db.collection("orders").doc(window.miPedidoId).update({ estado: "paying" }); } catch (e) {}
-  }
-  window.location.href = "pedido_cliente.html";
-};
-
-// ════ LÓGICA ORIGINAL DE HORARIOS SIN PANTALLA NEGRA ════
-window.checkStatus=function(){
-  const conf=window.STATE.config.store,now=new Date();
-  
-  const blocker=document.getElementById("blocker");
-  if(blocker) blocker.classList.add("hidden"); 
-  
-  let isOpen=false,label="CERRADO";
-  if(conf.forceOpen===true){isOpen=true;label="ABIERTO";}
-  else if(conf.forceOpen===false){isOpen=false;label="CERRADO";}
-  else{const H={0:[[19,0,24,0]],1:[],2:[],3:[[19,0,24,0]],4:[[19,0,24,0]],5:[[19,0,24,0]],6:[[19,0,24,0]]};const day=now.getDay(),min=now.getHours()*60+now.getMinutes();for(let s of(H[day]||[])){if(min>=(s[0]*60+s[1])&&min<(s[2]*60+s[3])){isOpen=true;label=`ABIERTO hasta ${s[2]}:${String(s[3]).padStart(2,'0')}`;break;}}}
-  
-  window.STATE.isOpen=isOpen;
-  const pill=document.getElementById("statusPill");
-  if(pill){pill.className=`pill ${isOpen?'pill-open':'pill-closed'}`;pill.innerHTML=`<span>${isOpen?'● Abierto':'● Cerrado'}</span><span style="font-size:9px;opacity:.75">${isOpen?label.replace('ABIERTO ',''):'19:00–00:00'}</span>`;}
+document.getElementById("btnCheckout").onclick=()=>{
+  const ic=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.drink).length+Object.keys(window.STATE.cart.side).length;
+  if(!ic)return alert("Tu carrito está vacío");
+  let lc={items:[]};
+  const cv=(id,obj,t)=>lc.items.push({id:obj.item.id,name:obj.item.name,price:Number(obj.item.price),category:obj.item.category,qty:obj.qty,fries:obj.fries,friesRaw:obj.friesRaw,sideType:obj.sideType,extras:obj.extras,notes:obj.notes,finalPrice:obj.finalPrice,type:t});
+  for(let id in window.STATE.cart.burger)cv(id,window.STATE.cart.burger[id],'burger');
+  for(let id in window.STATE.cart.side)cv(id,window.STATE.cart.side[id],'side');
+  for(let id in window.STATE.cart.drink)cv(id,window.STATE.cart.drink[id],'drink');
+  localStorage.setItem("rhodes_cart_legacy_format",JSON.stringify(lc));
+  window.location.href="pedido_cliente.html";
 };
 </script>
 </body>
