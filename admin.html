@@ -185,6 +185,7 @@ tr:hover td{background:rgba(255,255,255,.015);}
     <button class="sb-btn" onclick="showTab('order',this)"><span class="sb-ico">🔢</span> Orden Visual</button>
     <button class="sb-btn" onclick="showTab('stock',this)"><span class="sb-ico">📦</span> Stock Rápido</button>
     <div class="sb-section">Config</div>
+    <button class="sb-btn" onclick="showTab('promos',this)"><span class="sb-ico">🔥</span> Promos</button>
     <button class="sb-btn" onclick="showTab('sides',this)"><span class="sb-ico">🍟</span> Config Papas</button>
     <button class="sb-btn" onclick="showTab('coupons',this)"><span class="sb-ico">🏷️</span> Cupones</button>
   </aside>
@@ -328,6 +329,68 @@ tr:hover td{background:rgba(255,255,255,.015);}
       <div class="page-title">Stock <em>Rápido</em></div>
       <p class="page-sub">Activar o desactivar disponibilidad inmediata de productos.</p>
       <div class="card" style="padding:0;overflow:hidden"><div id="invList"></div></div>
+    </div>
+
+    <!-- PAPAS -->
+    <!-- PROMOS -->
+    <div id="tab-promos" class="tab-panel">
+      <div class="page-title">🔥 <em>Promos</em></div>
+      <p class="page-sub">Creá productos con precio especial o combos por tiempo limitado.</p>
+
+      <!-- Editor -->
+      <div class="card card-accent">
+        <div class="card-title" style="margin-bottom:16px">Nueva Promo</div>
+        <input type="hidden" id="promoEditId">
+        <div class="form-grid">
+          <div class="field"><label>Nombre</label><input id="promoName" type="text" placeholder="Ej: Promo Viernes, Combo Fecha"></div>
+          <div class="field"><label>Tipo</label>
+            <select id="promoType" onchange="togglePromoType()">
+              <option value="special">🏷️ Precio especial</option>
+              <option value="combo">🍔+🥤 Combo armado</option>
+            </select>
+          </div>
+          <div class="field"><label>Precio Promo ($)</label><input id="promoPrice" type="number" min="0" placeholder="Ej: 7500"></div>
+          <div class="field"><label>Precio Original ($) <span style="color:var(--muted);font-weight:400">(opcional, para mostrar tachado)</span></label><input id="promoOriginalPrice" type="number" min="0" placeholder="Ej: 9000"></div>
+          <div class="field"><label>Descripción</label><input id="promoDesc" type="text" placeholder="Ej: Burger + Papas + Bebida"></div>
+          <div class="field" style="grid-column:1/-1"><label>Imagen (URL o archivo)</label><input id="promoImg" type="text" placeholder="https://..."><input id="promoImgFile" type="file" accept="image/*" style="margin-top:8px;font-size:12px;color:var(--muted)" onchange="previewPromoImg(this)"></div>
+          <div class="field" id="promoImgPreviewWrap" style="grid-column:1/-1;display:none">
+            <label>Preview</label>
+            <img id="promoImgPreview" style="width:200px;height:120px;object-fit:cover;border-radius:10px;border:1px solid var(--border)">
+          </div>
+          <div class="field"><label>Válida Desde</label><input id="promoFrom" type="datetime-local"></div>
+          <div class="field"><label>Válida Hasta</label><input id="promoTo" type="datetime-local"></div>
+        </div>
+
+        <!-- Combo items -->
+        <div id="promoComboSection" style="display:none;margin-bottom:16px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Items del Combo</div>
+          <div style="background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:12px;padding:14px">
+            <div id="promoComboList" style="margin-bottom:10px;min-height:32px">
+              <div id="promoComboEmpty" style="color:var(--muted);font-size:13px;text-align:center;padding:8px">Sin items.</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--border);padding-top:12px">
+              <select id="promoComboProduct" class="search-input" style="flex:2">
+                <option value="">Seleccionar producto...</option>
+              </select>
+              <input id="promoComboQty" type="number" min="1" value="1" class="search-input" style="width:70px">
+              <button class="btn btn-primary" onclick="addComboItem()">+ Agregar</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="savePromo()">💾 Guardar Promo</button>
+          <button class="btn btn-ghost" onclick="clearPromoForm()">✕ Limpiar</button>
+        </div>
+      </div>
+
+      <!-- Listado -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:14px">Promos Actuales</div>
+        <div id="promosList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+          <div style="color:var(--muted);font-size:13px">Cargando...</div>
+        </div>
+      </div>
     </div>
 
     <!-- PAPAS -->
@@ -585,6 +648,172 @@ loadCoupons();
 
 $('#btnSaveProduct').onclick=saveProduct;
 $('#btnClearProduct').onclick=clearProductForm;
+
+/* ── PROMOS ── */
+let COMBO_ITEMS=[], PROMO_EDITING_IMG=null;
+const promosCol=db.collection('promos');
+
+function togglePromoType(){
+  const t=$('#promoType').value;
+  document.getElementById('promoComboSection').style.display=t==='combo'?'block':'none';
+}
+
+window.previewPromoImg=function(input){
+  const file=input.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    PROMO_EDITING_IMG=e.target.result;
+    document.getElementById('promoImgPreview').src=e.target.result;
+    document.getElementById('promoImgPreviewWrap').style.display='block';
+  };
+  reader.readAsDataURL(file);
+};
+
+function populateComboSelect(){
+  const sel=$('#promoComboProduct');
+  sel.innerHTML='<option value="">Seleccionar producto...</option>';
+  ALL_PRODUCTS_DATA.forEach(p=>sel.insertAdjacentHTML('beforeend',`<option value="${p.id}">${p.name}</option>`));
+}
+
+window.addComboItem=function(){
+  const sel=$('#promoComboProduct'),qty=Number($('#promoComboQty').value)||1;
+  const id=sel.value,name=sel.options[sel.selectedIndex]?.text;
+  if(!id) return;
+  const prod=ALL_PRODUCTS_DATA.find(p=>p.id===id);
+  const price=prod?Number(prod.price||0):0;
+  COMBO_ITEMS.push({id,name,qty,price});
+  renderComboList();
+  updateComboSuggestion();
+};
+
+function updateComboSuggestion(){
+  const total=COMBO_ITEMS.reduce((s,i)=>s+(i.price*i.qty),0);
+  if(!total) return;
+  const sugg10=Math.round(total*0.9/100)*100;
+  const sugg15=Math.round(total*0.85/100)*100;
+  let el=document.getElementById('comboSuggestion');
+  if(!el){
+    el=document.createElement('div');el.id='comboSuggestion';
+    el.style.cssText='margin-top:10px;padding:12px;background:rgba(212,168,71,.06);border:1px solid var(--gold-border);border-radius:9px;font-size:12px;color:var(--muted)';
+    document.getElementById('promoComboSection').appendChild(el);
+  }
+  el.innerHTML=`<span style="font-family:var(--fh);font-size:13px;color:var(--gold);font-weight:700">💡 Suma de productos: $${total.toLocaleString('es-AR')}</span><br>
+    Sugeridos: 
+    <button class="btn btn-sm" style="background:rgba(34,197,94,.1);color:var(--green);border-color:rgba(34,197,94,.3);margin:4px 4px 0 0" onclick="$('#promoPrice').value=${sugg10}">10% off → $${sugg10.toLocaleString('es-AR')}</button>
+    <button class="btn btn-sm" style="background:rgba(34,197,94,.1);color:var(--green);border-color:rgba(34,197,94,.3);margin:4px 0 0 0" onclick="$('#promoPrice').value=${sugg15}">15% off → $${sugg15.toLocaleString('es-AR')}</button>`;
+}
+
+function renderComboList(){
+  const cont=document.getElementById('promoComboList'),empty=document.getElementById('promoComboEmpty');
+  cont.querySelectorAll('.combo-row').forEach(e=>e.remove());
+  empty.style.display=COMBO_ITEMS.length?'none':'block';
+  COMBO_ITEMS.forEach((item,i)=>{
+    const row=document.createElement('div');row.className='combo-row ing-row';
+    row.innerHTML=`<span class="ing-row-name">${item.qty}× ${item.name}</span><button type="button" class="ing-remove" onclick="removeComboItem(${i})">✕</button>`;
+    cont.appendChild(row);
+  });
+}
+window.removeComboItem=i=>{COMBO_ITEMS.splice(i,1);renderComboList();updateComboSuggestion();};
+
+async function savePromo(){
+  const name=$('#promoName').value.trim(),type=$('#promoType').value;
+  const price=Number($('#promoPrice').value||0),origPrice=Number($('#promoOriginalPrice').value||0);
+  const desc=$('#promoDesc').value.trim();
+  const fromVal=$('#promoFrom').value,toVal=$('#promoTo').value;
+  if(!name){alert('Ingresá un nombre');return;}
+  if(!price){alert('Ingresá el precio promo');return;}
+  if(!fromVal||!toVal){alert('Ingresá fechas de inicio y fin');return;}
+  if(type==='combo'&&!COMBO_ITEMS.length){alert('Agregá al menos un item al combo');return;}
+
+  let img=$('#promoImg').value.trim();
+  if(PROMO_EDITING_IMG) img=PROMO_EDITING_IMG;
+
+  const editId=$('#promoEditId').value;
+  const payload={
+    name,type,price,originalPrice:origPrice||null,description:desc,img:img||null,
+    items:type==='combo'?COMBO_ITEMS:[],
+    from:firebase.firestore.Timestamp.fromDate(new Date(fromVal)),
+    to:firebase.firestore.Timestamp.fromDate(new Date(toVal)),
+    active:true,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  };
+  try{
+    if(editId) await promosCol.doc(editId).set(payload,{merge:true});
+    else await promosCol.add({...payload,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+    alert('✅ Promo guardada.');clearPromoForm();
+  }catch(e){console.error(e);alert('Error al guardar.');}
+}
+
+function clearPromoForm(){
+  ['promoName','promoDesc','promoImg','promoFrom','promoTo','promoPrice','promoOriginalPrice'].forEach(id=>document.getElementById(id).value='');
+  $('#promoType').value='special';$('#promoEditId').value='';
+  document.getElementById('promoComboSection').style.display='none';
+  document.getElementById('promoImgPreviewWrap').style.display='none';
+  COMBO_ITEMS=[];PROMO_EDITING_IMG=null;renderComboList();
+}
+
+function renderPromosList(snap){
+  const cont=document.getElementById('promosList');
+  if(snap.empty){cont.innerHTML='<div style="color:var(--muted);font-size:13px">No hay promos creadas todavía.</div>';return;}
+  const now=new Date();
+  cont.innerHTML='';
+  snap.forEach(doc=>{
+    const p=doc.data(),id=doc.id;
+    const from=p.from?.toDate?.()||new Date(p.from);
+    const to=p.to?.toDate?.()||new Date(p.to);
+    const isActive=p.active&&now>=from&&now<=to;
+    const isExpired=now>to;
+    const badge=isActive?`<span class="badge badge-green">Activa</span>`:isExpired?`<span class="badge badge-muted">Vencida</span>`:`<span class="badge badge-gold">Programada</span>`;
+    const imgHTML=p.img?`<img src="${p.img}" style="width:100%;height:140px;object-fit:cover;border-radius:10px 10px 0 0;display:block">`:'';
+    cont.insertAdjacentHTML('beforeend',`
+      <div class="card" style="padding:0;overflow:hidden;${isExpired?'opacity:.5':''}">
+        ${imgHTML}
+        <div style="padding:14px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+            <div style="font-family:var(--fh);font-size:18px;font-weight:800;color:var(--white);text-transform:uppercase">${p.name}</div>
+            ${badge}
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${p.description||''}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <span style="font-family:var(--fh);font-size:24px;font-weight:900;color:var(--gold)">$${(p.price||0).toLocaleString('es-AR')}</span>
+            ${p.originalPrice?`<span style="font-size:13px;color:var(--muted);text-decoration:line-through">$${p.originalPrice.toLocaleString('es-AR')}</span>`:''}
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
+            📅 ${from.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} → ${to.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="editPromo('${id}')">✏️ Editar</button>
+            <button class="btn btn-sm ${p.active?'btn-danger':'btn-good'}" onclick="togglePromoActive('${id}',${!!p.active})">${p.active?'Pausar':'Activar'}</button>
+            <button class="btn btn-danger btn-sm" onclick="deletePromo('${id}')">🗑️</button>
+          </div>
+        </div>
+      </div>`);
+  });
+}
+
+window.togglePromoActive=async(id,current)=>{await promosCol.doc(id).update({active:!current});};
+window.deletePromo=async id=>{if(confirm('¿Eliminar promo?'))await promosCol.doc(id).delete();};
+window.editPromo=async id=>{
+  const doc=await promosCol.doc(id).get();const p=doc.data();
+  $('#promoEditId').value=id;$('#promoName').value=p.name||'';
+  $('#promoType').value=p.type||'special';togglePromoType();
+  $('#promoPrice').value=p.price||'';$('#promoOriginalPrice').value=p.originalPrice||'';
+  $('#promoDesc').value=p.description||'';$('#promoImg').value=(p.img&&!p.img.startsWith('data:'))?p.img:'';
+  PROMO_EDITING_IMG=p.img||null;
+  if(p.img){document.getElementById('promoImgPreview').src=p.img;document.getElementById('promoImgPreviewWrap').style.display='block';}
+  const toLocal=dt=>new Date(dt.getTime()-dt.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  if(p.from)$('#promoFrom').value=toLocal(p.from.toDate());
+  if(p.to)$('#promoTo').value=toLocal(p.to.toDate());
+  COMBO_ITEMS=[...(p.items||[])];renderComboList();
+  showTab('promos',document.querySelector('.sb-btn[onclick*="promos"]'));
+  window.scrollTo({top:0,behavior:'smooth'});
+};
+
+promosCol.orderBy('createdAt','desc').onSnapshot(renderPromosList);
+// Populate combo select when products load
+const _origRenderProducts=renderProductsTable;
+renderProductsTable=function(snap){_origRenderProducts(snap);populateComboSelect();};
+productsCol.onSnapshot(renderProductsTable);
 </script>
 </body>
 </html>
