@@ -182,6 +182,10 @@
   <!-- MENU -->
   <section class="menu-section">
     <h1>Menú</h1>
+    <div id="promosSection" style="display:none">
+      <h2 style="color:var(--gold);border-color:rgba(212,168,71,.3)">🔥 Promos Activas</h2>
+      <div id="promosGrid" class="grid"></div>
+    </div>
     <h2>Hamburguesas</h2>
     <div id="burgersGrid" class="grid"></div>
 
@@ -387,7 +391,18 @@ let cart={burger:{},drink:{},side:{}};
 function renderCart(){
   let html="",subtotal=0;
   const wrap=$("#cartItems"),totalEl=$("#cartTotal");
-  for(const id in cart.burger){const b=cart.burger[id];let unit=b.item.price+b.extras.patty*EXTRA_PRICE_PATTY+b.extras.cheddar*EXTRA_PRICE_CHEDDAR;if(b.sideType==='aros')unit+=EXTRA_PRICE_ONION;subtotal+=unit*b.qty;const extras=[];if(b.friesRaw||b.fries)extras.push(`🍟 ${b.fries}`);else extras.push(`<div class="missing-fries-alert">⚠️ FALTAN ELEGIR PAPAS</div>`);if(b.extras.patty)extras.push("+"+b.extras.patty+" carne");if(b.extras.cheddar)extras.push("+"+b.extras.cheddar+" cheddar");if(b.notes)extras.push("📝 "+b.notes);html+=`<div class="cart-item"><div class="cart-item-info"><span class="cart-item-name">${b.qty}× ${b.item.name}</span><div class="cart-item-desc">${extras.join(" ")}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end"><span class="cart-item-price">${money(unit*b.qty)}</span><div class="cart-actions"><button class="btn-icon" onclick="editBurger('${id}')" title="Editar">✏️</button><button class="btn-icon" onclick="removeFromCart('${id}','burger')" style="color:var(--red)" title="Eliminar">✕</button></div></div></div>`;}
+  for(const id in cart.burger){const b=cart.burger[id];let unit=b.item.price+b.extras.patty*EXTRA_PRICE_PATTY+b.extras.cheddar*EXTRA_PRICE_CHEDDAR;if(b.sideType==='aros')unit+=EXTRA_PRICE_ONION;subtotal+=unit*b.qty;
+  const extras=[];
+  if(b.isPromo&&b.comboItems?.length){
+    b.comboItems.forEach(i=>extras.push(`${i.qty}× ${i.name}`));
+  } else {
+    if(b.friesRaw||b.fries)extras.push(`🍟 ${b.fries}`);else if(!b.isPromo)extras.push(`<div class="missing-fries-alert">⚠️ FALTAN ELEGIR PAPAS</div>`);
+    if(b.extras.patty)extras.push("+"+b.extras.patty+" carne");
+    if(b.extras.cheddar)extras.push("+"+b.extras.cheddar+" cheddar");
+    if(b.notes&&!b.isPromo)extras.push("📝 "+b.notes);
+  }
+  const promoBadge=b.isPromo?` <span style="background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:9px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:99px">🔥</span>`:'';
+  html+=`<div class="cart-item"><div class="cart-item-info"><span class="cart-item-name">${b.qty}× ${b.item.name}${promoBadge}</span><div class="cart-item-desc">${extras.join(" · ")}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end"><span class="cart-item-price">${money(unit*b.qty)}</span><div class="cart-actions">${b.isPromo?'':'<button class="btn-icon" onclick="editBurger(\''+id+'\')" title="Editar">✏️</button>'}<button class="btn-icon" onclick="removeFromCart('${id}','burger')" style="color:var(--red)" title="Eliminar">✕</button></div></div></div>`;}
   for(const id in cart.side){const s=cart.side[id];subtotal+=s.item.price*s.qty;const extras=[];if(s.friesRaw||s.fries)extras.push(`🍟 ${s.fries}`);else extras.push(`<div class="missing-fries-alert">⚠️ FALTAN ELEGIR PREPARACIÓN</div>`);if(s.notes)extras.push("📝 "+s.notes);html+=`<div class="cart-item"><div class="cart-item-info"><span class="cart-item-name">${s.qty}× ${s.item.name}</span><div class="cart-item-desc">${extras.join(" ")}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end"><span class="cart-item-price">${money(s.item.price*s.qty)}</span><div class="cart-actions"><button class="btn-icon" onclick="editSide('${id}')" title="Editar">✏️</button><button class="btn-icon" onclick="removeFromCart('${id}','side')" style="color:var(--red)" title="Eliminar">✕</button></div></div></div>`;}
   for(const id in cart.drink){const d=cart.drink[id];subtotal+=d.item.price*d.qty;html+=`<div class="cart-item"><div class="cart-item-info"><span class="cart-item-name">${d.qty}× ${d.item.name}</span><div class="cart-item-desc" style="color:var(--blue)">🥤 Bebida</div></div><div style="display:flex;flex-direction:column;align-items:flex-end"><span class="cart-item-price">${money(d.item.price*d.qty)}</span><div class="cart-actions"><button class="btn-icon" onclick="removeFromCart('${id}','drink')" style="color:var(--red)">✕</button></div></div></div>`;}
 
@@ -409,6 +424,58 @@ function renderCart(){
   wrap.innerHTML=html||`<span style="display:block;text-align:center;padding-top:28px;font-size:13px;color:var(--muted);font-family:var(--fh);text-transform:uppercase;letter-spacing:.06em">Carrito vacío.</span>`;
   totalEl.textContent=money(finalTotal);
 }
+
+let PROMOS_MOSTRADOR=[];
+
+db.collection('promos').where('active','==',true).onSnapshot(snap=>{
+  const now=new Date();
+  PROMOS_MOSTRADOR=snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>{
+    const from=p.from?.toDate?.()||new Date(0),to=p.to?.toDate?.()||new Date(0);
+    return now>=from&&now<=to;
+  });
+  renderPromosMostrador();
+});
+
+function renderPromosMostrador(){
+  const sec=document.getElementById('promosSection'),grid=document.getElementById('promosGrid');
+  if(!sec||!grid)return;
+  if(!PROMOS_MOSTRADOR.length){sec.style.display='none';return;}
+  sec.style.display='block';
+  grid.innerHTML=PROMOS_MOSTRADOR.map(p=>`
+    <div class="card" style="border-color:rgba(212,168,71,.4)">
+      <div style="position:relative">
+        <img src="${p.img||'images/logo.png'}" onerror="this.src='images/logo.png'" style="width:100%;height:120px;object-fit:cover">
+        <div style="position:absolute;top:8px;left:8px;background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:99px">🔥 Promo</div>
+      </div>
+      <div class="content">
+        <h3>${p.name}</h3>
+        ${p.description?`<div style="font-size:11px;color:var(--muted);margin-bottom:auto">${p.description}</div>`:'<div style="margin-bottom:auto"></div>'}
+        <div class="row">
+          <div>
+            <div class="price" style="color:var(--gold)">$${(p.price||0).toLocaleString('es-AR')}</div>
+            ${p.originalPrice?`<div style="font-size:11px;color:var(--muted);text-decoration:line-through">$${p.originalPrice.toLocaleString('es-AR')}</div>`:''}
+          </div>
+          <button class="btn addBtn" onclick="addPromoMostrador('${p.id}')">+ Agregar</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+window.addPromoMostrador=function(id){
+  const p=PROMOS_MOSTRADOR.find(x=>x.id===id);if(!p)return;
+  const comboDesc=p.type==='combo'&&p.items?.length
+    ? p.items.map(i=>`${i.qty}× ${i.name}`).join(', ')
+    : (p.description||'');
+  cart.burger['promo_'+id+'_'+Date.now()]={
+    item:{id:p.id,name:p.name,price:p.price,img:p.img,category:'promos'},
+    qty:1,sideType:null,fries:null,friesRaw:null,
+    extras:{patty:0,cheddar:0},
+    notes:comboDesc,
+    isPromo:true,
+    comboItems:p.items||[]
+  };
+  renderCart();
+};
 
 let currentItem=null;
 
@@ -537,7 +604,7 @@ async function sendToFirestore(){
   let slot=window.selectedSlot;const manual=$("#manualTime").value;
   if(manual){const now=new Date();slot={pretty:manual,iso:new Date(now.getFullYear(),now.getMonth(),now.getDate(),manual.split(":")[0],manual.split(":")[1]).toISOString()};}
   if(!slot){alert("Elegí un horario");return;}
-  for(const id in cart.burger){const burger=cart.burger[id];const name=burger.item.name.toLowerCase(),cat=(burger.item.category||"").toLowerCase();const isSimple=!name.includes("doble")&&!name.includes("pollo")&&!cat.includes("sandwich")&&!cat.includes("sándwich");if(!isSimple&&!burger.friesRaw){alert(`⚠️ ATENCIÓN:\n\nEl producto "${burger.item.name}" no tiene guarnición seleccionada.\n\nPor favor, tocá el lápiz ✏️ para editarla.`);return;}}
+  for(const id in cart.burger){const burger=cart.burger[id];if(burger.isPromo)continue;const name=burger.item.name.toLowerCase(),cat=(burger.item.category||"").toLowerCase();const isSimple=!name.includes("doble")&&!name.includes("pollo")&&!cat.includes("sandwich")&&!cat.includes("sándwich");if(!isSimple&&!burger.friesRaw){alert(`⚠️ ATENCIÓN:\n\nEl producto "${burger.item.name}" no tiene guarnición seleccionada.\n\nPor favor, tocá el lápiz ✏️ para editarla.`);return;}}
   for(const id in cart.side){const side=cart.side[id];if(!side.friesRaw){alert(`⚠️ ATENCIÓN:\n\nLa guarnición "${side.item.name}" no tiene preparación seleccionada.\n\nPor favor, tocá el lápiz ✏️ para editarla.`);return;}}
   if(Object.keys(cart.burger).length===0&&Object.keys(cart.drink).length===0&&Object.keys(cart.side).length===0){alert("El carrito está vacío");return;}
   if(btn.disabled)return;btn.disabled=true;const originalText=btn.textContent;btn.textContent="Procesando...";
