@@ -128,7 +128,12 @@
     /* EMPTY */
     .empty-state{text-align:center;padding:60px 20px;color:var(--muted);font-family:var(--fh);font-size:18px;letter-spacing:.06em;}
 
-    @media(max-width:768px){
+    /* TIMER */
+    .order-timer{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:6px;font-family:var(--fh);font-size:13px;font-weight:800;letter-spacing:.04em;border:1px solid;transition:all .3s;}
+    .order-timer.ok   {background:rgba(34,197,94,.12); color:var(--green); border-color:rgba(34,197,94,.3);}
+    .order-timer.warn {background:rgba(234,179,8,.12);  color:#eab308;      border-color:rgba(234,179,8,.3);}
+    .order-timer.late {background:rgba(239,68,68,.15);  color:var(--red);   border-color:rgba(239,68,68,.4); animation:pulse-red 1.5s ease-in-out infinite;}
+    @keyframes pulse-red{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}50%{box-shadow:0 0 0 5px rgba(239,68,68,.15)}}
       .brand span{display:none;}
       .nav-btn{padding:7px;font-size:12px;}
       .nav-btn span{display:none;}
@@ -981,9 +986,25 @@
 
         const telHtml = o.telefono ? `<div style="margin-top:4px; font-size:13px; font-weight:600; color:#4b5563;">📞 <a href="https://wa.me/${o.telefono.replace(/\D/g,'')}" target="_blank" style="text-decoration:none; color:inherit;">${esc(o.telefono)}</a></div>` : '';
 
-        return `<div class="order ${st==='cancelled'?'cancelled':''}">
+        // Timer
+        const nowMs = Date.now();
+        const elapsedMin = Math.floor((nowMs - dt.getTime()) / 60000);
+        const timerClass = elapsedMin >= 25 ? 'late' : elapsedMin >= 15 ? 'warn' : 'ok';
+        const timerIcon  = elapsedMin >= 25 ? '🔴' : elapsedMin >= 15 ? '🟡' : '🟢';
+        const timerHtml  = (st !== 'delivered' && st !== 'cancelled')
+            ? `<span class="order-timer ${timerClass}" data-since="${dt.getTime()}">${timerIcon} ${elapsedMin}min</span>`
+            : '';
+
+        return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
            <div class="order-head">
-              <div><div class="order-title">#${o.orderNumber||'--'} — ${o.source==='mostrador'?esc(o.nombre)+' (Local)':esc(o.nombre)}</div>${telHtml}<div class="order-meta"><span>${dateStr} ${timeStr}</span> <span class="chip ${srcVal}">${esc(srcVal)}</span> ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}</div></div>
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+                  <div class="order-title">#${o.orderNumber||'--'} — ${o.source==='mostrador'?esc(o.nombre)+' (Local)':esc(o.nombre)}</div>
+                  ${timerHtml}
+                </div>
+                ${telHtml}
+                <div class="order-meta"><span>${dateStr} ${timeStr}</span> <span class="chip ${srcVal}">${esc(srcVal)}</span> ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}</div>
+              </div>
               <div style="text-align:right"><div class="price-tag">${money(total)}</div>${netHtml}</div>
            </div>
            <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
@@ -1014,7 +1035,17 @@
         </div>`;
     }
 
-    window.trySilentPrint = function(docSnap){
+    // Actualizar timers cada 30s sin re-renderizar las cards
+    setInterval(()=>{
+        document.querySelectorAll('.order-timer[data-since]').forEach(el=>{
+            const since = Number(el.dataset.since);
+            const min = Math.floor((Date.now() - since) / 60000);
+            const cls  = min >= 25 ? 'late' : min >= 15 ? 'warn' : 'ok';
+            const icon = min >= 25 ? '🔴' : min >= 15 ? '🟡' : '🟢';
+            el.className = `order-timer ${cls}`;
+            el.textContent = `${icon} ${min}min`;
+        });
+    }, 30000);
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
        const m = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
