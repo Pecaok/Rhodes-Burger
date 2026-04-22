@@ -930,6 +930,32 @@
         const cont = document.getElementById("orders");
         if(filtered.length===0){ cont.innerHTML = '<div class="empty-state">No hay pedidos.</div>'; return; }
         cont.innerHTML = filtered.map(x => buildOrderHTML(x.ref)).join("");
+        injectTimers();
+    }
+
+    function injectTimers(){
+        document.querySelectorAll('.order[data-order-since]').forEach(function(card){
+            const st = card.getAttribute('data-order-status');
+            if(st === 'delivered' || st === 'cancelled') return;
+            const since = Number(card.getAttribute('data-order-since'));
+            const titleEl = card.querySelector('.order-title');
+            if(!titleEl) return;
+            const span = document.createElement('span');
+            span.className = 'order-timer';
+            span.setAttribute('data-since', since);
+            card.setAttribute('data-since', since);
+            titleEl.parentNode.insertBefore(span, titleEl.nextSibling);
+            updateTimerEl(span);
+        });
+    }
+
+    function updateTimerEl(el){
+        const since = Number(el.getAttribute('data-since'));
+        const min = Math.floor((Date.now() - since) / 60000);
+        const cls  = min >= 25 ? 'late' : min >= 15 ? 'warn' : 'ok';
+        const lbl  = min >= 25 ? '!! ' : min >= 15 ? '! ' : '';
+        el.className = 'order-timer ' + cls;
+        el.textContent = lbl + min + 'min';
     }
 
     function buildOrderHTML(doc){
@@ -995,16 +1021,9 @@
             ? '<span class="order-timer ' + timerClass + '" data-since="' + dt.getTime() + '">' + timerLabel + elapsedMin + 'min</span>'
             : '';
 
-        return `<div class="order ${st==='cancelled'?'cancelled':''}" data-id="${doc.id}">
+        return `<div class="order ${st==='cancelled'?'cancelled':''}" data-order-since="${dt.getTime()}" data-order-status="${st}">
            <div class="order-head">
-              <div>
-                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-                  <div class="order-title">#${o.orderNumber||'--'} &mdash; ${o.source==='mostrador'?esc(o.nombre)+' (Local)':esc(o.nombre)}</div>
-                  ${timerHtml}
-                </div>
-                ${telHtml}
-                <div class="order-meta"><span>${dateStr} ${timeStr}</span> <span class="chip ${srcVal}">${esc(srcVal)}</span> ${displayTime ? `<span class="chip time">⏰ ${esc(displayTime)}</span>` : ''}</div>
-              </div>
+              <div><div class="order-title">#${o.orderNumber||'--'} &mdash; ${o.source==='mostrador'?esc(o.nombre)+' (Local)':esc(o.nombre)}</div>${telHtml}<div class="order-meta"><span>${dateStr} ${timeStr}</span> <span class="chip ${srcVal}">${esc(srcVal)}</span> ${displayTime ? `<span class="chip time">${esc(displayTime)}</span>` : ''}</div></div>
               <div style="text-align:right"><div class="price-tag">${money(total)}</div>${netHtml}</div>
            </div>
            <div class="items">${itemsHTML || '<div class="it-sub">Sin ítems</div>'}</div>
@@ -1036,16 +1055,11 @@
     }
 
     // Actualizar timers cada 30s sin re-renderizar las cards
-    setInterval(()=>{
-        document.querySelectorAll('.order-timer[data-since]').forEach(el=>{
-            const since = Number(el.dataset.since);
-            const min = Math.floor((Date.now() - since) / 60000);
-            const cls  = min >= 25 ? 'late' : min >= 15 ? 'warn' : 'ok';
-            const lbl  = min >= 25 ? '!! ' : min >= 15 ? '! ' : '';
-            el.className = 'order-timer ' + cls;
-            el.textContent = lbl + min + 'min';
-        });
+    setInterval(function(){
+        document.querySelectorAll('.order-timer[data-since]').forEach(updateTimerEl);
     }, 30000);
+
+    window.trySilentPrint = function(docSnap){
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
        const m = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
