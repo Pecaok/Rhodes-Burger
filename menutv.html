@@ -232,11 +232,21 @@ updateClock();
 setInterval(updateClock,1000);
 
 // ── DATA ──
-let PRODUCTS=[], MENU_ORDER={}, currentCatIdx=0, rotateTimer=null, progressAnim=null;
-const ROTATE_SEC=12; // segundos por categoría
+let PRODUCTS=[], MENU_ORDER={}, PROMOS_TV=[], currentCatIdx=0, rotateTimer=null, progressAnim=null;
+
+db.collection('promos').where('active','==',true).onSnapshot(snap=>{
+  const now=new Date();
+  PROMOS_TV=snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>{
+    const from=p.from?.toDate?.()||new Date(0),to=p.to?.toDate?.()||new Date(0);
+    return now>=from&&now<=to;
+  });
+  buildMenu();
+});
+const ROTATE_SEC=10; // segundos por categoría
 const FALLBACK='images/logo.png';
 
 const CATEGORIES=[
+  {key:'promos',       label:'🔥 Promos',         big:false, isPromo:true},
   {key:'hamburguesas', label:'🍔 Hamburguesas', big:false},
   {key:'sandwiches',   label:'🥪 Sándwiches',   big:false},
   {key:'guarniciones', label:'🍟 Guarniciones',  big:true},
@@ -265,7 +275,10 @@ function orderedList(cat){
 }
 
 function buildMenu(){
-  const activeCats=CATEGORIES.filter(c=>orderedList(c.key).length>0);
+  const activeCats=CATEGORIES.filter(c=>{
+    if(c.isPromo) return PROMOS_TV.length>0;
+    return orderedList(c.key).length>0;
+  });
   if(!activeCats.length) return;
 
   // Tabs
@@ -276,7 +289,7 @@ function buildMenu(){
   const panelsEl=document.getElementById('tvPanels');
   panelsEl.innerHTML='';
   activeCats.forEach((c,i)=>{
-    const items=orderedList(c.key);
+    const items = c.isPromo ? PROMOS_TV : orderedList(c.key);
     const panel=document.createElement('div');
     panel.className='tv-panel'+(i===0?' active':'');
     panel.id='panel-'+c.key;
@@ -284,14 +297,20 @@ function buildMenu(){
     const cards=items.map(p=>{
       const soldout=p.available===false;
       const imgEl=p.img?`<img class="tv-card-img" src="${p.img}" onerror="this.src='${FALLBACK}'" alt="${p.name}">`:`<img class="tv-card-img" src="${FALLBACK}" alt="${p.name}">`;
-      return`<div class="tv-card${c.big?' tv-card-big':''}${soldout?' soldout':''}">
-        ${imgEl}
+      const promoBadge=c.isPromo?`<div style="position:absolute;top:10px;left:10px;background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:4px 12px;border-radius:99px">🔥 Promo</div>`:'';
+      return`<div class="tv-card${c.big?' tv-card-big':''}${soldout?' soldout':''}" style="${c.isPromo?'border-color:rgba(212,168,71,.5)':''}">
+        <div style="position:relative">${imgEl}${promoBadge}</div>
         <div class="tv-card-body">
           <div>
             <div class="tv-card-name">${p.name}</div>
             ${p.description?`<div class="tv-card-desc">${p.description}</div>`:''}
           </div>
-          ${soldout?`<div class="tv-card-soldout">Agotado</div>`:`<div class="tv-card-price">${money(p.price)}</div>`}
+          <div>
+            ${soldout?`<div class="tv-card-soldout">Agotado</div>`:`<div style="display:flex;align-items:center;gap:12px">
+              <div class="tv-card-price" style="${c.isPromo?'color:var(--gold)':''}">${money(p.price)}</div>
+              ${p.originalPrice?`<div style="font-size:20px;color:var(--muted);text-decoration:line-through">${money(p.originalPrice)}</div>`:''}
+            </div>`}
+          </div>
         </div>
       </div>`;
     }).join('');
