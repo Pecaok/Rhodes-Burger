@@ -184,6 +184,7 @@ div[id^="tab-"]{display:none;}
     <div class="tab-btn" onclick="showTab('rentabilidad')">💡 Rentabilidad</div>
     <div class="tab-btn" onclick="showTab('simulador')">📐 Simulador Precios</div>
     <div class="tab-btn" onclick="showTab('equilibrio')">⚖️ Punto de Equilibrio</div>
+    <div class="tab-btn" onclick="showTab('comparativa')">📊 Comparativa Semanas</div>
     <div class="section-title">Gestión</div>
     <div class="tab-btn" onclick="showTab('stock')">📦 Control de Stock</div>
     <div class="tab-btn" onclick="showTab('subrecipes')">🧩 Armado de Items</div>
@@ -560,6 +561,48 @@ div[id^="tab-"]{display:none;}
       </div>
     </div>
 
+    <!-- COMPARATIVA DE SEMANAS -->
+    <div id="tab-comparativa" style="display:none">
+      <div class="card card-accent" style="margin-bottom:16px">
+        <h2 style="border:0;padding:0;margin:0 0 14px;font-size:20px">📊 Comparativa de Semanas</h2>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 16px">Elegí dos semanas para comparar ventas, pedidos y rendimiento.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="field"><label>Semana A — Desde</label><input type="date" id="cmpA1" onchange="runComparativa()"></div>
+          <div class="field"><label>Semana A — Hasta</label><input type="date" id="cmpA2" onchange="runComparativa()"></div>
+          <div class="field"><label>Semana B — Desde</label><input type="date" id="cmpB1" onchange="runComparativa()"></div>
+          <div class="field"><label>Semana B — Hasta</label><input type="date" id="cmpB2" onchange="runComparativa()"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="cmpSetLastTwoWeeks()">📅 Últimas 2 semanas</button>
+          <button class="btn btn-ghost" onclick="runComparativa()">🔄 Actualizar</button>
+          <span id="cmpStatus" style="font-size:12px;color:var(--muted);align-self:center"></span>
+        </div>
+      </div>
+      <div id="cmpKpis" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px"></div>
+      <div class="card" style="margin-bottom:16px">
+        <h2>Ventas diarias comparadas</h2>
+        <div style="height:260px;position:relative"><canvas id="cmpChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Detalle por día de la semana</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Día</th>
+              <th style="text-align:right;background:rgba(59,130,246,.08);color:var(--blue)">Sem A — Ventas</th>
+              <th style="text-align:right;background:rgba(59,130,246,.08);color:var(--blue)">Sem A — Pedidos</th>
+              <th style="text-align:right;background:rgba(34,197,94,.08);color:var(--green)">Sem B — Ventas</th>
+              <th style="text-align:right;background:rgba(34,197,94,.08);color:var(--green)">Sem B — Pedidos</th>
+              <th style="text-align:center">Δ Ventas</th>
+            </tr></thead>
+            <tbody id="cmpTableBody">
+              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">Seleccioná las semanas arriba.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-fixed" style="display:none">
       <div class="card"><h2><span>💡 Gastos Fijos</span><button class="btn btn-primary" onclick="addFixedRow()">+ Agregar</button></h2><table id="tableFixed"><thead><tr><th>Concepto</th><th width="150">Monto Mensual ($)</th><th width="50"></th></tr></thead><tbody></tbody></table><div style="margin-top:12px;text-align:right"><button class="btn btn-blue" onclick="saveFixedData()">💾 Guardar Cambios</button></div></div>
     </div>
@@ -902,7 +945,7 @@ div[id^="tab-"]{display:none;}
     window.renderFixedTables=function(){ $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join('');$('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
     window.saveFixedData=function(){ if(!FIXED_DATA.aliases)FIXED_DATA.aliases=[];let pyVal=30;if($('#confPy'))pyVal=Number($('#confPy').value);FIXED_DATA.config={pyPercent:pyVal,taxDebit:Number($('#confDebit').value),taxTransf:Number($('#confTransf').value),taxQR:Number($('#confQR').value)};db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("✅ Guardado"));window.calculateAll();window.renderOrdersTab(); };
     window.saveConfig=window.saveFixedData;
-    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad();if(id==='simulador')window.runSimulator();if(id==='equilibrio')window.renderEquilibrio(); };
+    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad();if(id==='simulador')window.runSimulator();if(id==='equilibrio')window.renderEquilibrio();if(id==='comparativa')window.cmpSetLastTwoWeeks(); };
 
     window.loadStockMovements = function() {
         const tbody = document.getElementById('stockMovementsBody');
@@ -1351,6 +1394,142 @@ div[id^="tab-"]{display:none;}
         });
 
         if(!data.length) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Sin resultados.</td></tr>`;
+    };
+
+    // ── COMPARATIVA DE SEMANAS ──
+    let cmpChart = null;
+
+    function ordersInRange(from, to) {
+        return ORDERS.filter(o => {
+            if(o.status === 'cancelled') return false;
+            const d = parseDate(o.createdAt);
+            return d && d >= from && d <= to;
+        });
+    }
+
+    function calcWeekStats(orders) {
+        const ventas   = orders.reduce((s,o) => s + Number(o.total||0), 0);
+        const pedidos  = orders.length;
+        const ticketProm = pedidos > 0 ? ventas / pedidos : 0;
+        const burgers  = orders.reduce((s,o) => s + (o.items||[]).filter(i => {
+            const n = (i.name||'').toLowerCase();
+            return n.includes('burger')||n.includes('hamb')||n.includes('doble')||n.includes('simple');
+        }).reduce((a,i)=>a+Number(i.qty||1),0), 0);
+        return { ventas, pedidos, ticketProm, burgers };
+    }
+
+    function dateRange(from, to) {
+        const days = []; const cur = new Date(from);
+        while(cur <= to) { days.push(new Date(cur)); cur.setDate(cur.getDate()+1); }
+        return days;
+    }
+
+    function fmtDate(d) { return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'}); }
+
+    window.cmpSetLastTwoWeeks = function() {
+        const now = new Date();
+        const b2 = new Date(now); b2.setHours(23,59,59);
+        const b1 = new Date(b2); b1.setDate(b1.getDate()-6); b1.setHours(0,0,0);
+        const a2 = new Date(b1); a2.setDate(a2.getDate()-1); a2.setHours(23,59,59);
+        const a1 = new Date(a2); a1.setDate(a1.getDate()-6); a1.setHours(0,0,0);
+        const fmt = d => d.toISOString().slice(0,10);
+        document.getElementById('cmpA1').value = fmt(a1);
+        document.getElementById('cmpA2').value = fmt(a2);
+        document.getElementById('cmpB1').value = fmt(b1);
+        document.getElementById('cmpB2').value = fmt(b2);
+        runComparativa();
+    };
+
+    window.runComparativa = function() {
+        const a1v=$('#cmpA1').value, a2v=$('#cmpA2').value;
+        const b1v=$('#cmpB1').value, b2v=$('#cmpB2').value;
+        if(!a1v||!a2v||!b1v||!b2v) return;
+        const a1=new Date(a1v+'T00:00:00'), a2=new Date(a2v+'T23:59:59');
+        const b1=new Date(b1v+'T00:00:00'), b2=new Date(b2v+'T23:59:59');
+        document.getElementById('cmpStatus').textContent = 'Cargando...';
+
+        db.collection('orders').get().then(snap => {
+            const allRaw = snap.docs.map(d=>({id:d.id,...d.data()})).filter(o=>o.status!=='cancelled');
+            const ordA = allRaw.filter(o => { const d=parseDate(o.createdAt); return d&&d>=a1&&d<=a2; });
+            const ordB = allRaw.filter(o => { const d=parseDate(o.createdAt); return d&&d>=b1&&d<=b2; });
+            const stA = calcWeekStats(ordA), stB = calcWeekStats(ordB);
+            const pct = (a,b) => b>0 ? ((a-b)/b*100).toFixed(1) : a>0 ? 100 : 0;
+
+            document.getElementById('cmpStatus').textContent = `Sem A: ${ordA.length} pedidos | Sem B: ${ordB.length} pedidos`;
+
+            // KPIs
+            const kpiData = [
+                {label:'Ventas Totales',   a:stA.ventas,    b:stB.ventas,    fmt:money},
+                {label:'Pedidos',          a:stA.pedidos,   b:stB.pedidos,   fmt:n=>n},
+                {label:'Ticket Promedio',  a:stA.ticketProm,b:stB.ticketProm,fmt:money},
+                {label:'Burgers Vendidas', a:stA.burgers,   b:stB.burgers,   fmt:n=>n},
+            ];
+            document.getElementById('cmpKpis').innerHTML = kpiData.map(k => {
+                const p = Number(pct(k.b,k.a));
+                const col = p>0?'var(--green)':p<0?'var(--red)':'var(--muted)';
+                const ic  = p>0?'▲':p<0?'▼':'=';
+                return `<div class="card" style="padding:16px">
+                  <div style="font-size:10px;color:var(--muted);font-family:var(--fh);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">${k.label}</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+                    <div><div style="font-size:10px;color:var(--blue);font-weight:700;margin-bottom:3px">SEM A</div>
+                         <div style="font-family:var(--fh);font-size:22px;font-weight:900;color:var(--blue)">${k.fmt(k.a)}</div></div>
+                    <div><div style="font-size:10px;color:var(--green);font-weight:700;margin-bottom:3px">SEM B</div>
+                         <div style="font-family:var(--fh);font-size:22px;font-weight:900;color:var(--green)">${k.fmt(k.b)}</div></div>
+                  </div>
+                  <div style="font-family:var(--fh);font-size:14px;font-weight:800;color:${col}">${ic} ${Math.abs(p)}% ${p>0?'más':p<0?'menos':''} en Sem B</div>
+                </div>`;
+            }).join('');
+
+            // Gráfico
+            const daysA=dateRange(a1,a2), daysB=dateRange(b1,b2);
+            const maxDays=Math.max(daysA.length,daysB.length);
+            const salesA=daysA.map(d=>{const n=new Date(d);n.setDate(d.getDate()+1);return ordA.filter(o=>{const od=parseDate(o.createdAt);return od&&od>=d&&od<n;}).reduce((s,o)=>s+Number(o.total||0),0);});
+            const salesB=daysB.map(d=>{const n=new Date(d);n.setDate(d.getDate()+1);return ordB.filter(o=>{const od=parseDate(o.createdAt);return od&&od>=d&&od<n;}).reduce((s,o)=>s+Number(o.total||0),0);});
+            const labels=Array.from({length:maxDays},(_,i)=>`Día ${i+1}`);
+
+            if(cmpChart)cmpChart.destroy();
+            cmpChart=new Chart(document.getElementById('cmpChart').getContext('2d'),{
+                type:'bar',
+                data:{labels,datasets:[
+                    {label:`Sem A (${fmtDate(a1)}-${fmtDate(a2)})`,data:salesA,backgroundColor:'rgba(59,130,246,.6)',borderRadius:5},
+                    {label:`Sem B (${fmtDate(b1)}-${fmtDate(b2)})`,data:salesB,backgroundColor:'rgba(34,197,94,.6)',borderRadius:5}
+                ]},
+                options:{responsive:true,maintainAspectRatio:false,
+                    plugins:{legend:{labels:{color:'#7a7060',boxWidth:12}}},
+                    scales:{
+                        x:{grid:{color:'rgba(212,168,71,.06)'},ticks:{color:'#7a7060'}},
+                        y:{beginAtZero:true,grid:{color:'rgba(212,168,71,.06)'},ticks:{color:'#7a7060',callback:v=>'$'+Number(v).toLocaleString('es-AR',{maximumFractionDigits:0})}}
+                    }
+                }
+            });
+
+            // Tabla por día de la semana
+            const DOW=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+            const dowA=Array(7).fill(null).map(()=>({ventas:0,pedidos:0}));
+            const dowB=Array(7).fill(null).map(()=>({ventas:0,pedidos:0}));
+            ordA.forEach(o=>{const d=parseDate(o.createdAt);if(d){dowA[d.getDay()].ventas+=Number(o.total||0);dowA[d.getDay()].pedidos++;}});
+            ordB.forEach(o=>{const d=parseDate(o.createdAt);if(d){dowB[d.getDay()].ventas+=Number(o.total||0);dowB[d.getDay()].pedidos++;}});
+
+            const tbody=document.getElementById('cmpTableBody');tbody.innerHTML='';
+            const activeDays=new Set([...ordA,...ordB].map(o=>{const d=parseDate(o.createdAt);return d?d.getDay():-1}).filter(d=>d>=0));
+            if(!activeDays.size)[0,1,2,3,4,5,6].forEach(d=>activeDays.add(d));
+            [1,2,3,4,5,6,0].filter(d=>activeDays.has(d)).forEach(d=>{
+                const a=dowA[d],b=dowB[d];
+                const diff=b.ventas-a.ventas;
+                const diffPct=a.ventas>0?((diff/a.ventas)*100).toFixed(1):'—';
+                const col=diff>0?'var(--green)':diff<0?'var(--red)':'var(--muted)';
+                const ic=diff>0?'▲':diff<0?'▼':'=';
+                tbody.insertAdjacentHTML('beforeend',`<tr>
+                  <td style="font-weight:700;color:var(--white)">${DOW[d]}</td>
+                  <td style="text-align:right;color:var(--blue);font-weight:600">${money(a.ventas)}</td>
+                  <td style="text-align:right;color:var(--blue)">${a.pedidos}</td>
+                  <td style="text-align:right;color:var(--green);font-weight:600">${money(b.ventas)}</td>
+                  <td style="text-align:right;color:var(--green)">${b.pedidos}</td>
+                  <td style="text-align:center;font-family:var(--fh);font-size:14px;font-weight:800;color:${col}">${ic} ${diffPct!=='—'?Math.abs(Number(diffPct))+'%':'—'}</td>
+                </tr>`);
+            });
+
+        }).catch(err=>{ document.getElementById('cmpStatus').textContent='❌ '+err.message; });
     };
 
     window.saveStockRules=async function(){
