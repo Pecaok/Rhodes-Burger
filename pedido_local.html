@@ -858,8 +858,22 @@
       <a href="admin.html" class="nav-btn">⚙️ <span>Admin</span></a>
       <button id="btnBell" class="icon-btn" title="Sonido">🔔</button>
       <button id="btnAutoPrint" class="icon-btn" title="Autoimprimir">🖨️</button>
+      <button onclick="mostrarResumen()" class="icon-btn" title="Resumen de la noche" style="font-size:18px">🌙</button>
     </div>
   </header>
+
+  <div id="resumenModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(8px)">
+    <div style="background:#2a2619;border:1px solid rgba(212,168,71,.25);border-radius:18px;padding:28px;max-width:500px;width:92%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.7)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;color:#FAFAF8">Resumen de la Noche</div>
+          <div id="resumenFecha" style="font-size:12px;color:#7a7060;margin-top:2px"></div>
+        </div>
+        <button onclick="document.getElementById('resumenModal').style.display='none'" style="background:rgba(255,255,255,.06);border:1px solid rgba(212,168,71,.15);color:#7a7060;width:34px;height:34px;border-radius:8px;font-size:18px;cursor:pointer">✕</button>
+      </div>
+      <div id="resumenBody"></div>
+    </div>
+  </div>
 
   <main class="container">
     <h1>Últimos pedidos</h1>
@@ -1059,7 +1073,119 @@
         document.querySelectorAll('.order-timer[data-since]').forEach(updateTimerEl);
     }, 30000);
 
-    window.trySilentPrint = function(docSnap){
+    window.mostrarResumen = function() {
+        if(!window.lastSnap) return;
+        const now = new Date();
+        const hoy = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const manana = new Date(hoy); manana.setDate(hoy.getDate()+1);
+
+        // Filtrar pedidos de hoy (no cancelados)
+        const pedidosHoy = window.lastSnap.docs
+            .map(d => d.data())
+            .filter(o => {
+                if(o.status === 'cancelled') return false;
+                const d = window.pickDate(o);
+                return d >= hoy && d < manana;
+            });
+
+        if(!pedidosHoy.length) {
+            alert('No hay pedidos registrados hoy todavía.');
+            return;
+        }
+
+        // Cálculos
+        const totalFact   = pedidosHoy.reduce((s,o) => s + Number(o.total||0), 0);
+        const totalPed    = pedidosHoy.length;
+        const ticketProm  = totalFact / totalPed;
+        const pedidoMax   = pedidosHoy.reduce((a,b) => Number(b.total||0) > Number(a.total||0) ? b : a);
+
+        // Burgers
+        let burgers = 0;
+        pedidosHoy.forEach(o => (o.items||[]).forEach(it => {
+            const n = (it.name||'').toLowerCase();
+            if(n.includes('burger')||n.includes('hamb')||n.includes('doble')||n.includes('simple')||n.includes('royal')||n.includes('cheese')||n.includes('core')||n.includes('big')||n.includes('morgan')||n.includes('billy'))
+                burgers += Number(it.qty||1);
+        }));
+
+        // Métodos de pago
+        const pagos = {};
+        pedidosHoy.forEach(o => {
+            const p = o.pago || 'efectivo';
+            if(p === 'mostrador_sin_especificar') return;
+            pagos[p] = (pagos[p]||0) + 1;
+        });
+        const pagoTop = Object.entries(pagos).sort((a,b)=>b[1]-a[1]);
+
+        // Canal más usado
+        const canales = {};
+        pedidosHoy.forEach(o => { const s=o.source||'web'; canales[s]=(canales[s]||0)+1; });
+        const canalTop = Object.entries(canales).sort((a,b)=>b[1]-a[1]);
+
+        // Hora pico
+        const porHora = {};
+        pedidosHoy.forEach(o => {
+            const d = window.pickDate(o);
+            const h = d.getHours();
+            porHora[h] = (porHora[h]||0) + 1;
+        });
+        const horaPico = Object.entries(porHora).sort((a,b)=>b[1]-a[1])[0];
+
+        // Producto más pedido
+        const prods = {};
+        pedidosHoy.forEach(o => (o.items||[]).forEach(it => {
+            const n = (it.name||'').trim();
+            if(!n) return;
+            prods[n] = (prods[n]||0) + Number(it.qty||1);
+        }));
+        const prodTop = Object.entries(prods).sort((a,b)=>b[1]-a[1])[0];
+
+        // Descuentos
+        const totalDesc = pedidosHoy.filter(o=>o.discount>0).length;
+
+        const m = n => (Number(n)||0).toLocaleString('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0});
+        const pagoLabels = {'efectivo':'Efectivo','mercado_pago':'QR/MP','debito':'Débito','transferencia':'Transferencia'};
+
+        const kpi = (label, value, sub='', color='var(--gold)') =>
+            `<div style="background:rgba(255,255,255,.04);border:1px solid rgba(212,168,71,.1);border-radius:10px;padding:14px">
+               <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;color:#7a7060;text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px">${label}</div>
+               <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:900;color:${color};line-height:1">${value}</div>
+               ${sub?`<div style="font-size:11px;color:#7a7060;margin-top:3px">${sub}</div>`:''}
+             </div>`;
+
+        document.getElementById('resumenFecha').textContent =
+            now.toLocaleDateString('es-AR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+
+        document.getElementById('resumenBody').innerHTML = `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+            ${kpi('Facturación', m(totalFact))}
+            ${kpi('Pedidos', totalPed, 'confirmados hoy')}
+            ${kpi('Ticket Promedio', m(ticketProm))}
+            ${kpi('Burgers', burgers, 'unidades despachadas')}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+            ${kpi('Hora Pico', horaPico ? horaPico[0]+':00hs' : '—', horaPico?horaPico[1]+' pedidos':'')}
+            ${kpi('Pago más usado', pagoTop.length ? (pagoLabels[pagoTop[0][0]]||pagoTop[0][0]) : '—', pagoTop.length?pagoTop[0][1]+' veces':'')}
+            ${kpi('Más pedido', prodTop ? prodTop[0] : '—', prodTop?prodTop[1]+' unidades':'','var(--green)')}
+            ${kpi('Con descuento', totalDesc, 'de '+totalPed+' pedidos', totalDesc>0?'var(--orange)':'var(--muted)')}
+          </div>
+          <div style="background:rgba(212,168,71,.06);border:1px solid rgba(212,168,71,.15);border-radius:10px;padding:14px">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;color:#7a7060;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Pedido más grande</div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div style="font-weight:600;color:#F0EAE0;font-size:14px">#${pedidoMax.orderNumber||'—'} — ${pedidoMax.nombre||'Cliente'}</div>
+              <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:var(--gold)">${m(pedidoMax.total)}</div>
+            </div>
+          </div>
+          ${canalTop.length > 1 ? `
+          <div style="margin-top:10px;background:rgba(255,255,255,.03);border:1px solid rgba(212,168,71,.08);border-radius:10px;padding:14px">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;color:#7a7060;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Canales</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${canalTop.map(([c,n])=>`<span style="background:rgba(255,255,255,.06);border:1px solid rgba(212,168,71,.12);border-radius:6px;padding:5px 10px;font-size:13px;font-weight:600;color:#F0EAE0">${c}: <strong style="color:var(--gold)">${n}</strong></span>`).join('')}
+            </div>
+          </div>` : ''}
+        `;
+
+        document.getElementById('resumenModal').style.display = 'flex';
+    };
        const o = docSnap.data();
        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
        const m = n => (Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
