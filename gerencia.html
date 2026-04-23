@@ -185,6 +185,7 @@ div[id^="tab-"]{display:none;}
     <div class="tab-btn" onclick="showTab('simulador')">📐 Simulador Precios</div>
     <div class="tab-btn" onclick="showTab('equilibrio')">⚖️ Punto de Equilibrio</div>
     <div class="tab-btn" onclick="showTab('comparativa')">📊 Comparativa Semanas</div>
+    <div class="tab-btn" onclick="showTab('detector')">🔍 Detector Días Flojos</div>
     <div class="section-title">Gestión</div>
     <div class="tab-btn" onclick="showTab('stock')">📦 Control de Stock</div>
     <div class="tab-btn" onclick="showTab('subrecipes')">🧩 Armado de Items</div>
@@ -603,6 +604,59 @@ div[id^="tab-"]{display:none;}
       </div>
     </div>
 
+    <!-- DETECTOR DE DÍAS FLOJOS -->
+    <div id="tab-detector" style="display:none">
+      <div class="card card-accent" style="margin-bottom:16px">
+        <h2 style="border:0;padding:0;margin:0 0 14px;font-size:20px">🔍 Detector de Días Flojos</h2>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 16px">Analiza el historial y detecta patrones de días con bajo rendimiento.</p>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div class="field" style="margin:0">
+            <label>Mes a analizar</label>
+            <input type="month" id="detMonth" style="width:auto">
+          </div>
+          <button class="btn btn-primary" onclick="runDetector()" style="margin-top:18px">🔍 Analizar</button>
+          <span id="detStatus" style="font-size:12px;color:var(--muted);margin-top:18px"></span>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div id="detKpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+
+      <!-- Calendario visual -->
+      <div class="card" style="margin-bottom:16px">
+        <h2>Calendario del mes</h2>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">
+          <span style="display:inline-block;width:12px;height:12px;background:var(--green);border-radius:3px;margin-right:4px;vertical-align:middle"></span>Buen día
+          <span style="display:inline-block;width:12px;height:12px;background:#eab308;border-radius:3px;margin:0 4px 0 12px;vertical-align:middle"></span>Regular
+          <span style="display:inline-block;width:12px;height:12px;background:var(--red);border-radius:3px;margin:0 4px 0 12px;vertical-align:middle"></span>Flojo
+          <span style="display:inline-block;width:12px;height:12px;background:rgba(255,255,255,.06);border-radius:3px;margin:0 4px 0 12px;vertical-align:middle"></span>Sin ventas
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px">
+          <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);font-family:var(--fh);text-transform:uppercase">Lun</div>
+          <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);font-family:var(--fh);text-transform:uppercase">Mar</div>
+          <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);font-family:var(--fh);text-transform:uppercase">Mié</div>
+          <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);font-family:var(--fh);text-transform:uppercase">Jue</div>
+          <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);font-family:var(--fh);text-transform:uppercase">Vie</div>
+          <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);font-family:var(--fh);text-transform:uppercase">Sáb</div>
+          <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);font-family:var(--fh);text-transform:uppercase">Dom</div>
+        </div>
+        <div id="detCalendar" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px"></div>
+        <div style="display:none" id="detCalHdr"></div>
+      </div>
+
+      <!-- Análisis por día de la semana -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="card">
+          <h2>📅 Promedio por día de la semana</h2>
+          <div id="detDowChart" style="height:200px;position:relative"><canvas id="detDowCanvas"></canvas></div>
+        </div>
+        <div class="card">
+          <h2>⚠️ Días flojos detectados</h2>
+          <div id="detAlerts"></div>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-fixed" style="display:none">
       <div class="card"><h2><span>💡 Gastos Fijos</span><button class="btn btn-primary" onclick="addFixedRow()">+ Agregar</button></h2><table id="tableFixed"><thead><tr><th>Concepto</th><th width="150">Monto Mensual ($)</th><th width="50"></th></tr></thead><tbody></tbody></table><div style="margin-top:12px;text-align:right"><button class="btn btn-blue" onclick="saveFixedData()">💾 Guardar Cambios</button></div></div>
     </div>
@@ -945,7 +999,7 @@ div[id^="tab-"]{display:none;}
     window.renderFixedTables=function(){ $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join('');$('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
     window.saveFixedData=function(){ if(!FIXED_DATA.aliases)FIXED_DATA.aliases=[];let pyVal=30;if($('#confPy'))pyVal=Number($('#confPy').value);FIXED_DATA.config={pyPercent:pyVal,taxDebit:Number($('#confDebit').value),taxTransf:Number($('#confTransf').value),taxQR:Number($('#confQR').value)};db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("✅ Guardado"));window.calculateAll();window.renderOrdersTab(); };
     window.saveConfig=window.saveFixedData;
-    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad();if(id==='simulador')window.runSimulator();if(id==='equilibrio')window.renderEquilibrio();if(id==='comparativa')window.cmpSetLastTwoWeeks(); };
+    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad();if(id==='simulador')window.runSimulator();if(id==='equilibrio')window.renderEquilibrio();if(id==='comparativa')window.cmpSetLastTwoWeeks();if(id==='detector'){const now=new Date();document.getElementById('detMonth').value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;window.runDetector();} };
 
     window.loadStockMovements = function() {
         const tbody = document.getElementById('stockMovementsBody');
@@ -1530,6 +1584,169 @@ div[id^="tab-"]{display:none;}
             });
 
         }).catch(err=>{ document.getElementById('cmpStatus').textContent='❌ '+err.message; });
+    };
+
+    // ── DETECTOR DE DÍAS FLOJOS ──
+    let detDowChart = null;
+
+    window.runDetector = function() {
+        const monthVal = document.getElementById('detMonth').value;
+        if(!monthVal) { alert('Seleccioná un mes'); return; }
+        document.getElementById('detStatus').textContent = 'Analizando...';
+
+        const [y,m] = monthVal.split('-').map(Number);
+        const start = new Date(y,m-1,1);
+        const end   = new Date(y,m,0,23,59,59);
+        const daysInMonth = new Date(y,m,0).getDate();
+
+        db.collection('orders').get().then(snap => {
+            const orders = snap.docs.map(d=>({id:d.id,...d.data()}))
+                .filter(o => {
+                    if(o.status==='cancelled') return false;
+                    const d = parseDate(o.createdAt);
+                    return d && d >= start && d <= end;
+                });
+
+            // Agrupar por día
+            const byDay = {}; // {1: {ventas, pedidos}}
+            for(let i=1; i<=daysInMonth; i++) byDay[i] = {ventas:0, pedidos:0};
+            orders.forEach(o => {
+                const d = parseDate(o.createdAt);
+                if(!d) return;
+                const day = d.getDate();
+                byDay[day].ventas  += Number(o.total||0);
+                byDay[day].pedidos += 1;
+            });
+
+            // Calcular promedio solo de días con ventas
+            const diasConVentas = Object.values(byDay).filter(d=>d.ventas>0);
+            const promedio = diasConVentas.length ? diasConVentas.reduce((s,d)=>s+d.ventas,0)/diasConVentas.length : 0;
+            const umbralFlojo  = promedio * 0.6;  // menos del 60% del promedio = flojo
+            const umbralRegular = promedio * 0.85; // menos del 85% = regular
+
+            document.getElementById('detStatus').textContent = `${orders.length} pedidos analizados | Promedio diario: ${money(promedio)}`;
+
+            // KPIs
+            const totalVentas = orders.reduce((s,o)=>s+Number(o.total||0),0);
+            const diasFlojos  = Object.values(byDay).filter(d=>d.ventas>0&&d.ventas<umbralFlojo).length;
+            const mejorDia    = Object.entries(byDay).filter(([,d])=>d.ventas>0).sort((a,b)=>b[1].ventas-a[1].ventas)[0];
+            const peorDia     = Object.entries(byDay).filter(([,d])=>d.ventas>0).sort((a,b)=>a[1].ventas-b[1].ventas)[0];
+
+            document.getElementById('detKpis').innerHTML = `
+              <div class="kpi"><div class="kpi-lbl">Facturación del mes</div><div class="kpi-val">${money(totalVentas)}</div></div>
+              <div class="kpi"><div class="kpi-lbl">Promedio diario</div><div class="kpi-val" style="color:var(--gold)">${money(promedio)}</div></div>
+              <div class="kpi"><div class="kpi-lbl">Días flojos</div><div class="kpi-val" style="color:${diasFlojos>0?'var(--red)':'var(--green)'}">${diasFlojos}</div></div>
+              <div class="kpi"><div class="kpi-lbl">Mejor día</div><div class="kpi-val" style="font-size:18px;color:var(--green)">${mejorDia?mejorDia[0]+'/'+m+' ('+money(mejorDia[1].ventas)+')':'—'}</div></div>
+              <div class="kpi"><div class="kpi-lbl">Día más flojo</div><div class="kpi-val" style="font-size:18px;color:var(--red)">${peorDia?peorDia[0]+'/'+m+' ('+money(peorDia[1].ventas)+')':'—'}</div></div>
+            `;
+
+            // Calendario visual
+            const firstDow = new Date(y,m-1,1).getDay(); // 0=domingo
+            // Convertir a lunes=0
+            const offset = firstDow === 0 ? 6 : firstDow - 1;
+            const cal = document.getElementById('detCalendar');
+            cal.innerHTML = '';
+            // Encabezados días
+            const hdr = cal.previousElementSibling;
+            // Celdas vacías
+            for(let i=0;i<offset;i++) {
+                cal.insertAdjacentHTML('beforeend','<div></div>');
+            }
+            for(let d=1;d<=daysInMonth;d++) {
+                const v = byDay[d].ventas;
+                const p = byDay[d].pedidos;
+                let bg, textCol;
+                if(v === 0)          { bg='rgba(255,255,255,.06)'; textCol='var(--muted)'; }
+                else if(v<umbralFlojo)  { bg='rgba(239,68,68,.25)';  textCol='var(--red)'; }
+                else if(v<umbralRegular){ bg='rgba(234,179,8,.25)';   textCol='#eab308'; }
+                else                    { bg='rgba(34,197,94,.2)';    textCol='var(--green)'; }
+
+                const fecha = new Date(y,m-1,d);
+                const dow = ['D','L','M','X','J','V','S'][fecha.getDay()];
+                cal.insertAdjacentHTML('beforeend',`
+                  <div style="background:${bg};border-radius:8px;padding:8px 4px;text-align:center;cursor:default" title="${v>0?money(v)+' — '+p+' pedidos':'Sin ventas'}">
+                    <div style="font-family:var(--fh);font-size:18px;font-weight:900;color:${textCol};line-height:1">${d}</div>
+                    <div style="font-size:9px;color:var(--muted);margin-top:1px">${dow}</div>
+                    ${v>0?`<div style="font-size:9px;font-weight:700;color:${textCol};margin-top:2px">${p}ped</div>`:''}
+                  </div>`);
+            }
+
+            // Promedio por día de la semana
+            const DOW_LABELS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+            const dowTotals = Array(7).fill(null).map(()=>({ventas:0,dias:0}));
+            for(let d=1;d<=daysInMonth;d++) {
+                if(byDay[d].ventas===0) continue;
+                const dow = new Date(y,m-1,d).getDay();
+                dowTotals[dow].ventas += byDay[d].ventas;
+                dowTotals[dow].dias++;
+            }
+            const dowPromedios = dowTotals.map(t=>t.dias>0?t.ventas/t.dias:0);
+            // Reorder: Lun-Dom
+            const reorder = [1,2,3,4,5,6,0];
+            const dowLabels = reorder.map(i=>DOW_LABELS[i]);
+            const dowData   = reorder.map(i=>dowPromedios[i]);
+            const maxDow = Math.max(...dowData);
+            const colors = dowData.map(v=>{
+                if(v===0) return 'rgba(255,255,255,.06)';
+                const ratio = v/maxDow;
+                if(ratio<0.6) return 'rgba(239,68,68,.7)';
+                if(ratio<0.85) return 'rgba(234,179,8,.7)';
+                return 'rgba(34,197,94,.7)';
+            });
+
+            if(detDowChart) detDowChart.destroy();
+            detDowChart = new Chart(document.getElementById('detDowCanvas').getContext('2d'),{
+                type:'bar',
+                data:{labels:dowLabels,datasets:[{data:dowData,backgroundColor:colors,borderRadius:6}]},
+                options:{responsive:true,maintainAspectRatio:false,
+                    plugins:{legend:{display:false}},
+                    scales:{
+                        x:{grid:{color:'rgba(212,168,71,.06)'},ticks:{color:'#7a7060'}},
+                        y:{beginAtZero:true,grid:{color:'rgba(212,168,71,.06)'},
+                           ticks:{color:'#7a7060',callback:v=>'$'+Number(v).toLocaleString('es-AR',{maximumFractionDigits:0})}}
+                    }
+                }
+            });
+
+            // Alertas de días flojos
+            const flacos = Object.entries(byDay)
+                .filter(([,d])=>d.ventas>0&&d.ventas<umbralFlojo)
+                .sort((a,b)=>a[1].ventas-b[1].ventas);
+
+            const DOW_FULL = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+            const alertsEl = document.getElementById('detAlerts');
+            if(!flacos.length) {
+                alertsEl.innerHTML = `<div style="color:var(--green);font-size:14px;padding:16px;text-align:center">✅ Sin días flojos este mes. ¡Buen trabajo!</div>`;
+            } else {
+                alertsEl.innerHTML = flacos.map(([d,data])=>{
+                    const fecha = new Date(y,m-1,Number(d));
+                    const dow = DOW_FULL[fecha.getDay()];
+                    const pct = promedio>0?((data.ventas/promedio)*100).toFixed(0):0;
+                    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border2)">
+                      <div>
+                        <div style="font-weight:700;color:var(--white);font-size:13px">${dow} ${d}/${m}</div>
+                        <div style="font-size:11px;color:var(--muted)">${data.pedidos} pedido${data.pedidos!==1?'s':''}</div>
+                      </div>
+                      <div style="text-align:right">
+                        <div style="font-family:var(--fh);font-size:16px;font-weight:800;color:var(--red)">${money(data.ventas)}</div>
+                        <div style="font-size:10px;color:var(--muted)">${pct}% del promedio</div>
+                      </div>
+                    </div>`;
+                }).join('');
+
+                // Patrón por día de semana
+                const dowFlojos = {};
+                flacos.forEach(([d])=>{ const dow=new Date(y,m-1,Number(d)).getDay(); dowFlojos[dow]=(dowFlojos[dow]||0)+1; });
+                const patronTop = Object.entries(dowFlojos).sort((a,b)=>b[1]-a[1])[0];
+                if(patronTop && patronTop[1]>1) {
+                    alertsEl.insertAdjacentHTML('beforeend',`
+                      <div style="margin-top:12px;padding:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:8px;font-size:12px;color:var(--red)">
+                        ⚠️ <strong>${DOW_FULL[patronTop[0]]}</strong> es tu día más problemático este mes (${patronTop[1]} veces por debajo del promedio)
+                      </div>`);
+                }
+            }
+
+        }).catch(err=>{ document.getElementById('detStatus').textContent='❌ '+err.message; });
     };
 
     window.saveStockRules=async function(){
