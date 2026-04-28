@@ -928,11 +928,10 @@ window.generateStory = async function() {
     const status = document.getElementById('storyStatus');
     status.textContent = 'Cargando datos...';
 
-    const days   = Number(document.getElementById('storyPeriod').value);
-    const headline = document.getElementById('storyHeadline').value || 'Lo más pedido 🔥';
+    const days     = Number(document.getElementById('storyPeriod').value);
+    const headline = document.getElementById('storyHeadline').value || 'Lo más pedido';
     const subtitle = document.getElementById('storySubtitle').value || 'Esta semana en Rhodes.';
     const showPromo = document.getElementById('storyShowPromo').checked;
-
     const since = new Date(Date.now() - days * 86400000);
 
     // Fetch orders
@@ -953,211 +952,245 @@ window.generateStory = async function() {
         counts[k] = (counts[k]||0) + Number(it.qty||1);
     }));
     const top3 = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,3);
-
-    if(!top3.length) { status.textContent = '❌ Sin ventas en el período'; return; }
+    if(!top3.length) { status.textContent = 'Sin ventas en el período'; return; }
     status.textContent = 'Generando imagen...';
 
     // Fetch promo
     let promo = null;
     if(showPromo) {
-        const promoSnap = await db.collection('promos').where('active','==',true).get();
-        if(!promoSnap.empty) promo = promoSnap.docs[0].data();
+        const ps = await db.collection('promos').where('active','==',true).get();
+        if(!ps.empty) promo = ps.docs[0].data();
     }
 
-    // Load product images
+    // Product images
     const productImgs = {};
     const productSnap = await db.collection('products').get();
     productSnap.forEach(d => { productImgs[d.data().name] = d.data().img; });
 
-    // Draw canvas
     const canvas = document.getElementById('storyCanvas');
     const ctx = canvas.getContext('2d');
     const W = 540, H = 960;
     canvas.width = W; canvas.height = H;
 
-    // Background
+    // ── BACKGROUND ──
     ctx.fillStyle = STORY_BG;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0,0,W,H);
 
-    // Noise overlay (subtle texture)
-    for(let i=0;i<8000;i++) {
-        const x=Math.random()*W, y=Math.random()*H;
-        ctx.fillStyle=`rgba(255,255,255,${Math.random()*0.025})`;
+    // Try hero image from #1 product
+    const heroSrc = productImgs[top3[0][0]];
+    if(heroSrc) {
+        try {
+            const hero = await loadImg(heroSrc);
+            // Top half hero image with dark overlay
+            ctx.save();
+            ctx.drawImage(hero, 0, 0, W, H*0.52);
+            // Gradient overlay — heavy at bottom, light at top
+            const grad = ctx.createLinearGradient(0,0,0,H*0.52);
+            grad.addColorStop(0,'rgba(26,23,16,.25)');
+            grad.addColorStop(0.6,'rgba(26,23,16,.6)');
+            grad.addColorStop(1, STORY_BG === '#1a1710' ? 'rgba(26,23,16,1)' : STORY_BG+'ff');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0,0,W,H*0.52);
+            ctx.restore();
+        } catch(e) {}
+    }
+
+    // Subtle noise
+    for(let i=0;i<6000;i++){
+        const x=Math.random()*W,y=Math.random()*H;
+        ctx.fillStyle=`rgba(255,255,255,${Math.random()*0.018})`;
         ctx.fillRect(x,y,1,1);
     }
 
-    // Gold top accent line
-    const grd = ctx.createLinearGradient(0,0,W,0);
-    grd.addColorStop(0,'transparent'); grd.addColorStop(.5,'#D4A847'); grd.addColorStop(1,'transparent');
-    ctx.fillStyle=grd; ctx.fillRect(0,0,W,3);
-
-    // Logo area
-    let logoY = 60;
+    // ── TOP BAR ──
+    // Logo + brand name top-left
+    let logoLoaded = false;
     try {
-        const logoImg = await loadImg('images/logo.png');
+        const logo = await loadImg('images/logo.png');
         ctx.save();
         ctx.beginPath();
-        ctx.roundRect(W/2-28, logoY, 56, 56, 12);
+        ctx.roundRect(22, 22, 38, 38, 8);
         ctx.clip();
-        ctx.drawImage(logoImg, W/2-28, logoY, 56, 56);
+        ctx.drawImage(logo, 22, 22, 38, 38);
         ctx.restore();
-        logoY += 56;
-    } catch(e) { /* no logo */ }
+        logoLoaded = true;
+    } catch(e) {}
 
-    // Brand name
     ctx.fillStyle = '#FAFAF8';
-    ctx.font = 'bold 38px "Barlow Condensed", sans-serif';
-    ctx.letterSpacing = '3px';
-    ctx.textAlign = 'center';
-    ctx.fillText('RHODES.', W/2, logoY + 36);
+    ctx.font = '700 22px "Barlow Condensed", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.letterSpacing = '2px';
+    ctx.fillText('RHODES.', logoLoaded ? 68 : 22, 47);
 
-    // Headline
+    // Gold dot accent top-right
     ctx.fillStyle = '#D4A847';
-    ctx.font = 'bold 52px "Barlow Condensed", sans-serif';
-    ctx.fillText(headline.toUpperCase(), W/2, logoY + 98);
+    ctx.beginPath();
+    ctx.arc(W-22, 41, 5, 0, Math.PI*2);
+    ctx.fill();
 
-    // Divider
-    ctx.fillStyle = 'rgba(212,168,71,.3)';
-    ctx.fillRect(W/2-80, logoY+112, 160, 1);
+    // ── HEADLINE AREA (center of image) ──
+    const midY = H * 0.44;
 
-    // Top 3 product images + names
-    const cardW = 150, cardH = 170;
-    const startX = (W - (top3.length * cardW + (top3.length-1)*14)) / 2;
-    const cardsY = logoY + 130;
+    // Eyebrow text
+    ctx.fillStyle = '#D4A847';
+    ctx.font = '600 13px "DM Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.letterSpacing = '4px';
+    ctx.fillText('🔥  ' + 'ESTA SEMANA', W/2, midY - 54);
 
-    const rankColors = ['#D4A847','#C0C0C0','#CD7F32'];
-    const rankLabels = ['#1','#2','#3'];
+    // Big headline
+    ctx.fillStyle = '#FAFAF8';
+    ctx.font = '900 68px "Barlow Condensed", sans-serif';
+    ctx.letterSpacing = '1px';
+    ctx.fillText(headline.toUpperCase(), W/2, midY);
+
+    // Thin gold rule
+    const ruleGrad = ctx.createLinearGradient(W/2-100,0,W/2+100,0);
+    ruleGrad.addColorStop(0,'rgba(212,168,71,0)');
+    ruleGrad.addColorStop(0.5,'#D4A847');
+    ruleGrad.addColorStop(1,'rgba(212,168,71,0)');
+    ctx.fillStyle = ruleGrad;
+    ctx.fillRect(W/2-100, midY+14, 200, 1);
+
+    // ── BOTTOM SECTION ──
+    const bottomStart = H * 0.52;
+
+    // Products list — vertical editorial style
+    const productAreaH = promo ? (H - bottomStart - 160) : (H - bottomStart - 90);
+    const rowH = Math.floor(productAreaH / top3.length);
 
     for(let i=0; i<top3.length; i++) {
         const [name] = top3[i];
-        const cx = startX + i*(cardW+14);
+        const y = bottomStart + i * rowH + 20;
 
-        // Card bg
-        ctx.fillStyle = 'rgba(255,255,255,.05)';
-        roundRect(ctx, cx, cardsY, cardW, cardH, 14);
-        ctx.fill();
+        // Row separator
+        if(i > 0) {
+            ctx.strokeStyle = 'rgba(212,168,71,.12)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(40, y-8);
+            ctx.lineTo(W-40, y-8);
+            ctx.stroke();
+        }
 
-        // Product image
+        // Rank number — big and muted
+        const rankColors = ['rgba(212,168,71,.9)', 'rgba(192,192,192,.6)', 'rgba(205,127,50,.6)'];
+        ctx.fillStyle = rankColors[i];
+        ctx.font = '900 72px "Barlow Condensed", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.letterSpacing = '0px';
+        ctx.fillText(`0${i+1}`, 30, y + 60);
+
+        // Thumbnail
+        const thumbSize = 78;
+        const thumbX = 108;
+        const thumbY = y + 6;
         const imgSrc = productImgs[name];
         if(imgSrc) {
             try {
                 const img = await loadImg(imgSrc);
                 ctx.save();
                 ctx.beginPath();
-                roundRect(ctx, cx+6, cardsY+6, cardW-12, cardH-52, 10);
+                ctx.roundRect(thumbX, thumbY, thumbSize, thumbSize, 10);
                 ctx.clip();
-                ctx.drawImage(img, cx+6, cardsY+6, cardW-12, cardH-52);
+                ctx.drawImage(img, thumbX, thumbY, thumbSize, thumbSize);
                 ctx.restore();
+                // Subtle border
+                ctx.strokeStyle = 'rgba(212,168,71,.2)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(thumbX, thumbY, thumbSize, thumbSize, 10);
+                ctx.stroke();
             } catch(e) {
-                ctx.fillStyle='rgba(255,255,255,.04)';
-                roundRect(ctx, cx+6, cardsY+6, cardW-12, cardH-52, 10);
+                ctx.fillStyle = 'rgba(255,255,255,.06)';
+                ctx.beginPath();
+                ctx.roundRect(thumbX, thumbY, thumbSize, thumbSize, 10);
                 ctx.fill();
-                ctx.fillStyle='rgba(255,255,255,.2)';
-                ctx.font='30px sans-serif';
-                ctx.textAlign='center';
-                ctx.fillText('🍔', cx+cardW/2, cardsY+70);
             }
         }
 
-        // Rank badge
-        ctx.fillStyle = rankColors[i];
-        ctx.beginPath();
-        ctx.arc(cx+22, cardsY+22, 14, 0, Math.PI*2);
-        ctx.fill();
-        ctx.fillStyle = '#1a1710';
-        ctx.font = 'bold 13px "Barlow Condensed", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(rankLabels[i], cx+22, cardsY+27);
+        // Product name — right of thumbnail
+        const textX = thumbX + thumbSize + 16;
+        const maxW  = W - textX - 30;
 
-        // Product name
-        ctx.fillStyle = '#F0EAE0';
-        ctx.font = 'bold 15px "Barlow Condensed", sans-serif';
-        ctx.textAlign = 'center';
-        const words = name.split(' ');
+        // Split name into two lines if needed
+        const words = name.toUpperCase().split(' ');
         let line1 = '', line2 = '';
+        ctx.font = '800 26px "Barlow Condensed", sans-serif';
         for(const w of words) {
-            if((line1+w).length <= 12) line1 += (line1?' ':'')+w;
+            if(ctx.measureText(line1+' '+w).width < maxW) line1 += (line1?' ':'')+w;
             else line2 += (line2?' ':'')+w;
         }
-        ctx.fillText(line1.toUpperCase(), cx+cardW/2, cardsY+cardH-30);
-        if(line2) { ctx.font='bold 12px "Barlow Condensed",sans-serif'; ctx.fillText(line2.toUpperCase(), cx+cardW/2, cardsY+cardH-15); }
+        ctx.fillStyle = '#F0EAE0';
+        ctx.textAlign = 'left';
+        ctx.fillText(line1, textX, thumbY + 30);
+        if(line2) {
+            ctx.font = '700 22px "Barlow Condensed", sans-serif';
+            ctx.fillStyle = 'rgba(240,234,224,.7)';
+            ctx.fillText(line2, textX, thumbY + 56);
+        }
     }
 
-    let currentY = cardsY + cardH + 30;
-
-    // Promo section
+    // ── PROMO BANNER ──
     if(promo) {
-        // Promo card
-        ctx.fillStyle = 'rgba(212,168,71,.1)';
-        roundRect(ctx, 30, currentY, W-60, 130, 16);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(212,168,71,.4)';
+        const promoY = H - 155;
+        // Background pill
+        ctx.fillStyle = 'rgba(212,168,71,.12)';
+        ctx.strokeStyle = 'rgba(212,168,71,.5)';
         ctx.lineWidth = 1;
-        roundRect(ctx, 30, currentY, W-60, 130, 16);
+        ctx.beginPath();
+        ctx.roundRect(24, promoY, W-48, 100, 14);
+        ctx.fill();
         ctx.stroke();
 
+        // Tag
         ctx.fillStyle = '#D4A847';
-        ctx.font = 'bold 14px "Barlow Condensed",sans-serif';
+        ctx.font = '700 11px "DM Sans", sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('🔥 PROMO DEL DÍA', W/2, currentY+28);
+        ctx.letterSpacing = '3px';
+        ctx.fillText('PROMO DEL DÍA', W/2, promoY+22);
 
+        // Promo name
         ctx.fillStyle = '#FAFAF8';
-        ctx.font = 'bold 32px "Barlow Condensed",sans-serif';
-        const promoName = (promo.name||'').toUpperCase();
-        ctx.fillText(promoName, W/2, currentY+64);
+        ctx.font = '800 28px "Barlow Condensed", sans-serif';
+        ctx.letterSpacing = '0px';
+        ctx.fillText((promo.name||'').toUpperCase(), W/2, promoY+52);
 
+        // Description
         if(promo.description) {
-            ctx.fillStyle = 'rgba(240,234,224,.6)';
-            ctx.font = '15px "DM Sans",sans-serif';
-            ctx.fillText(promo.description, W/2, currentY+90);
+            ctx.fillStyle = 'rgba(240,234,224,.55)';
+            ctx.font = '400 13px "DM Sans", sans-serif';
+            ctx.fillText(promo.description, W/2, promoY+74);
         }
 
+        // Price pill
+        const priceStr = Number(promo.price||0).toLocaleString('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0});
         ctx.fillStyle = '#D4A847';
-        ctx.font = 'bold 28px "Barlow Condensed",sans-serif';
-        const price = Number(promo.price||0).toLocaleString('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0});
-        ctx.fillText(price, W/2, currentY+118);
-
-        currentY += 150;
+        ctx.font = '700 20px "Barlow Condensed", sans-serif';
+        ctx.fillText(priceStr, W/2, promoY+94);
     }
 
-    // Subtitle
-    ctx.fillStyle = 'rgba(240,234,224,.5)';
-    ctx.font = '18px "DM Sans",sans-serif';
+    // ── FOOTER ──
+    const footY = H - 36;
+    ctx.fillStyle = 'rgba(240,234,224,.3)';
+    ctx.font = '400 13px "DM Sans", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(subtitle, W/2, currentY + 20);
+    ctx.letterSpacing = '1px';
+    ctx.fillText(subtitle, W/2, footY);
 
-    // Bottom gold line
-    ctx.fillStyle = grd;
-    ctx.fillRect(0, H-3, W, 3);
+    // Bottom gold accent
+    const bottomGrad = ctx.createLinearGradient(0,0,W,0);
+    bottomGrad.addColorStop(0,'rgba(212,168,71,0)');
+    bottomGrad.addColorStop(0.5,'rgba(212,168,71,.8)');
+    bottomGrad.addColorStop(1,'rgba(212,168,71,0)');
+    ctx.fillStyle = bottomGrad;
+    ctx.fillRect(0, H-2, W, 2);
 
-    // Show download button
     document.getElementById('storyDownloadBtn').style.display = 'block';
-    status.textContent = '✅ Story generada';
+    status.textContent = '✅ Story generada — descargala abajo';
 };
 
-function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x+r, y);
-    ctx.lineTo(x+w-r, y);
-    ctx.quadraticCurveTo(x+w, y, x+w, y+r);
-    ctx.lineTo(x+w, y+h-r);
-    ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
-    ctx.lineTo(x+r, y+h);
-    ctx.quadraticCurveTo(x, y+h, x, y+h-r);
-    ctx.lineTo(x, y+r);
-    ctx.quadraticCurveTo(x, y, x+r, y);
-    ctx.closePath();
-}
 
-function loadImg(src) {
-    return new Promise((res,rej) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => res(img);
-        img.onerror = rej;
-        img.src = src;
-    });
-}
 
 window.downloadStory = function() {
     const canvas = document.getElementById('storyCanvas');
