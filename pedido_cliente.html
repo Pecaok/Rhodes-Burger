@@ -99,6 +99,17 @@
     .coupon-btn{padding:13px 18px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:12px;color:var(--muted);font-family:var(--fb);font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap;transition:all .2s;}
     .coupon-btn:hover{border-color:var(--gold);color:var(--gold);}
     .coupon-msg{font-size:13px;margin-top:8px;}
+    /* PROPINA */
+    .tip-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+    .tip-btn{padding:9px 16px;border-radius:99px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--muted);font-family:var(--fh);font-size:15px;font-weight:700;letter-spacing:.04em;cursor:pointer;transition:all .2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+    .tip-btn:hover{border-color:var(--gold-border);color:var(--gold);}
+    .tip-btn.active{background:var(--gold-dim);border-color:var(--gold-border);color:var(--gold);}
+    .tip-custom{display:flex;gap:8px;align-items:center;margin-top:8px;}
+    .tip-custom input{flex:1;padding:9px 12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--txt);font-family:var(--fb);font-size:14px;outline:none;transition:border-color .2s;}
+    .tip-custom input:focus{border-color:var(--gold);}
+    .tip-custom input::placeholder{color:var(--muted);}
+    .res-tip{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:13px;color:var(--green);font-weight:600;}
+    .res-tip span:last-child{font-family:var(--fh);font-size:15px;font-weight:800;}
     .coupon-msg.ok{color:var(--green);}
     .coupon-msg.err{color:var(--red);}
 
@@ -222,6 +233,22 @@
           <div id="msgCupon" class="coupon-msg"></div>
         </div>
 
+        <!-- Propina -->
+        <div class="divider"></div>
+        <div class="field">
+          <label>Propina <span style="font-weight:400;text-transform:none;font-family:var(--fb);font-size:11px">(opcional)</span></label>
+          <div class="tip-btns">
+            <button type="button" class="tip-btn" data-pct="10" onclick="setTip(10,this)">10%</button>
+            <button type="button" class="tip-btn" data-pct="15" onclick="setTip(15,this)">15%</button>
+            <button type="button" class="tip-btn" data-pct="20" onclick="setTip(20,this)">20%</button>
+            <button type="button" class="tip-btn" data-pct="0" onclick="setTip(0,this)">Sin propina</button>
+          </div>
+          <div class="tip-custom">
+            <input type="number" id="inpTipCustom" placeholder="Monto libre ($)" min="0" oninput="setTipCustom(this.value)">
+          </div>
+          <div id="tipPreview" style="font-size:12px;color:var(--green);margin-top:6px;font-weight:600;display:none"></div>
+        </div>
+
         <button class="confirm-btn" id="btnConfirmar">
           <span>🤠</span> Confirmar Pedido
         </button>
@@ -242,6 +269,7 @@
           <span class="res-total-val" id="resTotal">$0</span>
         </div>
         <div id="resDiscount"></div>
+        <div id="resTip"></div>
       </div>
     </div>
   </aside>
@@ -265,7 +293,31 @@ const $=s=>document.querySelector(s);
 const money=n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
 let activeDiscount=0, activeCouponCode="";
+let activeTip=0, activeTipPct=0;
 let slotObjects=[], visibles=[], currentIndex=0, listeners=[];
+
+window.setTip = function(pct, btn) {
+    activeTipPct = pct;
+    document.querySelectorAll('.tip-btn').forEach(b=>b.classList.remove('active'));
+    if(pct > 0) btn.classList.add('active');
+    document.getElementById('inpTipCustom').value = '';
+    calcTip();
+};
+
+window.setTipCustom = function(val) {
+    activeTipPct = 0;
+    document.querySelectorAll('.tip-btn').forEach(b=>b.classList.remove('active'));
+    activeTip = Math.max(0, Number(val)||0);
+    renderResumen();
+};
+
+function calcTip() {
+    const cart = loadCart();
+    const subtotal = cart.items.reduce((s,i)=>s+(( i.finalPrice||i.price||0)*i.qty),0);
+    const afterDiscount = Math.max(0, subtotal - activeDiscount);
+    activeTip = activeTipPct > 0 ? Math.round(afterDiscount * activeTipPct / 100) : 0;
+    renderResumen();
+}
 
 /* ── CART ── */
 function loadCart(){
@@ -327,7 +379,10 @@ function renderResumen(){
   $('#itemsBadge').textContent=`${totalItems} item${totalItems!==1?'s':''}`;
 
   let final=Math.max(0, subtotal-activeDiscount);
-  $('#resTotal').textContent=money(final);
+  // Recalculate tip if percentage-based
+  if(activeTipPct > 0) activeTip = Math.round(final * activeTipPct / 100);
+  const finalWithTip = final + activeTip;
+  $('#resTotal').textContent=money(finalWithTip);
 
   const discEl=$('#resDiscount');
   if(activeDiscount>0){
@@ -335,7 +390,17 @@ function renderResumen(){
   } else {
     discEl.innerHTML='';
   }
-  return final;
+
+  const tipEl = document.getElementById('resTip');
+  if(activeTip > 0){
+    tipEl.innerHTML=`<div class="res-tip"><span>🤝 Propina${activeTipPct>0?' ('+activeTipPct+'%)':''}</span><span>+${money(activeTip)}</span></div>`;
+    document.getElementById('tipPreview').style.display='block';
+    document.getElementById('tipPreview').textContent=`Propina: +${money(activeTip)}`;
+  } else {
+    tipEl.innerHTML='';
+    document.getElementById('tipPreview').style.display='none';
+  }
+  return finalWithTip;
 }
 
 /* ── PESO ── */
@@ -480,7 +545,9 @@ $('#btnConfirmar').onclick=async()=>{
       orderNumber:orderNum, nombre, telefono:tel||'', source:'web',
       entrega:'take_away', pago:'local', payment_status:'pending', status:'accepted',
       createdAt:localISO, total:finalTotal,
-      subtotal:finalTotal+(activeDiscount||0), discount:activeDiscount||0, coupon:activeCouponCode||'',
+      subtotal:finalTotal+(activeDiscount||0)-(activeTip||0),
+      discount:activeDiscount||0, coupon:activeCouponCode||'',
+      tip:activeTip||0, tipPct:activeTipPct||0,
       pickup_slot:slot.key||'', pickup_time_pretty:slot.pretty||'',
       trackToken, items:cart.items.map(i=>({
         id:i.id||'', name:i.name||'', qty:i.qty||1, price:i.price||0,
@@ -507,6 +574,7 @@ $('#btnConfirmar').onclick=async()=>{
       if(i.notes) msg+=`   📝 ${i.notes}\n`;
     });
     if(activeDiscount>0) msg+=`🏷️ Cupón: -${money(activeDiscount)}\n`;
+    if(activeTip>0) msg+=`🤝 Propina${activeTipPct>0?' ('+activeTipPct+'%)':''}: +${money(activeTip)}\n`;
     msg+=`${'─'.repeat(28)}\n*TOTAL: ${money(finalTotal)}*\n(Abona en el local)\n\n`;
     const base=window.location.href.substring(0,window.location.href.lastIndexOf('/'));
     const trackLink=`${base}/gracias.html?id=${docRef.id}&t=${trackToken}`;
@@ -515,6 +583,7 @@ $('#btnConfirmar').onclick=async()=>{
     localStorage.removeItem(CART_KEY);
     localStorage.setItem('rb_user_name',nombre);
     if(tel) localStorage.setItem('rb_user_phone',tel);
+    activeTip=0; activeTipPct=0;
 
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`,'_blank');
     setTimeout(()=>{window.location.href=trackLink;},800);
