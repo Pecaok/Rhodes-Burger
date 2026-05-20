@@ -1092,7 +1092,29 @@ function initFirebase(){
   db.collection("config").doc("menuOrder").onSnapshot(doc=>{window.STATE.menuOrder=doc.exists?doc.data():{};window.fastRender();cache();},()=>{});
   db.collection("config").doc("prices").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.prices={patty:Number(d.patty)||2500,cheddar:Number(d.cheddar)||300,onionRings:Number(d.onionRings)||1600};cache();if(window.MODAL?.item){const p=window.STATE.config.prices;document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;updateModalPrice();}},()=>{});
 
-  // Promos activas en tiempo real
+  // Tipos de guarnición configurables desde admin
+  db.collection('config').doc('sideTypes').onSnapshot(snap=>{
+    const d = snap.exists ? snap.data() : {};
+    const chips = document.getElementById('sideTypeOpts');
+    if(!chips) return;
+    chips.innerHTML='';
+    const types=[
+        {key:'crinkles',label:'🍟 Papas Crinkles'},
+        {key:'rejillas',label:'🍟 Papas Rejillas'},
+        {key:'aros',    label:'🧅 Aros'},
+    ];
+    types.forEach(t=>{
+        if(d[t.key]===false) return; // desactivado desde admin
+        const lbl=document.createElement('label');
+        lbl.className='chip';
+        const extra=t.key==='aros'?`<span id="lblOnion" style="color:var(--gold);font-size:10px;margin-left:1px"></span>`:'';
+        lbl.innerHTML=`<input type="radio" name="sideType" value="${t.key}" onchange="toggleSeasoning()"> ${t.label}${extra}`;
+        chips.appendChild(lbl);
+    });
+    // Restaurar precio aros si ya estaba cargado
+    const p=window.STATE?.config?.prices;
+    if(p?.onionRings){const el=document.getElementById('lblOnion');if(el)el.textContent=`+$${p.onionRings}`;}
+  },()=>{});
   db.collection('promos').where('active','==',true).onSnapshot(snap=>{
     const now=new Date();
     window.STATE.promos=snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>{
