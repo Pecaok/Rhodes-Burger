@@ -122,6 +122,10 @@
     .pay-btn{padding:0 16px;border-radius:9px;border:none;font-family:var(--fh);font-weight:800;font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:#fff;display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;justify-content:center;transition:all .2s;}
     .pay-btn.pending{background:var(--pay-pending);}
     .pay-btn.paid{background:var(--pay-paid);}
+    .facturar-btn{padding:0 14px;border-radius:9px;border:1px solid rgba(99,102,241,.4);background:rgba(99,102,241,.12);color:#818cf8;font-family:var(--fh);font-weight:800;font-size:13px;letter-spacing:.06em;text-transform:uppercase;display:none;align-items:center;gap:5px;cursor:pointer;height:42px;white-space:nowrap;transition:all .2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+    .facturar-btn:hover{background:rgba(99,102,241,.25);border-color:rgba(99,102,241,.6);}
+    .facturar-btn:active{transform:scale(.95);}
+    .facturar-btn.show{display:flex;}
     .icon-btn-lg{width:52px;height:52px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,.04);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;flex-shrink:0;transition:all .2s;-webkit-tap-highlight-color:rgba(0,0,0,0);touch-action:manipulation;}
     .icon-btn-lg:hover{border-color:var(--gold-border);background:var(--gold-dim);}
     .icon-btn-lg:active{transform:scale(.93);}
@@ -1092,6 +1096,7 @@
               </div>
               <div class="control-row">
                  <button class="pay-btn ${isPaid?'paid':'pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal}')">${isPaid ? 'PAGADO' : 'COBRAR'}</button>
+                 <button class="facturar-btn ${['transferencia','debito','mercado_pago','credito'].includes(payVal) ? 'show' : ''}" onclick="facturarPedido('${doc.id}')" title="Generar factura">🧾 Facturar</button>
                  <button class="icon-btn-lg" onclick="printOrder('${doc.id}')" title="Imprimir">🖨️</button>
                  <button class="icon-btn-lg" style="color:var(--red);border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.08)" onclick="deleteOrder('${doc.id}')" title="Eliminar">🗑️</button>
               </div>
@@ -1105,7 +1110,42 @@
         document.querySelectorAll('.order-timer[data-since]').forEach(updateTimerEl);
     }, 30000);
 
-    window.mostrarResumen = function() {
+    // ── NÚMERO DE WHATSAPP DE FACTURITAS (reemplazá con el tuyo) ──
+    const FACTURITAS_WA = '5493484346113'; // <-- cambiá este número
+
+    const PAGO_LABELS = {
+        'transferencia': 'Transferencia',
+        'debito': 'Débito',
+        'mercado_pago': 'QR / Mercado Pago',
+        'credito': 'Crédito'
+    };
+
+    window.facturarPedido = function(id) {
+        const doc = window.idToDoc?.get(id);
+        if(!doc) return;
+        const o = doc.data();
+
+        const fecha = window.pickDate(o);
+        const fechaStr = fecha ? fecha.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
+        const horaStr  = fecha ? fecha.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+        const total    = Number(o.total||0).toLocaleString('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0});
+        const pago     = PAGO_LABELS[o.pago] || o.pago || '';
+
+        const msg = [
+            `Hola! Quiero facturar un pedido:`,
+            ``,
+            `📋 Pedido #${o.orderNumber||'—'}`,
+            `👤 Cliente: ${o.nombre||'Consumidor Final'}`,
+            `💰 Total: ${total}`,
+            `💳 Método: ${pago}`,
+            `📅 Fecha: ${fechaStr} ${horaStr}`,
+            ``,
+            `Consumidor Final`
+        ].join('\n');
+
+        const url = `https://wa.me/${FACTURITAS_WA}?text=${encodeURIComponent(msg)}`;
+        window.open(url, '_blank');
+    };
         if(!window.lastSnap) return;
         const now = new Date();
         const hoy = new Date(now.getFullYear(), now.getMonth(), now.getDate());
