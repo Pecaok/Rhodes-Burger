@@ -186,6 +186,7 @@ div[id^="tab-"]{display:none;}
     <div class="tab-btn" onclick="showTab('equilibrio')">⚖️ Punto de Equilibrio</div>
     <div class="tab-btn" onclick="showTab('comparativa')">📊 Comparativa Semanas</div>
     <div class="tab-btn" onclick="showTab('detector')">🔍 Detector Días Flojos</div>
+    <div class="tab-btn" onclick="showTab('ranking')">🏆 Ranking Clientes</div>
     <div class="section-title">Gestión</div>
     <div class="tab-btn" onclick="showTab('stock')">📦 Control de Stock</div>
     <div class="tab-btn" onclick="showTab('subrecipes')">🧩 Armado de Items</div>
@@ -657,6 +658,60 @@ div[id^="tab-"]{display:none;}
       </div>
     </div>
 
+    <!-- RANKING CLIENTES -->
+    <div id="tab-ranking" style="display:none">
+      <div class="card card-accent" style="margin-bottom:16px">
+        <h2 style="border:0;padding:0;margin:0 0 14px;font-size:20px">🏆 Ranking de Clientes</h2>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 16px">Top clientes por gasto total. Excluye pedidos de PedidosYa.</p>
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div class="field" style="margin:0">
+            <label>Período</label>
+            <select id="rankPeriod" onchange="runRanking()">
+              <option value="30">Último mes</option>
+              <option value="90">Últimos 3 meses</option>
+              <option value="180">Últimos 6 meses</option>
+              <option value="365">Último año</option>
+              <option value="0">Todo el historial</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0">
+            <label>Mostrar top</label>
+            <select id="rankTop" onchange="runRanking()">
+              <option value="10">Top 10</option>
+              <option value="20">Top 20</option>
+              <option value="50">Top 50</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="runRanking()" style="margin-bottom:2px">🔄 Actualizar</button>
+          <span id="rankStatus" style="font-size:12px;color:var(--muted);align-self:center"></span>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div id="rankKpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+
+      <!-- Tabla -->
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th style="width:50px">Pos.</th>
+              <th>Cliente</th>
+              <th style="text-align:right">Pedidos</th>
+              <th style="text-align:right">Total Gastado</th>
+              <th style="text-align:right">Ticket Prom.</th>
+              <th style="text-align:right">Último Pedido</th>
+              <th style="text-align:center">Frecuencia</th>
+              <th style="text-align:center">Cupón</th>
+            </tr></thead>
+            <tbody id="rankTableBody">
+              <tr><td colspan="8" style="text-align:center;padding:30px;color:var(--muted)">Cargando...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-fixed" style="display:none">
       <div class="card"><h2><span>💡 Gastos Fijos</span><button class="btn btn-primary" onclick="addFixedRow()">+ Agregar</button></h2><table id="tableFixed"><thead><tr><th>Concepto</th><th width="150">Monto Mensual ($)</th><th width="50"></th></tr></thead><tbody></tbody></table><div style="margin-top:12px;text-align:right"><button class="btn btn-blue" onclick="saveFixedData()">💾 Guardar Cambios</button></div></div>
     </div>
@@ -999,7 +1054,7 @@ div[id^="tab-"]{display:none;}
     window.renderFixedTables=function(){ $('#tableFixed tbody').innerHTML=FIXED_DATA.fixed.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('fixed',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('fixed',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('fixed',${i})">🗑️</button></td></tr>`).join('');$('#tableProd tbody').innerHTML=FIXED_DATA.prod.map((r,i)=>`<tr><td><input value="${r.name}" onchange="updFix('prod',${i},'name',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><input type="number" value="${r.cost}" onchange="updFix('prod',${i},'cost',this.value)" style="background:transparent;border-color:transparent;color:var(--txt)"></td><td><button class="btn-icon" onclick="delFix('prod',${i})">🗑️</button></td></tr>`).join(''); };
     window.saveFixedData=function(){ if(!FIXED_DATA.aliases)FIXED_DATA.aliases=[];let pyVal=30;if($('#confPy'))pyVal=Number($('#confPy').value);FIXED_DATA.config={pyPercent:pyVal,taxDebit:Number($('#confDebit').value),taxTransf:Number($('#confTransf').value),taxQR:Number($('#confQR').value)};db.collection('config').doc('gerencia').set(FIXED_DATA).then(()=>alert("✅ Guardado"));window.calculateAll();window.renderOrdersTab(); };
     window.saveConfig=window.saveFixedData;
-    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad();if(id==='simulador')window.runSimulator();if(id==='equilibrio')window.renderEquilibrio();if(id==='comparativa')window.cmpSetLastTwoWeeks();if(id==='detector'){const now=new Date();document.getElementById('detMonth').value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;window.runDetector();} };
+    window.showTab=function(id){ document.querySelectorAll('div[id^="tab-"]').forEach(d=>d.style.display='none');$('#tab-'+id).style.display='block';document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active');if(id==='proportions')window.renderProportions();if(id==='rentabilidad')window.renderRentabilidad();if(id==='simulador')window.runSimulator();if(id==='equilibrio')window.renderEquilibrio();if(id==='comparativa')window.cmpSetLastTwoWeeks();if(id==='detector'){const now=new Date();document.getElementById('detMonth').value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;window.runDetector();}if(id==='ranking')window.runRanking(); };
 
     window.loadStockMovements = function() {
         const tbody = document.getElementById('stockMovementsBody');
@@ -1450,7 +1505,120 @@ div[id^="tab-"]{display:none;}
         if(!data.length) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Sin resultados.</td></tr>`;
     };
 
-    // ── COMPARATIVA DE SEMANAS ──
+    // ── RANKING DE CLIENTES ──
+    window.runRanking = async function() {
+        const days  = Number(document.getElementById('rankPeriod').value);
+        const topN  = Number(document.getElementById('rankTop').value);
+        const status = document.getElementById('rankStatus');
+        status.textContent = 'Cargando...';
+
+        const since = days > 0 ? new Date(Date.now() - days*86400000) : new Date(0);
+
+        const snap = await db.collection('orders').get();
+        const orders = snap.docs.map(d=>({id:d.id,...d.data()})).filter(o=>{
+            if(o.status==='cancelled') return false;
+            if(o.source==='pedidosya' || o.pago==='pedidosya_online') return false;
+            if(!o.nombre) return false;
+            const d = parseDate(o.createdAt);
+            return d && d >= since;
+        });
+
+        // Agrupar por nombre normalizado
+        const clientes = {};
+        orders.forEach(o=>{
+            const key = (o.nombre||'').trim().toLowerCase();
+            if(!key || key==='consumidor final' || key==='mostrador') return;
+            if(!clientes[key]){
+                clientes[key]={
+                    nombre: o.nombre.trim(),
+                    telefono: o.telefono||'',
+                    pedidos: 0,
+                    total: 0,
+                    ultimoPedido: null,
+                    metodos: {}
+                };
+            }
+            const c = clientes[key];
+            c.pedidos++;
+            c.total += Number(o.total||0);
+            const d = parseDate(o.createdAt);
+            if(!c.ultimoPedido || d > c.ultimoPedido) c.ultimoPedido = d;
+            if(o.pago) c.metodos[o.pago] = (c.metodos[o.pago]||0)+1;
+            if(o.telefono && !c.telefono) c.telefono = o.telefono;
+        });
+
+        const lista = Object.values(clientes)
+            .sort((a,b)=>b.total-a.total)
+            .slice(0, topN);
+
+        status.textContent = `${lista.length} clientes encontrados`;
+
+        // KPIs
+        const totalGasto = lista.reduce((s,c)=>s+c.total,0);
+        const top1 = lista[0];
+        const masLeal = lista.reduce((a,b)=>b.pedidos>a.pedidos?b:a, lista[0]||{});
+        const avgTicket = lista.length ? lista.reduce((s,c)=>s+c.total/c.pedidos,0)/lista.length : 0;
+
+        document.getElementById('rankKpis').innerHTML = `
+          <div class="kpi"><div class="kpi-lbl">Clientes únicos</div><div class="kpi-val">${lista.length}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Gasto total (top ${topN})</div><div class="kpi-val text-green">${money(totalGasto)}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Mayor gastador</div><div class="kpi-val" style="font-size:16px;color:var(--gold)">${top1?.nombre||'—'}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Más fiel</div><div class="kpi-val" style="font-size:16px;color:var(--blue)">${masLeal?.nombre||'—'} (${masLeal?.pedidos||0} pedidos)</div></div>
+          <div class="kpi"><div class="kpi-lbl">Ticket prom. top clientes</div><div class="kpi-val">${money(avgTicket)}</div></div>
+        `;
+
+        // Tabla
+        const medals = ['🥇','🥈','🥉'];
+        const tbody = document.getElementById('rankTableBody');
+        tbody.innerHTML = '';
+
+        if(!lista.length){
+            tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Sin datos para el período seleccionado.</td></tr>`;
+            return;
+        }
+
+        lista.forEach((c,i)=>{
+            const ticket = c.total / c.pedidos;
+            const freq   = c.pedidos >= 10 ? '🔥 Muy fiel' : c.pedidos >= 5 ? '⭐ Frecuente' : c.pedidos >= 2 ? '👍 Regular' : '🆕 Nuevo';
+            const freqColor = c.pedidos>=10?'var(--gold)':c.pedidos>=5?'var(--green)':c.pedidos>=2?'var(--blue)':'var(--muted)';
+            const fechaStr = c.ultimoPedido ? c.ultimoPedido.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'}) : '—';
+            const pos = i < 3 ? medals[i] : `<span style="color:var(--muted);font-weight:700">#${i+1}</span>`;
+
+            // Barra de gasto relativo al #1
+            const barPct = top1 ? (c.total/top1.total*100).toFixed(0) : 0;
+            const barColor = i===0?'var(--gold)':i===1?'rgba(192,192,192,.8)':i===2?'rgba(205,127,50,.8)':'rgba(59,130,246,.6)';
+
+            // WhatsApp link si tiene teléfono
+            const waLink = c.telefono
+                ? `<a href="https://wa.me/549${c.telefono.replace(/\D/g,'').replace(/^0?11/,'11').replace(/^0/,'')}" target="_blank" style="color:var(--green);font-size:11px;text-decoration:none" title="Abrir WhatsApp">💬</a>`
+                : '';
+
+            // Generar cupón
+            const cuponCode = 'RHD' + c.nombre.toUpperCase().replace(/\s/g,'').slice(0,4) + Math.floor(c.total/1000);
+
+            tbody.insertAdjacentHTML('beforeend',`
+              <tr>
+                <td style="text-align:center;font-size:18px">${pos}</td>
+                <td>
+                  <div style="font-weight:700;color:var(--white)">${c.nombre} ${waLink}</div>
+                  ${c.telefono?`<div style="font-size:11px;color:var(--muted)">${c.telefono}</div>`:''}
+                  <div style="margin-top:4px;height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;width:120px">
+                    <div style="width:${barPct}%;height:100%;background:${barColor};border-radius:2px"></div>
+                  </div>
+                </td>
+                <td style="text-align:right;font-family:var(--fh);font-size:16px;font-weight:800;color:var(--txt)">${c.pedidos}</td>
+                <td style="text-align:right;font-family:var(--fh);font-size:16px;font-weight:900;color:var(--gold)">${money(c.total)}</td>
+                <td style="text-align:right;color:var(--muted);font-size:13px">${money(ticket)}</td>
+                <td style="text-align:right;color:var(--muted);font-size:13px">${fechaStr}</td>
+                <td style="text-align:center">
+                  <span style="font-size:12px;font-weight:700;color:${freqColor}">${freq}</span>
+                </td>
+                <td style="text-align:center">
+                  <span style="font-size:10px;background:var(--gold-dim);border:1px solid var(--gold-border);color:var(--gold);padding:3px 7px;border-radius:5px;font-family:var(--fh);font-weight:700;letter-spacing:.04em;cursor:pointer" onclick="navigator.clipboard.writeText('${cuponCode}');this.textContent='✅ Copiado!';setTimeout(()=>this.textContent='${cuponCode}',2000)" title="Copiar código">${cuponCode}</span>
+                </td>
+              </tr>`);
+        });
+    };
     let cmpChart = null;
 
     function ordersInRange(from, to) {
