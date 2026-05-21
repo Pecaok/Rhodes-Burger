@@ -1507,6 +1507,116 @@ div[id^="tab-"]{display:none;}
 
     // ── RANKING DE CLIENTES ──
     window.runRanking = async function() {
+        const rankPeriodEl = document.getElementById('rankPeriod');
+        const rankTopEl = document.getElementById('rankTop');
+        const statusEl = document.getElementById('rankStatus');
+        if(!rankPeriodEl || !rankTopEl) return;
+
+        const days = Number(rankPeriodEl.value);
+        const topN = Number(rankTopEl.value);
+        if(statusEl) statusEl.textContent = 'Cargando...';
+
+        try {
+        const since = days > 0 ? new Date(Date.now() - days*86400000) : new Date(0);
+        const snap = await db.collection('orders').get();
+        const orders = snap.docs.map(d=>({id:d.id,...d.data()})).filter(o=>{
+            if(o.status==='cancelled') return false;
+            if(o.source==='pedidosya' || o.pago==='pedidosya_online') return false;
+            if(!o.nombre) return false;
+            const d = parseDate(o.createdAt);
+            return d && d >= since;
+        });
+
+        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+        const clientes = {};
+        orders.forEach(o=>{
+            const key = (o.nombre||'').trim().toLowerCase();
+            if(!key || key==='consumidor final' || key==='mostrador') return;
+            if(!clientes[key]){
+                clientes[key]={
+                    nombre: o.nombre.trim(),
+                    telefono: o.telefono||'',
+                    pedidos:0, total:0, ultimoPedido:null, metodos:{}
+                };
+            }
+            const c=clientes[key];
+            c.pedidos++;
+            c.total+=Number(o.total||0);
+            const d=parseDate(o.createdAt);
+            if(!c.ultimoPedido||d>c.ultimoPedido) c.ultimoPedido=d;
+            if(o.telefono&&!c.telefono) c.telefono=o.telefono;
+        });
+
+        const lista=Object.values(clientes).sort((a,b)=>b.total-a.total).slice(0,topN);
+        if(statusEl) statusEl.textContent=`${lista.length} clientes encontrados`;
+
+        const totalGasto=lista.reduce((s,c)=>s+c.total,0);
+        const top1=lista[0];
+        const masLeal=lista.length?lista.reduce((a,b)=>b.pedidos>a.pedidos?b:a,lista[0]):{nombre:'—',pedidos:0};
+        const avgTicket=lista.length?lista.reduce((s,c)=>s+c.total/c.pedidos,0)/lista.length:0;
+
+        document.getElementById('rankKpis').innerHTML=`
+          <div class="kpi"><div class="kpi-lbl">Clientes únicos</div><div class="kpi-val">${lista.length}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Gasto total (top ${topN})</div><div class="kpi-val text-green">${money(totalGasto)}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Mayor gastador</div><div class="kpi-val" style="font-size:16px;color:var(--gold)">${esc(top1?.nombre||'—')}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Más fiel</div><div class="kpi-val" style="font-size:16px;color:var(--blue)">${esc(masLeal.nombre)} (${masLeal.pedidos} pedidos)</div></div>
+          <div class="kpi"><div class="kpi-lbl">Ticket prom.</div><div class="kpi-val">${money(avgTicket)}</div></div>`;
+
+        const medals=['🥇','🥈','🥉'];
+        const tbody=document.getElementById('rankTableBody');
+        tbody.innerHTML='';
+
+        if(!lista.length){tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Sin datos.</td></tr>`;return;}
+
+        lista.forEach((c,i)=>{
+            const ticket=c.total/c.pedidos;
+            const freq=c.pedidos>=10?'🔥 Muy fiel':c.pedidos>=5?'⭐ Frecuente':c.pedidos>=2?'👍 Regular':'🆕 Nuevo';
+            const freqColor=c.pedidos>=10?'var(--gold)':c.pedidos>=5?'var(--green)':c.pedidos>=2?'var(--blue)':'var(--muted)';
+            const fechaStr=c.ultimoPedido?c.ultimoPedido.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'}):'—';
+            const pos=i<3?medals[i]:`<span style="color:var(--muted);font-weight:700">#${i+1}</span>`;
+            const barPct=top1?(c.total/top1.total*100).toFixed(0):0;
+            const barColor=i===0?'var(--gold)':i===1?'rgba(192,192,192,.8)':i===2?'rgba(205,127,50,.8)':'rgba(59,130,246,.6)';
+            const waNum=c.telefono?c.telefono.replace(/\D/g,'').replace(/^0?11/,'11').replace(/^0/,''):'';
+            const waLink=waNum?`<a href="https://wa.me/549${waNum}" target="_blank" style="color:var(--green);font-size:11px;text-decoration:none">💬</a>`:'';
+            // Safe coupon code - alphanumeric only
+            const cuponCode='RHD'+c.nombre.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4)+Math.floor(c.total/1000);
+
+            const row=document.createElement('tr');
+            row.innerHTML=`
+              <td style="text-align:center;font-size:18px">${pos}</td>
+              <td>
+                <div style="font-weight:700;color:var(--white)">${esc(c.nombre)} ${waLink}</div>
+                ${c.telefono?`<div style="font-size:11px;color:var(--muted)">${esc(c.telefono)}</div>`:''}
+                <div style="margin-top:4px;height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;width:120px">
+                  <div style="width:${barPct}%;height:100%;background:${barColor};border-radius:2px"></div>
+                </div>
+              </td>
+              <td style="text-align:right;font-family:var(--fh);font-size:16px;font-weight:800">${c.pedidos}</td>
+              <td style="text-align:right;font-family:var(--fh);font-size:16px;font-weight:900;color:var(--gold)">${money(c.total)}</td>
+              <td style="text-align:right;color:var(--muted);font-size:13px">${money(ticket)}</td>
+              <td style="text-align:right;color:var(--muted);font-size:13px">${fechaStr}</td>
+              <td style="text-align:center"><span style="font-size:12px;font-weight:700;color:${freqColor}">${freq}</span></td>
+              <td style="text-align:center"></td>`;
+
+            // Coupon button via DOM (avoids onclick injection issues)
+            const cuponSpan=document.createElement('span');
+            cuponSpan.textContent=cuponCode;
+            cuponSpan.style.cssText='font-size:10px;background:var(--gold-dim);border:1px solid var(--gold-border);color:var(--gold);padding:3px 7px;border-radius:5px;font-family:var(--fh);font-weight:700;letter-spacing:.04em;cursor:pointer';
+            cuponSpan.onclick=function(){
+                navigator.clipboard.writeText(cuponCode).catch(()=>{});
+                this.textContent='Copiado!';
+                setTimeout(()=>this.textContent=cuponCode,2000);
+            };
+            row.cells[7].appendChild(cuponSpan);
+            tbody.appendChild(row);
+        });
+
+        } catch(err) {
+            console.error('Ranking error:', err);
+            if(statusEl) statusEl.textContent = 'Error: ' + err.message;
+        }
+    };
         const days  = Number(document.getElementById('rankPeriod').value);
         const topN  = Number(document.getElementById('rankTop').value);
         const status = document.getElementById('rankStatus');
