@@ -358,7 +358,7 @@ let MENU_ORDER={};
 let availability=new Map();
 let GLOBAL_SIDES={con_sazon:true,con_sazon_bacon:true,con_sal:true,sin_sal:true};
 
-db.collection("config").doc("sides").onSnapshot(doc=>{if(doc.exists){const d=doc.data();GLOBAL_SIDES={con_sazon:d.con_sazon!==false,con_sazon_bacon:d.con_sazon_bacon!==false,con_sal:d.con_sal!==false,sin_sal:d.sin_sal!==false};}});
+db.collection("config").doc("sides").onSnapshot(doc=>{if(doc.exists){const d=doc.data();GLOBAL_SIDES={con_sazon:d.con_sazon!==false,con_sazon_bacon:d.con_sazon_bacon!==false,con_sal:d.con_sal!==false,sin_sal:d.sin_sal!==false};}if($("#overlayCustomize")?.style.display==="flex"&&currentItem)window.buildFriesChipsMostrador(currentItem);});
 
 function isPapasSide(item){if(!item)return false;const cat=(item.category||"").toLowerCase();if(cat.includes("burger")||cat.includes("hamburguesa")||cat.includes("sandwich")||cat.includes("sándwich"))return false;const n=((item.name||"")+" "+(item.id||"")).toLowerCase();return n.includes("papa")||n.includes("fritas")||n.includes("crinkle")||n.includes("rejilla");}
 const SIDES_MAP_LABELS={con_sazon:"Sazón Queso",con_sazon_bacon:"Sazón Bacon",con_sal:"Con Sal",sin_sal:"Sin Sal"};
@@ -517,6 +517,28 @@ window.addPromoMostrador=function(id){
 
 let currentItem=null;
 
+window.buildFriesChipsMostrador=function(item,preselectedKey){
+  const fc=$("#friesOptions");if(!fc||!item)return;
+  const prev=preselectedKey!==undefined?preselectedKey:(document.querySelector('input[name="fries"]:checked')?.value||'');
+  fc.innerHTML='';
+  const pOpts=item.potatoOptions||{};
+  const useGlobal=!pOpts.sazon&&!pOpts.sazonBacon&&!pOpts.sal&&!pOpts.sinSal;
+  for(const[key,label]of Object.entries(SIDES_MAP_LABELS)){
+    let isAllowed=false;
+    if(useGlobal)isAllowed=GLOBAL_SIDES[key];
+    else{
+      if(key==='con_sazon')isAllowed=pOpts.sazon;
+      if(key==='con_sazon_bacon')isAllowed=pOpts.sazonBacon;
+      if(key==='con_sal')isAllowed=pOpts.sal;
+      if(key==='sin_sal')isAllowed=pOpts.sinSal;
+    }
+    if(isAllowed||key===prev){
+      const checked=key===prev?'checked':'';
+      fc.innerHTML+=`<label class="chip"><input type="radio" name="fries" value="${key}" ${checked}> 🍟 ${label}</label>`;
+    }
+  }
+};
+
 window.toggleSeasoning=function(){const type=document.querySelector('input[name="sideType"]:checked')?.value;const ss=document.getElementById('seasoningSection');if(type==='crinkles'||type==='rejillas')ss.style.display='block';else{ss.style.display='none';document.querySelectorAll("input[name='fries']").forEach(x=>x.checked=false);}updatePreview();};
 
 function openCustomize(item){
@@ -531,11 +553,7 @@ function openCustomize(item){
   $("#rowPatties").style.display=(allowed.patty||(isBurgerType&&allowed.patty!==false))?"flex":"none";
   $("#rowCheddar").style.display=(allowed.cheddar||(isBurgerType&&allowed.cheddar!==false))?"flex":"none";
   $("#rowBacon").style.display=allowed.bacon?"flex":"none";
-  const friesContainer=$("#friesOptions");friesContainer.innerHTML='';
-  if(showSeasoning){
-    const pOpts=item.potatoOptions||{};const useGlobal=!pOpts.sazon&&!pOpts.sazonBacon&&!pOpts.sal&&!pOpts.sinSal;
-    for(const[key,label]of Object.entries(SIDES_MAP_LABELS)){let isAllowed=false;if(useGlobal)isAllowed=GLOBAL_SIDES[key];else{if(key==='con_sazon')isAllowed=pOpts.sazon;if(key==='con_sazon_bacon')isAllowed=pOpts.sazonBacon;if(key==='con_sal')isAllowed=pOpts.sal;if(key==='sin_sal')isAllowed=pOpts.sinSal;}if(isAllowed)friesContainer.innerHTML+=`<label class="chip"><input type="radio" name="fries" value="${key}"> 🍟 ${label}</label>`;}
-  }
+  if(showSeasoning){window.buildFriesChipsMostrador(item,'');}else{$("#friesOptions").innerHTML='';}
   $("#modTitle").textContent="Personalizar "+item.name;updatePreview();
   $("#overlayCustomize").style.display="flex";$("#btnAdd").onclick=addItemFromModal;$("#btnAdd").textContent="AGREGAR";
 }
@@ -545,9 +563,8 @@ function removeFromCart(id,type){if(type==="burger")delete cart.burger[id];if(ty
 function editBurger(id){
   const b=cart.burger[id];if(!b)return;currentItem=b.item;
   $("#sideTypeSection").style.display="block";$("#lblSeasoning").textContent="Preparación de las papas";
-  const friesContainer=$("#friesOptions");friesContainer.innerHTML='';
-  const pOpts=b.item.potatoOptions||{};const useGlobal=!pOpts.sazon&&!pOpts.sazonBacon&&!pOpts.sal&&!pOpts.sinSal;
-  for(const[key,label]of Object.entries(SIDES_MAP_LABELS)){let isAllowed=false;if(useGlobal)isAllowed=GLOBAL_SIDES[key];else{if(key==='con_sazon')isAllowed=pOpts.sazon;if(key==='con_sazon_bacon')isAllowed=pOpts.sazonBacon;if(key==='con_sal')isAllowed=pOpts.sal;if(key==='sin_sal')isAllowed=pOpts.sinSal;}const sazonRawOnly=b.friesRaw?b.friesRaw.split('_').slice(1).join('_'):"";if(isAllowed||key===sazonRawOnly||key===b.friesRaw){const checked=(key===sazonRawOnly||key===b.friesRaw)?'checked':'';friesContainer.innerHTML+=`<label class="chip"><input type="radio" name="fries" value="${key}" ${checked}> 🍟 ${label}</label>`;}}
+  const sazonRawOnly=b.friesRaw?b.friesRaw.split('_').slice(1).join('_'):"";
+  window.buildFriesChipsMostrador(b.item, sazonRawOnly||b.friesRaw||'');
   document.querySelectorAll("input[name='sideType']").forEach(x=>x.checked=(x.value===b.sideType));
   toggleSeasoning();
   $("#patVal").textContent=b.extras.patty;$("#cheVal").textContent=b.extras.cheddar;$("#bacVal").textContent=b.extras.bacon||0;$("#notes").value=b.notes||"";$("#notesCount").textContent=(b.notes||"").length+"/200";
@@ -564,12 +581,8 @@ function editBurger(id){
 function editSide(id){
   const s=cart.side[id];if(!s)return;currentItem=s.item;
   $("#sideTypeSection").style.display="none";$("#lblSeasoning").textContent="Elegí la preparación";
-  const friesContainer=$("#friesOptions");friesContainer.innerHTML='';
   const showSeasoning=isPapasSide(s.item);
-  if(showSeasoning){
-    const pOpts=s.item.potatoOptions||{};const useGlobal=!pOpts.sazon&&!pOpts.sazonBacon&&!pOpts.sal&&!pOpts.sinSal;
-    for(const[key,label]of Object.entries(SIDES_MAP_LABELS)){let isAllowed=false;if(useGlobal)isAllowed=GLOBAL_SIDES[key];else{if(key==='con_sazon')isAllowed=pOpts.sazon;if(key==='con_sazon_bacon')isAllowed=pOpts.sazonBacon;if(key==='con_sal')isAllowed=pOpts.sal;if(key==='sin_sal')isAllowed=pOpts.sinSal;}if(isAllowed||key===s.friesRaw){const checked=key===s.friesRaw?'checked':'';friesContainer.innerHTML+=`<label class="chip"><input type="radio" name="fries" value="${key}" ${checked}> 🍟 ${label}</label>`;}}
-  }
+  if(showSeasoning){window.buildFriesChipsMostrador(s.item, s.friesRaw||'');}else{$("#friesOptions").innerHTML='';}
   $("#seasoningSection").style.display=showSeasoning?'block':'none';$("#patVal").textContent="0";$("#cheVal").textContent="0";$("#notes").value=s.notes||"";$("#notesCount").textContent=(s.notes||"").length+"/200";
   $("#rowPatties").style.display="none";$("#rowCheddar").style.display="none";
   $("#modTitle").textContent="Editar "+s.item.name;updatePreview();
