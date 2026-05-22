@@ -421,10 +421,10 @@
     const CACHE_KEY="rhodes_data_v6",CART_KEY="rhodes_cart_v5";
     window.STATE={
       products:[],menuOrder:{},
-      config:{sides:{con_sazon:true,con_sal:true,sin_sal:true},store:{forceOpen:null,maintenance:{}},prices:{patty:2800,cheddar:300,onionRings:1600}},
+      config:{sides:{con_sazon:true,con_sazon_bacon:true,con_sal:true,sin_sal:true},store:{forceOpen:null,maintenance:{}},prices:{patty:2800,cheddar:300,bacon:1200,onionRings:1600}},
       cart:{burger:{},drink:{},side:{}},isOpen:false
     };
-    window.MODAL={item:null,extras:{patty:0,cheddar:0}};
+    window.MODAL={item:null,extras:{patty:0,cheddar:0,bacon:0}};
 
     window.toast=function(msg){
       const t=document.getElementById("toast");
@@ -1020,6 +1020,7 @@
       <label class="mlbl">Extras</label>
       <div class="ext-row" id="rowPatty"><div><div class="ext-name">Carne extra</div><div class="ext-pr" id="prPatty"></div></div><div class="qty-ctrl"><button class="qtybtn" onclick="updExtra('patty',-1)">−</button><span id="qtyPatty" style="width:22px;text-align:center;font-weight:800;font-family:var(--fh);font-size:16px;color:var(--gold)">0</span><button class="qtybtn" onclick="updExtra('patty',1)">+</button></div></div>
       <div class="ext-row" id="rowCheddar"><div><div class="ext-name">Cheddar extra</div><div class="ext-pr" id="prCheddar"></div></div><div class="qty-ctrl"><button class="qtybtn" onclick="updExtra('cheddar',-1)">−</button><span id="qtyCheddar" style="width:22px;text-align:center;font-weight:800;font-family:var(--fh);font-size:16px;color:var(--gold)">0</span><button class="qtybtn" onclick="updExtra('cheddar',1)">+</button></div></div>
+      <div class="ext-row" id="rowBacon"><div><div class="ext-name">Bacon extra</div><div class="ext-pr" id="prBacon"></div></div><div class="qty-ctrl"><button class="qtybtn" onclick="updExtra('bacon',-1)">−</button><span id="qtyBacon" style="width:22px;text-align:center;font-weight:800;font-family:var(--fh);font-size:16px;color:var(--gold)">0</span><button class="qtybtn" onclick="updExtra('bacon',1)">+</button></div></div>
     </div>
     <label class="mlbl">Notas</label>
     <textarea id="modNotes" rows="2" placeholder="Sin sal, sin tomate..."></textarea>
@@ -1088,9 +1089,9 @@ function initFirebase(){
   db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
   db.collection("products").onSnapshot(snap=>{window.STATE.products=[];snap.forEach(doc=>{const d=doc.data();window.STATE.products.push({id:doc.id,...d});});document.getElementById('errorMsg').style.display='none';window.fastRender();cache();},e=>console.log("Offline:",e));
   db.collection("config").doc("store").onSnapshot(doc=>{window.STATE.config.store=doc.data()||{};window.checkStatus();cache();});
-  db.collection("config").doc("sides").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.sides={con_sazon:d.con_sazon!==false,con_sal:d.con_sal!==false,sin_sal:d.sin_sal!==false};cache();window.fastRender();},()=>{});
+  db.collection("config").doc("sides").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.sides={con_sazon:d.con_sazon!==false,con_sazon_bacon:d.con_sazon_bacon!==false,con_sal:d.con_sal!==false,sin_sal:d.sin_sal!==false};cache();window.fastRender();},()=>{});
   db.collection("config").doc("menuOrder").onSnapshot(doc=>{window.STATE.menuOrder=doc.exists?doc.data():{};window.fastRender();cache();},()=>{});
-  db.collection("config").doc("prices").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.prices={patty:Number(d.patty)||2500,cheddar:Number(d.cheddar)||300,onionRings:Number(d.onionRings)||1600};cache();if(window.MODAL?.item){const p=window.STATE.config.prices;document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;updateModalPrice();}},()=>{});
+  db.collection("config").doc("prices").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.prices={patty:Number(d.patty)||2500,cheddar:Number(d.cheddar)||300,bacon:Number(d.bacon)||1200,onionRings:Number(d.onionRings)||1600};cache();if(window.MODAL?.item){const p=window.STATE.config.prices;document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;const prBacon=document.getElementById("prBacon");if(prBacon)prBacon.innerText=`+$${p.bacon}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;updateModalPrice();}},()=>{});
 
   // Tipos de guarnición configurables desde admin
   db.collection('config').doc('sideTypes').onSnapshot(snap=>{
@@ -1159,30 +1160,30 @@ window.openModal=(id)=>{
   const item=window.STATE.products.find(p=>p.id===id);if(!item)return;
   const cat=(item.category||"").toLowerCase();
   if(cat.includes("bebida")||cat.includes("drink")){window.STATE.cart.drink[item.id+"_"+Date.now()]={item,qty:1,type:'drink',extras:{},notes:"",finalPrice:Number(item.price)};saveCart();window.toast(`${item.name} agregado`);return;}
-  window.MODAL.item=item;window.MODAL.extras={patty:0,cheddar:0};
+  window.MODAL.item=item;window.MODAL.extras={patty:0,cheddar:0,bacon:0};
   document.getElementById("modTitle").innerText=item.name;document.getElementById("modNotes").value="";
-  document.getElementById("qtyPatty").innerText="0";document.getElementById("qtyCheddar").innerText="0";
+  document.getElementById("qtyPatty").innerText="0";document.getElementById("qtyCheddar").innerText="0";document.getElementById("qtyBacon").innerText="0";
   const p=window.STATE.config.prices;
-  document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;
+  document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("prBacon").innerText=`+$${p.bacon}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;
   document.querySelectorAll("input[name='sideType']").forEach(x=>x.checked=false);document.querySelectorAll("input[name='fries']").forEach(x=>x.checked=false);
   const isBT=cat.includes("burger")||cat.includes("hamburguesa")||cat.includes("sandwich")||cat.includes("sándwich");
   const al=item.allowedExtras||{};
-  document.getElementById("sideTypeSec").style.display=isBT?"block":"none";document.getElementById("lblSeason").innerText="Preparación de las papas";document.getElementById("seasonSec").style.display=isBT?"none":"block";document.getElementById("extrasSec").style.display=(isBT||al.patty||al.cheddar)?'block':'none';document.getElementById("rowPatty").style.display=(al.patty||(isBT&&al.patty!==false))?'flex':'none';document.getElementById("rowCheddar").style.display=(al.cheddar||(isBT&&al.cheddar!==false))?'flex':'none';
-  const fc=document.getElementById("friesOpts");fc.innerHTML='';const sm={con_sazon:"Sazonadas",con_sal:"Con Sal",sin_sal:"Sin Sal"};let ff=false;const pO=item.potatoOptions||{};const uG=!pO.sazon&&!pO.sal&&!pO.sinSal;
-  for(const[k,l]of Object.entries(sm)){let ok=false;if(uG){ok=window.STATE.config.sides[k];}else{if(k==='con_sazon')ok=pO.sazon;if(k==='con_sal')ok=pO.sal;if(k==='sin_sal')ok=pO.sinSal;}if(ok){const ch=(!isBT&&!ff)?'checked':'';ff=true;fc.innerHTML+=`<label class="chip"><input type="radio" name="fries" value="${k}" onchange="updateModalPrice()" ${ch}> 🍟 ${l}</label>`;}}
+  document.getElementById("sideTypeSec").style.display=isBT?"block":"none";document.getElementById("lblSeason").innerText="Preparación de las papas";document.getElementById("seasonSec").style.display=isBT?"none":"block";document.getElementById("extrasSec").style.display=(isBT||al.patty||al.cheddar||al.bacon)?'block':'none';document.getElementById("rowPatty").style.display=(al.patty||(isBT&&al.patty!==false))?'flex':'none';document.getElementById("rowCheddar").style.display=(al.cheddar||(isBT&&al.cheddar!==false))?'flex':'none';document.getElementById("rowBacon").style.display=al.bacon?'flex':'none';
+  const fc=document.getElementById("friesOpts");fc.innerHTML='';const sm={con_sazon:"Sazón Queso",con_sazon_bacon:"Sazón Bacon",con_sal:"Con Sal",sin_sal:"Sin Sal"};let ff=false;const pO=item.potatoOptions||{};const uG=!pO.sazon&&!pO.sazonBacon&&!pO.sal&&!pO.sinSal;
+  for(const[k,l]of Object.entries(sm)){let ok=false;if(uG){ok=window.STATE.config.sides[k];}else{if(k==='con_sazon')ok=pO.sazon;if(k==='con_sazon_bacon')ok=pO.sazonBacon;if(k==='con_sal')ok=pO.sal;if(k==='sin_sal')ok=pO.sinSal;}if(ok){const ch=(!isBT&&!ff)?'checked':'';ff=true;fc.innerHTML+=`<label class="chip"><input type="radio" name="fries" value="${k}" onchange="updateModalPrice()" ${ch}> 🍟 ${l}</label>`;}}
   updateModalPrice();document.getElementById("modalOvl").classList.add("open");
 };
 
-window.updExtra=(type,delta)=>{const nv=window.MODAL.extras[type]+delta,ml=type==='patty'?2:3;if(nv>=0&&nv<=ml){window.MODAL.extras[type]=nv;document.getElementById(type==='patty'?'qtyPatty':'qtyCheddar').innerText=nv;updateModalPrice();}};
-window.updateModalPrice=function(){let t=Number(window.MODAL.item.price);const p=window.STATE.config.prices;t+=(window.MODAL.extras.patty*p.patty)+(window.MODAL.extras.cheddar*p.cheddar);if(document.querySelector('input[name="sideType"]:checked')?.value==='aros')t+=p.onionRings;document.getElementById("modTotal").innerText="$"+t;};
+window.updExtra=(type,delta)=>{const nv=window.MODAL.extras[type]+delta,ml=type==='patty'?2:3;if(nv>=0&&nv<=ml){window.MODAL.extras[type]=nv;const idMap={patty:'qtyPatty',cheddar:'qtyCheddar',bacon:'qtyBacon'};document.getElementById(idMap[type]).innerText=nv;updateModalPrice();}};
+window.updateModalPrice=function(){let t=Number(window.MODAL.item.price);const p=window.STATE.config.prices;t+=(window.MODAL.extras.patty*p.patty)+(window.MODAL.extras.cheddar*p.cheddar)+(window.MODAL.extras.bacon*p.bacon);if(document.querySelector('input[name="sideType"]:checked')?.value==='aros')t+=p.onionRings;document.getElementById("modTotal").innerText="$"+t;};
 document.getElementById("btnCancel").onclick=()=>document.getElementById("modalOvl").classList.remove("open");
 
 document.getElementById("btnAddCart").onclick=()=>{
   const item=window.MODAL.item,notes=document.getElementById("modNotes").value.trim();
   const cat=(item.category||"").toLowerCase();const isBT=cat.includes("burger")||cat.includes("hamburguesa")||cat.includes("sandwich")||cat.includes("sándwich");
   let fs="",fr="",sv=null;
-  if(isBT){sv=document.querySelector('input[name="sideType"]:checked')?.value;if(!sv){alert("Seleccioná una guarnición.");return;}if(sv==='aros'){fs="Aros de Cebolla";fr="aros";}else{const sr=document.querySelector('input[name="fries"]:checked')?.value;if(!sr){alert("Seleccioná la preparación.");return;}const ms={con_sazon:"Sazonadas",con_sal:"Con sal",sin_sal:"Sin sal"};fs=`${sv==='crinkles'?'Papas Crinkles':'Papas Rejillas'} (${ms[sr]})`;fr=`${sv}_${sr}`;}}else{const sr=document.querySelector('input[name="fries"]:checked')?.value;if(!sr){alert("Seleccioná la preparación.");return;}const ms={con_sazon:"Sazonadas",con_sal:"Con sal",sin_sal:"Sin sal"};fs=ms[sr];fr=sr;}
-  const p=window.STATE.config.prices;let fp=Number(item.price)+(window.MODAL.extras.patty*p.patty)+(window.MODAL.extras.cheddar*p.cheddar);if(sv==='aros')fp+=p.onionRings;
+  if(isBT){sv=document.querySelector('input[name="sideType"]:checked')?.value;if(!sv){alert("Seleccioná una guarnición.");return;}if(sv==='aros'){fs="Aros de Cebolla";fr="aros";}else{const sr=document.querySelector('input[name="fries"]:checked')?.value;if(!sr){alert("Seleccioná la preparación.");return;}const ms={con_sazon:"Sazón Queso",con_sazon_bacon:"Sazón Bacon",con_sal:"Con sal",sin_sal:"Sin sal"};fs=`${sv==='crinkles'?'Papas Crinkles':'Papas Rejillas'} (${ms[sr]})`;fr=`${sv}_${sr}`;}}else{const sr=document.querySelector('input[name="fries"]:checked')?.value;if(!sr){alert("Seleccioná la preparación.");return;}const ms={con_sazon:"Sazón Queso",con_sazon_bacon:"Sazón Bacon",con_sal:"Con sal",sin_sal:"Sin sal"};fs=ms[sr];fr=sr;}
+  const p=window.STATE.config.prices;let fp=Number(item.price)+(window.MODAL.extras.patty*p.patty)+(window.MODAL.extras.cheddar*p.cheddar)+(window.MODAL.extras.bacon*p.bacon);if(sv==='aros')fp+=p.onionRings;
   const ci={item,qty:1,sideType:sv,fries:fs,friesRaw:fr,extras:{...window.MODAL.extras},notes,finalPrice:fp};const nId=item.id+"_"+fr+"_"+Date.now();
   if(cat.includes("guarnicion")||cat.includes("side")||cat.includes("papas"))window.STATE.cart.side[nId]=ci;else window.STATE.cart.burger[nId]=ci;
   saveCart();document.getElementById("modalOvl").classList.remove("open");window.toast(`${item.name} agregado`);
@@ -1214,6 +1215,7 @@ function updateCartUI(){
       if(obj.fries)d.push("🍟 "+obj.fries);
       if(obj.extras?.patty)d.push(`+${obj.extras.patty} Carne`);
       if(obj.extras?.cheddar)d.push(`+${obj.extras.cheddar} Cheddar`);
+      if(obj.extras?.bacon)d.push(`+${obj.extras.bacon} Bacon`);
       if(obj.notes&&!obj.isPromo)d.push(`📝 ${obj.notes}`);
     }
     const promoBadge=obj.isPromo?`<span style="background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:99px;margin-left:6px">🔥 PROMO</span>`:'';
