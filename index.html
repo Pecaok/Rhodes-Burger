@@ -1000,6 +1000,19 @@
   </div>
 </aside>
 
+<!-- ═══ MODAL PAPAS DE PROMO ═══ -->
+<div class="ovl" id="promoPotatoOvl">
+  <div class="modal">
+    <h3 id="promoPotatoTitle" style="font-family:var(--fh);font-size:26px;font-weight:900;text-transform:uppercase;letter-spacing:-.01em;margin:0 0 4px;color:var(--white)">Elegí tus papas</h3>
+    <div id="promoPotatoSub" style="font-size:12px;color:var(--muted);margin-bottom:12px"></div>
+    <div id="promoPotatoSteps"></div>
+    <div class="btn-row" style="margin-top:18px">
+      <button class="gbtn ghost" onclick="closePromoPotato()">Cancelar</button>
+      <button class="gbtn prim" id="btnPromoPotatoConfirm">Agregar al pedido</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ MODAL ═══ -->
 <div class="ovl" id="modalOvl">
   <div class="modal">
@@ -1096,6 +1109,7 @@ function initFirebase(){
   // Tipos de guarnición configurables desde admin
   db.collection('config').doc('sideTypes').onSnapshot(snap=>{
     const d = snap.exists ? snap.data() : {};
+    window.STATE.config.sideTypes = d;
     const chips = document.getElementById('sideTypeOpts');
     if(!chips) return;
     chips.innerHTML='';
@@ -1135,24 +1149,123 @@ window.toggleSeasoning=function(){
   updateModalPrice();
 };
 
-window.addPromoToCart=(id)=>{
-  const p=window.STATE.promos.find(x=>x.id===id);if(!p)return;
-  const nId='promo_'+id+'_'+Date.now();
-  // Descripción de los items del combo para mostrar en el carrito
+function _pushPromoToCart(p, potatoSelections){
+  const nId='promo_'+p.id+'_'+Date.now();
   const comboDesc = p.type==='combo'&&p.items?.length
     ? p.items.map(i=>`${i.qty}× ${i.name}`).join(', ')
     : (p.description||'');
+  const friesStr = potatoSelections&&potatoSelections.length
+    ? potatoSelections.map((s,i)=>`#${i+1} ${s.label}`).join(' · ')
+    : null;
   window.STATE.cart.burger[nId]={
     item:{id:p.id,name:p.name,price:p.price,img:p.img,category:'promos'},
     qty:1,type:'promo',
-    fries:null,friesRaw:null,sideType:null,
+    fries:friesStr,friesRaw:null,sideType:null,
     extras:{patty:0,cheddar:0},
     notes:comboDesc,
     finalPrice:Number(p.price),
     isPromo:true,
-    comboItems:p.items||[]
+    comboItems:p.items||[],
+    potatoSelections:potatoSelections||null
   };
   saveCart();window.toast(`${p.name} agregado 🔥`);
+}
+
+window.addPromoToCart=(id)=>{
+  const p=window.STATE.promos.find(x=>x.id===id);if(!p)return;
+  console.log('[PROMO]',p.name,'askPotato=',p.askPotato,'potatoCount=',p.potatoCount,'raw=',p);
+  if(p.askPotato&&Number(p.potatoCount||0)>0){
+    openPromoPotato(p);
+    return;
+  }
+  _pushPromoToCart(p,null);
+};
+
+let _PROMO_POTATO_CTX=null;
+window.openPromoPotato=function(p){
+  _PROMO_POTATO_CTX={promo:p,count:Math.max(1,Number(p.potatoCount||1))};
+  document.getElementById('promoPotatoTitle').textContent=p.name;
+  document.getElementById('promoPotatoSub').textContent=
+    `Elegí ${_PROMO_POTATO_CTX.count} ${_PROMO_POTATO_CTX.count===1?'porción':'porciones'} de papas`;
+
+  // Mismas fuentes que el modal regular
+  const sideTypesCfg = window.STATE.config.sideTypes || {};
+  const allTypes = [
+    {key:'crinkles', label:'🍟 Papas Crinkles', hasPrep:true},
+    {key:'rejillas', label:'🍟 Papas Rejillas', hasPrep:true},
+    {key:'aros',     label:'🧅 Aros',           hasPrep:false},
+  ].filter(t => sideTypesCfg[t.key] !== false);
+
+  const sides = window.STATE.config.sides || {};
+  const prepMap = {con_sazon:'Sazón Queso', con_sazon_bacon:'Sazón Bacon', con_sal:'Con Sal', sin_sal:'Sin Sal'};
+  const allPreps = Object.entries(prepMap)
+    .filter(([k]) => sides[k] !== false)
+    .map(([k,label]) => ({key:k, label}));
+
+  const steps=document.getElementById('promoPotatoSteps');
+  let html='';
+  for(let i=0; i<_PROMO_POTATO_CTX.count; i++){
+    const typesHtml = allTypes.map(t =>
+      `<label class="chip"><input type="radio" name="pp_type_${i}" value="${t.key}" data-label="${t.label.replace(/"/g,'&quot;')}" data-prep="${t.hasPrep?1:0}" onchange="_ppToggle(${i})"> ${t.label}</label>`
+    ).join('');
+    const prepsHtml = allPreps.map(pr =>
+      `<label class="chip"><input type="radio" name="pp_prep_${i}" value="${pr.key}" data-label="${pr.label}"> 🍟 ${pr.label}</label>`
+    ).join('');
+    html += `
+      <div style="border:1px solid var(--border);border-radius:12px;padding:12px 12px 4px;margin-bottom:12px;background:rgba(212,168,71,.03)">
+        <div style="font-family:var(--fh);font-size:13px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);margin-bottom:6px">Porción #${i+1}</div>
+        <label class="mlbl">Guarnición que acompaña</label>
+        <div class="chip-g">${typesHtml}</div>
+        <div data-pi="${i}" data-role="prep" style="display:none">
+          <label class="mlbl">Preparación</label>
+          <div class="chip-g">${prepsHtml}</div>
+        </div>
+      </div>`;
+  }
+  steps.innerHTML=html;
+  document.getElementById('promoPotatoOvl').classList.add('open');
+};
+window._ppToggle=function(i){
+  const sel=document.querySelector(`input[name="pp_type_${i}"]:checked`);
+  const prepBlock=document.querySelector(`[data-pi="${i}"][data-role="prep"]`);
+  if(!sel||!prepBlock)return;
+  if(sel.dataset.prep==='1'){
+    prepBlock.style.display='block';
+  } else {
+    prepBlock.style.display='none';
+    document.querySelectorAll(`input[name="pp_prep_${i}"]`).forEach(x=>x.checked=false);
+  }
+};
+window.closePromoPotato=function(){
+  document.getElementById('promoPotatoOvl').classList.remove('open');
+  _PROMO_POTATO_CTX=null;
+};
+document.getElementById('promoPotatoOvl').addEventListener('click',e=>{
+  if(e.target.id==='promoPotatoOvl')closePromoPotato();
+});
+document.getElementById('btnPromoPotatoConfirm').onclick=()=>{
+  if(!_PROMO_POTATO_CTX)return;
+  const sels=[];
+  for(let i=0;i<_PROMO_POTATO_CTX.count;i++){
+    const tEl=document.querySelector(`input[name="pp_type_${i}"]:checked`);
+    if(!tEl){alert(`Elegí tipo de papas para la porción #${i+1}`);return;}
+    const needsPrep=tEl.dataset.prep==='1';
+    let prepLabel='';
+    if(needsPrep){
+      const pEl=document.querySelector(`input[name="pp_prep_${i}"]:checked`);
+      if(!pEl){alert(`Elegí preparación para la porción #${i+1}`);return;}
+      prepLabel=pEl.dataset.label;
+    }
+    sels.push({
+      type:tEl.value,typeLabel:tEl.dataset.label,
+      prep:needsPrep?document.querySelector(`input[name="pp_prep_${i}"]:checked`).value:null,
+      prepLabel,
+      label: needsPrep ? `${tEl.dataset.label} (${prepLabel})` : tEl.dataset.label
+    });
+  }
+  const p=_PROMO_POTATO_CTX.promo;
+  closePromoPotato();
+  _pushPromoToCart(p,sels);
 };
 
 window.openModal=(id)=>{
