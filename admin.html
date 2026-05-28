@@ -217,6 +217,9 @@ tr:hover td{background:rgba(255,255,255,.02);}
     <button class="sidebar-btn" onclick="showTab('order',this)"><span class="sidebar-ico">🔢</span> Orden Visual</button>
     <button class="sidebar-btn" onclick="showTab('stock',this)"><span class="sidebar-ico">📦</span> Stock Rápido</button>
 
+    <div class="sidebar-section">Promociones</div>
+    <button class="sidebar-btn" onclick="showTab('promos',this)"><span class="sidebar-ico">🔥</span> Promos</button>
+
     <div class="sidebar-section">Config</div>
     <button class="sidebar-btn" onclick="showTab('sides',this)"><span class="sidebar-ico">🍟</span> Config Papas</button>
     <button class="sidebar-btn" onclick="showTab('coupons',this)"><span class="sidebar-ico">🏷️</span> Cupones</button>
@@ -410,6 +413,62 @@ tr:hover td{background:rgba(255,255,255,.02);}
         <h2>🧂 Preparaciones</h2>
         <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Activá o desactivá las opciones de preparación de las papas.</p>
         <div id="sidesContainer"></div>
+      </div>
+    </div>
+
+    <!-- ═══ PROMOS ═══ -->
+    <div id="tab-promos" class="tab-panel">
+      <div class="page-title"><em>Promos</em> y Combos</div>
+      <p class="page-sub">Creá ofertas y combos que se muestran en la sección 🔥 Promos del menú.</p>
+
+      <div class="card card-accent">
+        <div class="card-title" style="margin-bottom:16px">Editor de Promo</div>
+        <div class="form-grid">
+          <div class="field"><label>Nombre</label><input id="prmName" type="text" placeholder="Ej: Combo Familiar"></div>
+          <div class="field"><label>Tipo</label>
+            <select id="prmType">
+              <option value="combo">🍔 Combo</option>
+              <option value="simple">💸 Descuento Simple</option>
+            </select>
+          </div>
+          <div class="field"><label>Precio Promo ($)</label><input id="prmPrice" type="number" min="0" placeholder="Ej: 12000"></div>
+          <div class="field"><label>Precio Original ($) <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— opcional, se tacha</span></label><input id="prmOriginalPrice" type="number" min="0" placeholder="Ej: 15000"></div>
+          <div class="field" style="grid-column:1/-1"><label>Descripción corta</label><input id="prmDescription" type="text" placeholder="Ej: 2 hamburguesas + 2 papas + 2 bebidas"></div>
+          <div class="field" style="grid-column:1/-1"><label>Imagen (URL)</label><input id="prmImg" type="text" placeholder="https://..."><input id="prmImgFile" type="file" accept="image/*" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;grid-column:1/-1">
+            <div class="field"><label>Vigente Desde</label><input id="prmFrom" type="datetime-local"></div>
+            <div class="field"><label>Vigente Hasta</label><input id="prmTo" type="datetime-local"></div>
+          </div>
+
+          <div id="prmComboGroup" class="field" style="grid-column:1/-1">
+            <label>Items del Combo</label>
+            <div style="background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:12px;padding:14px;">
+              <div id="prmItemsList" style="min-height:32px;margin-bottom:10px">
+                <div id="prmItemsEmpty" style="color:var(--muted);font-size:13px;text-align:center;padding:8px">Sin items.</div>
+              </div>
+              <div style="display:grid;grid-template-columns:80px 1fr auto;gap:8px;align-items:center;border-top:1px solid var(--border);padding-top:12px">
+                <input id="prmItemQty" type="number" min="1" value="1" class="search-input" style="font-size:13px;text-align:center" placeholder="Cant.">
+                <input id="prmItemName" type="text" class="search-input" placeholder="Ej: Hamburguesa Cheddar" style="font-size:13px" onkeydown="if(event.key==='Enter'){event.preventDefault();addPrmItem();}">
+                <button type="button" class="btn btn-primary" onclick="addPrmItem()">+ Agregar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="btnSavePromo">💾 Guardar Promo</button>
+          <button class="btn btn-ghost" id="btnClearPromo">✕ Limpiar</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:14px">Promos</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Img</th><th>Nombre</th><th>Tipo</th><th>Precio</th><th>Vigencia</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody id="prmTable"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -787,9 +846,157 @@ function renderCoupons(list){
 async function loadCoupons(){const q=await db.collection("coupons").orderBy("code").get();renderCoupons(q.docs);}
 loadCoupons();
 
+/* ── PROMOS ── */
+const promosCol=db.collection('promos');
+let PRM_ITEMS=[],editingPromoId=null,editingPromoImg=null;
+
+function renderPrmItemsList(){
+  const cont=document.getElementById('prmItemsList');
+  const empty=document.getElementById('prmItemsEmpty');
+  cont.querySelectorAll('.ing-row').forEach(el=>el.remove());
+  empty.style.display=PRM_ITEMS.length?'none':'block';
+  PRM_ITEMS.forEach((it,i)=>{
+    const row=document.createElement('div');
+    row.className='ing-row';
+    row.innerHTML=`<span class="ing-row-name"><strong style="color:var(--gold)">×${it.qty}</strong> ${it.name}</span><button type="button" class="ing-remove" onclick="prmItemRemove(${i})">✕</button>`;
+    cont.appendChild(row);
+  });
+}
+window.prmItemRemove=(i)=>{PRM_ITEMS.splice(i,1);renderPrmItemsList();};
+window.addPrmItem=()=>{
+  const qtyEl=document.getElementById('prmItemQty');
+  const nameEl=document.getElementById('prmItemName');
+  const qty=Math.max(1,Number(qtyEl.value||1));
+  const name=(nameEl.value||'').trim();if(!name)return;
+  PRM_ITEMS.push({name,qty});
+  nameEl.value='';qtyEl.value=1;nameEl.focus();renderPrmItemsList();
+};
+
+function togglePromoComboGroup(){
+  const t=$('#prmType').value;
+  $('#prmComboGroup').style.display=(t==='combo')?'block':'none';
+}
+$('#prmType').addEventListener('change',togglePromoComboGroup);
+
+function clearPromoForm(){
+  ['prmName','prmDescription','prmPrice','prmOriginalPrice','prmImg','prmFrom','prmTo'].forEach(id=>$(('#'+id)).value='');
+  $('#prmType').value='combo';$('#prmImgFile').value='';
+  PRM_ITEMS=[];editingPromoId=null;editingPromoImg=null;
+  renderPrmItemsList();togglePromoComboGroup();
+  $('#btnSavePromo').textContent='💾 Guardar Promo';
+}
+
+async function savePromo(){
+  const name=$('#prmName').value.trim();
+  const type=$('#prmType').value;
+  const description=$('#prmDescription').value.trim();
+  const price=Number($('#prmPrice').value||0);
+  const originalPrice=Number($('#prmOriginalPrice').value||0);
+  const urlImg=$('#prmImg').value.trim();
+  const file=$('#prmImgFile').files[0];
+  const fromVal=$('#prmFrom').value;
+  const toVal=$('#prmTo').value;
+  if(!name){alert('Ingresá un nombre');return;}
+  if(!(price>0)){alert('Precio inválido');return;}
+  if(!fromVal||!toVal){alert('Definí vigencia (desde y hasta)');return;}
+  const dateFrom=new Date(fromVal),dateTo=new Date(toVal);
+  if(dateTo<=dateFrom){alert("'Hasta' debe ser después de 'Desde'");return;}
+  if(type==='combo'&&!PRM_ITEMS.length){alert('Agregá al menos un item al combo');return;}
+  let finalImg=urlImg;
+  if(file){finalImg=await fileToBase64(file);}else if(!finalImg&&editingPromoImg){finalImg=editingPromoImg;}
+  const payload={
+    name,type,description,price,
+    originalPrice:originalPrice>0?originalPrice:null,
+    img:finalImg||null,
+    items:type==='combo'?PRM_ITEMS:[],
+    from:firebase.firestore.Timestamp.fromDate(dateFrom),
+    to:firebase.firestore.Timestamp.fromDate(dateTo),
+    active:true,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  };
+  try{
+    if(editingPromoId){
+      await promosCol.doc(editingPromoId).set(payload,{merge:true});
+    } else {
+      payload.createdAt=firebase.firestore.FieldValue.serverTimestamp();
+      await promosCol.add(payload);
+    }
+    alert('✅ Promo guardada.');clearPromoForm();
+  }catch(e){console.error(e);alert('Error al guardar.');}
+}
+
+function loadPromoIntoForm(data,id){
+  editingPromoId=id;editingPromoImg=data.img||null;
+  $('#prmName').value=data.name||'';
+  $('#prmType').value=data.type||'combo';
+  $('#prmDescription').value=data.description||'';
+  $('#prmPrice').value=data.price||'';
+  $('#prmOriginalPrice').value=data.originalPrice||'';
+  $('#prmImg').value=(data.img&&!data.img.startsWith('data:'))?data.img:'';
+  $('#prmImgFile').value='';
+  const toLocal=ts=>{if(!ts?.toDate)return'';const dt=ts.toDate();return new Date(dt.getTime()-dt.getTimezoneOffset()*60000).toISOString().slice(0,16);};
+  $('#prmFrom').value=toLocal(data.from);
+  $('#prmTo').value=toLocal(data.to);
+  PRM_ITEMS=Array.isArray(data.items)?data.items.map(i=>({name:String(i.name||''),qty:Number(i.qty||1)})):[];
+  renderPrmItemsList();togglePromoComboGroup();
+  $('#btnSavePromo').textContent='💾 Actualizar Promo';
+  showTab('promos',document.querySelector('.sidebar-btn[onclick*="promos"]'));
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+async function togglePromoActive(id,current){
+  try{await promosCol.doc(id).set({active:!current,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}
+  catch(e){alert('Error.');}
+}
+async function deletePromo(id){
+  if(!confirm('¿Eliminar esta promo?'))return;
+  try{await promosCol.doc(id).delete();}catch(e){alert('Error.');}
+}
+
+function renderPromosTable(snapshot){
+  const tbody=$('#prmTable');tbody.innerHTML='';
+  const docs=[];snapshot.forEach(d=>docs.push({id:d.id,...d.data()}));
+  docs.sort((a,b)=>{const ta=a.from?.toMillis?.()||0,tb=b.from?.toMillis?.()||0;return tb-ta;});
+  const now=Date.now();
+  docs.forEach(p=>{
+    const tr=document.createElement('tr');
+    const imgTag=p.img?`<img src="${p.img}" class="img-prev">`:`<div class="img-prev"></div>`;
+    const typeBadge=p.type==='combo'?`<span class="badge badge-blue">🍔 Combo</span>`:`<span class="badge badge-muted">💸 Simple</span>`;
+    const fromMs=p.from?.toMillis?.()||0,toMs=p.to?.toMillis?.()||0;
+    const expired=toMs&&toMs<now;
+    const pending=fromMs&&fromMs>now;
+    let stateBadge;
+    if(!p.active) stateBadge=`<span class="badge badge-muted">Pausada</span>`;
+    else if(expired) stateBadge=`<span class="badge badge-red">Vencida</span>`;
+    else if(pending) stateBadge=`<span class="badge badge-orange">Programada</span>`;
+    else stateBadge=`<span class="badge badge-green">Activa</span>`;
+    const fmt=ms=>ms?new Date(ms).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'}):'—';
+    const priceCell=p.originalPrice?`<div style="font-weight:700;color:var(--gold)">$${(p.price||0).toLocaleString('es-AR')}</div><div style="font-size:11px;color:var(--muted);text-decoration:line-through">$${p.originalPrice.toLocaleString('es-AR')}</div>`:`<div style="font-weight:700;color:var(--gold)">$${(p.price||0).toLocaleString('es-AR')}</div>`;
+    tr.innerHTML=`<td>${imgTag}</td><td style="font-weight:600">${p.name||''}${p.description?`<div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:400">${p.description}</div>`:''}</td><td>${typeBadge}</td><td>${priceCell}</td><td style="font-size:12px;color:var(--muted)">${fmt(fromMs)}<br>→ ${fmt(toMs)}</td><td>${stateBadge}</td>
+      <td><div class="tbl-actions">
+        <button class="btn btn-ghost btn-sm" data-act="edit" data-id="${p.id}">✏️</button>
+        <button class="btn btn-sm ${p.active?'btn-danger':'btn-good'}" data-act="toggle" data-id="${p.id}" data-av="${p.active?1:0}">${p.active?'Pausar':'Activar'}</button>
+        <button class="btn btn-danger btn-sm" data-act="delete" data-id="${p.id}">🗑️</button>
+      </div></td>`;
+    tbody.appendChild(tr);
+  });
+  tbody.querySelectorAll('button').forEach(btn=>{
+    btn.onclick=async()=>{
+      const id=btn.dataset.id,act=btn.dataset.act;
+      if(act==='edit'){const d=await promosCol.doc(id).get();loadPromoIntoForm(d.data()||{},id);}
+      else if(act==='toggle'){togglePromoActive(id,btn.dataset.av==='1');}
+      else if(act==='delete'){deletePromo(id);}
+    };
+  });
+}
+promosCol.onSnapshot(renderPromosTable);
+togglePromoComboGroup();
+
 /* ── BINDINGS ── */
 document.querySelector("#btnSaveProduct").onclick=saveProduct;
 document.querySelector("#btnClearProduct").onclick=clearProductForm;
+document.querySelector("#btnSavePromo").onclick=savePromo;
+document.querySelector("#btnClearPromo").onclick=clearPromoForm;
 </script>
 </body>
 </html>
