@@ -265,6 +265,19 @@
   </aside>
 </div>
 
+<!-- MODAL PAPAS DE PROMO -->
+<div class="overlay" id="promoPotatoOvl">
+  <div class="modal">
+    <h3 id="promoPotatoTitle">Elegí tus papas</h3>
+    <div id="promoPotatoSub" style="font-size:12px;color:var(--muted);margin:-10px 0 14px"></div>
+    <div id="promoPotatoSteps"></div>
+    <div style="margin-top:18px;display:flex;gap:10px">
+      <button class="btn" style="flex:1;justify-content:center" onclick="closePromoPotato()">Cancelar</button>
+      <button class="btn primary" style="flex:1;justify-content:center" id="btnPromoPotatoConfirm">Agregar al pedido</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL PERSONALIZAR -->
 <div class="overlay" id="overlayCustomize">
   <div class="modal">
@@ -357,6 +370,7 @@ let PRODUCTS={burgers:[],sandwiches:[],drinks:[],sides:[]};
 let MENU_ORDER={};
 let availability=new Map();
 let GLOBAL_SIDES={con_sazon:true,con_sazon_bacon:true,con_sal:true,sin_sal:true};
+let SIDE_TYPES_CFG={};
 
 db.collection("config").doc("sides").onSnapshot(doc=>{if(doc.exists){const d=doc.data();GLOBAL_SIDES={con_sazon:d.con_sazon!==false,con_sazon_bacon:d.con_sazon_bacon!==false,con_sal:d.con_sal!==false,sin_sal:d.sin_sal!==false};}if($("#overlayCustomize")?.style.display==="flex"&&currentItem)window.buildFriesChipsMostrador(currentItem);});
 
@@ -456,20 +470,19 @@ function renderPromosMostrador(){
   if(!PROMOS_MOSTRADOR.length){sec.style.display='none';return;}
   sec.style.display='block';
   grid.innerHTML=PROMOS_MOSTRADOR.map(p=>`
-    <div class="card" style="border-color:rgba(212,168,71,.4)">
-      <div style="position:relative">
-        <img src="${p.img||'images/logo.png'}" onerror="this.src='images/logo.png'" style="width:100%;height:120px;object-fit:cover">
-        <div style="position:absolute;top:8px;left:8px;background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:99px">🔥 Promo</div>
-      </div>
-      <div class="content">
-        <h3>${p.name}</h3>
-        ${p.description?`<div style="font-size:11px;color:var(--muted);margin-bottom:auto">${p.description}</div>`:'<div style="margin-bottom:auto"></div>'}
-        <div class="row">
-          <div>
-            <div class="price" style="color:var(--gold)">$${(p.price||0).toLocaleString('es-AR')}</div>
-            ${p.originalPrice?`<div style="font-size:11px;color:var(--muted);text-decoration:line-through">$${p.originalPrice.toLocaleString('es-AR')}</div>`:''}
-          </div>
-          <button class="btn addBtn" onclick="addPromoMostrador('${p.id}')">+ Agregar</button>
+    <div class="card" style="position:relative;display:block;aspect-ratio:3/4;border-color:rgba(212,168,71,.4);overflow:hidden;cursor:pointer" onclick="addPromoMostrador('${p.id}')">
+      <div style="position:absolute;top:10px;left:10px;z-index:2;background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;border-radius:99px">🔥 Promo</div>
+      <img src="${p.img||'images/logo.png'}" onerror="this.src='images/logo.png'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+      <div style="position:absolute;inset:0;background:linear-gradient(to top,rgba(26,23,16,.97) 0%,rgba(26,23,16,.65) 40%,rgba(26,23,16,.1) 70%,transparent 100%)"></div>
+      <div style="position:absolute;bottom:0;left:0;right:0;z-index:3;padding:12px">
+        <div style="font-family:var(--fh);font-size:18px;font-weight:900;text-transform:uppercase;color:var(--white);letter-spacing:.02em;line-height:1;margin-bottom:4px">${p.name}</div>
+        ${p.description?`<div style="font-size:11px;color:rgba(240,234,224,.6);margin-bottom:6px;line-height:1.3">${p.description}</div>`:''}
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="font-family:var(--fh);font-size:16px;font-weight:800;color:var(--gold)">$${(p.price||0).toLocaleString('es-AR')}</div>
+          ${p.originalPrice?`<div style="font-size:12px;color:var(--muted);text-decoration:line-through">$${p.originalPrice.toLocaleString('es-AR')}</div>`:''}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button onclick="event.stopPropagation();addPromoMostrador('${p.id}')" style="width:36px;height:36px;border-radius:9px;border:none;background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:22px;font-weight:700;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">+</button>
         </div>
       </div>
     </div>`).join('');
@@ -477,7 +490,7 @@ function renderPromosMostrador(){
 
 db.collection('config').doc('sideTypes').onSnapshot(snap=>{
   const d=snap.exists?snap.data():{};
-  ['overlayCustomize','#overlayCustomize'].forEach(()=>{});
+  SIDE_TYPES_CFG=d;
   // Rebuild side type chips in modal
   const containers=document.querySelectorAll('#sideTypeOptions,#sideTypeSection .chip-group');
   containers.forEach(chips=>{
@@ -499,20 +512,120 @@ db.collection('config').doc('sideTypes').onSnapshot(snap=>{
   });
 },()=>{});
 
-window.addPromoMostrador=function(id){
-  const p=PROMOS_MOSTRADOR.find(x=>x.id===id);if(!p)return;
+function _pushPromoMostradorToCart(p, potatoSelections){
   const comboDesc=p.type==='combo'&&p.items?.length
     ? p.items.map(i=>`${i.qty}× ${i.name}`).join(', ')
     : (p.description||'');
-  cart.burger['promo_'+id+'_'+Date.now()]={
+  const friesStr = potatoSelections&&potatoSelections.length
+    ? potatoSelections.map((s,i)=>`#${i+1} ${s.label}`).join(' · ')
+    : null;
+  cart.burger['promo_'+p.id+'_'+Date.now()]={
     item:{id:p.id,name:p.name,price:p.price,img:p.img,category:'promos'},
-    qty:1,sideType:null,fries:null,friesRaw:null,
-    extras:{patty:0,cheddar:0},
+    qty:1,sideType:null,fries:friesStr,friesRaw:null,
+    extras:{patty:0,cheddar:0,bacon:0},
     notes:comboDesc,
     isPromo:true,
-    comboItems:p.items||[]
+    comboItems:p.items||[],
+    potatoSelections:potatoSelections||null
   };
   renderCart();
+}
+
+window.addPromoMostrador=function(id){
+  const p=PROMOS_MOSTRADOR.find(x=>x.id===id);if(!p)return;
+  if(p.askPotato && Number(p.potatoCount||0)>0){
+    openPromoPotato(p);
+    return;
+  }
+  _pushPromoMostradorToCart(p,null);
+};
+
+let _PROMO_POTATO_CTX=null;
+window.openPromoPotato=function(p){
+  _PROMO_POTATO_CTX={promo:p,count:Math.max(1,Number(p.potatoCount||1))};
+  document.getElementById('promoPotatoTitle').textContent=p.name;
+  document.getElementById('promoPotatoSub').textContent=
+    `Elegí ${_PROMO_POTATO_CTX.count} ${_PROMO_POTATO_CTX.count===1?'porción':'porciones'} de papas`;
+
+  const allTypes=[
+    {key:'crinkles', label:'🍟 Papas Crinkles', hasPrep:true},
+    {key:'rejillas', label:'🍟 Papas Rejillas', hasPrep:true},
+    {key:'aros',     label:'🧅 Aros de Cebolla',hasPrep:false},
+  ].filter(t => SIDE_TYPES_CFG[t.key] !== false);
+
+  const prepMap={con_sazon:'Sazón Queso', con_sazon_bacon:'Sazón Bacon', con_sal:'Con Sal', sin_sal:'Sin Sal'};
+  const allPreps=Object.entries(prepMap)
+    .filter(([k]) => GLOBAL_SIDES[k] !== false)
+    .map(([k,label]) => ({key:k, label}));
+
+  const steps=document.getElementById('promoPotatoSteps');
+  let html='';
+  for(let i=0; i<_PROMO_POTATO_CTX.count; i++){
+    const typesHtml=allTypes.map(t =>
+      `<label class="chip"><input type="radio" name="pp_type_${i}" value="${t.key}" data-label="${t.label.replace(/"/g,'&quot;')}" data-prep="${t.hasPrep?1:0}" onchange="_ppToggle(${i})"> ${t.label}</label>`
+    ).join('');
+    const prepsHtml=allPreps.map(pr =>
+      `<label class="chip"><input type="radio" name="pp_prep_${i}" value="${pr.key}" data-label="${pr.label}"> 🍟 ${pr.label}</label>`
+    ).join('');
+    html += `
+      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;background:rgba(212,168,71,.03)">
+        <div style="font-family:var(--fh);font-size:13px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);margin-bottom:8px">Porción #${i+1}</div>
+        <div style="font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Guarnición que acompaña</div>
+        <div class="chip-group">${typesHtml}</div>
+        <div data-pi="${i}" data-role="prep" style="display:none;margin-top:10px">
+          <div style="font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Preparación</div>
+          <div class="chip-group">${prepsHtml}</div>
+        </div>
+      </div>`;
+  }
+  steps.innerHTML=html;
+  document.getElementById('promoPotatoOvl').style.display='flex';
+};
+
+window._ppToggle=function(i){
+  const sel=document.querySelector(`input[name="pp_type_${i}"]:checked`);
+  const prepBlock=document.querySelector(`[data-pi="${i}"][data-role="prep"]`);
+  if(!sel||!prepBlock)return;
+  if(sel.dataset.prep==='1'){
+    prepBlock.style.display='block';
+  } else {
+    prepBlock.style.display='none';
+    document.querySelectorAll(`input[name="pp_prep_${i}"]`).forEach(x=>x.checked=false);
+  }
+};
+
+window.closePromoPotato=function(){
+  document.getElementById('promoPotatoOvl').style.display='none';
+  _PROMO_POTATO_CTX=null;
+};
+
+document.getElementById('promoPotatoOvl').addEventListener('click',e=>{
+  if(e.target.id==='promoPotatoOvl')closePromoPotato();
+});
+
+document.getElementById('btnPromoPotatoConfirm').onclick=()=>{
+  if(!_PROMO_POTATO_CTX)return;
+  const sels=[];
+  for(let i=0;i<_PROMO_POTATO_CTX.count;i++){
+    const tEl=document.querySelector(`input[name="pp_type_${i}"]:checked`);
+    if(!tEl){alert(`Elegí tipo de papas para la porción #${i+1}`);return;}
+    const needsPrep=tEl.dataset.prep==='1';
+    let prepLabel='';
+    if(needsPrep){
+      const pEl=document.querySelector(`input[name="pp_prep_${i}"]:checked`);
+      if(!pEl){alert(`Elegí preparación para la porción #${i+1}`);return;}
+      prepLabel=pEl.dataset.label;
+    }
+    sels.push({
+      type:tEl.value,typeLabel:tEl.dataset.label,
+      prep:needsPrep?document.querySelector(`input[name="pp_prep_${i}"]:checked`).value:null,
+      prepLabel,
+      label: needsPrep ? `${tEl.dataset.label} (${prepLabel})` : tEl.dataset.label
+    });
+  }
+  const p=_PROMO_POTATO_CTX.promo;
+  closePromoPotato();
+  _pushPromoMostradorToCart(p,sels);
 };
 
 let currentItem=null;
