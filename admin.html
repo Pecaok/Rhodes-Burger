@@ -441,6 +441,18 @@ tr:hover td{background:rgba(255,255,255,.02);}
             <div class="field"><label>Vigente Hasta</label><input id="prmTo" type="datetime-local"></div>
           </div>
 
+          <div class="field" style="grid-column:1/-1">
+            <label>Personalización del Cliente</label>
+            <div class="card" style="background:rgba(212,168,71,.05);border-color:rgba(212,168,71,.2);margin:0;padding:14px">
+              <label class="check-row" style="margin-bottom:10px"><input type="checkbox" id="prmAskPotato" onchange="togglePotatoCount()"> 🍟 Pedir preparación de papas al cliente</label>
+              <div id="prmPotatoCountGroup" style="display:none">
+                <label style="display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Cantidad de porciones de papas</label>
+                <input id="prmPotatoCount" type="number" min="1" max="6" value="1" style="width:100%;padding:10px 13px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;color:var(--txt);font-family:var(--fb);font-size:14px;outline:none">
+                <div style="font-size:11px;color:var(--muted);margin-top:6px">Se le va a pedir al cliente que elija tipo + preparación por cada porción.</div>
+              </div>
+            </div>
+          </div>
+
           <div id="prmComboGroup" class="field" style="grid-column:1/-1">
             <label>Items del Combo</label>
             <div style="background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:12px;padding:14px;">
@@ -879,11 +891,16 @@ function togglePromoComboGroup(){
 }
 $('#prmType').addEventListener('change',togglePromoComboGroup);
 
+window.togglePotatoCount=function(){
+  $('#prmPotatoCountGroup').style.display=$('#prmAskPotato').checked?'block':'none';
+};
+
 function clearPromoForm(){
   ['prmName','prmDescription','prmPrice','prmOriginalPrice','prmImg','prmFrom','prmTo'].forEach(id=>$(('#'+id)).value='');
   $('#prmType').value='combo';$('#prmImgFile').value='';
+  $('#prmAskPotato').checked=false;$('#prmPotatoCount').value=1;
   PRM_ITEMS=[];editingPromoId=null;editingPromoImg=null;
-  renderPrmItemsList();togglePromoComboGroup();
+  renderPrmItemsList();togglePromoComboGroup();togglePotatoCount();
   $('#btnSavePromo').textContent='💾 Guardar Promo';
 }
 
@@ -905,6 +922,8 @@ async function savePromo(){
   if(type==='combo'&&!PRM_ITEMS.length){alert('Agregá al menos un item al combo');return;}
   let finalImg=urlImg;
   if(file){finalImg=await fileToBase64(file);}else if(!finalImg&&editingPromoImg){finalImg=editingPromoImg;}
+  const askPotato=$('#prmAskPotato').checked;
+  const potatoCount=Math.max(1,Number($('#prmPotatoCount').value||1));
   const payload={
     name,type,description,price,
     originalPrice:originalPrice>0?originalPrice:null,
@@ -912,6 +931,8 @@ async function savePromo(){
     items:type==='combo'?PRM_ITEMS:[],
     from:firebase.firestore.Timestamp.fromDate(dateFrom),
     to:firebase.firestore.Timestamp.fromDate(dateTo),
+    askPotato,
+    potatoCount:askPotato?potatoCount:0,
     active:true,
     updatedAt:firebase.firestore.FieldValue.serverTimestamp()
   };
@@ -939,7 +960,9 @@ function loadPromoIntoForm(data,id){
   $('#prmFrom').value=toLocal(data.from);
   $('#prmTo').value=toLocal(data.to);
   PRM_ITEMS=Array.isArray(data.items)?data.items.map(i=>({name:String(i.name||''),qty:Number(i.qty||1)})):[];
-  renderPrmItemsList();togglePromoComboGroup();
+  $('#prmAskPotato').checked=!!data.askPotato;
+  $('#prmPotatoCount').value=Math.max(1,Number(data.potatoCount||1));
+  renderPrmItemsList();togglePromoComboGroup();togglePotatoCount();
   $('#btnSavePromo').textContent='💾 Actualizar Promo';
   showTab('promos',document.querySelector('.sidebar-btn[onclick*="promos"]'));
   window.scrollTo({top:0,behavior:'smooth'});
