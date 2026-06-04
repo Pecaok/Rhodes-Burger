@@ -1350,7 +1350,7 @@ function _pushPromoToCart(p, potatoSelections){
     comboItems:p.items||[],
     potatoSelections:potatoSelections||null
   };
-  saveCart();window.toast(`${p.name} agregado 🔥`);
+  saveCart();window.flyToCart(p.img,cartSrcEl(p.id));window.toast(`${p.name} agregado 🔥`);
 }
 
 window.addPromoToCart=(id)=>{
@@ -1454,7 +1454,7 @@ window.openModal=(id)=>{
   if(!window.STATE.isOpen&&!window.STATE.config.store.forceOpen){alert("El local está cerrado.");return;}
   const item=window.STATE.products.find(p=>p.id===id);if(!item)return;
   const cat=(item.category||"").toLowerCase();
-  if(cat.includes("bebida")||cat.includes("drink")){window.STATE.cart.drink[item.id+"_"+Date.now()]={item,qty:1,type:'drink',extras:{},notes:"",finalPrice:Number(item.price)};saveCart();window.toast(`${item.name} agregado`);return;}
+  if(cat.includes("bebida")||cat.includes("drink")){const _src=cartSrcEl(item.id);window.STATE.cart.drink[item.id+"_"+Date.now()]={item,qty:1,type:'drink',extras:{},notes:"",finalPrice:Number(item.price)};saveCart();window.flyToCart(item.img,_src);window.toast(`${item.name} agregado`);return;}
   window.MODAL.item=item;window.MODAL.extras={patty:0,cheddar:0,bacon:0};
   document.getElementById("modTitle").innerText=item.name;document.getElementById("modNotes").value="";
   document.getElementById("qtyPatty").innerText="0";document.getElementById("qtyCheddar").innerText="0";document.getElementById("qtyBacon").innerText="0";
@@ -1482,10 +1482,45 @@ document.getElementById("btnAddCart").onclick=()=>{
   const p=window.STATE.config.prices;let fp=Number(item.price)+(window.MODAL.extras.patty*p.patty)+(window.MODAL.extras.cheddar*p.cheddar)+(window.MODAL.extras.bacon*p.bacon);if(sv==='aros')fp+=p.onionRings;
   const ci={item,qty:1,sideType:sv,fries:fs,friesRaw:fr,extras:{...window.MODAL.extras},notes,finalPrice:fp};const nId=item.id+"_"+fr+"_"+Date.now();
   if(cat.includes("guarnicion")||cat.includes("side")||cat.includes("papas"))window.STATE.cart.side[nId]=ci;else window.STATE.cart.burger[nId]=ci;
-  saveCart();document.getElementById("modalOvl").classList.remove("open");window.toast(`${item.name} agregado`);
+  const _src=cartSrcEl(item.id);document.getElementById("modalOvl").classList.remove("open");saveCart();window.flyToCart(item.img,_src);window.toast(`${item.name} agregado`);
 };
 
 function saveCart(){localStorage.setItem(CART_KEY,JSON.stringify(window.STATE.cart));updateCartUI();}
+
+/* ── FLY TO CART (UI nueva) ── */
+function cartSrcEl(id){
+  // Si está abierta la vista de detalle, volar desde su imagen grande
+  const det=document.getElementById('scDetail');
+  if(det&&det.classList.contains('open'))return document.getElementById('scdImg');
+  // Si no, desde la imagen del panel del menú
+  const panel=[...document.querySelectorAll('.sc-panel')].find(p=>(p.getAttribute('onclick')||'').includes(`'${id}'`));
+  return panel?panel.querySelector('.sc-img'):null;
+}
+function bumpCart(){
+  const ico=document.querySelector('.cart-ico'),b=document.getElementById('cartBubble');
+  if(ico)ico.animate([{transform:'scale(1)'},{transform:'scale(1.28)'},{transform:'scale(1)'}],{duration:380,easing:'ease-out'});
+  if(b&&b.style.display!=='none')b.animate([{transform:'scale(.4)'},{transform:'scale(1.5)'},{transform:'scale(1)'}],{duration:430,easing:'cubic-bezier(.34,1.56,.64,1)'});
+}
+window.flyToCart=function(imgUrl,srcEl){
+  const cart=document.querySelector('.cart-ico');
+  imgUrl=imgUrl||'images/logo.png';
+  if(!cart){bumpCart();return;}
+  let rect=srcEl&&srcEl.getBoundingClientRect?srcEl.getBoundingClientRect():null;
+  if(!rect||!rect.width){const s=Math.min(110,innerWidth*0.4);rect={left:innerWidth/2-s/2,top:innerHeight/2-s/2,width:s,height:s};}
+  const cr=cart.getBoundingClientRect();
+  const fly=document.createElement('img');
+  fly.src=imgUrl;
+  fly.style.cssText=`position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;border-radius:14px;object-fit:cover;z-index:9998;pointer-events:none;box-shadow:0 14px 36px rgba(0,0,0,.55);will-change:transform,opacity;`;
+  document.body.appendChild(fly);
+  const dx=(cr.left+cr.width/2)-(rect.left+rect.width/2);
+  const dy=(cr.top+cr.height/2)-(rect.top+rect.height/2);
+  const anim=fly.animate([
+    {transform:'translate(0,0) scale(1) rotate(0deg)',opacity:1,offset:0},
+    {transform:`translate(${dx*0.55}px,${dy*0.55-90}px) scale(.62) rotate(-8deg)`,opacity:1,offset:.55},
+    {transform:`translate(${dx}px,${dy}px) scale(.1) rotate(6deg)`,opacity:.15,offset:1}
+  ],{duration:720,easing:'cubic-bezier(.5,-0.15,.35,1)'});
+  anim.onfinish=()=>{fly.remove();bumpCart();};
+};
 
 function renderUpsell(){
   const cnt=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.side).length+Object.keys(window.STATE.cart.drink).length;
