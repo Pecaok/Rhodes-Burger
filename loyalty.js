@@ -133,6 +133,30 @@
       data = Object.assign({}, data || {}, res);
       notify();
       return res;
+    },
+
+    /* Guardar datos editables del perfil (teléfono, nombre). */
+    async updateProfile(fields) {
+      if (!user) return null;
+      ensure();
+      const ref = db.collection('customers').doc(user.uid);
+      const upd = { updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+      if (typeof fields.phone === 'string') upd.phone = fields.phone.trim();
+      if (typeof fields.name === 'string' && fields.name.trim()) upd.name = fields.name.trim();
+      await ref.set(upd, { merge: true });
+      data = Object.assign({}, data || {}, upd);
+      notify();
+      return data;
+    },
+
+    /* Traer los pedidos anteriores del cliente (orden cliente-side por fecha). */
+    async getOrders() {
+      if (!user) return [];
+      ensure();
+      const snap = await db.collection('orders').where('customerUid', '==', user.uid).get();
+      const arr = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+      arr.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      return arr;
     }
   };
 
