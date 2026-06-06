@@ -609,15 +609,49 @@
         }catch(e){ console.error('revertir sello', e); }
     }
 
+    // 🍔 Reaplicar el sello cuando un pedido cancelado vuelve a un estado activo (descancelar).
+    // Es el inverso exacto de revertirSelloPedido. Solo actúa si el pedido estaba revertido.
+    async function reaplicarSelloPedido(pedido) {
+        if(!pedido || !pedido.customerUid) return;
+        const cref = db.collection('customers').doc(pedido.customerUid);
+        const oref = db.collection('orders').doc(pedido.id);
+        try{
+            await db.runTransaction(async t => {
+                const osnap = await t.get(oref);
+                if(!osnap.exists || !osnap.data().loyaltyReversed) return; // no estaba revertido, nada que devolver
+                const snap = await t.get(cref);
+                if(snap.exists){
+                    const d = snap.data();
+                    let stamps = Number(d.stamps || 0);
+                    let rewardAvailable = !!d.rewardAvailable;
+                    if(pedido.loyaltyApplied){
+                        // El pedido había canjeado el 10% -> se lo volvemos a consumir
+                        stamps = 0; rewardAvailable = false;
+                    } else {
+                        // El pedido había sumado 1 sello -> se lo volvemos a sumar
+                        stamps = stamps + 1;
+                        if(stamps >= 10){ stamps = 10; rewardAvailable = true; }
+                    }
+                    t.set(cref, { stamps, rewardAvailable, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+                }
+                t.set(oref, { loyaltyReversed: false }, {merge:true});
+            });
+        }catch(e){ console.error('reaplicar sello', e); }
+    }
+
     window.setOrderStatus = async (id, next, isPaid) => {
         if(next==='delivered' && !isPaid){ alert("⚠️ COBRAR PRIMERO: El pedido figura pendiente."); return; }
         try{
             const docSnap = await db.collection('orders').doc(id).get();
             if(!docSnap.exists) return;
             const pedidoData = { id: docSnap.id, ...docSnap.data() };
+            const prevStatus = pedidoData.status;
 
             if(next === 'delivered'){ await gestionarStock(pedidoData, -1); }
             else if(next === 'cancelled'){ await gestionarStock(pedidoData, 1); await revertirSelloPedido(pedidoData); }
+
+            // Descancelar: venía cancelado y pasa a un estado activo -> devolver el sello
+            if(prevStatus === 'cancelled' && next !== 'cancelled'){ await reaplicarSelloPedido(pedidoData); }
 
             await db.collection("orders").doc(id).update({status:next});
         }catch(e){
