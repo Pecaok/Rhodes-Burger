@@ -147,6 +147,26 @@
     .modal .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid var(--border2);}
     .modal .row:last-of-type{border-bottom:none;}
 
+    /* CLIENTE / SELLOS */
+    #clienteResults{max-height:210px;overflow-y:auto;margin-top:4px;}
+    .cli-result{padding:9px 11px;border:1px solid var(--border);border-radius:8px;margin-top:6px;cursor:pointer;background:rgba(255,255,255,.03);transition:all .15s;}
+    .cli-result:hover{border-color:var(--gold-border);background:var(--gold-dim);}
+    .cli-result b{color:var(--white);font-weight:600;}
+    .cli-result small{display:block;color:var(--muted);font-size:11px;margin-top:2px;}
+    .cli-st{color:var(--gold);font-size:11px;font-weight:700;}
+    .cli-empty{padding:9px 4px;font-size:12px;color:var(--muted);}
+    .cli-card{margin-top:8px;padding:11px 13px;border:1px solid var(--gold-border);border-radius:10px;background:var(--gold-dim);}
+    .cli-card-top{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+    .cli-card-top strong{font-family:var(--fh);font-size:16px;color:var(--white);letter-spacing:.02em;}
+    .cli-change{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;text-decoration:underline;padding:2px;}
+    .cli-change:hover{color:var(--gold);}
+    .cli-stamps{font-family:var(--fh);font-size:14px;font-weight:700;color:var(--gold);margin-top:5px;letter-spacing:.03em;}
+    .cli-reward{color:var(--green);}
+    .cli-reward-toggle{display:flex;align-items:center;gap:7px;margin-top:9px;font-size:13px;color:var(--txt);cursor:pointer;}
+    .cli-hint{font-size:11.5px;color:var(--muted);margin-top:7px;}
+    .cli-hint strong{color:var(--gold);}
+    .cli-hint.ok{color:var(--green);font-weight:700;}
+
     @media(max-width:900px){
       .container{grid-template-columns:1fr;}
       aside.side{position:fixed;bottom:0;left:0;right:0;height:auto;max-height:50vh;z-index:50;}
@@ -214,6 +234,12 @@
 
     <div class="form-area">
       <div class="form-grid">
+        <div class="field" id="clienteBox">
+          <label>🍔 Cliente con sellos (opcional)</label>
+          <input id="inpClienteSearch" type="text" placeholder="Buscar por nombre, email o teléfono…" autocomplete="off">
+          <div id="clienteResults" style="display:none"></div>
+          <div id="clienteSelected" style="display:none"></div>
+        </div>
         <div class="field">
           <label>Nombre del Cliente</label>
           <input id="inpNombre" type="text" placeholder="Ej: Juan" autocomplete="off">
@@ -451,6 +477,7 @@ function renderCart(){
 
   wrap.innerHTML=html||`<span style="display:block;text-align:center;padding-top:28px;font-size:13px;color:var(--muted);font-family:var(--fh);text-transform:uppercase;letter-spacing:.06em">Carrito vacío.</span>`;
   totalEl.textContent=money(finalTotal);
+  if(window.updateCliStampHint)window.updateCliStampHint(subtotal);
 }
 
 let PROMOS_MOSTRADOR=[];
@@ -795,13 +822,144 @@ async function sendToFirestore(){
     const finalTotal = rawTotal - discountAmt;
     const discountDesc = document.getElementById('inpDiscountDesc')?.value.trim() || (pct > 0 ? `Descuento ${pct}%` : '');
 
-    const order={orderNumber,number:orderNumber,nombre,telefono:$("#inpTel").value.trim(),entrega:"take_away",pago,notes:"",pickup_slot:slot.pretty,pickup_time:slot.iso,status:'accepted',payment_status:payStatusFinal,items,total:finalTotal,rawTotal,discount:discountAmt,discountPct:pct,coupon:discountDesc,source:"mostrador",createdAt:createdAtLocal,createdAt_server:firebase.firestore.FieldValue.serverTimestamp()};
+    // Sellos: ¿hay cliente seleccionado? ¿canjea el 10%? ¿suma sello? (mínimo sobre el subtotal de comida = rawTotal)
+    const usedReward = !!(selectedCustomer && loyaltyUseReward && selectedCustomer.rewardAvailable);
+    const willStamp  = !!(selectedCustomer && !usedReward && rawTotal >= MIN_FOR_STAMP);
+
+    const order={orderNumber,number:orderNumber,nombre,telefono:$("#inpTel").value.trim(),entrega:"take_away",pago,notes:"",pickup_slot:slot.pretty,pickup_time:slot.iso,status:'accepted',payment_status:payStatusFinal,items,total:finalTotal,rawTotal,discount:discountAmt,discountPct:pct,coupon:discountDesc,customerUid:selectedCustomer?selectedCustomer.uid:'',loyaltyApplied:usedReward,loyaltyPercent:usedReward?10:0,loyaltyStamped:willStamp,source:"mostrador",createdAt:createdAtLocal,createdAt_server:firebase.firestore.FieldValue.serverTimestamp()};
     await db.collection("orders").doc().set(order);
+    // Aplicar el sello (o canjear el premio) al cliente registrado
+    if(selectedCustomer){
+      try{ await applyStampToCustomer(selectedCustomer.uid, usedReward, rawTotal); }catch(e){ console.error('sellos', e); }
+    }
     alert(`✅ Pedido cargado: #${orderNumber}`);
-    cart={burger:{},drink:{},side:{}};renderCart();$("#inpNombre").value="";$("#selPago").value="";$("#manualTime").value="";if(document.getElementById('inpDiscountPct'))document.getElementById('inpDiscountPct').value="";if(document.getElementById('inpDiscountDesc'))document.getElementById('inpDiscountDesc').value="";setPaymentStatus(false);updateRealTimeSlot();
+    cart={burger:{},drink:{},side:{}};renderCart();$("#inpNombre").value="";$("#selPago").value="";$("#manualTime").value="";if(document.getElementById('inpDiscountPct')){document.getElementById('inpDiscountPct').value="";document.getElementById('inpDiscountPct').disabled=false;}if(document.getElementById('inpDiscountDesc')){document.getElementById('inpDiscountDesc').value="";document.getElementById('inpDiscountDesc').disabled=false;}setPaymentStatus(false);updateRealTimeSlot();
+    // Limpiar selección de cliente y refrescar caché de sellos para el próximo pedido
+    selectedCustomer=null;loyaltyUseReward=false;CUSTOMERS=null;renderClienteSelected();
+    if($("#inpClienteSearch"))$("#inpClienteSearch").value="";
+    if($("#clienteResults")){$("#clienteResults").style.display="none";$("#clienteResults").innerHTML="";}
   }catch(e){console.error(e);alert("Error de conexión. No se cargó el pedido.");}
   finally{btn.disabled=false;btn.textContent=originalText;}
 }
+/* ════════ CLIENTE / SELLOS ════════ */
+const MIN_FOR_STAMP=20000;            // subtotal mínimo (comida) para sumar sello
+let CUSTOMERS=null;                   // caché de la colección customers
+let selectedCustomer=null;            // cliente elegido para este pedido
+let loyaltyUseReward=false;           // ¿este pedido canjea su 10%?
+
+const _norm=s=>(s||'').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+async function ensureCustomers(){
+  if(CUSTOMERS)return CUSTOMERS;
+  const snap=await db.collection('customers').get();
+  CUSTOMERS=snap.docs.map(d=>Object.assign({uid:d.id},d.data()));
+  return CUSTOMERS;
+}
+
+let _cliTimer=null;
+const _inpCli=document.getElementById('inpClienteSearch');
+if(_inpCli){
+  _inpCli.addEventListener('input',()=>{
+    clearTimeout(_cliTimer);
+    const q=_inpCli.value.trim();
+    const box=document.getElementById('clienteResults');
+    if(q.length<2){box.style.display='none';box.innerHTML='';return;}
+    _cliTimer=setTimeout(()=>doClienteSearch(q),200);
+  });
+}
+
+async function doClienteSearch(q){
+  const box=document.getElementById('clienteResults');
+  box.style.display='block';
+  box.innerHTML='<div class="cli-empty">Buscando…</div>';
+  let list;
+  try{ list=await ensureCustomers(); }catch(e){ console.error(e); box.innerHTML='<div class="cli-empty">Error al buscar.</div>'; return; }
+  const nq=_norm(q);
+  const res=list.filter(c=>_norm(c.name).includes(nq)||_norm(c.email).includes(nq)||_norm(c.phone).includes(nq)).slice(0,8);
+  if(!res.length){ box.innerHTML='<div class="cli-empty">Sin resultados. (Solo aparecen clientes que iniciaron sesión en la web)</div>'; return; }
+  box.innerHTML=res.map(c=>{
+    const st=Number(c.stamps||0);
+    const rw=c.rewardAvailable?' · <span class="cli-st">10% 🎉</span>':'';
+    const sub=[c.email||'',c.phone||''].filter(Boolean).join(' · ');
+    return `<div class="cli-result" onclick="selectCliente('${c.uid}')"><b>${c.name||'(sin nombre)'}</b> <span class="cli-st">${st}/10${rw}</span>${sub?`<small>${sub}</small>`:''}</div>`;
+  }).join('');
+}
+
+window.selectCliente=function(uid){
+  const c=(CUSTOMERS||[]).find(x=>x.uid===uid); if(!c)return;
+  selectedCustomer=c; loyaltyUseReward=false;
+  if(_inpCli)_inpCli.value='';
+  const box=document.getElementById('clienteResults'); box.style.display='none'; box.innerHTML='';
+  renderClienteSelected();
+  renderCart();
+};
+
+window.clearCliente=function(){
+  if(loyaltyUseReward)window.toggleUsarReward(false);
+  selectedCustomer=null; loyaltyUseReward=false;
+  renderClienteSelected(); renderCart();
+};
+
+function renderClienteSelected(){
+  const el=document.getElementById('clienteSelected'); if(!el)return;
+  if(!selectedCustomer){el.style.display='none';el.innerHTML='';return;}
+  const c=selectedCustomer, st=Number(c.stamps||0);
+  const rewardHtml=c.rewardAvailable
+    ?`<label class="cli-reward-toggle"><input type="checkbox" id="chkUsarReward" ${loyaltyUseReward?'checked':''} onchange="toggleUsarReward(this.checked)"> Usar 10% de sellos en este pedido</label>`
+    :'';
+  el.style.display='block';
+  el.innerHTML=`
+    <div class="cli-card">
+      <div class="cli-card-top">
+        <strong>${c.name||'(sin nombre)'}</strong>
+        <button class="cli-change" onclick="clearCliente()">cambiar</button>
+      </div>
+      <div class="cli-stamps">${c.rewardAvailable?`${st}/10 · <span class="cli-reward">¡10% disponible!</span>`:`${st}/10 sellos`}</div>
+      ${rewardHtml}
+      <div class="cli-hint" id="cliStampHint"></div>
+    </div>`;
+}
+
+window.toggleUsarReward=function(on){
+  loyaltyUseReward=!!on;
+  const pctEl=document.getElementById('inpDiscountPct'), descEl=document.getElementById('inpDiscountDesc');
+  if(on){
+    pctEl.value=10; descEl.value='Descuento sellos (10%)';
+    pctEl.disabled=true; descEl.disabled=true;
+  } else {
+    if(pctEl.value==='10' && descEl.value==='Descuento sellos (10%)'){ pctEl.value=''; descEl.value=''; }
+    pctEl.disabled=false; descEl.disabled=false;
+  }
+  renderCart();
+};
+
+window.updateCliStampHint=function(subtotal){
+  const el=document.getElementById('cliStampHint'); if(!el)return;
+  if(loyaltyUseReward){ el.textContent='Canjea el 10% — este pedido no suma sello.'; el.className='cli-hint'; return; }
+  if(subtotal>=MIN_FOR_STAMP){ el.innerHTML='✅ Este pedido suma 1 sello'; el.className='cli-hint ok'; }
+  else { el.innerHTML=`Faltan <strong>${money(MIN_FOR_STAMP-subtotal)}</strong> para sumar un sello (mínimo ${money(MIN_FOR_STAMP)})`; el.className='cli-hint'; }
+};
+
+// Aplica el sello (o canjea el premio) directo en customers/{uid}. Mismo criterio que loyalty.js.
+async function applyStampToCustomer(uid, usedReward, amount){
+  const ref=db.collection('customers').doc(uid);
+  await db.runTransaction(async t=>{
+    const snap=await t.get(ref);
+    if(!snap.exists)return;
+    const d=snap.data();
+    let stamps=Number(d.stamps||0);
+    let rewardAvailable=!!d.rewardAvailable;
+    const ordersCount=Number(d.ordersCount||0)+1;
+    if(usedReward){
+      stamps=0; rewardAvailable=false;
+    } else if(Number(amount||0)>=MIN_FOR_STAMP){
+      stamps=stamps+1;
+      if(stamps>=10){ stamps=10; rewardAvailable=true; }
+    }
+    t.set(ref,{stamps,rewardAvailable,ordersCount,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+  });
+}
+
 $("#btnCargarPedido").onclick=sendToFirestore;
 </script>
 </body>
