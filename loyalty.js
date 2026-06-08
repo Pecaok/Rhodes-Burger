@@ -10,6 +10,7 @@
 (function () {
   const STAMPS_GOAL = 10;     // sellos necesarios
   const DISCOUNT_PCT = 0.10;  // 10%
+  const MIN_FOR_STAMP = 20000; // subtotal mínimo (comida) para que el pedido sume sello
 
   let auth = null, db = null;
   let user = undefined;       // undefined = aún no resuelto; null = sin sesión
@@ -44,7 +45,7 @@
   }
 
   const RB = {
-    STAMPS_GOAL, DISCOUNT_PCT,
+    STAMPS_GOAL, DISCOUNT_PCT, MIN_FOR_STAMP,
 
     /* Inicia el listener de sesión. Llamar una vez por página, después de initializeApp. */
     init() {
@@ -98,10 +99,12 @@
 
     /* Registrar un pedido recién confirmado.
        usedReward = true si este pedido aplicó el 10% de sellos.
+       amount = subtotal de comida; solo suma sello si es >= MIN_FOR_STAMP.
        Devuelve el estado actualizado. */
-    async registerOrder(usedReward) {
+    async registerOrder(usedReward, amount) {
       if (!user) return null;
       ensure();
+      const sumaSello = Number(amount || 0) >= MIN_FOR_STAMP; // ¿alcanza el mínimo?
       const ref = db.collection('customers').doc(user.uid);
       const res = await db.runTransaction(async t => {
         const snap = await t.get(ref);
@@ -114,10 +117,12 @@
           // Canjeó el premio en este pedido -> reinicia el ciclo
           stamps = 0;
           rewardAvailable = false;
-        } else {
+        } else if (sumaSello) {
+          // Solo suma sello si el subtotal llega al mínimo
           stamps = stamps + 1;
           if (stamps >= STAMPS_GOAL) { stamps = STAMPS_GOAL; rewardAvailable = true; }
         }
+        // si no llega al mínimo y no canjeó, no toca los sellos (solo ordersCount)
 
         const upd = {
           stamps, ordersCount, rewardAvailable,

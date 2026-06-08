@@ -164,6 +164,11 @@
     .stamp.on{border-style:solid;border-color:var(--gold);background:var(--gold-dim);transform:scale(1.04);}
     .loy-count{text-align:center;font-family:var(--fh);font-size:15px;font-weight:700;color:var(--muted);letter-spacing:.04em;}
     .loy-count em{font-style:normal;color:var(--gold);}
+    .loy-min{text-align:center;font-size:12.5px;line-height:1.45;margin-top:8px;}
+    .loy-min:empty{display:none;}
+    .loy-min-ok{color:#7bd88f;font-weight:700;}
+    .loy-min-warn{color:var(--muted);}
+    .loy-min-warn strong{color:var(--gold);}
     .loy-prompt{font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.5;}
     .reward-box{margin-top:14px;padding:14px 16px;background:linear-gradient(135deg,rgba(212,168,71,.16),rgba(212,168,71,.06));border:1px solid var(--gold);border-radius:12px;}
     .reward-title{font-family:var(--fh);font-size:18px;font-weight:900;color:var(--gold);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;}
@@ -308,7 +313,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<script src="loyalty.js?v=2"></script>
+<script src="loyalty.js?v=3"></script>
 <script>
 const firebaseConfig={apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
 firebase.initializeApp(firebaseConfig);
@@ -430,6 +435,21 @@ function renderResumen(){
 
   const discEl=$('#resDiscount');
   discEl.innerHTML=discLine?`<div class="res-discount">${discLine}</div>`:'';
+
+  // Aviso del mínimo para sumar sello (solo si está logueado y NO está canjeando el premio)
+  const loyMin=$('#loyMinHint');
+  if(loyMin){
+    const minSello=(window.rbLoyalty && rbLoyalty.MIN_FOR_STAMP) || 20000;
+    if(loyaltyApplied || !cart.items.length){
+      loyMin.textContent=''; loyMin.className='loy-min';
+    } else if(subtotal>=minSello){
+      loyMin.innerHTML='🍔 ¡Este pedido suma 1 sello!';
+      loyMin.className='loy-min loy-min-ok';
+    } else {
+      loyMin.innerHTML=`Te faltan <strong>${money(minSello-subtotal)}</strong> para sumar un sello (mínimo ${money(minSello)}).`;
+      loyMin.className='loy-min loy-min-warn';
+    }
+  }
 
   const tipEl = document.getElementById('resTip');
   if(activeTip > 0){
@@ -601,7 +621,8 @@ function renderLoyaltyUI(user,data){
       <button class="loy-logout" id="btnLogout">Salir</button>
     </div>
     ${stampsGridHTML(n)}
-    <div class="loy-count">${d.rewardAvailable?'<em>¡10 de 10!</em> 🎉':`<em>${n}</em> de 10 sellos`}</div>`;
+    <div class="loy-count">${d.rewardAvailable?'<em>¡10 de 10!</em> 🎉':`<em>${n}</em> de 10 sellos`}</div>
+    <div class="loy-min" id="loyMinHint"></div>`;
 
   if(d.rewardAvailable){
     html+=`
@@ -681,6 +702,9 @@ $('#btnConfirmar').onclick=async()=>{
     let subtotalAmount=0; cart.items.forEach(i=>{ subtotalAmount += (i.finalPrice||i.price||0)*(i.qty||1); });
     const discountAmount = usedReward ? Math.round(subtotalAmount*0.10) : (activeDiscount||0);
     const uid = (window.rbLoyalty && rbLoyalty.user) ? rbLoyalty.user.uid : '';
+    // ¿Este pedido sumará un sello? Solo si NO canjea premio y el subtotal llega al mínimo.
+    const minSello = (window.rbLoyalty && rbLoyalty.MIN_FOR_STAMP) || 20000;
+    const loyaltyStamped = !usedReward && subtotalAmount >= minSello;
 
     const now=new Date();
     const localISO=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,-1);
@@ -691,7 +715,7 @@ $('#btnConfirmar').onclick=async()=>{
       createdAt:localISO, total:finalTotal,
       subtotal:subtotalAmount,
       discount:discountAmount, coupon: usedReward ? '' : (activeCouponCode||''),
-      loyaltyApplied: !!usedReward, loyaltyPercent: usedReward ? 10 : 0, customerUid: uid,
+      loyaltyApplied: !!usedReward, loyaltyPercent: usedReward ? 10 : 0, loyaltyStamped: loyaltyStamped, customerUid: uid,
       tip:activeTip||0, tipPct:activeTipPct||0,
       pickup_slot:slot.key||'', pickup_time_pretty:slot.pretty||'',
       trackToken, items:cart.items.map(i=>({
@@ -711,7 +735,7 @@ $('#btnConfirmar').onclick=async()=>{
 
     // Sellos: suma 1 (o canjea el premio y reinicia)
     if(window.rbLoyalty && rbLoyalty.isLoggedIn()){
-      try{ await rbLoyalty.registerOrder(usedReward); }catch(e){ console.error('loyalty register', e); }
+      try{ await rbLoyalty.registerOrder(usedReward, subtotalAmount); }catch(e){ console.error('loyalty register', e); }
     }
 
     // WhatsApp
