@@ -9,7 +9,7 @@
    ════════════════════════════════════════════════════ */
 (function () {
   const STAMPS_GOAL = 10;     // sellos necesarios
-  const DISCOUNT_PCT = 0.10;  // 10%
+  const DISCOUNT_PCT = 0.20;  // 10%
   const MIN_FOR_STAMP = 20000; // subtotal mínimo (comida) para que el pedido sume sello
 
   let auth = null, db = null;
