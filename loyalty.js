@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════
    loyalty.js — Sistema de sellos Rhodes Burgers
    - Login con Google (Firebase Auth)
-   - Cada pedido suma 1 sello. A los 10 -> 10% off el próximo.
+   - Cada pedido suma 1 sello. A los 10 -> 20% off el próximo.
    - Al usar el descuento, los sellos vuelven a 0.
    Requiere: firebase-app-compat, firebase-firestore-compat,
              firebase-auth-compat ya cargados, y firebase.initializeApp() hecho.
@@ -9,7 +9,7 @@
    ════════════════════════════════════════════════════ */
 (function () {
   const STAMPS_GOAL = 10;     // sellos necesarios
-  const DISCOUNT_PCT = 0.20;  // 10%
+  const DISCOUNT_PCT = 0.20;  // 20%
   const MIN_FOR_STAMP = 20000; // subtotal mínimo (comida) para que el pedido sume sello
 
   let auth = null, db = null;
