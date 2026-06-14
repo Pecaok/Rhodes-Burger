@@ -1164,7 +1164,7 @@
               </div>
               <div class="control-row">
                  <button class="pay-btn ${isPaid?'paid':'pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal}')">${isPaid ? 'PAGADO' : 'COBRAR'}</button>
-                 <button class="facturar-btn ${['transferencia','debito','mercado_pago','credito'].includes(payVal) ? 'show' : ''}" onclick="facturarPedido('${doc.id}')" title="Generar factura">🧾 Facturar</button>
+                 <button class="facturar-btn ${(o.factura&&o.factura.cae)||['transferencia','debito','mercado_pago','credito'].includes(payVal) ? 'show' : ''}" onclick="facturarPedido('${doc.id}')" title="${o.factura&&o.factura.cae?'Ver factura':'Generar factura'}">${o.factura&&o.factura.cae ? '✓ Factura '+(o.factura.nro||'') : '🧾 Facturar'}</button>
                  <button class="icon-btn-lg" onclick="printOrder('${doc.id}')" title="Imprimir">🖨️</button>
                  <button class="icon-btn-lg" style="color:var(--red);border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.08)" onclick="deleteOrder('${doc.id}')" title="Eliminar">🗑️</button>
               </div>
@@ -1188,31 +1188,70 @@
         'credito': 'Crédito'
     };
 
-    window.facturarPedido = function(id) {
-        const doc = window.idToDoc?.get(id);
-        if(!doc) return;
-        const o = doc.data();
-
+    // Respaldo manual: si ARCA todavía no está configurado, se factura como
+    // antes, mandando los datos a Facturitas por WhatsApp.
+    window.facturarPorWhatsApp = function(o) {
         const fecha = window.pickDate(o);
         const fechaStr = fecha ? fecha.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
         const horaStr  = fecha ? fecha.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
         const total    = Number(o.total||0).toLocaleString('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0});
         const pago     = PAGO_LABELS[o.pago] || o.pago || '';
-
         const msg = [
-            `Hola! Quiero facturar un pedido:`,
-            ``,
+            `Hola! Quiero facturar un pedido:`, ``,
             `📋 Pedido #${o.orderNumber||'—'}`,
             `👤 Cliente: ${o.nombre||'Consumidor Final'}`,
             `💰 Total: ${total}`,
             `💳 Método: ${pago}`,
-            `📅 Fecha: ${fechaStr} ${horaStr}`,
-            ``,
-            `Consumidor Final`
+            `📅 Fecha: ${fechaStr} ${horaStr}`, ``, `Consumidor Final`
         ].join('\n');
+        window.open(`https://wa.me/${FACTURITAS_WA}?text=${encodeURIComponent(msg)}`, '_blank');
+    };
 
-        const url = `https://wa.me/${FACTURITAS_WA}?text=${encodeURIComponent(msg)}`;
-        window.open(url, '_blank');
+    // Muestra los datos de una factura ya emitida (guardada en el pedido).
+    window.verFactura = function(id) {
+        const doc = window.idToDoc?.get(id);
+        const f = doc && doc.data().factura;
+        if(!f || !f.cae){ alert('Este pedido todavía no tiene factura.'); return; }
+        alert(
+            `🧾 Factura C\n` +
+            `Comprobante: ${String(f.ptoVta).padStart(4,'0')}-${String(f.nro).padStart(8,'0')}\n` +
+            `CAE: ${f.cae}\n` +
+            `Vto CAE: ${f.vto}\n` +
+            `Total: $${Number(f.total).toLocaleString('es-AR')}` +
+            (f.production ? '' : '\n\n⚠️ HOMOLOGACIÓN — factura de PRUEBA (no válida)')
+        );
+    };
+
+    // Facturar a ARCA (Factura C). Si el comprobante ya existe, lo muestra. Si
+    // ARCA no está configurado o falla la conexión, cae al flujo de WhatsApp.
+    window.facturarPedido = async function(id) {
+        const doc = window.idToDoc?.get(id);
+        if(!doc) return;
+        const o = doc.data();
+        if(o.factura && o.factura.cae) return window.verFactura(id);
+
+        try {
+            const res = await fetch('/.netlify/functions/facturar', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ orderId: id })
+            });
+            const data = await res.json().catch(()=>({}));
+            if (data && data.cae) {
+                alert(
+                    `✅ Factura C generada\n` +
+                    `Comprobante: ${String(data.ptoVta).padStart(4,'0')}-${String(data.nro).padStart(8,'0')}\n` +
+                    `CAE: ${data.cae}` +
+                    (data.production ? '' : '\n\n⚠️ HOMOLOGACIÓN — factura de PRUEBA')
+                );
+                return;
+            }
+            if (data && data.error === 'arca_no_configurado') return window.facturarPorWhatsApp(o);
+            alert('No se pudo facturar: ' + ((data && (data.detalle||data.error)) || 'error desconocido'));
+        } catch(e) {
+            // sin conexión con la función: usar el flujo manual
+            window.facturarPorWhatsApp(o);
+        }
     };
 
     window.mostrarResumen = function() {
