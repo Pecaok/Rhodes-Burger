@@ -170,6 +170,7 @@
 
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
 
   <script>
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
@@ -1231,13 +1232,11 @@
         if(o.factura && o.factura.cae) return window.verFactura(id);
 
         try {
-            const res = await fetch('/.netlify/functions/facturar', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ orderId: id })
-            });
-            const data = await res.json().catch(()=>({}));
-            if (data && data.cae) {
+            // Cloud Function de Firebase (Node) — ahí corre la facturación ARCA.
+            const facturar = firebase.functions().httpsCallable('facturar');
+            const r = await facturar({ orderId: id });
+            const data = (r && r.data) || {};
+            if (data.cae) {
                 alert(
                     `✅ Factura C generada\n` +
                     `Comprobante: ${String(data.ptoVta).padStart(4,'0')}-${String(data.nro).padStart(8,'0')}\n` +
@@ -1246,16 +1245,15 @@
                 );
                 return;
             }
-            // Solo mostramos error si ARCA realmente rechazó la factura (la
-            // función corrió y AFIP devolvió error). Cualquier otra cosa
-            // (no configurado, 404, función no disponible) cae al WhatsApp.
-            if (data && data.error === 'arca_error') {
+            // Solo mostramos error si ARCA realmente rechazó la factura. Si todavía
+            // no está configurado (o cualquier otra cosa) cae al WhatsApp de siempre.
+            if (data.error === 'arca_error') {
                 alert('ARCA rechazó la factura:\n' + (data.detalle || 'error desconocido'));
                 return;
             }
             return window.facturarPorWhatsApp(o);
         } catch(e) {
-            // función no disponible / sin conexión / respuesta no-JSON: WhatsApp
+            // función no disponible / sin conexión: usar el flujo manual
             window.facturarPorWhatsApp(o);
         }
     };
