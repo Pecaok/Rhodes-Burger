@@ -885,6 +885,22 @@ div[id^="tab-"]{display:none;}
     let INVENTORY=[], RAW_STOCK=[], PREMADE_STOCK=[], SUB_RECIPES=[], RECIPES=[], PURCHASES=[], ORDERS=[];
     let FIXED_DATA={fixed:[],prod:[],config:{taxDebit:0,taxTransf:0,taxQR:0},aliases:[]};
     let PRODUCTS_DB={}, PRODUCTS_LIST=[], SIDES_CONFIG={}, currentRecipeId=null, currentSubRecipeId=null, currentRecipeIngs=[];
+    // Guarniciones y sazones dinámicos (para analítica de consumos por sazón)
+    let SAZONES_LIST=[{key:'con_sazon',name:'Sazón Queso'},{key:'con_sazon_bacon',name:'Sazón Bacon'},{key:'con_sal',name:'Con Sal'},{key:'sin_sal',name:'Sin Sal'}];
+    let SIDE_TYPES_LIST=[{key:'crinkles',name:'Papas Crinkles',needsPrep:true},{key:'rejillas',name:'Papas Rejillas',needsPrep:true},{key:'aros',name:'Aros de Cebolla',needsPrep:false}];
+    const sazonByKey=k=>SAZONES_LIST.find(s=>s.key===k);
+    // Detecta el sazón (key+name) de un ítem: 1) por friesRaw estructurado, 2) por nombre en el texto, 3) heurística legacy
+    function detectSazon(friesRaw, text){
+      const fr=String(friesRaw||'').toLowerCase();
+      const byLen=[...SAZONES_LIST].sort((a,b)=>b.key.length-a.key.length);
+      for(const s of byLen){ if(fr===s.key||fr.endsWith('_'+s.key)) return {key:s.key,name:s.name}; }
+      const t=String(text||'').toLowerCase();
+      for(const s of byLen){ if(s.name&&t.includes(s.name.toLowerCase())) return {key:s.key,name:s.name}; }
+      let key='con_sal';
+      if(t.includes('sin sal'))key='sin_sal';
+      else if(t.includes('sazon')||t.includes('dorito')||t.includes('queso'))key='con_sazon';
+      return {key,name:(sazonByKey(key)||{}).name||'Con Sal'};
+    }
     let tempAliasList=[];
     let chartMain=null, chartDaily=null, chartProds=null, chartPayment=null;
 
@@ -900,7 +916,8 @@ div[id^="tab-"]{display:none;}
             });
             checkLoadComplete();
         });
-        db.collection('config').doc('sides').get().then(doc => { if(doc.exists) SIDES_CONFIG=doc.data(); checkLoadComplete(); });
+        db.collection('sazones').get().then(snap => { const l=snap.docs.map(d=>({key:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0)); if(l.length)SAZONES_LIST=l; checkLoadComplete(); }).catch(()=>checkLoadComplete());
+        db.collection('sideTypes').get().then(snap => { const l=snap.docs.map(d=>({key:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0)); if(l.length)SIDE_TYPES_LIST=l; checkLoadComplete(); }).catch(()=>checkLoadComplete());
     }
     function checkLoadComplete() { if(ORDERS.length) window.renderProportions(); }
 
@@ -910,8 +927,17 @@ div[id^="tab-"]{display:none;}
         function initStat(key,name,cat){ if(!stats[key]) stats[key]={name,category:cat||'otros',countSimple:0,countDouble:0,total:0,web:0,local:0,py:0}; }
         Object.keys(PRODUCTS_DB).forEach(key=>{ const p=PRODUCTS_DB[key]; let sk=key.replace(/simple|doble/gi,'').trim().toLowerCase(); let cdn=p.realName.replace(/simple|doble/gi,'').trim(); if(sk.includes("porcion papas")||sk.includes("porcion de papas")) return; initStat(sk,cdn,p.category); });
         if(FIXED_DATA&&FIXED_DATA.aliases) FIXED_DATA.aliases.forEach(a=>{ let sk=a.external.replace(/simple|doble/gi,'').replace(/[^a-z0-9 ]/g,'').trim().toLowerCase(); initStat(sk,a.external,'promos'); });
-        ['rejillas_sal','rejillas_sazonadas','rejillas_sinsal','crinkles_sal','crinkles_sazonadas','crinkles_sinsal','aros'].forEach(t=>initStat(`acompañamiento_${t}`,`Acompañamiento: ${t}`,'guarniciones'));
-        ['papas_sal','papas_sazonadas','papas_sinsal','crinkles_sal','rejillas_sal','aros'].forEach(t=>initStat(`porcion_${t}`,`Porción ${t}`,'guarniciones'));
+        // Buckets dinámicos: cada guarnición con preparación × cada sazón; las que no llevan sazón (aros) van solas
+        const prepTypes=SIDE_TYPES_LIST.filter(t=>t.needsPrep!==false);
+        const noPrepTypes=SIDE_TYPES_LIST.filter(t=>t.needsPrep===false);
+        prepTypes.forEach(t=>SAZONES_LIST.forEach(sz=>{
+          initStat(`acompañamiento_${t.key}_${sz.key}`,`Acompañamiento: ${t.name} (${sz.name})`,'guarniciones');
+        }));
+        noPrepTypes.forEach(t=>initStat(`acompañamiento_${t.key}`,`Acompañamiento: ${t.name}`,'guarniciones'));
+        // Porciones (papas fritas como producto) por sazón
+        SAZONES_LIST.forEach(sz=>initStat(`porcion_papas_${sz.key}`,`Porción Papas Fritas (${sz.name})`,'guarniciones'));
+        prepTypes.forEach(t=>SAZONES_LIST.forEach(sz=>initStat(`porcion_${t.key}_${sz.key}`,`Porción ${t.name} (${sz.name})`,'guarniciones')));
+        noPrepTypes.forEach(t=>initStat(`porcion_${t.key}`,`Porción ${t.name}`,'guarniciones'));
         initStat('nuggets','Nuggets de Pollo','guarniciones');
         let totalGeneral=0, grandTotalWeb=0, grandTotalLocal=0, grandTotalPY=0;
         ORDERS.forEach(o=>{
@@ -945,16 +971,30 @@ div[id^="tab-"]{display:none;}
                 const isPortion=/(porcion|porción)/.test(cleanName)||(!isBurger&&/(papas|fritas|nuggets|aros)/.test(cleanName));
                 if(isBurger||isPortion){
                     if(cleanName.includes('nugget')){initStat('nuggets','Nuggets de Pollo','guarniciones');stats['nuggets'].total+=qty;stats['nuggets'][source]+=qty;totalGeneral+=qty;if(source==='web')grandTotalWeb+=qty;if(source==='local')grandTotalLocal+=qty;if(source==='py')grandTotalPY+=qty;return;}
+                    // Detectar guarnición (sideType) dinámicamente: por friesRaw, por nombre, o heurística legacy
                     let sideType=isBurger?'rejillas':'papas';
-                    if(modifiers.includes('crinkle')||cleanName.includes('crinkle'))sideType='crinkles';
+                    const frLow=String(it.friesRaw||'').toLowerCase();
+                    const stByLen=[...SIDE_TYPES_LIST].sort((a,b)=>b.key.length-a.key.length);
+                    let stMatch=null;
+                    for(const t of stByLen){ if(frLow===t.key||frLow.startsWith(t.key+'_')){stMatch=t.key;break;} }
+                    if(!stMatch){ for(const t of stByLen){ const nm=(t.name||'').toLowerCase(); if(nm&&(modifiers.includes(nm)||cleanName.includes(nm))){stMatch=t.key;break;} } }
+                    if(stMatch)sideType=stMatch;
+                    else if(modifiers.includes('crinkle')||cleanName.includes('crinkle'))sideType='crinkles';
                     else if(modifiers.includes('aro')||modifiers.includes('cebolla')||cleanName.includes('aro')||cleanName.includes('cebolla'))sideType='aros';
                     else if(modifiers.includes('rejilla')||cleanName.includes('rejilla'))sideType='rejillas';
-                    let seasoning='sal';
-                    if(modifiers.includes('sin sal')||cleanName.includes('sin sal'))seasoning='sinsal';
-                    else if(modifiers.includes('sazon')||modifiers.includes('dorito')||modifiers.includes('queso')||cleanName.includes('sazon'))seasoning='sazonadas';
+                    const stObj=SIDE_TYPES_LIST.find(t=>t.key===sideType);
+                    const stName=stObj?stObj.name:(sideType==='papas'?'Papas Fritas':sideType.charAt(0).toUpperCase()+sideType.slice(1));
+                    const noPrep=(stObj&&stObj.needsPrep===false)||sideType==='aros';
                     let statKey='',statName='';
-                    if(isBurger){if(sideType==='aros'){statKey='acompañamiento_aros';statName='Acompañamiento: Aros de Cebolla';}else{statKey=`acompañamiento_${sideType}_${seasoning}`;statName=`Acompañamiento: Papas ${sideType.charAt(0).toUpperCase()+sideType.slice(1)} (${seasoning==='sinsal'?'Sin Sal':seasoning==='sazonadas'?'Sazonadas':'Con Sal'})`;}}
-                    else if(isPortion){if(sideType==='aros'){statKey='porcion_aros';statName='Porción Aros de Cebolla';}else{statKey=`porcion_${sideType}_${seasoning}`;statName=`Porción Papas ${sideType==='papas'?'Fritas':sideType.charAt(0).toUpperCase()+sideType.slice(1)} (${seasoning==='sinsal'?'Sin Sal':seasoning==='sazonadas'?'Sazonadas':'Con Sal'})`;}}
+                    if(noPrep){
+                      if(isBurger){statKey=`acompañamiento_${sideType}`;statName=`Acompañamiento: ${stName}`;}
+                      else{statKey=`porcion_${sideType}`;statName=`Porción ${stName}`;}
+                    }else{
+                      const sz=detectSazon(it.friesRaw, modifiers+' '+cleanName);
+                      if(isBurger){statKey=`acompañamiento_${sideType}_${sz.key}`;statName=`Acompañamiento: ${stName} (${sz.name})`;}
+                      else if(sideType==='papas'){statKey=`porcion_papas_${sz.key}`;statName=`Porción Papas Fritas (${sz.name})`;}
+                      else{statKey=`porcion_${sideType}_${sz.key}`;statName=`Porción ${stName} (${sz.name})`;}
+                    }
                     initStat(statKey,statName,'guarniciones');stats[statKey].total+=qty;stats[statKey][source]+=qty;
                     if(isPortion){totalGeneral+=qty;if(source==='web')grandTotalWeb+=qty;if(source==='local')grandTotalLocal+=qty;if(source==='py')grandTotalPY+=qty;return;}
                 }
