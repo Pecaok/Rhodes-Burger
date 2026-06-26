@@ -321,15 +321,16 @@ tr:hover td{background:rgba(255,255,255,.02);}
             </div>
           </div>
 
-          <div id="potatoOptionsGroup" style="grid-column:1/-1;display:none">
+          <div id="prdSidesGroup" style="grid-column:1/-1;display:none">
             <div class="card" style="background:rgba(212,168,71,.05);border-color:rgba(212,168,71,.2);margin:0">
-              <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);margin-bottom:10px">Variantes de Papas</div>
-              <div style="display:flex;gap:10px;flex-wrap:wrap">
-                <label class="check-row"><input type="checkbox" id="prdOptSazon"> 🧀 Sazón Queso</label>
-                <label class="check-row"><input type="checkbox" id="prdOptSazonBacon"> 🥓 Sazón Bacon</label>
-                <label class="check-row"><input type="checkbox" id="prdOptSal"> 🧂 Con Sal</label>
-                <label class="check-row"><input type="checkbox" id="prdOptSinSal"> 🥔 Sin Sal</label>
+              <div id="prdSideTypesBlock">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);margin-bottom:4px">Guarniciones permitidas</div>
+                <p style="font-size:11px;color:var(--muted);margin:0 0 10px">Las que el cliente puede elegir con este producto. Si no marcás ninguna, se ofrecen <b>todas las activas</b>.</p>
+                <div id="prdSideTypesChecks" style="display:flex;gap:10px;flex-wrap:wrap"></div>
               </div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);margin:14px 0 4px">Sazones permitidos</div>
+              <p style="font-size:11px;color:var(--muted);margin:0 0 10px">Si no marcás ninguno, se ofrecen <b>todos los activos</b>.</p>
+              <div id="prdSazonesChecks" style="display:flex;gap:10px;flex-wrap:wrap"></div>
             </div>
           </div>
 
@@ -403,16 +404,25 @@ tr:hover td{background:rgba(255,255,255,.02);}
 
     <!-- ═══ CONFIG PAPAS ═══ -->
     <div id="tab-sides" class="tab-panel">
-      <div class="page-title">Config <em>Papas</em></div>
-      <p class="page-sub">Controlá qué tipos de guarnición y preparaciones se muestran.</p>
+      <div class="page-title">Guarniciones <em>y Sazones</em></div>
+      <p class="page-sub">Creá las guarniciones y sazones. Después elegís cuáles permite cada hamburguesa en la pestaña Productos.</p>
       <div class="card" style="margin-bottom:16px">
-        <h2>🍟 Tipos de Guarnición</h2>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Activá o desactivá qué guarniciones aparecen al pedir una hamburguesa.</p>
+        <h2>🍟 Guarniciones</h2>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Lo que acompaña a la hamburguesa (papas, aros…). Marcá <b>"Lleva sazón"</b> si el cliente debe elegir una preparación.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+          <input id="newGuarnName" type="text" class="search-input" placeholder="Nombre (ej: Papas Rústicas)" style="flex:1;min-width:180px" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnAddGuarn').click();}">
+          <label class="check-row"><input type="checkbox" id="newGuarnPrep" checked> Lleva sazón</label>
+          <button class="btn btn-primary" id="btnAddGuarn">+ Agregar</button>
+        </div>
         <div id="sideTypesContainer"></div>
       </div>
       <div class="card">
-        <h2>🧂 Preparaciones</h2>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Activá o desactivá las opciones de preparación de las papas.</p>
+        <h2>🧂 Sazones</h2>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Las preparaciones (con sal, sazón queso…).</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+          <input id="newSazonName" type="text" class="search-input" placeholder="Nombre (ej: Sazón Picante)" style="flex:1;min-width:180px" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnAddSazon').click();}">
+          <button class="btn btn-primary" id="btnAddSazon">+ Agregar</button>
+        </div>
         <div id="sidesContainer"></div>
       </div>
     </div>
@@ -526,7 +536,29 @@ try{db.settings({experimentalForceLongPolling:true,experimentalAutoDetectLongPol
 
 const $=s=>document.querySelector(s);
 const productsCol=db.collection('products');
+const sideTypesCol=db.collection('sideTypes');
+const sazonesCol=db.collection('sazones');
 let editingProductImg=null;
+let SIDE_TYPES=[], SAZONES=[];
+let _prdSelSideTypes=[], _prdSelSazones=[];
+
+function slugify(s){return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40);}
+
+/* Sembrar las opciones por defecto si las colecciones están vacías (1ra vez) */
+async function seedSidesIfEmpty(){
+  try{
+    const [st,sz]=await Promise.all([sideTypesCol.get(),sazonesCol.get()]);
+    if(st.empty){
+      const def=[{id:'crinkles',name:'Papas Crinkles',needsPrep:true},{id:'rejillas',name:'Papas Rejillas',needsPrep:true},{id:'aros',name:'Aros de Cebolla',needsPrep:false}];
+      await Promise.all(def.map((d,i)=>sideTypesCol.doc(d.id).set({name:d.name,needsPrep:d.needsPrep,available:true,order:i})));
+    }
+    if(sz.empty){
+      const def=[{id:'con_sazon',name:'Sazón Queso'},{id:'con_sazon_bacon',name:'Sazón Bacon'},{id:'con_sal',name:'Con Sal'},{id:'sin_sal',name:'Sin Sal'}];
+      await Promise.all(def.map((d,i)=>sazonesCol.doc(d.id).set({name:d.name,available:true,order:i})));
+    }
+  }catch(e){console.error('seed',e);}
+}
+seedSidesIfEmpty();
 
 /* ── TABS ── */
 function showTab(id, btn){
@@ -573,14 +605,15 @@ async function saveProduct(){
   const urlImg=$('#prdImg').value.trim();
   const description=$('#prdDescription').value.trim();
   const exPatty=$('#prdExPatty').checked;const exCheddar=$('#prdExCheddar').checked;const exBacon=$('#prdExBacon').checked;
-  const optSazon=$('#prdOptSazon').checked;const optSazonBacon=$('#prdOptSazonBacon').checked;const optSal=$('#prdOptSal').checked;const optSinSal=$('#prdOptSinSal').checked;
+  const allowedSideTypes=[...document.querySelectorAll('.prd-st:checked')].map(c=>c.value);
+  const allowedSazones=[...document.querySelectorAll('.prd-sz:checked')].map(c=>c.value);
   const file=$('#prdImgFile').files[0];
   if(!id){alert("Ingresá un ID");return;}if(!name){alert("Ingresá un nombre");return;}if(!(price>0)){alert("Precio inválido");return;}
   let finalImg=urlImg;
   if(file){finalImg=await fileToBase64(file);}else if(!finalImg&&editingProductImg){finalImg=editingProductImg;}
   const payload={name,category,price,img:finalImg,description,available:true,
     allowedExtras:{patty:exPatty,cheddar:exCheddar,bacon:exBacon},
-    potatoOptions:{sazon:optSazon,sazonBacon:optSazonBacon,sal:optSal,sinSal:optSinSal},
+    allowedSideTypes,allowedSazones,
     kind:autoDetectKind(id,name),
     updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
     createdAt:firebase.firestore.FieldValue.serverTimestamp()};
@@ -594,12 +627,22 @@ async function saveProduct(){
   }catch(e){console.error(e);alert("Error al guardar.");}
 }
 
+/* Muestra/oculta las listas de permitidos según la categoría */
+function updatePrdSidesVisibility(cat){
+  const grp=$('#prdSidesGroup');const stBlock=$('#prdSideTypesBlock');
+  if(!grp)return;
+  const showGroup=cat==='hamburguesas'||cat==='sandwiches'||cat==='guarniciones';
+  grp.style.display=showGroup?'block':'none';
+  // La guarnición que "acompaña" solo aplica a hamburguesas/sándwiches
+  if(stBlock)stBlock.style.display=(cat==='hamburguesas'||cat==='sandwiches')?'block':'none';
+}
+
 function clearProductForm(){
   ['prdId','prdName','prdPrice','prdImg','prdDescription'].forEach(id=>$(('#'+id)).value='');
   $('#prdCategory').value='hamburguesas';$('#prdImgFile').value='';
   $('#prdExPatty').checked=false;$('#prdExCheddar').checked=false;$('#prdExBacon').checked=false;
-  $('#prdOptSazon').checked=false;$('#prdOptSazonBacon').checked=false;$('#prdOptSal').checked=false;$('#prdOptSinSal').checked=false;
-  $('#potatoOptionsGroup').style.display='none';editingProductImg=null;
+  _prdSelSideTypes=[];_prdSelSazones=[];applyPrdSideSelection();
+  updatePrdSidesVisibility('hamburguesas');editingProductImg=null;
   PRD_INGREDIENTS=[];renderPrdIngList();
 }
 
@@ -610,8 +653,10 @@ function loadProductIntoForm(data,id){
   $('#prdDescription').value=data.description||'';
   $('#prdImgFile').value='';
   const ex=data.allowedExtras||{};$('#prdExPatty').checked=!!ex.patty;$('#prdExCheddar').checked=!!ex.cheddar;$('#prdExBacon').checked=!!ex.bacon;
-  const po=data.potatoOptions||{};$('#prdOptSazon').checked=!!po.sazon;$('#prdOptSazonBacon').checked=!!po.sazonBacon;$('#prdOptSal').checked=!!po.sal;$('#prdOptSinSal').checked=!!po.sinSal;
-  $('#potatoOptionsGroup').style.display=cat==='guarniciones'?'block':'none';
+  _prdSelSideTypes=Array.isArray(data.allowedSideTypes)?data.allowedSideTypes.slice():[];
+  _prdSelSazones=Array.isArray(data.allowedSazones)?data.allowedSazones.slice():[];
+  applyPrdSideSelection();
+  updatePrdSidesVisibility(cat);
   PRD_INGREDIENTS=[];
   document.getElementById('prdIngEmpty').textContent='Cargando ingredientes...';
   renderPrdIngList();
@@ -652,7 +697,7 @@ function applyFilters(){
     const imgTag=p.img?`<img src="${p.img}" class="img-prev">`:`<div class="img-prev"></div>`;
     const avBadge=p.available?`<span class="badge badge-green">Activo</span>`:`<span class="badge badge-muted">Pausado</span>`;
     let exIcons='';const ex=p.allowedExtras||{};if(ex.patty)exIcons+='🥩 ';if(ex.cheddar)exIcons+='🧀 ';if(ex.bacon)exIcons+='🥓 ';
-    const po=p.potatoOptions||{};if(po.sazon||po.sazonBacon||po.sal||po.sinSal)exIcons+='🍟';
+    if((p.allowedSideTypes&&p.allowedSideTypes.length)||(p.allowedSazones&&p.allowedSazones.length))exIcons+='🍟';
     if(!exIcons.trim())exIcons='<span style="color:var(--muted);font-size:12px">—</span>';
     tr.innerHTML=`<td><strong style="font-size:12px;color:var(--muted)">${p.id}</strong></td><td>${imgTag}</td><td style="font-weight:600">${p.name}</td><td><span class="badge badge-muted" style="font-size:10px">${p.category}</span></td><td style="font-weight:700;color:var(--gold)">$${(p.price||0).toLocaleString('es-AR')}</td><td>${exIcons}</td><td>${avBadge}</td>
       <td><div class="tbl-actions">
@@ -676,7 +721,7 @@ $('#prdSearch').addEventListener('input',e=>{FILTER_TXT=e.target.value;applyFilt
 document.querySelectorAll('#prdFilters .filter-tab').forEach(btn=>{
   btn.onclick=()=>{document.querySelectorAll('#prdFilters .filter-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');FILTER_CAT=btn.dataset.f;applyFilters();};
 });
-$('#prdCategory').addEventListener('change',e=>{$('#potatoOptionsGroup').style.display=e.target.value==='guarniciones'?'block':'none';});
+$('#prdCategory').addEventListener('change',e=>{updatePrdSidesVisibility(e.target.value);});
 productsCol.onSnapshot(renderProductsTable);
 
 /* ── PRECIOS EXTRAS ── */
@@ -739,57 +784,100 @@ function renderInventory(snapshot){
 }
 productsCol.onSnapshot(renderInventory);
 
-/* ── SIDES ── */
-const sidesRef=()=>db.collection("config").doc("sides");
-const SIDES_META=[{key:"con_sazon",label:"🧀 Sazón Queso"},{key:"con_sazon_bacon",label:"🥓 Sazón Bacon"},{key:"con_sal",label:"🧂 Con sal"},{key:"sin_sal",label:"🥔 Sin sal"}];
-const sidesContainer=document.querySelector("#sidesContainer");
-function renderSidesUI(state){
-  if(!sidesContainer)return;sidesContainer.innerHTML='';
-  SIDES_META.forEach(s=>{
-    const enabled=state?!!state[s.key]:true;const el=document.createElement("div");el.className="side-pill";
-    el.innerHTML=`<div class="side-name">${s.label}</div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span class="badge ${enabled?'badge-green':'badge-muted'}">${enabled?'Activo':'Inactivo'}</span>
-        <button class="btn btn-sm ${enabled?'btn-danger':'btn-good'}" data-side="${s.key}" data-next="${enabled?0:1}">${enabled?'Desactivar':'Activar'}</button>
-      </div>`;
-    sidesContainer.appendChild(el);
-  });
-  sidesContainer.querySelectorAll("button[data-side]").forEach(btn=>{
-    btn.onclick=async()=>{const key=btn.dataset.side;const next=btn.dataset.next==="1";try{await sidesRef().set({[key]:next,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}catch(e){}};
-  });
-}
-sidesRef().onSnapshot(snap=>{renderSidesUI(snap.exists?snap.data():{});});
-
-/* ── SIDE TYPES ── */
-const SIDE_TYPES_META=[
-  {key:'crinkles',label:'🍟 Papas Crinkles'},
-  {key:'rejillas',label:'🍟 Papas Rejillas'},
-  {key:'aros',label:'🧅 Aros de Cebolla'},
-];
-const sideTypesRef=()=>db.collection('config').doc('sideTypes');
+/* ── GUARNICIONES (SIDE TYPES) + SAZONES — ABM dinámico ── */
 const sideTypesContainer=document.querySelector('#sideTypesContainer');
-function renderSideTypesUI(state){
+const sidesContainer=document.querySelector('#sidesContainer');
+
+function renderSideTypesUI(){
   if(!sideTypesContainer)return;
   sideTypesContainer.innerHTML='';
-  SIDE_TYPES_META.forEach(s=>{
-    const enabled=state?(state[s.key]!==false):true;
+  if(!SIDE_TYPES.length){sideTypesContainer.innerHTML='<p style="color:var(--muted);font-size:13px">Sin guarniciones. Agregá una arriba.</p>';return;}
+  SIDE_TYPES.forEach(s=>{
+    const enabled=s.available!==false;
     const el=document.createElement('div');el.className='side-pill';
-    el.innerHTML=`<div class="side-name">${s.label}</div>
+    el.innerHTML=`<div class="side-name">🍟 ${s.name}${s.needsPrep?' <span style="font-size:11px;color:var(--muted);font-weight:400">· lleva sazón</span>':''}</div>
       <div style="display:flex;align-items:center;gap:10px">
         <span class="badge ${enabled?'badge-green':'badge-muted'}">${enabled?'Activo':'Inactivo'}</span>
-        <button class="btn btn-sm ${enabled?'btn-danger':'btn-good'}" data-type="${s.key}" data-next="${enabled?0:1}">${enabled?'Desactivar':'Activar'}</button>
+        <button class="btn btn-sm ${enabled?'btn-danger':'btn-good'}" data-act="toggle" data-id="${s.id}" data-next="${enabled?0:1}">${enabled?'Desactivar':'Activar'}</button>
+        <button class="btn btn-danger btn-sm" data-act="del" data-id="${s.id}">🗑️</button>
       </div>`;
     sideTypesContainer.appendChild(el);
   });
-  sideTypesContainer.querySelectorAll('button[data-type]').forEach(btn=>{
+  sideTypesContainer.querySelectorAll('button').forEach(btn=>{
     btn.onclick=async()=>{
-      const key=btn.dataset.type,next=btn.dataset.next==='1';
-      try{await sideTypesRef().set({[key]:next,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}
-      catch(e){alert('Error al guardar');}
+      const id=btn.dataset.id;
+      try{
+        if(btn.dataset.act==='toggle')await sideTypesCol.doc(id).set({available:btn.dataset.next==='1',updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+        else if(btn.dataset.act==='del'&&confirm('¿Eliminar esta guarnición?'))await sideTypesCol.doc(id).delete();
+      }catch(e){alert('Error al guardar');}
     };
   });
 }
-sideTypesRef().onSnapshot(snap=>{renderSideTypesUI(snap.exists?snap.data():{});});
+function renderSazonesUI(){
+  if(!sidesContainer)return;
+  sidesContainer.innerHTML='';
+  if(!SAZONES.length){sidesContainer.innerHTML='<p style="color:var(--muted);font-size:13px">Sin sazones. Agregá uno arriba.</p>';return;}
+  SAZONES.forEach(s=>{
+    const enabled=s.available!==false;
+    const el=document.createElement('div');el.className='side-pill';
+    el.innerHTML=`<div class="side-name">🧂 ${s.name}</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="badge ${enabled?'badge-green':'badge-muted'}">${enabled?'Activo':'Inactivo'}</span>
+        <button class="btn btn-sm ${enabled?'btn-danger':'btn-good'}" data-act="toggle" data-id="${s.id}" data-next="${enabled?0:1}">${enabled?'Desactivar':'Activar'}</button>
+        <button class="btn btn-danger btn-sm" data-act="del" data-id="${s.id}">🗑️</button>
+      </div>`;
+    sidesContainer.appendChild(el);
+  });
+  sidesContainer.querySelectorAll('button').forEach(btn=>{
+    btn.onclick=async()=>{
+      const id=btn.dataset.id;
+      try{
+        if(btn.dataset.act==='toggle')await sazonesCol.doc(id).set({available:btn.dataset.next==='1',updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+        else if(btn.dataset.act==='del'&&confirm('¿Eliminar este sazón?'))await sazonesCol.doc(id).delete();
+      }catch(e){alert('Error al guardar');}
+    };
+  });
+}
+
+/* Checkboxes de "permitidos" dentro del editor de producto */
+function renderPrdSideChecks(){
+  const stc=$('#prdSideTypesChecks');
+  if(stc)stc.innerHTML=SIDE_TYPES.length?SIDE_TYPES.map(s=>`<label class="check-row"><input type="checkbox" class="prd-st" value="${s.id}"> 🍟 ${s.name}</label>`).join(''):'<span style="color:var(--muted);font-size:12px">Sin guarniciones (creá alguna en "Config Papas")</span>';
+  const szc=$('#prdSazonesChecks');
+  if(szc)szc.innerHTML=SAZONES.length?SAZONES.map(s=>`<label class="check-row"><input type="checkbox" class="prd-sz" value="${s.id}"> 🧂 ${s.name}</label>`).join(''):'<span style="color:var(--muted);font-size:12px">Sin sazones (creá alguno en "Config Papas")</span>';
+  applyPrdSideSelection();
+}
+function applyPrdSideSelection(){
+  document.querySelectorAll('.prd-st').forEach(c=>c.checked=_prdSelSideTypes.includes(c.value));
+  document.querySelectorAll('.prd-sz').forEach(c=>c.checked=_prdSelSazones.includes(c.value));
+}
+
+sideTypesCol.onSnapshot(snap=>{
+  SIDE_TYPES=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0));
+  renderSideTypesUI();renderPrdSideChecks();
+});
+sazonesCol.onSnapshot(snap=>{
+  SAZONES=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0));
+  renderSazonesUI();renderPrdSideChecks();
+});
+
+$('#btnAddGuarn').onclick=async()=>{
+  const name=$('#newGuarnName').value.trim();if(!name){alert('Ingresá un nombre');return;}
+  const id=slugify(name);if(!id){alert('Nombre inválido');return;}
+  const needsPrep=$('#newGuarnPrep').checked;
+  try{
+    await sideTypesCol.doc(id).set({name,needsPrep,available:true,order:SIDE_TYPES.length,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+    $('#newGuarnName').value='';$('#newGuarnPrep').checked=true;
+  }catch(e){alert('Error al guardar');}
+};
+$('#btnAddSazon').onclick=async()=>{
+  const name=$('#newSazonName').value.trim();if(!name){alert('Ingresá un nombre');return;}
+  const id=slugify(name);if(!id){alert('Nombre inválido');return;}
+  try{
+    await sazonesCol.doc(id).set({name,available:true,order:SAZONES.length,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+    $('#newSazonName').value='';
+  }catch(e){alert('Error al guardar');}
+};
 
 /* ── STORE OVERRIDE ── */
 const storeRef=()=>db.collection("config").doc("store");
@@ -1033,6 +1121,7 @@ document.querySelector("#btnSaveProduct").onclick=saveProduct;
 document.querySelector("#btnClearProduct").onclick=clearProductForm;
 document.querySelector("#btnSavePromo").onclick=savePromo;
 document.querySelector("#btnClearPromo").onclick=clearPromoForm;
+updatePrdSidesVisibility($('#prdCategory').value);
 </script>
 </body>
 </html>

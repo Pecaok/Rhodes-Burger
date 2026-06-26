@@ -548,7 +548,10 @@
     const CACHE_KEY="rhodes_data_v6",CART_KEY="rhodes_cart_v5";
     window.STATE={
       products:[],menuOrder:{},
-      config:{sides:{con_sazon:true,con_sazon_bacon:true,con_sal:true,sin_sal:true},store:{forceOpen:null,maintenance:{}},prices:{patty:2800,cheddar:300,bacon:1200,onionRings:1600}},
+      config:{
+        sideTypesList:[{key:'crinkles',name:'Papas Crinkles',needsPrep:true},{key:'rejillas',name:'Papas Rejillas',needsPrep:true},{key:'aros',name:'Aros de Cebolla',needsPrep:false}],
+        sazonesList:[{key:'con_sazon',name:'Sazón Queso'},{key:'con_sazon_bacon',name:'Sazón Bacon'},{key:'con_sal',name:'Con Sal'},{key:'sin_sal',name:'Sin Sal'}],
+        store:{forceOpen:null,maintenance:{}},prices:{patty:2800,cheddar:300,bacon:1200,onionRings:1600}},
       cart:{burger:{},drink:{},side:{}},isOpen:false
     };
     window.MODAL={item:null,extras:{patty:0,cheddar:0,bacon:0}};
@@ -1192,11 +1195,7 @@
     <h3 id="modTitle">Personalizar</h3>
     <div id="sideTypeSec">
       <label class="mlbl">Guarnición que acompaña</label>
-      <div class="chip-g" id="sideTypeOpts">
-        <label class="chip"><input type="radio" name="sideType" value="crinkles" onchange="toggleSeasoning()"> 🍟 Papas Crinkles</label>
-        <label class="chip"><input type="radio" name="sideType" value="rejillas" onchange="toggleSeasoning()"> 🍟 Papas Rejillas</label>
-        <label class="chip"><input type="radio" name="sideType" value="aros"     onchange="toggleSeasoning()"> 🧅 Aros <span id="lblOnion" style="color:var(--gold);font-size:10px;margin-left:1px"></span></label>
-      </div>
+      <div class="chip-g" id="sideTypeOpts"></div>
     </div>
     <div id="seasonSec">
       <label class="mlbl" id="lblSeason">Preparación</label>
@@ -1305,33 +1304,20 @@ function initFirebase(){
   db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
   db.collection("products").onSnapshot(snap=>{window.STATE.products=[];snap.forEach(doc=>{const d=doc.data();window.STATE.products.push({id:doc.id,...d});});document.getElementById('errorMsg').style.display='none';window.fastRender();cache();},e=>console.log("Offline:",e));
   db.collection("config").doc("store").onSnapshot(doc=>{window.STATE.config.store=doc.data()||{};window.checkStatus();cache();});
-  db.collection("config").doc("sides").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.sides={con_sazon:d.con_sazon!==false,con_sazon_bacon:d.con_sazon_bacon!==false,con_sal:d.con_sal!==false,sin_sal:d.sin_sal!==false};cache();window.fastRender();},()=>{});
+  // Sazones (preparaciones) dinámicos desde admin
+  db.collection("sazones").onSnapshot(snap=>{
+    const list=snap.docs.map(d=>({key:d.id,...d.data()})).filter(s=>s.available!==false).sort((a,b)=>(a.order||0)-(b.order||0));
+    if(list.length)window.STATE.config.sazonesList=list;
+    cache();window.fastRender();
+  },()=>{});
   db.collection("config").doc("menuOrder").onSnapshot(doc=>{window.STATE.menuOrder=doc.exists?doc.data():{};window.fastRender();cache();},()=>{});
-  db.collection("config").doc("prices").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.prices={patty:Number(d.patty)||2500,cheddar:Number(d.cheddar)||300,bacon:Number(d.bacon)||1200,onionRings:Number(d.onionRings)||1600};cache();if(window.MODAL?.item){const p=window.STATE.config.prices;document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;const prBacon=document.getElementById("prBacon");if(prBacon)prBacon.innerText=`+$${p.bacon}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;updateModalPrice();}},()=>{});
+  db.collection("config").doc("prices").onSnapshot(doc=>{const d=doc.data()||{};window.STATE.config.prices={patty:Number(d.patty)||2500,cheddar:Number(d.cheddar)||300,bacon:Number(d.bacon)||1200,onionRings:Number(d.onionRings)||1600};cache();if(window.MODAL?.item){const p=window.STATE.config.prices;document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;const prBacon=document.getElementById("prBacon");if(prBacon)prBacon.innerText=`+$${p.bacon}`;const _lo=document.getElementById("lblOnion");if(_lo)_lo.innerText=`+$${p.onionRings}`;updateModalPrice();}},()=>{});
 
-  // Tipos de guarnición configurables desde admin
-  db.collection('config').doc('sideTypes').onSnapshot(snap=>{
-    const d = snap.exists ? snap.data() : {};
-    window.STATE.config.sideTypes = d;
-    const chips = document.getElementById('sideTypeOpts');
-    if(!chips) return;
-    chips.innerHTML='';
-    const types=[
-        {key:'crinkles',label:'🍟 Papas Crinkles'},
-        {key:'rejillas',label:'🍟 Papas Rejillas'},
-        {key:'aros',    label:'🧅 Aros'},
-    ];
-    types.forEach(t=>{
-        if(d[t.key]===false) return; // desactivado desde admin
-        const lbl=document.createElement('label');
-        lbl.className='chip';
-        const extra=t.key==='aros'?`<span id="lblOnion" style="color:var(--gold);font-size:10px;margin-left:1px"></span>`:'';
-        lbl.innerHTML=`<input type="radio" name="sideType" value="${t.key}" onchange="toggleSeasoning()"> ${t.label}${extra}`;
-        chips.appendChild(lbl);
-    });
-    // Restaurar precio aros si ya estaba cargado
-    const p=window.STATE?.config?.prices;
-    if(p?.onionRings){const el=document.getElementById('lblOnion');if(el)el.textContent=`+$${p.onionRings}`;}
+  // Guarniciones (tipos) dinámicas desde admin — los chips se arman por hamburguesa en openModal()
+  db.collection('sideTypes').onSnapshot(snap=>{
+    const list=snap.docs.map(d=>({key:d.id,...d.data()})).filter(s=>s.available!==false).sort((a,b)=>(a.order||0)-(b.order||0));
+    if(list.length)window.STATE.config.sideTypesList=list;
+    cache();window.fastRender();
   },()=>{});
   db.collection('promos').where('active','==',true).onSnapshot(snap=>{
     const now=new Date();
@@ -1377,9 +1363,10 @@ function renderNavLoyalty(user,data){
 }
 
 window.toggleSeasoning=function(){
-  const t=document.querySelector('input[name="sideType"]:checked')?.value;
+  const sel=document.querySelector('input[name="sideType"]:checked');
   const ss=document.getElementById('seasonSec');
-  if(t==='crinkles'||t==='rejillas')ss.style.display='block';
+  const needsPrep=sel && sel.dataset.prep==='1';
+  if(needsPrep)ss.style.display='block';
   else{ss.style.display='none';document.querySelectorAll("input[name='fries']").forEach(x=>x.checked=false);}
   updateModalPrice();
 };
@@ -1423,19 +1410,9 @@ window.openPromoPotato=function(p){
   document.getElementById('promoPotatoSub').textContent=
     `Elegí ${_PROMO_POTATO_CTX.count} ${_PROMO_POTATO_CTX.count===1?'porción':'porciones'} de papas`;
 
-  // Mismas fuentes que el modal regular
-  const sideTypesCfg = window.STATE.config.sideTypes || {};
-  const allTypes = [
-    {key:'crinkles', label:'🍟 Papas Crinkles', hasPrep:true},
-    {key:'rejillas', label:'🍟 Papas Rejillas', hasPrep:true},
-    {key:'aros',     label:'🧅 Aros',           hasPrep:false},
-  ].filter(t => sideTypesCfg[t.key] !== false);
-
-  const sides = window.STATE.config.sides || {};
-  const prepMap = {con_sazon:'Sazón Queso', con_sazon_bacon:'Sazón Bacon', con_sal:'Con Sal', sin_sal:'Sin Sal'};
-  const allPreps = Object.entries(prepMap)
-    .filter(([k]) => sides[k] !== false)
-    .map(([k,label]) => ({key:k, label}));
+  // Mismas fuentes que el modal regular (listas dinámicas desde admin)
+  const allTypes = (window.STATE.config.sideTypesList||[]).map(s=>({key:s.key, label:s.name, hasPrep:s.needsPrep!==false}));
+  const allPreps = (window.STATE.config.sazonesList||[]).map(s=>({key:s.key, label:s.name}));
 
   const steps=document.getElementById('promoPotatoSteps');
   let html='';
@@ -1512,14 +1489,34 @@ window.openModal=(id)=>{
   document.getElementById("modTitle").innerText=item.name;document.getElementById("modNotes").value="";
   document.getElementById("qtyPatty").innerText="0";document.getElementById("qtyCheddar").innerText="0";document.getElementById("qtyBacon").innerText="0";
   const p=window.STATE.config.prices;
-  document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("prBacon").innerText=`+$${p.bacon}`;document.getElementById("lblOnion").innerText=`+$${p.onionRings}`;
+  document.getElementById("prPatty").innerText=`+$${p.patty}`;document.getElementById("prCheddar").innerText=`+$${p.cheddar}`;document.getElementById("prBacon").innerText=`+$${p.bacon}`;
   document.querySelectorAll("input[name='sideType']").forEach(x=>x.checked=false);document.querySelectorAll("input[name='fries']").forEach(x=>x.checked=false);
   const isBT=cat.includes("burger")||cat.includes("hamburguesa")||cat.includes("sandwich")||cat.includes("sándwich");
   const al=item.allowedExtras||{};
   const isPapasSide=!isBT&&/papa|fritas|crinkle|rejilla/.test(((item.name||"")+" "+(item.id||"")).toLowerCase());
-  document.getElementById("sideTypeSec").style.display=isBT?"block":"none";document.getElementById("lblSeason").innerText="Preparación de las papas";document.getElementById("seasonSec").style.display=isPapasSide?"block":"none";document.getElementById("extrasSec").style.display=(isBT||al.patty||al.cheddar||al.bacon)?'block':'none';document.getElementById("rowPatty").style.display=(al.patty||(isBT&&al.patty!==false))?'flex':'none';document.getElementById("rowCheddar").style.display=(al.cheddar||(isBT&&al.cheddar!==false))?'flex':'none';document.getElementById("rowBacon").style.display=al.bacon?'flex':'none';
-  const fc=document.getElementById("friesOpts");fc.innerHTML='';const sm={con_sazon:"Sazón Queso",con_sazon_bacon:"Sazón Bacon",con_sal:"Con Sal",sin_sal:"Sin Sal"};let ff=false;const pO=item.potatoOptions||{};const uG=!pO.sazon&&!pO.sazonBacon&&!pO.sal&&!pO.sinSal;
-  for(const[k,l]of Object.entries(sm)){let ok=false;if(uG){ok=window.STATE.config.sides[k];}else{if(k==='con_sazon')ok=pO.sazon;if(k==='con_sazon_bacon')ok=pO.sazonBacon;if(k==='con_sal')ok=pO.sal;if(k==='sin_sal')ok=pO.sinSal;}if(ok){const ch=(!isBT&&!ff)?'checked':'';ff=true;fc.innerHTML+=`<label class="chip"><input type="radio" name="fries" value="${k}" onchange="updateModalPrice()" ${ch}> 🍟 ${l}</label>`;}}
+
+  // ── Guarniciones (sideTypes) permitidas para este producto ──
+  const allST=window.STATE.config.sideTypesList||[];
+  const allowST=Array.isArray(item.allowedSideTypes)&&item.allowedSideTypes.length?item.allowedSideTypes:null;
+  const itemSideTypes=allST.filter(s=>!allowST||allowST.includes(s.key));
+  window._STLBL=Object.fromEntries(allST.map(s=>[s.key,s.name]));
+  const stc=document.getElementById("sideTypeOpts");stc.innerHTML='';
+  itemSideTypes.forEach(s=>{
+    const isAros=s.key==='aros';
+    const extra=isAros?`<span id="lblOnion" style="color:var(--gold);font-size:10px;margin-left:1px">+$${p.onionRings}</span>`:'';
+    stc.innerHTML+=`<label class="chip"><input type="radio" name="sideType" value="${s.key}" data-prep="${s.needsPrep!==false?1:0}" onchange="toggleSeasoning()"> 🍟 ${s.name}${extra}</label>`;
+  });
+
+  document.getElementById("sideTypeSec").style.display=(isBT&&itemSideTypes.length)?"block":"none";document.getElementById("lblSeason").innerText="Preparación de las papas";document.getElementById("seasonSec").style.display=isPapasSide?"block":"none";document.getElementById("extrasSec").style.display=(isBT||al.patty||al.cheddar||al.bacon)?'block':'none';document.getElementById("rowPatty").style.display=(al.patty||(isBT&&al.patty!==false))?'flex':'none';document.getElementById("rowCheddar").style.display=(al.cheddar||(isBT&&al.cheddar!==false))?'flex':'none';document.getElementById("rowBacon").style.display=al.bacon?'flex':'none';
+
+  // ── Sazones permitidos para este producto ──
+  const allSZ=window.STATE.config.sazonesList||[];
+  const allowSZ=Array.isArray(item.allowedSazones)&&item.allowedSazones.length?item.allowedSazones:null;
+  const itemSazones=allSZ.filter(s=>!allowSZ||allowSZ.includes(s.key));
+  window._SZLBL=Object.fromEntries(allSZ.map(s=>[s.key,s.name]));
+  const fc=document.getElementById("friesOpts");fc.innerHTML='';let ff=false;
+  itemSazones.forEach(s=>{const ch=(!isBT&&!ff)?'checked':'';ff=true;fc.innerHTML+=`<label class="chip"><input type="radio" name="fries" value="${s.key}" onchange="updateModalPrice()" ${ch}> 🍟 ${s.name}</label>`;});
+
   updateModalPrice();document.getElementById("modalOvl").classList.add("open");
 };
 
@@ -1530,10 +1527,21 @@ document.getElementById("btnCancel").onclick=()=>document.getElementById("modalO
 document.getElementById("btnAddCart").onclick=()=>{
   const item=window.MODAL.item,notes=document.getElementById("modNotes").value.trim();
   const cat=(item.category||"").toLowerCase();const isBT=cat.includes("burger")||cat.includes("hamburguesa")||cat.includes("sandwich")||cat.includes("sándwich");
+  const stLbl=window._STLBL||{},szLbl=window._SZLBL||{};
   let fs="",fr="",sv=null;
-  if(isBT){sv=document.querySelector('input[name="sideType"]:checked')?.value;if(!sv){alert("Seleccioná una guarnición.");return;}if(sv==='aros'){fs="Aros de Cebolla";fr="aros";}else{const sr=document.querySelector('input[name="fries"]:checked')?.value;if(!sr){alert("Seleccioná la preparación.");return;}const ms={con_sazon:"Sazón Queso",con_sazon_bacon:"Sazón Bacon",con_sal:"Con sal",sin_sal:"Sin sal"};fs=`${sv==='crinkles'?'Papas Crinkles':'Papas Rejillas'} (${ms[sr]})`;fr=`${sv}_${sr}`;}}else{const isPapasSide=/papa|fritas|crinkle|rejilla/.test(((item.name||"")+" "+(item.id||"")).toLowerCase());if(isPapasSide){const sr=document.querySelector('input[name="fries"]:checked')?.value;if(!sr){alert("Seleccioná la preparación.");return;}const ms={con_sazon:"Sazón Queso",con_sazon_bacon:"Sazón Bacon",con_sal:"Con sal",sin_sal:"Sin sal"};fs=ms[sr];fr=sr;}else{fs="";fr="";}}
+  if(isBT){
+    const stEl=document.querySelector('input[name="sideType"]:checked');
+    const hasST=document.querySelectorAll('input[name="sideType"]').length>0;
+    sv=stEl?stEl.value:null;
+    if(hasST&&!sv){alert("Seleccioná una guarnición.");return;}
+    if(sv){
+      const needsPrep=stEl.dataset.prep==='1';
+      if(needsPrep){const sr=document.querySelector('input[name="fries"]:checked')?.value;if(!sr){alert("Seleccioná la preparación.");return;}fs=`${stLbl[sv]||sv} (${szLbl[sr]||sr})`;fr=`${sv}_${sr}`;}
+      else{fs=stLbl[sv]||sv;fr=sv;}
+    }
+  }else{const isPapasSide=/papa|fritas|crinkle|rejilla/.test(((item.name||"")+" "+(item.id||"")).toLowerCase());if(isPapasSide){const sr=document.querySelector('input[name="fries"]:checked')?.value;if(!sr){alert("Seleccioná la preparación.");return;}fs=szLbl[sr]||sr;fr=sr;}else{fs="";fr="";}}
   const p=window.STATE.config.prices;let fp=Number(item.price)+(window.MODAL.extras.patty*p.patty)+(window.MODAL.extras.cheddar*p.cheddar)+(window.MODAL.extras.bacon*p.bacon);if(sv==='aros')fp+=p.onionRings;
-  const ci={item,qty:1,sideType:sv,fries:fs,friesRaw:fr,extras:{...window.MODAL.extras},notes,finalPrice:fp};const nId=item.id+"_"+fr+"_"+Date.now();
+  const ci={item,qty:1,sideType:sv,fries:fs,friesRaw:fr,extras:{...window.MODAL.extras},notes,finalPrice:fp};const nId=item.id+"_"+(fr||'x')+"_"+Date.now();
   if(cat.includes("guarnicion")||cat.includes("side")||cat.includes("papas"))window.STATE.cart.side[nId]=ci;else window.STATE.cart.burger[nId]=ci;
   const _src=cartSrcEl(item.id);document.getElementById("modalOvl").classList.remove("open");saveCart();window.flyToCart(item.img,_src);window.toast(`${item.name} agregado`);
 };
