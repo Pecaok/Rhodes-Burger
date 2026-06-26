@@ -174,7 +174,7 @@ div[id^="tab-"]{display:none;}
   <a href="#" class="brand"><img src="images/logo.png" alt="Rhodes"> Rhodes<em>.</em> Gerencia</a>
   <div class="nav-group">
     <a href="pedido_local.html" class="nav-btn">📦 Pedidos</a>
-    <a href="finanzas.html" class="nav-btn">📈 Finanzas</a>
+    <a href="#" class="nav-btn" onclick="showTab('finanzas');return false;">📈 Finanzas</a>
     <a href="stock.html" class="nav-btn">📋 Stock</a>
     <a href="ingresos.html" class="nav-btn">📥 Ingresos</a>
     <a href="mostrador.html" class="nav-btn">🧾 Mostrador</a>
@@ -186,8 +186,10 @@ div[id^="tab-"]{display:none;}
 
 <div class="layout">
   <aside class="sidebar">
-    <div class="tab-btn active" onclick="showTab('dashboard')">📊 Rendimiento</div>
+    <div class="section-title">Caja & Ventas</div>
+    <div class="tab-btn" onclick="showTab('finanzas')">💰 Finanzas / Caja</div>
     <div class="section-title">Análisis</div>
+    <div class="tab-btn active" onclick="showTab('dashboard')">📊 Rendimiento</div>
     <div class="tab-btn" onclick="showTab('proportions')">📈 Proporción Ventas</div>
     <div class="tab-btn" onclick="showTab('rentabilidad')">💡 Rentabilidad</div>
     <div class="tab-btn" onclick="showTab('simulador')">📐 Simulador Precios</div>
@@ -195,6 +197,8 @@ div[id^="tab-"]{display:none;}
     <div class="tab-btn" onclick="showTab('comparativa')">📊 Comparativa Semanas</div>
     <div class="tab-btn" onclick="showTab('detector')">🔍 Detector Días Flojos</div>
     <div class="tab-btn" onclick="showTab('ranking')">🏆 Ranking Clientes</div>
+    <div class="section-title">Clientes</div>
+    <div class="tab-btn" onclick="showTab('customers')">👥 Clientes / Sellos</div>
     <div class="section-title">Gestión</div>
     <div class="tab-btn" onclick="showTab('stock')">📦 Control de Stock</div>
     <div class="tab-btn" onclick="showTab('subrecipes')">🧩 Armado de Items</div>
@@ -212,6 +216,47 @@ div[id^="tab-"]{display:none;}
   </aside>
 
   <main class="content">
+
+    <!-- FINANZAS / CAJA (embebido desde finanzas-panel.html, aislado para no colisionar) -->
+    <div id="tab-finanzas" style="display:none;margin:-24px -28px;height:calc(100vh - 58px);overflow:hidden">
+      <iframe id="finanzasFrame" title="Finanzas / Caja" style="width:100%;height:100%;border:0;display:block"></iframe>
+    </div>
+
+    <!-- CLIENTES REGISTRADOS / SELLOS (colección customers de loyalty.js) -->
+    <div id="tab-customers" style="display:none">
+      <div class="card card-accent" style="margin-bottom:16px">
+        <div class="row-flex">
+          <div><h2 style="margin:0;border:0;font-size:20px">👥 Clientes Registrados</h2>
+            <p style="font-size:12px;color:var(--muted);margin:4px 0 0">Clientes que iniciaron sesión con Google en la web y sus sellos de fidelidad.</p></div>
+          <button class="btn btn-primary" onclick="loadCustomers()">🔄 Actualizar</button>
+        </div>
+      </div>
+      <div id="custKpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+      <div class="card">
+        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <input type="text" id="custSearch" placeholder="🔍 Buscar por nombre, email o teléfono..." oninput="renderCustomers()" style="flex:1;min-width:200px">
+          <select id="custSort" onchange="renderCustomers()" style="width:auto">
+            <option value="stamps_desc">Más sellos primero</option>
+            <option value="reward_first">Con premio disponible primero</option>
+            <option value="orders_desc">Más pedidos</option>
+            <option value="recent">Más recientes</option>
+            <option value="name">Nombre (A-Z)</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Cliente</th>
+              <th style="text-align:center">Sellos</th>
+              <th style="text-align:center">Premio</th>
+              <th style="text-align:right">Pedidos</th>
+              <th style="text-align:right">Últ. actividad</th>
+            </tr></thead>
+            <tbody id="custTableBody"><tr><td colspan="5" style="text-align:center;padding:30px;color:var(--muted)">Hacé clic en Actualizar para cargar.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
 
     <!-- DASHBOARD -->
     <div id="tab-dashboard">
@@ -1077,6 +1122,8 @@ div[id^="tab-"]{display:none;}
         });
         // Reset scroll to top
         const c=document.querySelector('.content');if(c)c.scrollTop=0;
+        // Carga diferida del panel de Finanzas embebido
+        if(id==='finanzas'){const f=document.getElementById('finanzasFrame');if(f&&!f.getAttribute('src'))f.setAttribute('src','finanzas-panel.html?embed=1');}
         try {
             if(id==='proportions')window.renderProportions();
             if(id==='rentabilidad')window.renderRentabilidad();
@@ -1085,6 +1132,7 @@ div[id^="tab-"]{display:none;}
             if(id==='comparativa')window.cmpSetLastTwoWeeks();
             if(id==='detector'){const now=new Date();document.getElementById('detMonth').value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;window.runDetector();}
             if(id==='ranking')window.runRanking();
+            if(id==='customers')window.loadCustomers();
         } catch(err) { console.error('Error renderizando tab '+id+':',err); }
     };
 
@@ -1111,6 +1159,9 @@ div[id^="tab-"]{display:none;}
         $('#monthPicker').addEventListener('change',window.loadDashboardData);
         loadProductsDB();
         window.loadInventory();window.loadRecipes();window.loadFixedData();window.loadDashboardData();
+        // Permite abrir una pestaña directa via hash (ej: gerencia.html#finanzas)
+        const hashTab=location.hash.replace('#','');
+        if(hashTab&&document.getElementById('tab-'+hashTab))window.showTab(hashTab);
     });
 
     db.collection('config').doc('stockRules').onSnapshot(doc=>{
@@ -1960,6 +2011,74 @@ div[id^="tab-"]{display:none;}
             updatedAt:firebase.firestore.FieldValue.serverTimestamp()
         });
         alert('✅ Reglas de stock guardadas.');
+    };
+
+    // ── CLIENTES REGISTRADOS / SELLOS ──
+    let CUSTOMERS_DATA = [];
+    window.loadCustomers = async function() {
+        const tbody = document.getElementById('custTableBody');
+        if(tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">Cargando...</td></tr>';
+        try {
+            const snap = await db.collection('customers').get();
+            CUSTOMERS_DATA = snap.docs.map(d=>({uid:d.id, ...d.data()}));
+            window.renderCustomers();
+        } catch(err) {
+            console.error('customers', err);
+            if(tbody) tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:20px">Error: ${err.message}</td></tr>`;
+        }
+    };
+
+    window.renderCustomers = function() {
+        const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const search = (document.getElementById('custSearch')?.value||'').toLowerCase().trim();
+        const sortBy = document.getElementById('custSort')?.value || 'stamps_desc';
+        const lastActive = c => parseDate(c.updatedAt) || parseDate(c.createdAt);
+
+        // KPIs (sobre el total, sin filtrar)
+        const total = CUSTOMERS_DATA.length;
+        const conPremio = CUSTOMERS_DATA.filter(c=>c.rewardAvailable).length;
+        const sellosTotales = CUSTOMERS_DATA.reduce((s,c)=>s+Number(c.stamps||0),0);
+        const pedidosTotales = CUSTOMERS_DATA.reduce((s,c)=>s+Number(c.ordersCount||0),0);
+        const kpis = document.getElementById('custKpis');
+        if(kpis) kpis.innerHTML = `
+          <div class="kpi"><div class="kpi-lbl">Clientes registrados</div><div class="kpi-val">${total}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Con 20% disponible</div><div class="kpi-val" style="color:${conPremio>0?'var(--green)':'var(--txt)'}">${conPremio}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Sellos acumulados</div><div class="kpi-val" style="color:var(--gold)">${sellosTotales}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Pedidos de clientes</div><div class="kpi-val">${pedidosTotales}</div></div>`;
+
+        // Filtro + orden
+        let list = CUSTOMERS_DATA.filter(c=>{
+            if(!search) return true;
+            return [c.name,c.email,c.phone].some(v=>String(v||'').toLowerCase().includes(search));
+        });
+        if(sortBy==='stamps_desc')      list.sort((a,b)=>Number(b.stamps||0)-Number(a.stamps||0));
+        else if(sortBy==='reward_first')list.sort((a,b)=>(b.rewardAvailable?1:0)-(a.rewardAvailable?1:0) || Number(b.stamps||0)-Number(a.stamps||0));
+        else if(sortBy==='orders_desc') list.sort((a,b)=>Number(b.ordersCount||0)-Number(a.ordersCount||0));
+        else if(sortBy==='recent')      list.sort((a,b)=>(lastActive(b)||0)-(lastActive(a)||0));
+        else if(sortBy==='name')        list.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+
+        const tbody = document.getElementById('custTableBody');
+        if(!tbody) return;
+        if(!list.length){ tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">${total?'Sin resultados.':'Todavía no hay clientes registrados.'}</td></tr>`; return; }
+
+        tbody.innerHTML = list.map(c=>{
+            const st = Math.min(10, Number(c.stamps||0));
+            let dots=''; for(let i=0;i<10;i++) dots+=`<span style="width:9px;height:9px;border-radius:50%;display:inline-block;background:${i<st?'var(--gold)':'rgba(255,255,255,.08)'}"></span>`;
+            const ava = c.photoURL?`<img src="${esc(c.photoURL)}" referrerpolicy="no-referrer" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0" alt="">`:`<div style="width:32px;height:32px;border-radius:50%;background:var(--gold-dim);display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700;flex-shrink:0;font-family:var(--fh)">${esc((c.name||'?').charAt(0).toUpperCase())}</div>`;
+            const sub = [c.email,c.phone].filter(Boolean).map(esc).join(' · ');
+            const la = lastActive(c);
+            const laStr = la?la.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'}):'—';
+            const premio = c.rewardAvailable
+                ? `<span class="badge" style="background:rgba(34,197,94,.15);color:var(--green)">🎉 20% listo</span>`
+                : `<span style="color:var(--muted);font-size:12px">—</span>`;
+            return `<tr>
+              <td><div style="display:flex;align-items:center;gap:10px">${ava}<div style="min-width:0"><div style="font-weight:700;color:var(--white)">${esc(c.name||'(sin nombre)')}</div>${sub?`<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px">${sub}</div>`:''}</div></div></td>
+              <td style="text-align:center"><div style="display:flex;gap:3px;justify-content:center;align-items:center;margin-bottom:3px">${dots}</div><div style="font-size:11px;color:var(--muted);font-family:var(--fh);font-weight:700">${st}/10</div></td>
+              <td style="text-align:center">${premio}</td>
+              <td style="text-align:right;font-family:var(--fh);font-size:16px;font-weight:800">${Number(c.ordersCount||0)}</td>
+              <td style="text-align:right;color:var(--muted);font-size:13px">${laStr}</td>
+            </tr>`;
+        }).join('');
     };
 </script>
 </body>
