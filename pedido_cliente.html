@@ -329,11 +329,23 @@ const SLOT_START="19:15", SLOT_END_NORMAL="22:59", SLOT_END_LATE="23:50", SLOT_I
 const $=s=>document.querySelector(s);
 const money=n=>(Number(n)||0).toLocaleString("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0});
 
-let activeDiscount=0, activeCouponCode="";
+let activeCouponCode="", activeCouponType="", activeCouponValue=0;
 let loyaltyApplied=false;   // ¿se usa el 20% de sellos en este pedido?
 let loyaltyTouched=false;   // el cliente tocó manualmente el toggle del premio
 let activeTip=0, activeTipPct=0;
 let slotObjects=[], visibles=[], currentIndex=0, listeners=[];
+
+// Descuento del cupón sobre un subtotal dado (respeta % o monto fijo, sin pasar el subtotal)
+function couponDiscount(subtotal){
+  if(!activeCouponCode || activeCouponValue<=0) return 0;
+  const raw = activeCouponType==='percent' ? Math.round(subtotal*activeCouponValue/100) : activeCouponValue;
+  return Math.min(raw, subtotal);
+}
+// Descuento vigente: sellos (20%) O cupón, no se combinan
+function currentDiscount(subtotal){
+  if(loyaltyApplied) return Math.round(subtotal*0.20);
+  return couponDiscount(subtotal);
+}
 
 window.setTip = function(pct, btn) {
     activeTipPct = pct;
@@ -353,7 +365,7 @@ window.setTipCustom = function(val) {
 function calcTip() {
     const cart = loadCart();
     const subtotal = cart.items.reduce((s,i)=>s+(( i.finalPrice||i.price||0)*i.qty),0);
-    const afterDiscount = Math.max(0, subtotal - activeDiscount);
+    const afterDiscount = Math.max(0, subtotal - currentDiscount(subtotal));
     activeTip = activeTipPct > 0 ? Math.round(afterDiscount * activeTipPct / 100) : 0;
     renderResumen();
 }
@@ -422,9 +434,10 @@ function renderResumen(){
   if(loyaltyApplied){
     discount=Math.round(subtotal*0.20);
     discLine=`🍔 Descuento sellos (-20%): -${money(discount)}`;
-  } else if(activeDiscount>0){
-    discount=activeDiscount;
-    discLine=`🏷️ Cupón (${activeCouponCode}): -${money(discount)}`;
+  } else if(activeCouponCode){
+    discount=couponDiscount(subtotal);
+    const pct = activeCouponType==='percent' ? ` -${activeCouponValue}%` : '';
+    discLine=`🏷️ Cupón (${activeCouponCode}${pct}): -${money(discount)}`;
   }
 
   let final=Math.max(0, subtotal-discount);
@@ -551,17 +564,29 @@ $('#btnAplicarCupon').onclick=async()=>{
     return;
   }
   $('#btnAplicarCupon').textContent='...';
+  const fail=t=>{ msg.textContent=t; msg.className='coupon-msg err'; activeCouponCode=''; activeCouponType=''; activeCouponValue=0; $('#btnAplicarCupon').textContent='Aplicar'; renderResumen(); };
   try{
     const snap=await db.collection('coupons').where('code','==',code).where('enabled','==',true).get();
-    if(snap.empty){
-      msg.textContent='❌ Cupón no válido'; msg.className='coupon-msg err';
-      activeDiscount=0; activeCouponCode='';
-    } else {
-      const d=snap.docs[0].data();
-      activeDiscount=Number(d.value); activeCouponCode=code;
-      msg.textContent=`✅ Cupón aplicado: -${money(activeDiscount)}`; msg.className='coupon-msg ok';
-    }
-  }catch(e){console.error(e);}
+    if(snap.empty){ return fail('❌ Cupón no válido'); }
+    const d=snap.docs[0].data();
+    // Vigencia
+    const now=new Date();
+    const from=d.validFrom&&d.validFrom.toDate?d.validFrom.toDate():null;
+    let to=d.validTo&&d.validTo.toDate?d.validTo.toDate():null;
+    if(to){ to=new Date(to); to.setHours(23,59,59,999); }
+    if(from && now<from){ return fail('❌ El cupón todavía no está vigente'); }
+    if(to && now>to){ return fail('❌ El cupón está vencido'); }
+    // Máximo de usos
+    if(d.maxUses && Number(d.uses||0)>=Number(d.maxUses)){ return fail('❌ El cupón alcanzó su límite de usos'); }
+    // Válido → aplicar respetando el tipo
+    activeCouponType = d.type==='percent' ? 'percent' : 'fixed';
+    activeCouponValue = Number(d.value)||0;
+    activeCouponCode = code;
+    const subtotal = loadCart().items.reduce((s,i)=>s+((i.finalPrice||i.price||0)*(i.qty||1)),0);
+    const disc = couponDiscount(subtotal);
+    const extra = activeCouponType==='percent' ? ` (${activeCouponValue}%)` : '';
+    msg.textContent=`✅ Cupón aplicado: -${money(disc)}${extra}`; msg.className='coupon-msg ok';
+  }catch(e){ console.error(e); return fail('❌ No se pudo validar el cupón'); }
   $('#btnAplicarCupon').textContent='Aplicar';
   renderResumen();
 };
@@ -609,7 +634,7 @@ function renderLoyaltyUI(user,data){
   // Auto-aplicar el premio si está disponible y el cliente no tocó el toggle
   if(d.rewardAvailable && !loyaltyTouched) loyaltyApplied=true;
   if(!d.rewardAvailable) loyaltyApplied=false;
-  if(loyaltyApplied){ activeDiscount=0; activeCouponCode=''; const ic=$('#inpCupon'); if(ic) ic.value=''; }
+  if(loyaltyApplied){ activeCouponCode=''; activeCouponType=''; activeCouponValue=0; const ic=$('#inpCupon'); if(ic) ic.value=''; }
 
   let html=`
     <div class="loy-head">
@@ -643,7 +668,7 @@ function renderLoyaltyUI(user,data){
     chk.onchange=()=>{
       loyaltyTouched=true;
       loyaltyApplied=chk.checked;
-      if(loyaltyApplied){ activeDiscount=0; activeCouponCode=''; const ic=$('#inpCupon'); if(ic) ic.value=''; const mc=$('#msgCupon'); if(mc) mc.textContent=''; }
+      if(loyaltyApplied){ activeCouponCode=''; activeCouponType=''; activeCouponValue=0; const ic=$('#inpCupon'); if(ic) ic.value=''; const mc=$('#msgCupon'); if(mc) mc.textContent=''; }
       updateCouponLock(); renderResumen();
     };
   }
@@ -700,7 +725,7 @@ $('#btnConfirmar').onclick=async()=>{
 
     // Subtotal (comida) y descuento reales para el registro
     let subtotalAmount=0; cart.items.forEach(i=>{ subtotalAmount += (i.finalPrice||i.price||0)*(i.qty||1); });
-    const discountAmount = usedReward ? Math.round(subtotalAmount*0.20) : (activeDiscount||0);
+    const discountAmount = usedReward ? Math.round(subtotalAmount*0.20) : couponDiscount(subtotalAmount);
     const uid = (window.rbLoyalty && rbLoyalty.user) ? rbLoyalty.user.uid : '';
     // ¿Este pedido sumará un sello? Solo si NO canjea premio y el subtotal llega al mínimo.
     const minSello = (window.rbLoyalty && rbLoyalty.MIN_FOR_STAMP) || 20000;
@@ -715,6 +740,7 @@ $('#btnConfirmar').onclick=async()=>{
       createdAt:localISO, total:finalTotal,
       subtotal:subtotalAmount,
       discount:discountAmount, coupon: usedReward ? '' : (activeCouponCode||''),
+      couponType: usedReward ? '' : (activeCouponCode?activeCouponType:''),
       loyaltyApplied: !!usedReward, loyaltyPercent: usedReward ? 20 : 0, loyaltyStamped: loyaltyStamped, customerUid: uid,
       tip:activeTip||0, tipPct:activeTipPct||0,
       pickup_slot:slot.key||'', pickup_time_pretty:slot.pretty||'',
@@ -738,6 +764,11 @@ $('#btnConfirmar').onclick=async()=>{
       try{ await rbLoyalty.registerOrder(usedReward, subtotalAmount); }catch(e){ console.error('loyalty register', e); }
     }
 
+    // Cupón: contar el uso (para respetar el máximo de usos)
+    if(!usedReward && activeCouponCode && discountAmount>0){
+      try{ await db.collection('coupons').doc(activeCouponCode).set({uses:firebase.firestore.FieldValue.increment(1)},{merge:true}); }catch(e){ console.error('coupon uses', e); }
+    }
+
     // WhatsApp
     let msg=`*NUEVO PEDIDO WEB #${orderNum}*\n👤 ${nombre}\n🕒 Retiro: ${slot.pretty}\n${'─'.repeat(28)}\n`;
     cart.items.forEach(i=>{
@@ -748,7 +779,7 @@ $('#btnConfirmar').onclick=async()=>{
       if(i.notes) msg+=`   📝 ${i.notes}\n`;
     });
     if(usedReward) msg+=`🍔 Descuento sellos (20%): -${money(discountAmount)}\n`;
-    else if(activeDiscount>0) msg+=`🏷️ Cupón: -${money(activeDiscount)}\n`;
+    else if(activeCouponCode && discountAmount>0) msg+=`🏷️ Cupón ${activeCouponCode}: -${money(discountAmount)}\n`;
     if(activeTip>0) msg+=`🤝 Propina${activeTipPct>0?' ('+activeTipPct+'%)':''}: +${money(activeTip)}\n`;
     msg+=`${'─'.repeat(28)}\n*TOTAL: ${money(finalTotal)}*\n(Abona en el local)\n\n`;
     const base=window.location.href.substring(0,window.location.href.lastIndexOf('/'));
