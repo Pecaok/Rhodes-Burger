@@ -219,6 +219,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
 
     <div class="sidebar-section">Promociones</div>
     <button class="sidebar-btn" onclick="showTab('promos',this)"><span class="sidebar-ico">🔥</span> Promos</button>
+    <button class="sidebar-btn" onclick="showTab('daily',this)"><span class="sidebar-ico">🏷️</span> Promo del Día</button>
 
     <div class="sidebar-section">Config</div>
     <button class="sidebar-btn" onclick="showTab('sides',this)"><span class="sidebar-ico">🍟</span> Config Papas</button>
@@ -428,6 +429,60 @@ tr:hover td{background:rgba(255,255,255,.02);}
     </div>
 
     <!-- ═══ PROMOS ═══ -->
+    <!-- ═══ PROMO DEL DÍA ═══ -->
+    <div id="tab-daily" class="tab-panel">
+      <div class="page-title">Promo del <em>Día</em></div>
+      <p class="page-sub">Un % de descuento sobre los productos que elijas. Se aplica solo, en el menú web, la TV y el mostrador.</p>
+
+      <div id="dpBanner" class="card" style="display:none;background:rgba(34,197,94,.08);border-color:rgba(34,197,94,.3);margin-bottom:16px">
+        <div style="font-family:var(--fh);font-weight:800;color:var(--green)" id="dpBannerTxt"></div>
+      </div>
+
+      <div class="card card-accent">
+        <div class="card-title" style="margin-bottom:16px">Configuración</div>
+        <div class="form-grid">
+          <div class="field"><label>Nombre de la promo <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— lo ve el cliente</span></label><input id="dpLabel" type="text" placeholder="Ej: Martes de Hamburguesas"></div>
+          <div class="field"><label>Descuento (%)</label><input id="dpPct" type="number" min="1" max="100" placeholder="Ej: 20"></div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;grid-column:1/-1">
+            <div class="field"><label>Vigente Desde</label><input id="dpFrom" type="datetime-local"></div>
+            <div class="field"><label>Vigente Hasta</label><input id="dpTo" type="datetime-local"></div>
+          </div>
+
+          <div class="field" style="grid-column:1/-1">
+            <label>Productos en promo</label>
+            <div class="card" style="background:rgba(212,168,71,.05);border-color:rgba(212,168,71,.2);margin:0;padding:14px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+                <button type="button" class="btn" style="padding:7px 12px;font-size:12px" onclick="dpSelectCat('hamburguesas')">Todas las hamburguesas</button>
+                <button type="button" class="btn" style="padding:7px 12px;font-size:12px" onclick="dpSelectCat('sandwiches')">Sándwiches</button>
+                <button type="button" class="btn" style="padding:7px 12px;font-size:12px" onclick="dpSelectCat('guarniciones')">Guarniciones</button>
+                <button type="button" class="btn" style="padding:7px 12px;font-size:12px" onclick="dpSelectCat('bebidas')">Bebidas</button>
+                <button type="button" class="btn" style="padding:7px 12px;font-size:12px" onclick="dpSelectNone()">Limpiar</button>
+              </div>
+              <div id="dpProducts" style="max-height:340px;overflow:auto"></div>
+              <div style="font-size:12px;color:var(--muted);margin-top:10px" id="dpCount">0 productos seleccionados</div>
+            </div>
+          </div>
+
+          <div class="field" style="grid-column:1/-1">
+            <label class="check-row"><input type="checkbox" id="dpActive"> Promo activa</label>
+            <div style="font-size:12px;color:var(--muted);margin-top:6px">Si está destildada, la promo no corre aunque las fechas estén vigentes.</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="dpSave()">Guardar promo</button>
+          <button class="btn" onclick="dpToday()">Poner fechas de hoy</button>
+          <button class="btn danger" onclick="dpTurnOff()">Apagar promo</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:12px">Vista previa</div>
+        <div id="dpPreview" style="font-size:13px;color:var(--muted)">Elegí productos y un % para ver cómo quedan los precios.</div>
+      </div>
+    </div>
+
     <div id="tab-promos" class="tab-panel">
       <div class="page-title"><em>Promos</em> y Combos</div>
       <p class="page-sub">Creá ofertas y combos que se muestran en la sección 🔥 Promos del menú.</p>
@@ -723,6 +778,138 @@ document.querySelectorAll('#prdFilters .filter-tab').forEach(btn=>{
 });
 $('#prdCategory').addEventListener('change',e=>{updatePrdSidesVisibility(e.target.value);});
 productsCol.onSnapshot(renderProductsTable);
+
+/* ── PROMO DEL DÍA ── */
+const dailyPromoRef=db.collection('config').doc('dailyPromo');
+let DP_SELECTED=new Set(), DP_PRODUCTS=[], DP_LOADED_ONCE=false;
+const dpMoney=n=>'$'+(Number(n)||0).toLocaleString('es-AR');
+
+function dpToLocalInput(d){
+  if(!d) return '';
+  const t=new Date(d.getTime()-d.getTimezoneOffset()*60000);
+  return t.toISOString().slice(0,16);
+}
+
+function dpRenderProducts(){
+  const cont=document.getElementById('dpProducts');
+  if(!cont) return;
+  if(!DP_PRODUCTS.length){cont.innerHTML='<div style="font-size:13px;color:var(--muted)">Cargando productos…</div>';return;}
+  const cats={};
+  DP_PRODUCTS.forEach(p=>{const c=p.category||'otros';(cats[c]=cats[c]||[]).push(p);});
+  let html='';
+  Object.keys(cats).sort().forEach(cat=>{
+    html+=`<div style="font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);margin:12px 0 6px">${cat}</div>`;
+    cats[cat].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''))).forEach(p=>{
+      const on=DP_SELECTED.has(p.id);
+      html+=`<label class="check-row" style="margin-bottom:5px;display:flex;align-items:center;gap:8px">
+        <input type="checkbox" ${on?'checked':''} onchange="dpToggle('${p.id}',this.checked)">
+        <span style="flex:1">${p.name||p.id}</span>
+        <span style="color:var(--muted);font-size:12px">${dpMoney(p.price)}</span>
+      </label>`;
+    });
+  });
+  cont.innerHTML=html;
+  dpRefreshPreview();
+}
+
+window.dpToggle=(id,on)=>{ if(on)DP_SELECTED.add(id); else DP_SELECTED.delete(id); dpRefreshPreview(); };
+window.dpSelectCat=(cat)=>{ DP_PRODUCTS.filter(p=>(p.category||'')===cat).forEach(p=>DP_SELECTED.add(p.id)); dpRenderProducts(); };
+window.dpSelectNone=()=>{ DP_SELECTED.clear(); dpRenderProducts(); };
+
+window.dpToday=()=>{
+  const d=new Date(); const from=new Date(d.getFullYear(),d.getMonth(),d.getDate(),0,0);
+  const to=new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59);
+  document.getElementById('dpFrom').value=dpToLocalInput(from);
+  document.getElementById('dpTo').value=dpToLocalInput(to);
+};
+
+function dpRefreshPreview(){
+  const pct=Number(document.getElementById('dpPct')?.value||0);
+  const cnt=DP_SELECTED.size;
+  const cEl=document.getElementById('dpCount');
+  if(cEl) cEl.textContent=`${cnt} producto${cnt===1?'':'s'} seleccionado${cnt===1?'':'s'}`;
+  const prev=document.getElementById('dpPreview');
+  if(!prev) return;
+  if(!cnt||!(pct>0)){prev.innerHTML='Elegí productos y un % para ver cómo quedan los precios.';return;}
+  const rows=DP_PRODUCTS.filter(p=>DP_SELECTED.has(p.id)).map(p=>{
+    const base=Number(p.price||0), off=base-Math.round(base*pct/100);
+    return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)">
+      <span>${p.name||p.id}</span>
+      <span><span style="text-decoration:line-through;color:var(--muted)">${dpMoney(base)}</span> <strong style="color:var(--green)">${dpMoney(off)}</strong></span>
+    </div>`;
+  }).join('');
+  prev.innerHTML=rows;
+}
+
+async function dpLoad(){
+  const snap=await dailyPromoRef.get();
+  const d=snap.exists?snap.data():null;
+  if(!d){ dpRenderProducts(); return; }
+  document.getElementById('dpLabel').value=d.label||'';
+  document.getElementById('dpPct').value=d.percent||'';
+  document.getElementById('dpActive').checked=d.active===true;
+  if(d.from?.toDate) document.getElementById('dpFrom').value=dpToLocalInput(d.from.toDate());
+  if(d.to?.toDate) document.getElementById('dpTo').value=dpToLocalInput(d.to.toDate());
+  DP_SELECTED=new Set(Array.isArray(d.productIds)?d.productIds:[]);
+  dpRenderProducts();
+  dpRenderBanner(d);
+}
+
+function dpRenderBanner(d){
+  const b=document.getElementById('dpBanner'), t=document.getElementById('dpBannerTxt');
+  if(!b||!t) return;
+  if(!d||d.active!==true){b.style.display='none';return;}
+  const now=new Date(), from=d.from?.toDate?.(), to=d.to?.toDate?.();
+  const vig=(!from||now>=from)&&(!to||now<=to);
+  b.style.display='block';
+  b.style.background=vig?'rgba(34,197,94,.08)':'rgba(255,255,255,.03)';
+  b.style.borderColor=vig?'rgba(34,197,94,.3)':'var(--border)';
+  t.style.color=vig?'var(--green)':'var(--muted)';
+  t.textContent=vig
+    ? `CORRIENDO AHORA · ${d.label||'Promo'} · ${d.percent}% off en ${(d.productIds||[]).length} productos`
+    : `Activa pero fuera de fecha · ${d.label||'Promo'} (no se está aplicando)`;
+}
+
+window.dpSave=async()=>{
+  const label=document.getElementById('dpLabel').value.trim();
+  const pct=Number(document.getElementById('dpPct').value||0);
+  const fromVal=document.getElementById('dpFrom').value;
+  const toVal=document.getElementById('dpTo').value;
+  const active=document.getElementById('dpActive').checked;
+  if(!(pct>0&&pct<=100)){alert('El descuento tiene que estar entre 1 y 100.');return;}
+  if(!DP_SELECTED.size){alert('Elegí al menos un producto.');return;}
+  if(!fromVal||!toVal){alert('Definí vigencia (desde y hasta).');return;}
+  const dFrom=new Date(fromVal), dTo=new Date(toVal);
+  if(dTo<=dFrom){alert("'Hasta' debe ser después de 'Desde'.");return;}
+  const payload={
+    label, percent:pct, active,
+    productIds:[...DP_SELECTED],
+    from:firebase.firestore.Timestamp.fromDate(dFrom),
+    to:firebase.firestore.Timestamp.fromDate(dTo),
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  };
+  try{
+    await dailyPromoRef.set(payload,{merge:true});
+    alert(active?'✅ Promo guardada y activa.':'✅ Promo guardada (apagada).');
+  }catch(e){console.error(e);alert('Error al guardar.');}
+};
+
+window.dpTurnOff=async()=>{
+  if(!confirm('¿Apagar la promo? Los precios vuelven a la normalidad en todas las pantallas.'))return;
+  try{
+    await dailyPromoRef.set({active:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+    document.getElementById('dpActive').checked=false;
+    alert('Promo apagada.');
+  }catch(e){console.error(e);alert('Error.');}
+};
+
+document.getElementById('dpPct')?.addEventListener('input',dpRefreshPreview);
+dailyPromoRef.onSnapshot(s=>dpRenderBanner(s.exists?s.data():null),()=>{});
+productsCol.onSnapshot(snap=>{
+  DP_PRODUCTS=snap.docs.map(d=>({id:d.id,...d.data()}));
+  if(!DP_LOADED_ONCE){ DP_LOADED_ONCE=true; dpLoad().catch(e=>console.error(e)); }
+  else dpRenderProducts();
+},()=>{});
 
 /* ── PRECIOS EXTRAS ── */
 const pricesRef=db.collection("config").doc("prices");

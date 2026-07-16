@@ -366,6 +366,7 @@
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="promo.js?v=1"></script>
 
 <script>
 const firebaseConfig={apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
@@ -428,7 +429,9 @@ function renderCard(item){
   const ok=isAvailable(item.id);
   const card=document.createElement("div");card.className="card";
   if(!ok)card.style.opacity=".4";
-  card.innerHTML=`<img src="${item.img}" onerror="this.src='${FALLBACK_IMG}'"><div class="content"><h3>${item.name}</h3>${item.description?`<div style="font-size:12px;color:var(--muted);margin-bottom:auto">${item.description}</div>`:"<div style='margin-bottom:auto'></div>"}<div class="row"><span class="price">${money(item.price)}</span><button class="btn addBtn" ${ok?"":"disabled"}>+ Agregar</button></div></div>`;
+  card.innerHTML=`<img src="${item.img}" onerror="this.src='${FALLBACK_IMG}'"><div class="content"><h3>${item.name}</h3>${item.description?`<div style="font-size:12px;color:var(--muted);margin-bottom:auto">${item.description}</div>`:"<div style='margin-bottom:auto'></div>"}<div class="row"><span class="price">${window.rbPromo?.has(item.id)
+    ? `${money(rbPromo.unitPrice(item))} <span style="text-decoration:line-through;color:var(--muted);font-size:12px">${money(item.price)}</span>`
+    : money(item.price)}</span><button class="btn addBtn" ${ok?"":"disabled"}>+ Agregar</button></div></div>`;
   const btn=card.querySelector(".addBtn");
   const cat=(item.category||"").toLowerCase();
   if(cat.includes("bebida")||cat.includes("drink")){btn.onclick=()=>{if(!cart.drink[item.id])cart.drink[item.id]={qty:0,item};cart.drink[item.id].qty++;renderCart();};}
@@ -447,6 +450,18 @@ function mountMenu(){
 }
 
 let cart={burger:{},drink:{},side:{}};
+
+/* Items del carrito que puede agarrar la promo del día.
+   Los combos de la sección Promos quedan afuera: ya tienen precio propio. */
+function promoCartItems(){
+  const out=[];
+  const add=o=>{ if(o.isPromo)return; out.push({id:o.item.id,qty:o.qty,price:Number(o.item.price||0)}); };
+  for(const id in cart.burger) add(cart.burger[id]);
+  for(const id in cart.side)   add(cart.side[id]);
+  for(const id in cart.drink)  add(cart.drink[id]);
+  return out;
+}
+function promoDiscountCart(){ return window.rbPromo ? rbPromo.discountForItems(promoCartItems()) : 0; }
 
 function renderCart(){
   let html="",subtotal=0;
@@ -467,12 +482,17 @@ function renderCart(){
   for(const id in cart.side){const s=cart.side[id];subtotal+=s.item.price*s.qty;const extras=[];const needsPrep=isPapasSide(s.item);if(needsPrep){if(s.friesRaw||s.fries)extras.push(`🍟 ${s.fries}`);else extras.push(`<div class="missing-fries-alert">⚠️ FALTAN ELEGIR PREPARACIÓN</div>`);}if(s.notes)extras.push("📝 "+s.notes);html+=`<div class="cart-item"><div class="cart-item-info"><span class="cart-item-name">${s.qty}× ${s.item.name}</span><div class="cart-item-desc">${extras.join(" ")}</div></div><div style="display:flex;flex-direction:column;align-items:flex-end"><span class="cart-item-price">${money(s.item.price*s.qty)}</span><div class="cart-actions"><button class="btn-icon" onclick="editSide('${id}')" title="Editar">✏️</button><button class="btn-icon" onclick="removeFromCart('${id}','side')" style="color:var(--red)" title="Eliminar">✕</button></div></div></div>`;}
   for(const id in cart.drink){const d=cart.drink[id];subtotal+=d.item.price*d.qty;html+=`<div class="cart-item"><div class="cart-item-info"><span class="cart-item-name">${d.qty}× ${d.item.name}</span><div class="cart-item-desc" style="color:var(--blue)">🥤 Bebida</div></div><div style="display:flex;flex-direction:column;align-items:flex-end"><span class="cart-item-price">${money(d.item.price*d.qty)}</span><div class="cart-actions"><button class="btn-icon" onclick="removeFromCart('${id}','drink')" style="color:var(--red)">✕</button></div></div></div>`;}
 
-  // Descuento
-  const pct = Math.max(0, Math.min(100, Number(document.getElementById('inpDiscountPct')?.value)||0));
-  const discountAmt = Math.round(subtotal * pct / 100);
+  // Descuento: la promo del día pisa al manual y a los sellos.
+  const promoDisc = promoDiscountCart();
+  const pct = promoDisc > 0 ? 0 : Math.max(0, Math.min(100, Number(document.getElementById('inpDiscountPct')?.value)||0));
+  const discountAmt = promoDisc > 0 ? Math.min(promoDisc, subtotal) : Math.round(subtotal * pct / 100);
   const finalTotal = subtotal - discountAmt;
 
-  if(pct > 0 && subtotal > 0){
+  if(promoDisc > 0 && subtotal > 0){
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin-top:4px;background:rgba(212,168,71,.1);border:1px solid rgba(212,168,71,.3);border-radius:9px;font-family:var(--fh);font-size:15px;font-weight:800;color:var(--gold)">
+      <span>🏷️ ${rbPromo.label()} (-${rbPromo.percent()}%)</span><span>-${money(discountAmt)}</span>
+    </div>`;
+  } else if(pct > 0 && subtotal > 0){
     html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin-top:4px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:9px;font-family:var(--fh);font-size:15px;font-weight:800;color:var(--green)">
       <span>🏷️ Descuento ${pct}%</span><span>-${money(discountAmt)}</span>
     </div>`;
@@ -480,7 +500,12 @@ function renderCart(){
 
   // Preview descuento
   const dp = document.getElementById('discountPreview');
-  if(dp) dp.textContent = pct > 0 && subtotal > 0 ? `-${money(discountAmt)}` : '—';
+  if(dp) dp.textContent = discountAmt > 0 && subtotal > 0 ? `-${money(discountAmt)}` : '—';
+
+  // Con promo activa el descuento manual queda bloqueado para no encimar dos descuentos.
+  const dpi=document.getElementById('inpDiscountPct'), dpd=document.getElementById('inpDiscountDesc');
+  if(dpi&&!loyaltyUseReward) dpi.disabled = promoDisc>0;
+  if(dpd&&!loyaltyUseReward) dpd.disabled = promoDisc>0;
 
   wrap.innerHTML=html||`<span style="display:block;text-align:center;padding-top:28px;font-size:13px;color:var(--muted);font-family:var(--fh);text-transform:uppercase;letter-spacing:.06em">Carrito vacío.</span>`;
   totalEl.textContent=money(finalTotal);
@@ -497,6 +522,11 @@ db.collection('promos').where('active','==',true).onSnapshot(snap=>{
   });
   renderPromosMostrador();
 });
+
+if(window.rbPromo){
+  rbPromo.init();
+  rbPromo.onChange(()=>{ try{ renderMenu(); renderClienteSelected(); renderCart(); }catch(e){} });
+}
 
 function renderPromosMostrador(){
   const sec=document.getElementById('promosSection'),grid=document.getElementById('promosGrid');
@@ -802,16 +832,22 @@ async function sendToFirestore(){
     const orderNumber=await db.runTransaction(async tx=>{const snap=await tx.get(refCounters);const cur=snap.exists?Number(snap.data().orderNumber||0):0;const nxt=cur+1;tx.set(refCounters,{orderNumber:nxt},{merge:true});return nxt;});
     const payStatusFinal=isOrderPaid?'paid':'pending_payment';
     const now=new Date(),offset=now.getTimezoneOffset()*60000,localDate=new Date(now.getTime()-offset),createdAtLocal=localDate.toISOString().slice(0,-1);
-    const pct = Math.max(0, Math.min(100, Number(document.getElementById('inpDiscountPct')?.value)||0));
-    const discountAmt = Math.round(rawTotal * pct / 100);
+    // La promo del día pisa al descuento manual y a los sellos.
+    const promoDisc = promoDiscountCart();
+    const promoOn = promoDisc > 0;
+    const promoInfo = promoOn ? rbPromo.stampOnOrder(promoCartItems()) : {promoPct:0,promoLabel:''};
+    const pct = promoOn ? 0 : Math.max(0, Math.min(100, Number(document.getElementById('inpDiscountPct')?.value)||0));
+    const discountAmt = promoOn ? Math.min(promoDisc, rawTotal) : Math.round(rawTotal * pct / 100);
     const finalTotal = rawTotal - discountAmt;
-    const discountDesc = document.getElementById('inpDiscountDesc')?.value.trim() || (pct > 0 ? `Descuento ${pct}%` : '');
+    const discountDesc = promoOn
+      ? promoInfo.promoLabel
+      : (document.getElementById('inpDiscountDesc')?.value.trim() || (pct > 0 ? `Descuento ${pct}%` : ''));
 
-    // Sellos: ¿hay cliente seleccionado? ¿canjea el 20%? ¿suma sello? (mínimo sobre el subtotal de comida = rawTotal)
-    const usedReward = !!(selectedCustomer && loyaltyUseReward && selectedCustomer.rewardAvailable);
+    // Sellos: durante la promo el sello NO se canjea, queda para otro día.
+    const usedReward = !promoOn && !!(selectedCustomer && loyaltyUseReward && selectedCustomer.rewardAvailable);
     const willStamp  = !!(selectedCustomer && !usedReward && rawTotal >= MIN_FOR_STAMP);
 
-    const order={orderNumber,number:orderNumber,nombre,telefono:$("#inpTel").value.trim(),entrega:"take_away",pago,notes:"",pickup_slot:slot.pretty,pickup_time:slot.iso,status:'accepted',payment_status:payStatusFinal,items,total:finalTotal,rawTotal,discount:discountAmt,discountPct:pct,coupon:discountDesc,customerUid:selectedCustomer?selectedCustomer.uid:'',loyaltyApplied:usedReward,loyaltyPercent:usedReward?10:0,loyaltyStamped:willStamp,source:"mostrador",createdAt:createdAtLocal,createdAt_server:firebase.firestore.FieldValue.serverTimestamp()};
+    const order={orderNumber,number:orderNumber,nombre,telefono:$("#inpTel").value.trim(),entrega:"take_away",pago,notes:"",pickup_slot:slot.pretty,pickup_time:slot.iso,status:'accepted',payment_status:payStatusFinal,items,total:finalTotal,rawTotal,discount:discountAmt,discountPct:promoOn?promoInfo.promoPct:pct,coupon:discountDesc,promoApplied:promoOn,promoDiscount:promoOn?discountAmt:0,promoPct:promoOn?promoInfo.promoPct:0,promoLabel:promoOn?promoInfo.promoLabel:'',customerUid:selectedCustomer?selectedCustomer.uid:'',loyaltyApplied:usedReward,loyaltyPercent:usedReward?10:0,loyaltyStamped:willStamp,source:"mostrador",createdAt:createdAtLocal,createdAt_server:firebase.firestore.FieldValue.serverTimestamp()};
     await db.collection("orders").doc().set(order);
     // Aplicar el sello (o canjear el premio) al cliente registrado
     if(selectedCustomer){
@@ -890,7 +926,9 @@ function renderClienteSelected(){
   if(!selectedCustomer){el.style.display='none';el.innerHTML='';return;}
   const c=selectedCustomer, st=Number(c.stamps||0);
   const rewardHtml=c.rewardAvailable
-    ?`<label class="cli-reward-toggle"><input type="checkbox" id="chkUsarReward" ${loyaltyUseReward?'checked':''} onchange="toggleUsarReward(this.checked)"> Usar 20% de sellos en este pedido</label>`
+    ? (promoDiscountCart()>0
+        ? `<div class="cli-hint" style="color:var(--gold)">Corre ${rbPromo.label()}: el 20% de sellos no se aplica y el sello queda para otro día.</div>`
+        : `<label class="cli-reward-toggle"><input type="checkbox" id="chkUsarReward" ${loyaltyUseReward?'checked':''} onchange="toggleUsarReward(this.checked)"> Usar 20% de sellos en este pedido</label>`)
     :'';
   el.style.display='block';
   el.innerHTML=`

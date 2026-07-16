@@ -314,12 +314,17 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="loyalty.js?v=3"></script>
+<script src="promo.js?v=1"></script>
 <script>
 const firebaseConfig={apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
 firebase.initializeApp(firebaseConfig);
 const db=firebase.firestore();
 db.settings({experimentalForceLongPolling:true,experimentalAutoDetectLongPolling:false});
 if(window.rbLoyalty) rbLoyalty.init();
+if(window.rbPromo){
+  rbPromo.init();
+  rbPromo.onChange(()=>{ try{ renderResumen(); updateCouponLock(); if(window.rbLoyalty&&rbLoyalty.data) renderLoyaltyUI(rbLoyalty.user, rbLoyalty.data); }catch(e){} });
+}
 
 const CART_KEY="rhodes_cart_v5";
 const WHATSAPP_NUMBER="5491170596483";
@@ -341,8 +346,21 @@ function couponDiscount(subtotal){
   const raw = activeCouponType==='percent' ? Math.round(subtotal*activeCouponValue/100) : activeCouponValue;
   return Math.min(raw, subtotal);
 }
-// Descuento vigente: sellos (20%) O cupón, no se combinan
+/* Descuento de la promo del día sobre el carrito actual.
+   Se calcula sobre el precio base de cada producto, sin extras.
+   Los combos de la sección Promos quedan afuera: ya tienen precio propio. */
+function promoDiscount(items){
+  if(!window.rbPromo) return 0;
+  const list=(items||loadCart().items).filter(i=>!i.isPromo);
+  return window.rbPromo.discountForItems(list);
+}
+function promoIsOn(items){ return promoDiscount(items)>0; }
+
+/* Descuento vigente. Prioridad: promo del día > sellos > cupón. Nunca se combinan.
+   Durante la promo el sello NO se consume, queda para otro día. */
 function currentDiscount(subtotal){
+  const pd=promoDiscount();
+  if(pd>0) return Math.min(pd, subtotal);
   if(loyaltyApplied) return Math.round(subtotal*0.20);
   return couponDiscount(subtotal);
 }
@@ -429,9 +447,13 @@ function renderResumen(){
   const totalItems=cart.items.reduce((a,i)=>a+(i.qty||1),0);
   $('#itemsBadge').textContent=`${totalItems} item${totalItems!==1?'s':''}`;
 
-  // Descuento: sellos (20%) O cupón, no se combinan.
+  // Descuento: promo del día > sellos > cupón. No se combinan.
   let discount=0, discLine='';
-  if(loyaltyApplied){
+  const pDisc=promoDiscount(cart.items);
+  if(pDisc>0){
+    discount=Math.min(pDisc, subtotal);
+    discLine=`🏷️ ${window.rbPromo.label()} (-${window.rbPromo.percent()}%): -${money(discount)}`;
+  } else if(loyaltyApplied){
     discount=Math.round(subtotal*0.20);
     discLine=`🍔 Descuento sellos (-20%): -${money(discount)}`;
   } else if(activeCouponCode){
@@ -602,9 +624,12 @@ function stampsGridHTML(n){
 
 function updateCouponLock(){
   const inp=$('#inpCupon'), btn=$('#btnAplicarCupon'), m=$('#msgCupon');
-  if(inp) inp.disabled=loyaltyApplied;
-  if(btn){ btn.disabled=loyaltyApplied; btn.style.opacity=loyaltyApplied?'.4':''; btn.style.cursor=loyaltyApplied?'not-allowed':''; }
-  if(loyaltyApplied && m && !m.textContent){ m.textContent='Usando descuento de sellos (no se combina con cupón).'; m.className='coupon-msg'; }
+  const promoOn=promoIsOn();
+  const lock=loyaltyApplied||promoOn;
+  if(inp) inp.disabled=lock;
+  if(btn){ btn.disabled=lock; btn.style.opacity=lock?'.4':''; btn.style.cursor=lock?'not-allowed':''; }
+  if(promoOn && m){ m.textContent='Ya tenés la promo del día aplicada (no se combina con cupón).'; m.className='coupon-msg'; }
+  else if(loyaltyApplied && m && !m.textContent){ m.textContent='Usando descuento de sellos (no se combina con cupón).'; m.className='coupon-msg'; }
 }
 
 function renderLoyaltyUI(user,data){
@@ -650,14 +675,25 @@ function renderLoyaltyUI(user,data){
     <div class="loy-min" id="loyMinHint"></div>`;
 
   if(d.rewardAvailable){
-    html+=`
-      <div class="reward-box">
-        <div class="reward-title">🎉 Tenés 20% de descuento</div>
-        <label class="reward-toggle">
-          <input type="checkbox" id="chkReward" ${loyaltyApplied?'checked':''}>
-          Usar mi 20% en este pedido
-        </label>
-      </div>`;
+    if(promoIsOn()){
+      html+=`
+        <div class="reward-box">
+          <div class="reward-title">🎉 Tenés 20% de descuento</div>
+          <div style="font-size:13px;color:var(--white);line-height:1.5">
+            Hoy corre <strong>${window.rbPromo.label()}</strong>, así que este pedido ya sale con descuento.
+            Tu 20% de sellos queda guardado para tu próximo pedido.
+          </div>
+        </div>`;
+    } else {
+      html+=`
+        <div class="reward-box">
+          <div class="reward-title">🎉 Tenés 20% de descuento</div>
+          <label class="reward-toggle">
+            <input type="checkbox" id="chkReward" ${loyaltyApplied?'checked':''}>
+            Usar mi 20% en este pedido
+          </label>
+        </div>`;
+    }
   }
 
   el.style.display='block';
@@ -715,8 +751,9 @@ $('#btnConfirmar').onclick=async()=>{
   btn.innerHTML='<span style="animation:spin 1s linear infinite;display:inline-block">⏳</span> Procesando...';
 
   try{
-    // ¿Este pedido canjea el premio de sellos?
-    const usedReward = loyaltyApplied && window.rbLoyalty && rbLoyalty.hasReward();
+    // Durante la promo del día el sello NO se canjea: queda disponible para otro día.
+    const promoOn = promoIsOn(cart.items);
+    const usedReward = !promoOn && loyaltyApplied && window.rbLoyalty && rbLoyalty.hasReward();
 
     await reservarSlot(slot.key,calculateWeight());
     const orderNum=await getNextOrderNumber();
@@ -725,7 +762,10 @@ $('#btnConfirmar').onclick=async()=>{
 
     // Subtotal (comida) y descuento reales para el registro
     let subtotalAmount=0; cart.items.forEach(i=>{ subtotalAmount += (i.finalPrice||i.price||0)*(i.qty||1); });
-    const discountAmount = usedReward ? Math.round(subtotalAmount*0.20) : couponDiscount(subtotalAmount);
+    const promoInfo = window.rbPromo ? window.rbPromo.stampOnOrder(cart.items.filter(i=>!i.isPromo)) : {promoApplied:false,promoDiscount:0,promoPct:0,promoLabel:''};
+    const discountAmount = promoOn
+      ? Math.min(promoInfo.promoDiscount, subtotalAmount)
+      : (usedReward ? Math.round(subtotalAmount*0.20) : couponDiscount(subtotalAmount));
     const uid = (window.rbLoyalty && rbLoyalty.user) ? rbLoyalty.user.uid : '';
     // ¿Este pedido sumará un sello? Solo si NO canjea premio y el subtotal llega al mínimo.
     const minSello = (window.rbLoyalty && rbLoyalty.MIN_FOR_STAMP) || 20000;
@@ -739,8 +779,11 @@ $('#btnConfirmar').onclick=async()=>{
       entrega:'take_away', pago:'local', payment_status:'pending', status:'accepted',
       createdAt:localISO, total:finalTotal,
       subtotal:subtotalAmount,
-      discount:discountAmount, coupon: usedReward ? '' : (activeCouponCode||''),
-      couponType: usedReward ? '' : (activeCouponCode?activeCouponType:''),
+      discount:discountAmount,
+      coupon: (promoOn||usedReward) ? '' : (activeCouponCode||''),
+      couponType: (promoOn||usedReward) ? '' : (activeCouponCode?activeCouponType:''),
+      promoApplied: promoOn, promoDiscount: promoOn?promoInfo.promoDiscount:0,
+      promoPct: promoOn?promoInfo.promoPct:0, promoLabel: promoOn?promoInfo.promoLabel:'',
       loyaltyApplied: !!usedReward, loyaltyPercent: usedReward ? 20 : 0, loyaltyStamped: loyaltyStamped, customerUid: uid,
       tip:activeTip||0, tipPct:activeTipPct||0,
       pickup_slot:slot.key||'', pickup_time_pretty:slot.pretty||'',

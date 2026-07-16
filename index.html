@@ -725,7 +725,9 @@
           <div class="sc-body">
             <div class="sc-num">${num}</div>
             <div class="sc-name">${esc(p.name)}</div>
-            <div class="sc-price">$${p.price}</div>
+            <div class="sc-price">${window.rbPromo?.has(p.id)
+              ? `$${window.rbPromo.unitPrice(p).toLocaleString('es-AR')} <span style="color:var(--muted);text-decoration:line-through;font-size:12px;font-weight:600">$${Number(p.price||0).toLocaleString('es-AR')}</span> <span style="color:var(--gold);font-size:11px;font-weight:800">-${window.rbPromo.pctFor(p.id)}%</span>`
+              : `$${p.price}`}</div>
             <div class="sc-cta">
               <button class="sc-btn" onclick="event.stopPropagation();openModal('${p.id}')">Agregar +</button>
               ${ingBtn}
@@ -1218,6 +1220,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js" defer></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js" defer></script>
 <script src="loyalty.js?v=3" defer></script>
+<script src="promo.js?v=1" defer></script>
 
 <script defer>
 let db;
@@ -1328,6 +1331,12 @@ function initFirebase(){
     });
     window.fastRender();
   },()=>{});
+
+  // Promo del día: redibuja precios y carrito cuando cambia desde el admin
+  if(window.rbPromo){
+    window.rbPromo.init();
+    window.rbPromo.onChange(()=>{ window.fastRender(); window.updateCartUI&&window.updateCartUI(); });
+  }
 
   // Sistema de sellos (login Google + fidelidad)
   if(window.rbLoyalty){ rbLoyalty.init(); rbLoyalty.onChange(renderNavLoyalty); }
@@ -1617,10 +1626,32 @@ function updateCartUI(){
   for(let id in window.STATE.cart.side)c.innerHTML+=ri(id,window.STATE.cart.side[id],'side');
   for(let id in window.STATE.cart.drink){const d=window.STATE.cart.drink[id];count+=d.qty;total+=d.finalPrice*d.qty;c.innerHTML+=`<div class="ci"><div style="flex:1"><div class="ci-name">${d.item.name}</div><div class="ci-det">Bebida</div><div class="ci-price">$${d.finalPrice}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('drink','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${d.qty}</span><button class="qbtn" onclick="cartQty('drink','${id}',1)">+</button></div></div>`;}
   const b=document.getElementById("cartBubble");b.innerText=count;b.style.display=count>0?'inline-flex':'none';
-  document.getElementById("cartTotal").innerText="$"+total;
+
+  // Promo del día: se descuenta sobre el precio base, nunca sobre los extras.
+  const promoDisc=window.rbPromo?window.rbPromo.discountForItems(cartPromoItems()):0;
+  if(promoDisc>0){
+    c.innerHTML+=`<div class="ci" style="background:rgba(212,168,71,.08);border-radius:10px">
+      <div style="flex:1"><div class="ci-name" style="color:var(--gold)">🏷️ ${window.rbPromo.label()}</div>
+      <div class="ci-det">Descuento aplicado</div></div>
+      <div class="ci-price" style="color:var(--gold)">-$${promoDisc.toLocaleString('es-AR')}</div></div>`;
+  }
+  document.getElementById("cartTotal").innerText="$"+Math.max(0,total-promoDisc);
   if(!count)c.innerHTML=`<div style="text-align:center;padding:28px 0;color:var(--muted);font-size:13px">Tu carrito está vacío.</div>`;
   renderUpsell();
 }
+window.updateCartUI=updateCartUI;
+
+/* Items del carrito que puede agarrar la promo del día.
+   Se excluyen los combos de la sección Promos: ya vienen con precio propio. */
+function cartPromoItems(){
+  const out=[];
+  const add=obj=>{ if(obj.isPromo)return; out.push({id:obj.item.id,qty:obj.qty,price:Number(obj.item.price||0)}); };
+  for(let id in window.STATE.cart.burger)add(window.STATE.cart.burger[id]);
+  for(let id in window.STATE.cart.side)add(window.STATE.cart.side[id]);
+  for(let id in window.STATE.cart.drink)add(window.STATE.cart.drink[id]);
+  return out;
+}
+window.cartPromoItems=cartPromoItems;
 window.cartQty=(type,id,delta)=>{const it=window.STATE.cart[type][id];it.qty+=delta;if(it.qty<=0)delete window.STATE.cart[type][id];saveCart();};
 window.emptyCart=()=>{if(confirm("¿Vaciar carrito?")){window.STATE.cart={burger:{},drink:{},side:{}};saveCart();toggleDrawer(false);}};
 window.toggleDrawer=(open)=>{const d=document.getElementById("drawer");if(open){d.classList.add("open");updateCartUI();}else d.classList.remove("open");};
