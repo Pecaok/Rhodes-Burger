@@ -1253,7 +1253,9 @@ window.openScDetail=function(id){
   document.getElementById('scdNum').textContent=catLabel[p.category]||'';
   document.getElementById('scdTitle').textContent=p.name;
   document.getElementById('scdDesc').textContent=p.description||'';
-  document.getElementById('scdPrice').textContent='$'+p.price;
+  document.getElementById('scdPrice').innerHTML=window.rbPromo?.has(p.id)
+    ? `$${window.rbPromo.unitPrice(p).toLocaleString('es-AR')} <span style="color:var(--muted);text-decoration:line-through;font-size:.6em;font-weight:600">$${Number(p.price||0).toLocaleString('es-AR')}</span> <span style="color:var(--gold);font-size:.5em;font-weight:800">-${window.rbPromo.pctFor(p.id)}%</span>`
+    : '$'+p.price;
   const addBtn=document.getElementById('scdAdd');
   addBtn.onclick=()=>{closeScDetail();setTimeout(()=>openModal(id),140);};
   document.getElementById('scDetail').classList.add('open');
@@ -1530,7 +1532,21 @@ window.openModal=(id)=>{
 };
 
 window.updExtra=(type,delta)=>{const nv=window.MODAL.extras[type]+delta,ml=type==='patty'?2:3;if(nv>=0&&nv<=ml){window.MODAL.extras[type]=nv;const idMap={patty:'qtyPatty',cheddar:'qtyCheddar',bacon:'qtyBacon'};document.getElementById(idMap[type]).innerText=nv;updateModalPrice();}};
-window.updateModalPrice=function(){let t=Number(window.MODAL.item.price);const p=window.STATE.config.prices;t+=(window.MODAL.extras.patty*p.patty)+(window.MODAL.extras.cheddar*p.cheddar)+(window.MODAL.extras.bacon*p.bacon);if(document.querySelector('input[name="sideType"]:checked')?.value==='aros')t+=p.onionRings;document.getElementById("modTotal").innerText="$"+t;};
+window.updateModalPrice=function(){
+  const item=window.MODAL.item;
+  // La promo baja el precio base; los extras se cobran full.
+  const desc=window.rbPromo?window.rbPromo.unitDiscount(item):0;
+  let t=Number(item.price);
+  const p=window.STATE.config.prices;
+  t+=(window.MODAL.extras.patty*p.patty)+(window.MODAL.extras.cheddar*p.cheddar)+(window.MODAL.extras.bacon*p.bacon);
+  if(document.querySelector('input[name="sideType"]:checked')?.value==='aros')t+=p.onionRings;
+  const el=document.getElementById("modTotal");
+  if(desc>0){
+    el.innerHTML=`$${(t-desc).toLocaleString('es-AR')} <span style="color:var(--muted);text-decoration:line-through;font-size:.5em;font-weight:600">$${t.toLocaleString('es-AR')}</span>`;
+  } else {
+    el.innerText="$"+t;
+  }
+};
 document.getElementById("btnCancel").onclick=()=>document.getElementById("modalOvl").classList.remove("open");
 
 document.getElementById("btnAddCart").onclick=()=>{
@@ -1620,20 +1636,25 @@ function updateCartUI(){
       if(obj.notes&&!obj.isPromo)d.push(`📝 ${obj.notes}`);
     }
     const promoBadge=obj.isPromo?`<span style="background:var(--gold);color:#1a1710;font-family:var(--fh);font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:99px;margin-left:6px">🔥 PROMO</span>`:'';
-    return`<div class="ci"><div style="flex:1"><div class="ci-name">${obj.item.name}${promoBadge}</div><div class="ci-det">${d.join(" · ")}</div><div class="ci-price">$${obj.finalPrice}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('${t}','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${obj.qty}</span><button class="qbtn" onclick="cartQty('${t}','${id}',1)">+</button></div></div>`;
+    const uDesc=obj.isPromo?0:(window.rbPromo?window.rbPromo.unitDiscount(obj.item):0);
+    const priceHtml=uDesc>0
+      ? `$${(obj.finalPrice-uDesc).toLocaleString('es-AR')} <span style="color:var(--muted);text-decoration:line-through;font-size:11px">$${Number(obj.finalPrice).toLocaleString('es-AR')}</span>`
+      : `$${obj.finalPrice}`;
+    return`<div class="ci"><div style="flex:1"><div class="ci-name">${obj.item.name}${promoBadge}</div><div class="ci-det">${d.join(" · ")}</div><div class="ci-price">${priceHtml}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('${t}','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${obj.qty}</span><button class="qbtn" onclick="cartQty('${t}','${id}',1)">+</button></div></div>`;
   };
   for(let id in window.STATE.cart.burger)c.innerHTML+=ri(id,window.STATE.cart.burger[id],'burger');
   for(let id in window.STATE.cart.side)c.innerHTML+=ri(id,window.STATE.cart.side[id],'side');
-  for(let id in window.STATE.cart.drink){const d=window.STATE.cart.drink[id];count+=d.qty;total+=d.finalPrice*d.qty;c.innerHTML+=`<div class="ci"><div style="flex:1"><div class="ci-name">${d.item.name}</div><div class="ci-det">Bebida</div><div class="ci-price">$${d.finalPrice}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('drink','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${d.qty}</span><button class="qbtn" onclick="cartQty('drink','${id}',1)">+</button></div></div>`;}
+  for(let id in window.STATE.cart.drink){const d=window.STATE.cart.drink[id];count+=d.qty;total+=d.finalPrice*d.qty;const dD=window.rbPromo?window.rbPromo.unitDiscount(d.item):0;const dPrice=dD>0?`$${(d.finalPrice-dD).toLocaleString('es-AR')} <span style="color:var(--muted);text-decoration:line-through;font-size:11px">$${Number(d.finalPrice).toLocaleString('es-AR')}</span>`:`$${d.finalPrice}`;c.innerHTML+=`<div class="ci"><div style="flex:1"><div class="ci-name">${d.item.name}</div><div class="ci-det">Bebida</div><div class="ci-price">${dPrice}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('drink','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${d.qty}</span><button class="qbtn" onclick="cartQty('drink','${id}',1)">+</button></div></div>`;}
   const b=document.getElementById("cartBubble");b.innerText=count;b.style.display=count>0?'inline-flex':'none';
 
   // Promo del día: se descuenta sobre el precio base, nunca sobre los extras.
   const promoDisc=window.rbPromo?window.rbPromo.discountForItems(cartPromoItems()):0;
   if(promoDisc>0){
+    // Los precios de arriba ya vienen con la promo aplicada: esta línea solo informa el ahorro.
     c.innerHTML+=`<div class="ci" style="background:rgba(212,168,71,.08);border-radius:10px">
       <div style="flex:1"><div class="ci-name" style="color:var(--gold)">🏷️ ${window.rbPromo.label()}</div>
-      <div class="ci-det">Descuento aplicado</div></div>
-      <div class="ci-price" style="color:var(--gold)">-$${promoDisc.toLocaleString('es-AR')}</div></div>`;
+      <div class="ci-det">Ya aplicada en los precios</div></div>
+      <div class="ci-price" style="color:var(--gold)">ahorrás $${promoDisc.toLocaleString('es-AR')}</div></div>`;
   }
   document.getElementById("cartTotal").innerText="$"+Math.max(0,total-promoDisc);
   if(!count)c.innerHTML=`<div style="text-align:center;padding:28px 0;color:var(--muted);font-size:13px">Tu carrito está vacío.</div>`;
