@@ -30,9 +30,13 @@
   }
 
   // cb(promo|null) en cada cambio del doc, ya normalizada.
+  // El cliente no tiene que ver un error, pero queda en consola: si el aviso no aparece,
+  // la causa es o que el doc no existe o que las reglas no dejan leerlo.
   function watch(db,cb){
-    return db.collection('config').doc('promoEfectivo')
-      .onSnapshot(snap=>cb(normalizar(snap.exists?snap.data():null)),()=>cb(null));
+    return db.collection('config').doc('promoEfectivo').onSnapshot(snap=>{
+      if(!snap.exists)console.warn('promoEfectivo: el doc no existe todavia (se crea entrando a admin.html)');
+      cb(normalizar(snap.exists?snap.data():null));
+    },err=>{console.warn('promoEfectivo: no se pudo leer,',err?.code||err);cb(null);});
   }
 
   window.RBPromoEfectivo={watch,normalizar,aplicaHoy,textoDias,descuento};

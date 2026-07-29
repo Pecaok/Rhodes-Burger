@@ -1181,15 +1181,25 @@ $('#btnCpefOff').onclick=async()=>{
   catch(e){alert("Error.");}
 };
 // Se siembra sola la 1ra vez con 10% miércoles y jueves, igual que sideTypes/sazones.
+// Si la escritura o la lectura fallan hay que verlo acá: una promo que no existe en silencio
+// se traduce en un cartel que nunca aparece en la web y media hora buscando por qué.
+function cpefError(msg,e){
+  console.error('promoEfectivo:',e);
+  const pill=$('#cashPromoPill'), sub=$('#cashPromoSub');
+  if(pill){pill.textContent="ERROR";pill.className="badge badge-red";}
+  if(sub)sub.textContent=`${msg} (${e?.code||e?.message||'sin detalle'}). Revisá las reglas de Firestore para config/promoEfectivo.`;
+}
 cashPromoRef().onSnapshot(async snap=>{
   if(!snap.exists&&!_cpefSeeded){
     _cpefSeeded=true;
     applyCashPromoToUI(CPEF_DEFAULT);
-    try{await cashPromoRef().set({...CPEF_DEFAULT,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});}catch(e){}
+    try{
+      await cashPromoRef().set({...CPEF_DEFAULT,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    }catch(e){cpefError('No se pudo crear la promo',e);}
     return;
   }
   applyCashPromoToUI(snap.exists?snap.data():{});
-});
+},e=>cpefError('No se pudo leer la promo',e));
 
 /* ── CUPONES ── */
 const cpTbody=document.querySelector("#cpTable");
