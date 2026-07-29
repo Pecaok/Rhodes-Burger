@@ -367,6 +367,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="promo.js?v=1"></script>
+<script src="js/promo-efectivo.js?v=1"></script>
 
 <script>
 const firebaseConfig={apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
@@ -515,6 +516,45 @@ function renderCart(){
   totalEl.textContent=money(finalTotal);
   if(window.updateCliStampHint)window.updateCliStampHint(subtotal);
 }
+
+/* ── PROMO PAGO EFECTIVO ── */
+// La config vive en config/promoEfectivo y se edita en Admin (ver js/promo-efectivo.js).
+let PROMO_EFECTIVO=null;
+RBPromoEfectivo.watch(db,p=>{PROMO_EFECTIVO=p;syncPromoEfectivo();});
+
+// % de la promo si hoy corresponde Y el medio de pago elegido es efectivo. 0 en cualquier otro caso.
+function promoEfectivoPct(){
+  if(!RBPromoEfectivo.aplicaHoy(PROMO_EFECTIVO))return 0;
+  return (document.getElementById('selPago')?.value||'')==='efectivo'?PROMO_EFECTIVO.percent:0;
+}
+
+// Precarga el descuento cuando corresponde y lo saca cuando deja de corresponder.
+// No pisa un descuento manual más grande ni el canje de sellos (que deja los inputs disabled).
+function syncPromoEfectivo(){
+  const pctEl=document.getElementById('inpDiscountPct'), descEl=document.getElementById('inpDiscountDesc');
+  if(!pctEl||!descEl)return;
+  if(pctEl.disabled||descEl.disabled)return;   // canje de sellos: manda el 20%
+  const promoPct=promoEfectivoPct();
+  const eraPromo=pctEl.dataset.promoEfectivo==='1';
+  if(promoPct>0){
+    if((Number(pctEl.value)||0)<promoPct||eraPromo){
+      pctEl.value=promoPct;
+      descEl.value=`Promo efectivo (${promoPct}%)`;
+      pctEl.dataset.promoEfectivo='1';
+      renderCart();
+    }
+  } else if(eraPromo){
+    pctEl.value=''; descEl.value='';
+    delete pctEl.dataset.promoEfectivo;
+    renderCart();
+  }
+}
+document.getElementById('selPago')?.addEventListener('change',syncPromoEfectivo);
+// Si el cajero cambia el % a mano, deja de ser la promo y no se vuelve a tocar solo.
+document.getElementById('inpDiscountPct')?.addEventListener('input',e=>{
+  if(e.target.dataset.promoEfectivo==='1'&&(Number(e.target.value)||0)!==promoEfectivoPct())
+    delete e.target.dataset.promoEfectivo;
+});
 
 let PROMOS_MOSTRADOR=[];
 
@@ -870,7 +910,7 @@ async function sendToFirestore(){
       try{ await applyStampToCustomer(selectedCustomer.uid, usedReward, rawTotal); }catch(e){ console.error('sellos', e); }
     }
     alert(`✅ Pedido cargado: #${orderNumber}`);
-    cart={burger:{},drink:{},side:{}};renderCart();$("#inpNombre").value="";$("#selPago").value="";$("#manualTime").value="";if(document.getElementById('inpDiscountPct')){document.getElementById('inpDiscountPct').value="";document.getElementById('inpDiscountPct').disabled=false;}if(document.getElementById('inpDiscountDesc')){document.getElementById('inpDiscountDesc').value="";document.getElementById('inpDiscountDesc').disabled=false;}setPaymentStatus(false);updateRealTimeSlot();
+    cart={burger:{},drink:{},side:{}};renderCart();$("#inpNombre").value="";$("#selPago").value="";$("#manualTime").value="";if(document.getElementById('inpDiscountPct')){document.getElementById('inpDiscountPct').value="";document.getElementById('inpDiscountPct').disabled=false;delete document.getElementById('inpDiscountPct').dataset.promoEfectivo;}if(document.getElementById('inpDiscountDesc')){document.getElementById('inpDiscountDesc').value="";document.getElementById('inpDiscountDesc').disabled=false;}setPaymentStatus(false);updateRealTimeSlot();
     // Limpiar selección de cliente y refrescar caché de sellos para el próximo pedido
     selectedCustomer=null;loyaltyUseReward=false;CUSTOMERS=null;renderClienteSelected();
     if($("#inpClienteSearch"))$("#inpClienteSearch").value="";
@@ -970,6 +1010,8 @@ window.toggleUsarReward=function(on){
     pctEl.disabled=false; descEl.disabled=false;
   }
   renderCart();
+  // Al soltar el canje puede volver a corresponder la promo de efectivo.
+  if(!on) syncPromoEfectivo();
 };
 
 window.updateCliStampHint=function(subtotal){

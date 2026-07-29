@@ -140,6 +140,9 @@
     .res-total-lbl{font-family:var(--fh);font-size:16px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);}
     .res-total-val{font-family:var(--fh);font-size:32px;font-weight:900;color:var(--gold);}
     .res-discount{font-size:13px;color:var(--green);font-weight:600;margin-top:8px;}
+    .res-cash{font-size:13px;color:var(--gold);font-weight:600;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);line-height:1.5;}
+    .res-cash span{display:block;font-size:11px;color:var(--muted);font-weight:500;margin-top:2px;}
+    .pago-promo{margin-top:10px;padding:10px 14px;background:rgba(212,168,71,.07);border:1px solid rgba(212,168,71,.25);border-radius:10px;font-size:12.5px;color:var(--gold);font-weight:600;line-height:1.45;}
     .empty-cart{text-align:center;padding:32px 0;color:var(--muted);font-size:14px;}
 
     /* ── CART ITEMS COUNT BADGE ── */
@@ -233,6 +236,7 @@
               <div class="pago-sub">Efectivo · Débito · Transferencia · MercadoPago</div>
             </div>
           </div>
+          <div class="pago-promo" id="pagoPromo" style="display:none"></div>
         </div>
 
         <div class="divider"></div>
@@ -304,6 +308,7 @@
         </div>
         <div id="resDiscount"></div>
         <div id="resTip"></div>
+        <div id="resCashPromo"></div>
       </div>
     </div>
   </aside>
@@ -315,6 +320,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="loyalty.js?v=3"></script>
 <script src="promo.js?v=1"></script>
+<script src="js/promo-efectivo.js?v=1"></script>
 <script>
 const firebaseConfig={apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
 firebase.initializeApp(firebaseConfig);
@@ -339,6 +345,28 @@ let loyaltyApplied=false;   // ¿se usa el 20% de sellos en este pedido?
 let loyaltyTouched=false;   // el cliente tocó manualmente el toggle del premio
 let activeTip=0, activeTipPct=0;
 let slotObjects=[], visibles=[], currentIndex=0, listeners=[];
+let CASH_PROMO=null;   // promo de pago en efectivo: acá solo se informa, la aplica el local
+
+// Aviso del medio de pago. La promo se anuncia siempre (es semanal), pero si el pedido ya
+// lleva la promo del día se aclara que ésa manda: en la caja se aplica una sola.
+function renderPagoPromo(promoDelDiaActiva){
+  const el=$('#pagoPromo'); if(!el)return;
+  if(!CASH_PROMO){el.style.display='none';return;}
+  const dias=RBPromoEfectivo.textoDias(CASH_PROMO);
+  if(RBPromoEfectivo.aplicaHoy(CASH_PROMO)){
+    el.textContent=promoDelDiaActiva
+      ? `💵 Este pedido ya sale con la promo del día, así que el ${CASH_PROMO.percent}% por pagar en efectivo no se suma.`
+      : `💵 Hoy tenés ${CASH_PROMO.percent}% de descuento pagando en efectivo.`;
+  } else {
+    el.textContent=`💵 ${dias.charAt(0).toUpperCase()+dias.slice(1)}: ${CASH_PROMO.percent}% de descuento pagando en efectivo.`;
+  }
+  el.style.display='block';
+}
+
+RBPromoEfectivo.watch(db,promo=>{
+  CASH_PROMO=promo;
+  renderResumen();   // recalcula el estimado y de paso refresca el aviso
+});
 
 // Descuento del cupón sobre un subtotal dado (respeta % o monto fijo, sin pasar el subtotal)
 function couponDiscount(subtotal){
@@ -419,6 +447,8 @@ function renderResumen(){
     list.innerHTML='<div class="empty-cart">🛒 Carrito vacío</div>';
     $('#resTotal').textContent='$0';
     $('#itemsBadge').textContent='0 items';
+    const emptyCash=$('#resCashPromo'); if(emptyCash) emptyCash.innerHTML='';
+    renderPagoPromo(false);
     return 0;
   }
 
@@ -475,6 +505,22 @@ function renderResumen(){
 
   const discEl=$('#resDiscount');
   discEl.innerHTML=discLine?`<div class="res-discount">${discLine}</div>`:'';
+
+  // Estimado pagando en efectivo. El total guardado NO lleva este descuento: lo aplica el local al cobrar.
+  // No se muestra si corre la promo del día, porque esa tiene prioridad y el mostrador bloquea
+  // el descuento manual: prometerlo acá sería una discusión en la caja.
+  // Fuera de eso solo se muestra si supera al descuento ya aplicado: nunca se acumulan.
+  renderPagoPromo(pDisc>0);
+  const cashEl=$('#resCashPromo');
+  if(cashEl){
+    const cashDisc=RBPromoEfectivo.descuento(CASH_PROMO,subtotal);
+    if(pDisc===0&&RBPromoEfectivo.aplicaHoy(CASH_PROMO)&&subtotal>0&&cashDisc>discount){
+      const cashFinal=Math.max(0,subtotal-cashDisc);
+      const cashTip=activeTipPct>0?Math.round(cashFinal*activeTipPct/100):0;
+      cashEl.innerHTML=`<div class="res-cash">💵 Pagando en efectivo: ${money(cashFinal+cashTip)}
+        <span>Con el ${CASH_PROMO.percent}% de hoy${discount>0?' (reemplaza al otro descuento, no se suman)':''}. Se aplica al cobrar en el local.</span></div>`;
+    } else cashEl.innerHTML='';
+  }
 
   // Aviso del mínimo para sumar sello (solo si está logueado y NO está canjeando el premio)
   const loyMin=$('#loyMinHint');
@@ -829,7 +875,15 @@ $('#btnConfirmar').onclick=async()=>{
     if(usedReward) msg+=`🍔 Descuento sellos (20%): -${money(discountAmount)}\n`;
     else if(activeCouponCode && discountAmount>0) msg+=`🏷️ Cupón ${activeCouponCode}: -${money(discountAmount)}\n`;
     if(activeTip>0) msg+=`🤝 Propina${activeTipPct>0?' ('+activeTipPct+'%)':''}: +${money(activeTip)}\n`;
-    msg+=`${'─'.repeat(28)}\n*TOTAL: ${money(finalTotal)}*\n(Abona en el local)\n\n`;
+    msg+=`${'─'.repeat(28)}\n*TOTAL: ${money(finalTotal)}*\n(Abona en el local)\n`;
+    // Recordatorio para quien cobra: el descuento por efectivo se aplica en el mostrador, no acá.
+    const cashDiscMsg=RBPromoEfectivo.descuento(CASH_PROMO,subtotalAmount);
+    if(!promoOn&&RBPromoEfectivo.aplicaHoy(CASH_PROMO)&&cashDiscMsg>discountAmount){
+      const cashBaseMsg=Math.max(0,subtotalAmount-cashDiscMsg);
+      const cashFinalMsg=cashBaseMsg+(activeTipPct>0?Math.round(cashBaseMsg*activeTipPct/100):activeTip);
+      msg+=`💵 Si abona en EFECTIVO (-${CASH_PROMO.percent}%): ${money(cashFinalMsg)}\n`;
+    }
+    msg+=`\n`;
     const base=window.location.href.substring(0,window.location.href.lastIndexOf('/'));
     const trackLink=`${base}/gracias.html?id=${docRef.id}&t=${trackToken}`;
     msg+=`🔗 Seguí tu pedido:\n${trackLink}`;

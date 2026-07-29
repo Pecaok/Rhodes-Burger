@@ -220,6 +220,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
     <div class="sidebar-section">Promociones</div>
     <button class="sidebar-btn" onclick="showTab('promos',this)"><span class="sidebar-ico">🔥</span> Promos</button>
     <button class="sidebar-btn" onclick="showTab('daily',this)"><span class="sidebar-ico">🏷️</span> Promo del Día</button>
+    <button class="sidebar-btn" onclick="showTab('cashpromo',this)"><span class="sidebar-ico">💵</span> Pago Efectivo</button>
 
     <div class="sidebar-section">Config</div>
     <button class="sidebar-btn" onclick="showTab('sides',this)"><span class="sidebar-ico">🍟</span> Config Papas</button>
@@ -575,6 +576,40 @@ tr:hover td{background:rgba(255,255,255,.02);}
         <div class="table-wrap">
           <table><thead><tr><th>Código</th><th>Tipo</th><th>Valor</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="cpTable"></tbody></table>
         </div>
+      </div>
+    </div>
+
+    <!-- ═══ PROMO PAGO EFECTIVO ═══ -->
+    <div id="tab-cashpromo" class="tab-panel">
+      <div class="page-title">Promo <em>Pago en Efectivo</em></div>
+      <p class="page-sub">Descuento automático para quien paga en efectivo. Se aplica solo en el mostrador al elegir Efectivo, y se anuncia en la web.</p>
+
+      <div class="card card-accent">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Estado actual</div>
+            <div id="cashPromoSub" style="font-size:13px;color:var(--muted)">Cargando...</div>
+          </div>
+          <span id="cashPromoPill" class="badge badge-muted">...</span>
+        </div>
+
+        <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+          <div class="field"><label>Descuento (%)</label><input id="cpefPercent" type="number" min="1" max="100" step="1" placeholder="Ej: 10"></div>
+        </div>
+
+        <div class="field" style="margin-top:14px">
+          <label>Días que aplica</label>
+          <div id="cpefDias" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px"></div>
+        </div>
+
+        <div class="store-actions" style="margin-top:18px">
+          <button class="btn btn-good" id="btnCpefSave" style="flex:1">💾 Guardar y Activar</button>
+          <button class="btn btn-danger" id="btnCpefOff" style="flex:1">🔒 Desactivar</button>
+        </div>
+
+        <p style="font-size:12px;color:var(--muted);margin-top:14px;line-height:1.5">
+          No se acumula con sellos ni con cupón: en cada pedido se aplica <strong>el descuento más grande</strong>, uno solo.
+        </p>
       </div>
     </div>
 
@@ -1100,6 +1135,61 @@ function applyStoreDocToUI(d){
   storeSub.textContent=maintActive?`⚠️ ${d.maintenance.title}`:d.forceOpen===true?"Abierto manualmente":d.forceOpen===false?"Cerrado manualmente":"Siguiendo el horario automático";
 }
 storeRef().onSnapshot(snap=>{applyStoreDocToUI(snap.exists?snap.data():{});});
+
+/* ── PROMO PAGO EFECTIVO ── */
+// Un único doc config/promoEfectivo: {activo, percent, dias:[0..6]} con 0=domingo.
+// Lo leen mostrador.html (lo aplica) e index/pedido_cliente (lo anuncian).
+const cashPromoRef=()=>db.collection("config").doc("promoEfectivo");
+const CPEF_DIAS_LBL=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+const CPEF_DEFAULT={activo:true,percent:10,dias:[3,4]};
+let _cpefSeeded=false;
+
+function renderCpefDias(dias){
+  const box=$('#cpefDias'); if(!box)return;
+  box.innerHTML=CPEF_DIAS_LBL.map((d,i)=>`<label class="check-row"><input type="checkbox" class="cpef-dia" value="${i}" ${dias.includes(i)?'checked':''}> ${d}</label>`).join('');
+}
+function applyCashPromoToUI(d){
+  const pct=Number(d.percent)||0;
+  const dias=Array.isArray(d.dias)?d.dias.map(Number).filter(n=>n>=0&&n<=6):[];
+  $('#cpefPercent').value=pct||'';
+  renderCpefDias(dias);
+  const pill=$('#cashPromoPill'), sub=$('#cashPromoSub');
+  if(!(d.activo===true&&pct>0&&dias.length)){
+    pill.textContent="DESACTIVADA"; pill.className="badge badge-muted";
+    sub.textContent="No se aplica ningún descuento por pago en efectivo.";
+    return;
+  }
+  const aplicaHoy=dias.includes(new Date().getDay());
+  pill.textContent=aplicaHoy?"ACTIVA HOY":"ACTIVA";
+  pill.className=aplicaHoy?"badge badge-green":"badge badge-blue";
+  const nombres=dias.slice().sort((a,b)=>a-b).map(i=>CPEF_DIAS_LBL[i]).join(', ');
+  sub.textContent=`${pct}% pagando en efectivo · ${nombres}${aplicaHoy?' · hoy aplica':''}`;
+}
+$('#btnCpefSave').onclick=async()=>{
+  const pct=Number($('#cpefPercent').value||0);
+  if(!(pct>0&&pct<=100)){alert("Porcentaje inválido: tiene que ser entre 1 y 100.");return;}
+  const dias=[...document.querySelectorAll('.cpef-dia:checked')].map(c=>Number(c.value));
+  if(!dias.length){alert("Elegí al menos un día.");return;}
+  try{
+    await cashPromoRef().set({activo:true,percent:pct,dias,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+    alert("✅ Promo guardada y activa.");
+  }catch(e){alert("Error al guardar.");}
+};
+$('#btnCpefOff').onclick=async()=>{
+  if(!confirm("¿Desactivar el descuento por pago en efectivo?"))return;
+  try{await cashPromoRef().set({activo:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}
+  catch(e){alert("Error.");}
+};
+// Se siembra sola la 1ra vez con 10% miércoles y jueves, igual que sideTypes/sazones.
+cashPromoRef().onSnapshot(async snap=>{
+  if(!snap.exists&&!_cpefSeeded){
+    _cpefSeeded=true;
+    applyCashPromoToUI(CPEF_DEFAULT);
+    try{await cashPromoRef().set({...CPEF_DEFAULT,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});}catch(e){}
+    return;
+  }
+  applyCashPromoToUI(snap.exists?snap.data():{});
+});
 
 /* ── CUPONES ── */
 const cpTbody=document.querySelector("#cpTable");
