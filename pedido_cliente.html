@@ -346,14 +346,17 @@ let loyaltyTouched=false;   // el cliente tocó manualmente el toggle del premio
 let activeTip=0, activeTipPct=0;
 let slotObjects=[], visibles=[], currentIndex=0, listeners=[];
 let CASH_PROMO=null;   // promo de pago en efectivo: acá solo se informa, la aplica el local
+// Si js/promo-efectivo.js no cargó (404, red, bloqueador), el checkout tiene que seguir andando:
+// sin este fallback un ReferenceError corta el script y se rompe toda la página.
+const RBPE=window.RBPromoEfectivo||{watch(){},aplicaHoy(){return false},textoDias(){return ''},descuento(){return 0}};
 
 // Aviso del medio de pago. La promo se anuncia siempre (es semanal), pero si el pedido ya
 // lleva la promo del día se aclara que ésa manda: en la caja se aplica una sola.
 function renderPagoPromo(promoDelDiaActiva){
   const el=$('#pagoPromo'); if(!el)return;
   if(!CASH_PROMO){el.style.display='none';return;}
-  const dias=RBPromoEfectivo.textoDias(CASH_PROMO);
-  if(RBPromoEfectivo.aplicaHoy(CASH_PROMO)){
+  const dias=RBPE.textoDias(CASH_PROMO);
+  if(RBPE.aplicaHoy(CASH_PROMO)){
     el.textContent=promoDelDiaActiva
       ? `💵 Este pedido ya sale con la promo del día, así que el ${CASH_PROMO.percent}% por pagar en efectivo no se suma.`
       : `💵 Hoy tenés ${CASH_PROMO.percent}% de descuento pagando en efectivo.`;
@@ -363,7 +366,7 @@ function renderPagoPromo(promoDelDiaActiva){
   el.style.display='block';
 }
 
-RBPromoEfectivo.watch(db,promo=>{
+RBPE.watch(db,promo=>{
   CASH_PROMO=promo;
   renderResumen();   // recalcula el estimado y de paso refresca el aviso
 });
@@ -513,8 +516,8 @@ function renderResumen(){
   renderPagoPromo(pDisc>0);
   const cashEl=$('#resCashPromo');
   if(cashEl){
-    const cashDisc=RBPromoEfectivo.descuento(CASH_PROMO,subtotal);
-    if(pDisc===0&&RBPromoEfectivo.aplicaHoy(CASH_PROMO)&&subtotal>0&&cashDisc>discount){
+    const cashDisc=RBPE.descuento(CASH_PROMO,subtotal);
+    if(pDisc===0&&RBPE.aplicaHoy(CASH_PROMO)&&subtotal>0&&cashDisc>discount){
       const cashFinal=Math.max(0,subtotal-cashDisc);
       const cashTip=activeTipPct>0?Math.round(cashFinal*activeTipPct/100):0;
       cashEl.innerHTML=`<div class="res-cash">💵 Pagando en efectivo: ${money(cashFinal+cashTip)}
@@ -877,8 +880,8 @@ $('#btnConfirmar').onclick=async()=>{
     if(activeTip>0) msg+=`🤝 Propina${activeTipPct>0?' ('+activeTipPct+'%)':''}: +${money(activeTip)}\n`;
     msg+=`${'─'.repeat(28)}\n*TOTAL: ${money(finalTotal)}*\n(Abona en el local)\n`;
     // Recordatorio para quien cobra: el descuento por efectivo se aplica en el mostrador, no acá.
-    const cashDiscMsg=RBPromoEfectivo.descuento(CASH_PROMO,subtotalAmount);
-    if(!promoOn&&RBPromoEfectivo.aplicaHoy(CASH_PROMO)&&cashDiscMsg>discountAmount){
+    const cashDiscMsg=RBPE.descuento(CASH_PROMO,subtotalAmount);
+    if(!promoOn&&RBPE.aplicaHoy(CASH_PROMO)&&cashDiscMsg>discountAmount){
       const cashBaseMsg=Math.max(0,subtotalAmount-cashDiscMsg);
       const cashFinalMsg=cashBaseMsg+(activeTipPct>0?Math.round(cashBaseMsg*activeTipPct/100):activeTip);
       msg+=`💵 Si abona en EFECTIVO (-${CASH_PROMO.percent}%): ${money(cashFinalMsg)}\n`;
