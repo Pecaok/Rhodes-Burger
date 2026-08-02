@@ -770,6 +770,8 @@ function loadProductIntoForm(data,id){
 
 async function deleteProduct(id){if(!confirm("¿Eliminar "+id+"?"))return;try{await productsCol.doc(id).delete();}catch(e){alert("Error.");}}
 async function toggleProductAvailability(id,current){try{await productsCol.doc(id).set({available:!current,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}catch(e){alert("Error.");}}
+/* Oculto ≠ pausado: pausado se sigue viendo como "Agotado", oculto no aparece en el menú ni en el mostrador. */
+async function toggleProductHidden(id,current){try{await productsCol.doc(id).set({hidden:!current,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});}catch(e){alert("Error.");}}
 
 let ALL_PRODUCTS_DATA=[],FILTER_CAT="all",FILTER_TXT="";
 function renderProductsTable(snapshot){
@@ -785,7 +787,10 @@ function applyFilters(){
   filtered.forEach(p=>{
     const tr=document.createElement('tr');
     const imgTag=p.img?`<img src="${p.img}" class="img-prev">`:`<div class="img-prev"></div>`;
-    const avBadge=p.available?`<span class="badge badge-green">Activo</span>`:`<span class="badge badge-muted">Pausado</span>`;
+    const hidden=p.hidden===true;
+    const avBadge=hidden
+      ? `<span class="badge badge-orange">Oculto</span>`
+      : (p.available?`<span class="badge badge-green">Activo</span>`:`<span class="badge badge-muted">Pausado</span>`);
     let exIcons='';const ex=p.allowedExtras||{};if(ex.patty)exIcons+='🥩 ';if(ex.cheddar)exIcons+='🧀 ';if(ex.bacon)exIcons+='🥓 ';
     if((p.allowedSideTypes&&p.allowedSideTypes.length)||(p.allowedSazones&&p.allowedSazones.length))exIcons+='🍟';
     if(!exIcons.trim())exIcons='<span style="color:var(--muted);font-size:12px">—</span>';
@@ -793,6 +798,7 @@ function applyFilters(){
       <td><div class="tbl-actions">
         <button class="btn btn-ghost btn-sm" data-act="edit" data-id="${p.id}">✏️</button>
         <button class="btn btn-sm ${p.available?'btn-danger':'btn-good'}" data-act="toggle" data-id="${p.id}" data-av="${p.available}">${p.available?'Pausar':'Activar'}</button>
+        <button class="btn btn-ghost btn-sm" data-act="hide" data-id="${p.id}" data-hd="${hidden}" title="${hidden?'Volver a mostrarlo en el menú':'Sacarlo del menú y del mostrador'}">${hidden?'👁 Mostrar':'🙈 Ocultar'}</button>
         <button class="btn btn-danger btn-sm" data-act="delete" data-id="${p.id}">🗑️</button>
       </div></td>`;
     tbody.appendChild(tr);
@@ -802,6 +808,7 @@ function applyFilters(){
       const id=btn.dataset.id,act=btn.dataset.act;
       if(act==="edit"){const d=await productsCol.doc(id).get();loadProductIntoForm(d.data(),id);}
       else if(act==="toggle"){toggleProductAvailability(id,btn.dataset.av==="true");}
+      else if(act==="hide"){toggleProductHidden(id,btn.dataset.hd==="true");}
       else if(act==="delete"){deleteProduct(id);}
     };
   });
@@ -995,6 +1002,7 @@ function renderInventory(snapshot){
     const p=doc.data();const available=!!p.available;const el=document.createElement('div');el.className='inv-tile';
     el.innerHTML=`<div><div class="inv-name">${p.name}</div><div class="inv-cat">${p.category}</div></div>
       <div style="display:flex;align-items:center;gap:10px">
+        ${p.hidden===true?`<span class="badge badge-orange">Oculto</span>`:''}
         <span class="badge ${available?'badge-green':'badge-muted'}">${available?'Activo':'Pausado'}</span>
         <button class="btn btn-sm ${available?'btn-danger':'btn-good'}" data-id="${doc.id}" data-next="${available?0:1}">${available?'Quitar':'Activar'}</button>
       </div>`;
