@@ -122,10 +122,6 @@
     .pay-btn{padding:0 16px;border-radius:9px;border:none;font-family:var(--fh);font-weight:800;font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:#fff;display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;justify-content:center;transition:all .2s;}
     .pay-btn.pending{background:var(--pay-pending);}
     .pay-btn.paid{background:var(--pay-paid);}
-    .facturar-btn{padding:0 14px;border-radius:9px;border:1px solid rgba(99,102,241,.4);background:rgba(99,102,241,.12);color:#818cf8;font-family:var(--fh);font-weight:800;font-size:13px;letter-spacing:.06em;text-transform:uppercase;display:none;align-items:center;gap:5px;cursor:pointer;height:42px;white-space:nowrap;transition:all .2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
-    .facturar-btn:hover{background:rgba(99,102,241,.25);border-color:rgba(99,102,241,.6);}
-    .facturar-btn:active{transform:scale(.95);}
-    .facturar-btn.show{display:flex;}
     .icon-btn-lg{width:52px;height:52px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,.04);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;flex-shrink:0;transition:all .2s;-webkit-tap-highlight-color:rgba(0,0,0,0);touch-action:manipulation;}
     .icon-btn-lg:hover{border-color:var(--gold-border);background:var(--gold-dim);}
     .icon-btn-lg:active{transform:scale(.93);}
@@ -170,7 +166,6 @@
 
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
 
   <script>
     const firebaseConfig = {apiKey:"AIzaSyBbt5YOWDE0ouLn-Ib_iD1yUesok5SEhB8",authDomain:"rhodes-burguers.firebaseapp.com",projectId:"rhodes-burguers",storageBucket:"rhodes-burguers.firebasestorage.app",messagingSenderId:"951646688091",appId:"1:951646688091:web:05db5fadb4150d1fa9c07e"};
@@ -1167,7 +1162,6 @@
               </div>
               <div class="control-row">
                  <button class="pay-btn ${isPaid?'paid':'pending'}" onclick="setPaymentStatus('${doc.id}', ${isPaid}, '${payVal}')">${isPaid ? 'PAGADO' : 'COBRAR'}</button>
-                 <button class="facturar-btn ${(o.factura&&o.factura.cae)||['transferencia','debito','mercado_pago','credito'].includes(payVal) ? 'show' : ''}" onclick="facturarPedido('${doc.id}')" title="${o.factura&&o.factura.cae?'Ver factura':'Generar factura'}">${o.factura&&o.factura.cae ? '✓ Factura '+(o.factura.nro||'') : '🧾 Facturar'}</button>
                  <button class="icon-btn-lg" onclick="printOrder('${doc.id}')" title="Imprimir">🖨️</button>
                  <button class="icon-btn-lg" style="color:var(--red);border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.08)" onclick="deleteOrder('${doc.id}')" title="Eliminar">🗑️</button>
               </div>
@@ -1180,85 +1174,6 @@
     setInterval(function(){
         document.querySelectorAll('.order-timer[data-since]').forEach(updateTimerEl);
     }, 30000);
-
-    // ── NÚMERO DE WHATSAPP DE FACTURITAS (reemplazá con el tuyo) ──
-    const FACTURITAS_WA = '5493484346113'; // <-- cambiá este número
-
-    const PAGO_LABELS = {
-        'transferencia': 'Transferencia',
-        'debito': 'Débito',
-        'mercado_pago': 'QR / Mercado Pago',
-        'credito': 'Crédito'
-    };
-
-    // Respaldo manual: si ARCA todavía no está configurado, se factura como
-    // antes, mandando los datos a Facturitas por WhatsApp.
-    window.facturarPorWhatsApp = function(o) {
-        const fecha = window.pickDate(o);
-        const fechaStr = fecha ? fecha.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
-        const horaStr  = fecha ? fecha.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
-        const total    = Number(o.total||0).toLocaleString('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0});
-        const pago     = PAGO_LABELS[o.pago] || o.pago || '';
-        const msg = [
-            `Hola! Quiero facturar un pedido:`, ``,
-            `📋 Pedido #${o.orderNumber||'—'}`,
-            `👤 Cliente: ${o.nombre||'Consumidor Final'}`,
-            `💰 Total: ${total}`,
-            `💳 Método: ${pago}`,
-            `📅 Fecha: ${fechaStr} ${horaStr}`, ``, `Consumidor Final`
-        ].join('\n');
-        window.open(`https://wa.me/${FACTURITAS_WA}?text=${encodeURIComponent(msg)}`, '_blank');
-    };
-
-    // Muestra los datos de una factura ya emitida (guardada en el pedido).
-    window.verFactura = function(id) {
-        const doc = window.idToDoc?.get(id);
-        const f = doc && doc.data().factura;
-        if(!f || !f.cae){ alert('Este pedido todavía no tiene factura.'); return; }
-        alert(
-            `🧾 Factura C\n` +
-            `Comprobante: ${String(f.ptoVta).padStart(4,'0')}-${String(f.nro).padStart(8,'0')}\n` +
-            `CAE: ${f.cae}\n` +
-            `Vto CAE: ${f.vto}\n` +
-            `Total: $${Number(f.total).toLocaleString('es-AR')}` +
-            (f.production ? '' : '\n\n⚠️ HOMOLOGACIÓN — factura de PRUEBA (no válida)')
-        );
-    };
-
-    // Facturar a ARCA (Factura C). Si el comprobante ya existe, lo muestra. Si
-    // ARCA no está configurado o falla la conexión, cae al flujo de WhatsApp.
-    window.facturarPedido = async function(id) {
-        const doc = window.idToDoc?.get(id);
-        if(!doc) return;
-        const o = doc.data();
-        if(o.factura && o.factura.cae) return window.verFactura(id);
-
-        try {
-            // Cloud Function de Firebase (Node) — ahí corre la facturación ARCA.
-            const facturar = firebase.functions().httpsCallable('facturar');
-            const r = await facturar({ orderId: id });
-            const data = (r && r.data) || {};
-            if (data.cae) {
-                alert(
-                    `✅ Factura C generada\n` +
-                    `Comprobante: ${String(data.ptoVta).padStart(4,'0')}-${String(data.nro).padStart(8,'0')}\n` +
-                    `CAE: ${data.cae}` +
-                    (data.production ? '' : '\n\n⚠️ HOMOLOGACIÓN — factura de PRUEBA')
-                );
-                return;
-            }
-            // Solo mostramos error si ARCA realmente rechazó la factura. Si todavía
-            // no está configurado (o cualquier otra cosa) cae al WhatsApp de siempre.
-            if (data.error === 'arca_error') {
-                alert('ARCA rechazó la factura:\n' + (data.detalle || 'error desconocido'));
-                return;
-            }
-            return window.facturarPorWhatsApp(o);
-        } catch(e) {
-            // función no disponible / sin conexión: usar el flujo manual
-            window.facturarPorWhatsApp(o);
-        }
-    };
 
     window.mostrarResumen = function() {
         if(!window.lastSnap) return;
