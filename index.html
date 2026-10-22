@@ -589,15 +589,16 @@
       else if (d.includes('aderezo'))                        L.push({id:'sauce'});
       if (d.includes('cebolla crispy')||d.includes('crispy'))L.push({id:'crispy'});
       if (d.includes('panceta')||d.includes('bacon'))        L.push({id:'bacon'});
-      const dbl = d.includes('doble')||d.includes('x2');
+      // Cantidad de medallones segun nombre/descripcion (antes solo distinguia doble).
+      const nPat = (d.includes('cuadruple')||d.includes('cuádruple')||d.includes('x4')) ? 4
+                 : (d.includes('triple')||d.includes('x3'))                                 ? 3
+                 : (d.includes('doble')||d.includes('x2'))                                   ? 2
+                 : 1;
       const ch  = d.includes('cheddar')||d.includes('queso');
-      if (dbl){
-        L.push({id:'patty',name:'Medallón de carne (1)',sub:'100% carne vacuna'});
-        if(ch) L.push({id:'cheese'});
-        L.push({id:'patty',name:'Medallón de carne (2)',sub:'100% carne vacuna'});
-        if(ch) L.push({id:'cheese'});
-      } else {
-        L.push({id:'patty'});
+      for(let i=1;i<=nPat;i++){
+        L.push(nPat>1
+          ? {id:'patty',name:'Medallón de carne ('+i+')',sub:'100% carne vacuna'}
+          : {id:'patty'});
         if(ch) L.push({id:'cheese'});
       }
       if(d.includes('tomate'))  L.push({id:'tomato'});
@@ -1541,7 +1542,7 @@ window.openModal=(id)=>{
     stc.innerHTML+=`<label class="chip"><input type="radio" name="sideType" value="${s.key}" data-prep="${s.needsPrep!==false?1:0}" onchange="toggleSeasoning()"> 🍟 ${s.name}${extra}</label>`;
   });
 
-  document.getElementById("sideTypeSec").style.display=(isBT&&itemSideTypes.length)?"block":"none";document.getElementById("lblSeason").innerText="Preparación de las papas";document.getElementById("seasonSec").style.display=isPapasSide?"block":"none";document.getElementById("extrasSec").style.display=(isBT||al.patty||al.cheddar||al.bacon)?'block':'none';document.getElementById("rowPatty").style.display=(al.patty||(isBT&&al.patty!==false))?'flex':'none';document.getElementById("rowCheddar").style.display=(al.cheddar||(isBT&&al.cheddar!==false))?'flex':'none';document.getElementById("rowBacon").style.display=al.bacon?'flex':'none';
+  document.getElementById("sideTypeSec").style.display=(isBT&&itemSideTypes.length)?"block":"none";document.getElementById("lblSeason").innerText="Preparación de las papas";document.getElementById("seasonSec").style.display=isPapasSide?"block":"none";document.getElementById("extrasSec").style.display=(isBT||al.patty||al.cheddar||al.bacon)?'block':'none';document.getElementById("rowPatty").style.display=((al.patty||(isBT&&al.patty!==false))&&window.maxPattyFor(item)>0)?'flex':'none';document.getElementById("rowCheddar").style.display=(al.cheddar||(isBT&&al.cheddar!==false))?'flex':'none';document.getElementById("rowBacon").style.display=al.bacon?'flex':'none';
 
   // ── Sazones permitidos para este producto ──
   const allSZ=window.STATE.config.sazonesList||[];
@@ -1554,7 +1555,22 @@ window.openModal=(id)=>{
   updateModalPrice();document.getElementById("modalOvl").classList.add("open");
 };
 
-window.updExtra=(type,delta)=>{const nv=window.MODAL.extras[type]+delta,ml=type==='patty'?2:3;if(nv>=0&&nv<=ml){window.MODAL.extras[type]=nv;const idMap={patty:'qtyPatty',cheddar:'qtyCheddar',bacon:'qtyBacon'};document.getElementById(idMap[type]).innerText=nv;updateModalPrice();}};
+// Tope de medallones extra POR PRODUCTO.
+// Usa el campo maxPatty del producto si existe; si no, lo deduce del nombre.
+// Triple -> 1 (para llegar a cuadruple). Cuadruple -> 0. Resto -> 2 (comportamiento historico).
+window.maxPattyFor=(item)=>{
+  if(!item) return 0;
+  const raw=item.maxPatty;
+  if(raw!==null&&raw!==undefined&&raw!==''){
+    const explicit=Number(raw);
+    if(Number.isFinite(explicit)&&explicit>=0) return explicit;
+  }
+  const n=((item.name||"")+" "+(item.id||"")+" "+(item.kind||"")).toLowerCase();
+  if(n.includes('cuadruple')||n.includes('cuádruple')) return 0;
+  if(n.includes('triple')) return 1;
+  return 2;
+};
+window.updExtra=(type,delta)=>{const nv=window.MODAL.extras[type]+delta,ml=type==='patty'?window.maxPattyFor(window.MODAL.item):3;if(nv>=0&&nv<=ml){window.MODAL.extras[type]=nv;const idMap={patty:'qtyPatty',cheddar:'qtyCheddar',bacon:'qtyBacon'};document.getElementById(idMap[type]).innerText=nv;updateModalPrice();}};
 window.updateModalPrice=function(){
   const item=window.MODAL.item;
   // La promo baja el precio base; los extras se cobran full.
