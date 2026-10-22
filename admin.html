@@ -321,6 +321,8 @@ tr:hover td{background:rgba(255,255,255,.02);}
               <label class="check-row"><input type="checkbox" id="prdExCheddar"> 🧀 Cheddar extra</label>
               <label class="check-row"><input type="checkbox" id="prdExBacon"> 🥓 Bacon extra</label>
             </div>
+            <label style="margin-top:10px">Tope de carne extra <span style="color:var(--muted);font-weight:400">(vacío = automático según el nombre: triple→1, resto→2)</span></label>
+            <input id="prdMaxPatty" type="number" min="0" max="4" step="1" class="search-input" placeholder="auto">
           </div>
 
           <div id="prdSidesGroup" style="grid-column:1/-1;display:none">
@@ -682,6 +684,8 @@ window.addPrdIng=()=>{
 function autoDetectKind(id,name=""){
   id=id.toLowerCase();name=(name||'').toLowerCase();
   if(name.includes("sandwich")||name.includes("sándwich"))return"sandwich";
+  if(id.includes("_cuadruple")||name.includes("cuadruple")||name.includes("cuádruple"))return"cuadruple";
+  if(id.includes("_triple")||name.includes("triple"))return"triple";
   if(id.includes("_doble")||name.includes("doble"))return"doble";
   if(id.includes("_pollo")||name.includes("pollo"))return"pollo";
   return"simple";
@@ -694,6 +698,8 @@ async function saveProduct(){
   const category=$('#prdCategory').value;const price=Number($('#prdPrice').value||0);
   const urlImg=$('#prdImg').value.trim();
   const description=$('#prdDescription').value.trim();
+  const rawMaxPatty=($('#prdMaxPatty').value||'').trim();
+  const maxPattyVal=rawMaxPatty===''?null:Math.max(0,Math.min(4,Number(rawMaxPatty)||0));
   const exPatty=$('#prdExPatty').checked;const exCheddar=$('#prdExCheddar').checked;const exBacon=$('#prdExBacon').checked;
   const allowedSideTypes=[...document.querySelectorAll('.prd-st:checked')].map(c=>c.value);
   const allowedSazones=[...document.querySelectorAll('.prd-sz:checked')].map(c=>c.value);
@@ -703,6 +709,7 @@ async function saveProduct(){
   if(file){finalImg=await fileToBase64(file);}else if(!finalImg&&editingProductImg){finalImg=editingProductImg;}
   const payload={name,category,price,img:finalImg,description,available:true,
     allowedExtras:{patty:exPatty,cheddar:exCheddar,bacon:exBacon},
+    maxPatty:maxPattyVal,
     allowedSideTypes,allowedSazones,
     kind:autoDetectKind(id,name),
     updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
@@ -730,6 +737,7 @@ function updatePrdSidesVisibility(cat){
 function clearProductForm(){
   ['prdId','prdName','prdPrice','prdImg','prdDescription'].forEach(id=>$(('#'+id)).value='');
   $('#prdCategory').value='hamburguesas';$('#prdImgFile').value='';
+  $('#prdMaxPatty').value='';
   $('#prdExPatty').checked=false;$('#prdExCheddar').checked=false;$('#prdExBacon').checked=false;
   _prdSelSideTypes=[];_prdSelSazones=[];applyPrdSideSelection();
   updatePrdSidesVisibility('hamburguesas');editingProductImg=null;
@@ -742,6 +750,7 @@ function loadProductIntoForm(data,id){
   editingProductImg=data.img||null;$('#prdImg').value=(data.img&&!data.img.startsWith("data:"))?data.img:'';
   $('#prdDescription').value=data.description||'';
   $('#prdImgFile').value='';
+  $('#prdMaxPatty').value=(data.maxPatty===null||data.maxPatty===undefined)?'':data.maxPatty;
   const ex=data.allowedExtras||{};$('#prdExPatty').checked=!!ex.patty;$('#prdExCheddar').checked=!!ex.cheddar;$('#prdExBacon').checked=!!ex.bacon;
   _prdSelSideTypes=Array.isArray(data.allowedSideTypes)?data.allowedSideTypes.slice():[];
   _prdSelSazones=Array.isArray(data.allowedSazones)?data.allowedSazones.slice():[];
