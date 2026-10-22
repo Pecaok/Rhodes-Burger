@@ -563,13 +563,17 @@
 
   <script>
     const CACHE_KEY="rhodes_data_v6",CART_KEY="rhodes_cart_v5";
+    // Baldes del carrito. Postres se agregan directo, como las bebidas.
+    const CART_BUCKETS=['burger','side','drink','dessert'];
+    const emptyBuckets=()=>({burger:{},drink:{},side:{},dessert:{}});
+    const cartCount=()=>CART_BUCKETS.reduce((n,b)=>n+Object.keys(window.STATE.cart[b]||{}).length,0);
     window.STATE={
       products:[],menuOrder:{},
       config:{
         sideTypesList:[{key:'crinkles',name:'Papas Crinkles',needsPrep:true},{key:'rejillas',name:'Papas Rejillas',needsPrep:true},{key:'aros',name:'Aros de Cebolla',needsPrep:false}],
         sazonesList:[{key:'con_sazon',name:'Sazón Queso'},{key:'con_sazon_bacon',name:'Sazón Bacon'},{key:'con_sal',name:'Con Sal'},{key:'sin_sal',name:'Sin Sal'}],
         store:{forceOpen:null,maintenance:{}},prices:{patty:2800,cheddar:300,bacon:1200,onionRings:1600}},
-      cart:{burger:{},drink:{},side:{}},isOpen:false
+      cart:{burger:{},drink:{},side:{},dessert:{}},isOpen:false
     };
     window.MODAL={item:null,extras:{patty:0,cheddar:0,bacon:0}};
 
@@ -729,12 +733,13 @@
       const sands  =sort(window.STATE.products.filter(p=>p.category==='sandwiches'),'sandwiches');
       const sides  =sort(window.STATE.products.filter(p=>p.category==='guarniciones'),'guarniciones');
       const drinks =sort(window.STATE.products.filter(p=>p.category==='bebidas'),'bebidas');
+      const sweets =sort(window.STATE.products.filter(p=>p.category==='postres'),'postres');
       const ROW = window.innerWidth<600 ? 2 : 4;
       const panel=(p,i)=>{
-        const isDrink=p.category==='bebidas';
+        const noIng=p.category==='bebidas'||p.category==='postres';
         const soldout=p.available===false;
         const num=String(i+1).padStart(2,'0');
-        const ingBtn=isDrink?'':`<button class="sc-btn ghost" onclick="event.stopPropagation();showIngredients(event,'${p.id}')">Ingredientes</button>`;
+        const ingBtn=noIng?'':`<button class="sc-btn ghost" onclick="event.stopPropagation();showIngredients(event,'${p.id}')">Ingredientes</button>`;
         return `<div class="sc-panel${soldout?' sc-sold':''}" ${soldout?'':`onclick="openScDetail('${p.id}')"`}>
           ${soldout?'<div class="soldout-lbl">Agotado</div>':''}
           <img class="sc-img" src="${esc(p.img||'images/logo.png')}" loading="lazy" alt="${esc(p.name)}" onload="this.classList.add('loaded')">
@@ -782,9 +787,10 @@
       if(sands.length)  html+=section('Sándwiches',sands,n++);
       if(sides.length)  html+=section('Guarniciones',sides,n++);
       if(drinks.length) html+=section('Bebidas',drinks,n++);
+      if(sweets.length) html+=section('Postres',sweets,n++);
       cont.innerHTML=html;
       checkStatus();
-      buildNavSections(burgers, sands, sides, drinks);
+      buildNavSections(burgers, sands, sides, drinks, sweets);
       requestAnimationFrame(()=>{
         const panels=cont.querySelectorAll('.sc-panel');
         const obs=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('vis');obs.unobserve(e.target);}});},{threshold:.04,rootMargin:'0px 0px -20px 0px'});
@@ -792,7 +798,7 @@
       });
     };
 
-    function buildNavSections(burgers, sands, sides, drinks) {
+    function buildNavSections(burgers, sands, sides, drinks, sweets) {
       const nav = document.getElementById('navSections');
       if(!nav) return;
       const promos = window.STATE.promos||[];
@@ -802,6 +808,7 @@
         { label:'Sándwiches',   ico:'🥪', count:sands.length   },
         { label:'Guarniciones', ico:'🍟', count:sides.length   },
         { label:'Bebidas',      ico:'🥤', count:drinks.length  },
+        { label:'Postres',      ico:'🍰', count:(sweets||[]).length },
       ].filter(i => i.count > 0);
 
       nav.innerHTML = items.map(item => `
@@ -1282,7 +1289,7 @@ window.openScDetail=function(id){
   document.getElementById('scdBg').style.backgroundImage=`url('${img}')`;
   document.getElementById('scdImg').src=img;
   document.getElementById('scdWord').textContent=(p.name||'').split(' ')[0];
-  const catLabel={hamburguesas:'Hamburguesa',sandwiches:'Sándwich',guarniciones:'Guarnición',bebidas:'Bebida'};
+  const catLabel={hamburguesas:'Hamburguesa',sandwiches:'Sándwich',guarniciones:'Guarnición',bebidas:'Bebida',postres:'Postre'};
   document.getElementById('scdNum').textContent=catLabel[p.category]||'';
   document.getElementById('scdTitle').textContent=p.name;
   document.getElementById('scdDesc').textContent=p.description||'';
@@ -1292,7 +1299,7 @@ window.openScDetail=function(id){
   const addBtn=document.getElementById('scdAdd');
   addBtn.onclick=()=>{closeScDetail();setTimeout(()=>openModal(id),140);};
   const ingBtn=document.getElementById('scdIng');
-  ingBtn.style.display=(p.category==='bebidas')?'none':'block';
+  ingBtn.style.display=(p.category==='bebidas'||p.category==='postres')?'none':'block';
   ingBtn.onclick=(ev)=>{closeScDetail();setTimeout(()=>window.showIngredients(ev,id),140);};
   document.getElementById('scDetail').classList.add('open');
   document.body.style.overflow='hidden';
@@ -1318,7 +1325,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 document.addEventListener("DOMContentLoaded",()=>{
   const saved=localStorage.getItem(CART_KEY);
-  if(saved){const pc=JSON.parse(saved);if(Array.isArray(pc.items)){window.STATE.cart={burger:{},drink:{},side:{}};localStorage.removeItem(CART_KEY);}else{window.STATE.cart=pc;updateCartUI();}}
+  if(saved){const pc=JSON.parse(saved);if(Array.isArray(pc.items)){window.STATE.cart=emptyBuckets();localStorage.removeItem(CART_KEY);}else{window.STATE.cart={...emptyBuckets(),...pc};updateCartUI();}}
   setTimeout(()=>{if(!window.STATE.products.length)document.getElementById('errorMsg').style.display='block';},6000);
   const chk=setInterval(()=>{if(window.firebase){clearInterval(chk);initFirebase();}},100);
 });
@@ -1540,7 +1547,10 @@ window.openModal=(id)=>{
   if(!window.STATE.isOpen&&!window.STATE.config.store.forceOpen){alert("El local está cerrado.");return;}
   const item=window.STATE.products.find(p=>p.id===id);if(!item)return;
   const cat=(item.category||"").toLowerCase();
-  if(cat.includes("bebida")||cat.includes("drink")){const _src=cartSrcEl(item.id);window.STATE.cart.drink[item.id+"_"+Date.now()]={item,qty:1,type:'drink',extras:{},notes:"",finalPrice:Number(item.price)};saveCart();window.flyToCart(item.img,_src);window.toast(`${item.name} agregado`);return;}
+  // Bebidas y postres no se personalizan: van derecho al carrito.
+  const directBucket=(cat.includes("bebida")||cat.includes("drink"))?'drink'
+                    :(cat.includes("postre")||cat.includes("dessert"))?'dessert':null;
+  if(directBucket){const _src=cartSrcEl(item.id);window.STATE.cart[directBucket][item.id+"_"+Date.now()]={item,qty:1,type:directBucket,extras:{},notes:"",finalPrice:Number(item.price)};saveCart();window.flyToCart(item.img,_src);window.toast(`${item.name} agregado`);return;}
   window.MODAL.item=item;window.MODAL.extras={patty:0,cheddar:0,bacon:0};
   document.getElementById("modTitle").innerText=item.name;document.getElementById("modNotes").value="";
   document.getElementById("qtyPatty").innerText="0";document.getElementById("qtyCheddar").innerText="0";document.getElementById("qtyBacon").innerText="0";
@@ -1669,7 +1679,7 @@ window.flyToCart=function(imgUrl,srcEl){
 };
 
 function renderUpsell(){
-  const cnt=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.side).length+Object.keys(window.STATE.cart.drink).length;
+  const cnt=cartCount();
   const drinks=window.STATE.products.filter(p=>(p.category||"").toLowerCase().includes("bebida")&&p.available!==false);
   const sides=window.STATE.products.filter(p=>(p.category||"").toLowerCase().includes("guarnicion")&&p.available!==false);
   const dB=document.getElementById("upDrinks"),dL=document.getElementById("upDrinksList");
@@ -1704,7 +1714,8 @@ function updateCartUI(){
   };
   for(let id in window.STATE.cart.burger)c.innerHTML+=ri(id,window.STATE.cart.burger[id],'burger');
   for(let id in window.STATE.cart.side)c.innerHTML+=ri(id,window.STATE.cart.side[id],'side');
-  for(let id in window.STATE.cart.drink){const d=window.STATE.cart.drink[id];count+=d.qty;total+=d.finalPrice*d.qty;const dD=window.rbPromo?window.rbPromo.unitDiscount(d.item):0;const dPrice=dD>0?`$${(d.finalPrice-dD).toLocaleString('es-AR')} <span style="color:var(--muted);text-decoration:line-through;font-size:11px">$${Number(d.finalPrice).toLocaleString('es-AR')}</span>`:`$${d.finalPrice}`;c.innerHTML+=`<div class="ci"><div style="flex:1"><div class="ci-name">${d.item.name}</div><div class="ci-det">Bebida</div><div class="ci-price">${dPrice}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('drink','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${d.qty}</span><button class="qbtn" onclick="cartQty('drink','${id}',1)">+</button></div></div>`;}
+  for(const bk of ['drink','dessert'])
+  for(let id in window.STATE.cart[bk]||{}){const d=window.STATE.cart[bk][id];count+=d.qty;total+=d.finalPrice*d.qty;const dD=window.rbPromo?window.rbPromo.unitDiscount(d.item):0;const dPrice=dD>0?`$${(d.finalPrice-dD).toLocaleString('es-AR')} <span style="color:var(--muted);text-decoration:line-through;font-size:11px">$${Number(d.finalPrice).toLocaleString('es-AR')}</span>`:`$${d.finalPrice}`;c.innerHTML+=`<div class="ci"><div style="flex:1"><div class="ci-name">${d.item.name}</div><div class="ci-det">${bk==='drink'?'Bebida':'Postre'}</div><div class="ci-price">${dPrice}</div></div><div class="qb"><button class="qbtn" onclick="cartQty('${bk}','${id}',-1)">−</button><span style="width:18px;text-align:center;font-weight:800;font-family:var(--fh);color:var(--white)">${d.qty}</span><button class="qbtn" onclick="cartQty('${bk}','${id}',1)">+</button></div></div>`;}
   const b=document.getElementById("cartBubble");b.innerText=count;b.style.display=count>0?'inline-flex':'none';
 
   // Promo del día: se descuenta sobre el precio base, nunca sobre los extras.
@@ -1734,18 +1745,19 @@ function cartPromoItems(){
 }
 window.cartPromoItems=cartPromoItems;
 window.cartQty=(type,id,delta)=>{const it=window.STATE.cart[type][id];it.qty+=delta;if(it.qty<=0)delete window.STATE.cart[type][id];saveCart();};
-window.emptyCart=()=>{if(confirm("¿Vaciar carrito?")){window.STATE.cart={burger:{},drink:{},side:{}};saveCart();toggleDrawer(false);}};
+window.emptyCart=()=>{if(confirm("¿Vaciar carrito?")){window.STATE.cart=emptyBuckets();saveCart();toggleDrawer(false);}};
 window.toggleDrawer=(open)=>{const d=document.getElementById("drawer");if(open){d.classList.add("open");updateCartUI();}else d.classList.remove("open");};
 document.getElementById("modalOvl").onclick=(e)=>{if(e.target.id==="modalOvl")document.getElementById("modalOvl").classList.remove("open");};
 document.getElementById("ingOvl").addEventListener('click',e=>{if(e.target.id==="ingOvl")window.closeIng();});
 document.getElementById("btnCheckout").onclick=()=>{
-  const ic=Object.keys(window.STATE.cart.burger).length+Object.keys(window.STATE.cart.drink).length+Object.keys(window.STATE.cart.side).length;
+  const ic=cartCount();
   if(!ic)return alert("Tu carrito está vacío");
   let lc={items:[]};
   const cv=(id,obj,t)=>lc.items.push({id:obj.item.id,name:obj.item.name,price:Number(obj.item.price),category:obj.item.category,qty:obj.qty,fries:obj.fries,friesRaw:obj.friesRaw,sideType:obj.sideType,extras:obj.extras,notes:obj.notes,finalPrice:obj.finalPrice,type:t});
   for(let id in window.STATE.cart.burger)cv(id,window.STATE.cart.burger[id],'burger');
   for(let id in window.STATE.cart.side)cv(id,window.STATE.cart.side[id],'side');
   for(let id in window.STATE.cart.drink)cv(id,window.STATE.cart.drink[id],'drink');
+  for(let id in window.STATE.cart.dessert||{})cv(id,window.STATE.cart.dessert[id],'dessert');
   localStorage.setItem("rhodes_cart_legacy_format",JSON.stringify(lc));
   window.location.href="pedido_cliente.html";
 };
